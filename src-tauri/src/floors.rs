@@ -112,13 +112,19 @@ impl NodeModulesLinkStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WorktreeShell {
     PowerShell,
-    #[cfg_attr(all(windows, not(test)), expect(dead_code, reason = "selected by the default shell on Unix"))]
+    #[cfg_attr(
+        all(windows, not(test)),
+        expect(dead_code, reason = "selected by the default shell on Unix")
+    )]
     Posix,
 }
 
 /// Dedicated agent cache, separate from the target used by `tauri dev`.
 pub(crate) fn agents_cargo_target_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(std::env::temp_dir).join(".ags").join("cargo-target-agents")
+    dirs::home_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(".ags")
+        .join("cargo-target-agents")
 }
 
 /// Sem override, todos compartilham o cache exclusivo dos agentes.
@@ -140,7 +146,10 @@ pub(crate) fn cargo_target_dir(
     };
 
     if value.eq_ignore_ascii_case("shared") {
-        return CargoTarget { path: agents_cargo_target_dir(), mode: CargoTargetMode::Shared };
+        return CargoTarget {
+            path: agents_cargo_target_dir(),
+            mode: CargoTargetMode::Shared,
+        };
     }
     if value.eq_ignore_ascii_case("per-worktree") {
         return CargoTarget {
@@ -151,7 +160,11 @@ pub(crate) fn cargo_target_dir(
 
     let path = PathBuf::from(value);
     CargoTarget {
-        path: if path.is_absolute() { path } else { repo_root.join(path) },
+        path: if path.is_absolute() {
+            path
+        } else {
+            repo_root.join(path)
+        },
         mode: CargoTargetMode::Custom,
     }
 }
@@ -165,10 +178,11 @@ pub(crate) fn prepare_node_modules_link(
     let link = worktree_root.join("node_modules");
     match std::fs::symlink_metadata(&link) {
         Ok(_) => {
-            let linked_to_target = match (std::fs::canonicalize(&link), std::fs::canonicalize(&target)) {
-                (Ok(link), Ok(target)) => link == target,
-                _ => false,
-            };
+            let linked_to_target =
+                match (std::fs::canonicalize(&link), std::fs::canonicalize(&target)) {
+                    (Ok(link), Ok(target)) => link == target,
+                    _ => false,
+                };
             return Ok(if linked_to_target {
                 NodeModulesLinkStatus::AlreadyLinked
             } else {
@@ -188,10 +202,11 @@ pub(crate) fn prepare_node_modules_link(
     match create_node_modules_link(&target, &link) {
         Ok(()) => Ok(NodeModulesLinkStatus::Created),
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-            let linked_to_target = match (std::fs::canonicalize(&link), std::fs::canonicalize(&target)) {
-                (Ok(link), Ok(target)) => link == target,
-                _ => false,
-            };
+            let linked_to_target =
+                match (std::fs::canonicalize(&link), std::fs::canonicalize(&target)) {
+                    (Ok(link), Ok(target)) => link == target,
+                    _ => false,
+                };
             Ok(if linked_to_target {
                 NodeModulesLinkStatus::AlreadyLinked
             } else {
@@ -214,7 +229,10 @@ fn create_node_modules_link(target: &Path, link: &Path) -> io::Result<()> {
 
 #[cfg(not(any(windows, unix)))]
 fn create_node_modules_link(_target: &Path, _link: &Path) -> io::Result<()> {
-    Err(io::Error::new(io::ErrorKind::Unsupported, "links de diretório não suportados nesta plataforma"))
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "links de diretório não suportados nesta plataforma",
+    ))
 }
 
 fn shell_quote_posix(value: &str) -> String {
@@ -240,15 +258,18 @@ pub(crate) fn worktree_environment_block(
             format!("Set-Location {}", shell_quote_powershell(worktree_root)),
             "powershell",
         ),
-        WorktreeShell::Posix => (
-            format!("cd {}", shell_quote_posix(worktree_root)),
-            "bash",
-        ),
+        WorktreeShell::Posix => (format!("cd {}", shell_quote_posix(worktree_root)), "bash"),
     };
     let cargo_note = match cargo_mode {
-        CargoTargetMode::Shared => "O target Cargo é compartilhado exclusivamente pelos agentes, separado do tauri dev; compilações simultâneas podem disputar o lock. Aqueça-o uma vez com cargo test --lib --no-run. ADE_AGS_CARGO_TARGET_DIR=per-worktree mantém isolamento opcional.",
-        CargoTargetMode::PerWorktree => "O target Cargo é isolado por worktree, evitando disputa pelo lock; as dependências serão recompiladas uma vez neste worktree.",
-        CargoTargetMode::Custom => "O target Cargo usa o caminho configurado. Se vários agentes o compartilharem, podem disputar o lock; ADE_AGS_CARGO_TARGET_DIR=per-worktree seleciona um target próprio por worktree, com recompilação única das dependências.",
+        CargoTargetMode::Shared => {
+            "O target Cargo é compartilhado exclusivamente pelos agentes, separado do tauri dev; compilações simultâneas podem disputar o lock. Aqueça-o uma vez com cargo test --lib --no-run. ADE_AGS_CARGO_TARGET_DIR=per-worktree mantém isolamento opcional."
+        }
+        CargoTargetMode::PerWorktree => {
+            "O target Cargo é isolado por worktree, evitando disputa pelo lock; as dependências serão recompiladas uma vez neste worktree."
+        }
+        CargoTargetMode::Custom => {
+            "O target Cargo usa o caminho configurado. Se vários agentes o compartilharem, podem disputar o lock; ADE_AGS_CARGO_TARGET_DIR=per-worktree seleciona um target próprio por worktree, com recompilação única das dependências."
+        }
     };
     format!(
         "AMBIENTE DO WORKTREE\nShell: {shell_label}\nRaiz: {worktree_root}\nnode_modules: {node_modules}\nCARGO_TARGET_DIR: {cargo_target_dir}\n{cargo_note}\n\nValidação de cada entrega:\n```{code_fence}\n{root_command}\nags test affected --dry-run\nags test affected\n```\nNão repita a suite completa localmente: ao abrir PR, o CI é o gate; acompanhe com ags ci watch <n> (o resultado chega no seu terminal), sem ficar preso em gh pr checks <n> --watch. Suite completa local obrigatória em migrações de banco, schema, código unsafe ou COM, e também na última rodada de correção. Use ags test run <frontend|rust|tsc|babel> nessas exceções: ele reaproveita o verde da mesma árvore, e esse verde vale também na última rodada e na validação da integração. --force só para descartar um resultado suspeito (flake), nunca para «garantir». QA roda ags test affected no mesmo commit; se responder `já verde neste hash`, não reexecuta a suíte. Só reexecuta quando o cache não acerta. Correções da mesma entrega têm teto (padrão 2; chave fix_rounds.max ou ADE_AGS_MAX_FIX_ROUNDS). A última rodada exige a suíte completa. Ao atingir o teto a entrega escala, em vez de repetir o loop. A integração tem uma validação completa final (ou CI)."
@@ -265,7 +286,10 @@ pub(crate) fn cargo_target_prelaunch(target: &Path) -> String {
     #[cfg(unix)]
     {
         let shell = std::env::var("SHELL").unwrap_or_default();
-        if Path::new(&shell).file_name().is_some_and(|name| name == "fish") {
+        if Path::new(&shell)
+            .file_name()
+            .is_some_and(|name| name == "fish")
+        {
             format!("set -gx CARGO_TARGET_DIR {}", shell_quote_posix(&target))
         } else {
             format!("export CARGO_TARGET_DIR={}", shell_quote_posix(&target))
@@ -285,7 +309,10 @@ pub(crate) fn worktree_shell() -> (WorktreeShell, String) {
     #[cfg(unix)]
     {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
-        let label = Path::new(&shell).file_name().and_then(OsStr::to_str).unwrap_or("bash");
+        let label = Path::new(&shell)
+            .file_name()
+            .and_then(OsStr::to_str)
+            .unwrap_or("bash");
         (WorktreeShell::Posix, label.to_string())
     }
     #[cfg(not(any(windows, unix)))]
@@ -351,7 +378,11 @@ pub fn ground_for(floors: &[Floor], cwd: &str) -> String {
 /// Los pisos de una planta baja.
 pub fn floors_of(floors: &[Floor], ground: &str) -> Vec<Floor> {
     let g = norm(ground);
-    floors.iter().filter(|f| norm(&f.ground) == g).cloned().collect()
+    floors
+        .iter()
+        .filter(|f| norm(&f.ground) == g)
+        .cloned()
+        .collect()
 }
 
 /// Un nombre válido y libre en esa planta baja.
@@ -366,9 +397,13 @@ pub fn check_name(floors: &[Floor], ground: &str, name: &str) -> Result<String, 
     if name.chars().any(char::is_control) {
         return Err("O nome do andar não pode ter caracteres de controle.".into());
     }
-    let taken = floors_of(floors, ground).iter().any(|f| f.name.to_lowercase() == name.to_lowercase());
+    let taken = floors_of(floors, ground)
+        .iter()
+        .any(|f| f.name.to_lowercase() == name.to_lowercase());
     if taken {
-        return Err(format!("Já existe um andar chamado '{name}' neste projeto."));
+        return Err(format!(
+            "Já existe um andar chamado '{name}' neste projeto."
+        ));
     }
     Ok(name)
 }
@@ -395,7 +430,10 @@ pub fn find<'a>(floors: &'a [Floor], ground: &str, wanted: &str) -> Result<&'a F
 /// De dónde parte el piso. `start` llega de un agente y acaba en la línea de comandos de
 /// git: una opción disfrazada (`--upload-pack=…`) no puede pasar por rama.
 pub fn check_start(start: Option<&str>) -> Result<&str, String> {
-    let start = start.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("HEAD");
+    let start = start
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("HEAD");
     if start.starts_with('-') {
         return Err("A origem do andar não pode começar com '-'.".into());
     }
@@ -411,16 +449,27 @@ pub fn check_exclude(raw: &str) -> Result<String, String> {
         return Err("A pasta excluída não pode ser vazia.".into());
     }
     if path.starts_with('-') {
-        return Err(format!("A pasta excluída '{raw}' não pode começar com '-'."));
+        return Err(format!(
+            "A pasta excluída '{raw}' não pode começar com '-'."
+        ));
     }
     if path.contains(':') {
-        return Err(format!("A pasta excluída '{raw}' precisa ser relativa ao projeto."));
+        return Err(format!(
+            "A pasta excluída '{raw}' precisa ser relativa ao projeto."
+        ));
     }
     if path.split('/').any(|c| c == ".." || c == ".") {
-        return Err(format!("A pasta excluída '{raw}' não pode usar '..' ou '.'."));
+        return Err(format!(
+            "A pasta excluída '{raw}' não pode usar '..' ou '.'."
+        ));
     }
-    if path.chars().any(|c| matches!(c, '*' | '?' | '[' | ']' | '!')) {
-        return Err(format!("A pasta excluída '{raw}' não aceita curingas (* ? [ ] !)."));
+    if path
+        .chars()
+        .any(|c| matches!(c, '*' | '?' | '[' | ']' | '!'))
+    {
+        return Err(format!(
+            "A pasta excluída '{raw}' não aceita curingas (* ? [ ] !)."
+        ));
     }
     Ok(path)
 }
@@ -431,7 +480,12 @@ pub(crate) fn apply_exclusions(root: &Path, excluded: &[String]) -> Result<(), S
     if excluded.is_empty() {
         return Ok(());
     }
-    let mut args = vec!["sparse-checkout".to_string(), "set".into(), "--no-cone".into(), "/*".into()];
+    let mut args = vec![
+        "sparse-checkout".to_string(),
+        "set".into(),
+        "--no-cone".into(),
+        "/*".into(),
+    ];
     args.extend(excluded.iter().map(|p| format!("!/{p}/")));
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     crate::runs::worktrees::git(root, &refs, Duration::from_secs(120))
@@ -448,24 +502,47 @@ pub fn all() -> Vec<Floor> {
 /// Crea un piso: un worktree nuevo del proyecto de `cwd`, partiendo de `start` (`HEAD` si
 /// no se dice) y lo guarda.
 pub fn create(cwd: &str, name: &str, start: Option<&str>) -> Result<Floor, String> {
-    create_with(cwd, name, CreateOpts { start: start.map(str::to_string), ..Default::default() })
+    create_with(
+        cwd,
+        name,
+        CreateOpts {
+            start: start.map(str::to_string),
+            ..Default::default()
+        },
+    )
 }
 
 /// Como `create`, con las opciones del piso. Sobre una rama existente (`existing_branch`) el
 /// piso no crea rama: la origen (`start`) no tiene sentido ahí y se rechaza.
 pub fn create_with(cwd: &str, name: &str, opts: CreateOpts) -> Result<Floor, String> {
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut floors = read_file();
-    let ground = ground_for(&floors, cwd);
-    let name = check_name(&floors, &ground, name)?;
-    // Se valida antes de crear nada: una pasta mala no deja un worktree a medias.
-    let excluded = opts.exclude.iter().map(|e| check_exclude(e)).collect::<Result<Vec<_>, _>>()?;
+    let (ground, name, excluded) = {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let floors = read_file();
+        let ground = ground_for(&floors, cwd);
+        let name = check_name(&floors, &ground, name)?;
+        // Se valida antes de crear nada: una pasta mala no deja un worktree a medias.
+        let excluded = opts
+            .exclude
+            .iter()
+            .map(|e| check_exclude(e))
+            .collect::<Result<Vec<_>, _>>()?;
+        (ground, name, excluded)
+    };
 
     let base = data_dir()?.join("floors");
-    let existing = opts.existing_branch.as_deref().map(str::trim).filter(|b| !b.is_empty());
+    let existing = opts
+        .existing_branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|b| !b.is_empty());
     let wt = match existing {
         Some(branch) => {
-            if opts.start.as_deref().map(str::trim).is_some_and(|s| !s.is_empty()) {
+            if opts
+                .start
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|s| !s.is_empty())
+            {
                 return Err("Escolha uma branch existente ou uma origem, não as duas.".into());
             }
             crate::runs::worktrees::create_on_branch(&base, Path::new(&ground), branch)?
@@ -487,7 +564,10 @@ pub fn create_with(cwd: &str, name: &str, opts: CreateOpts) -> Result<Floor, Str
         );
         return Err(match undo {
             Ok(_) => error,
-            Err(e) => format!("{error}; além disso, o worktree ficou em {}: {e}", wt.root.display()),
+            Err(e) => format!(
+                "{error}; além disso, o worktree ficou em {}: {e}",
+                wt.root.display()
+            ),
         });
     }
 
@@ -507,26 +587,58 @@ pub fn create_with(cwd: &str, name: &str, opts: CreateOpts) -> Result<Floor, Str
                 wt.root.display(),
             ),
         },
-        Err(error) => eprintln!("[ags] aviso: não foi possível localizar o clone principal para node_modules: {error}"),
+        Err(error) => eprintln!(
+            "[ags] aviso: não foi possível localizar o clone principal para node_modules: {error}"
+        ),
     }
 
     let floor = Floor {
         id: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(),
         name,
-        ground,
+        ground: ground.clone(),
         cwd: wt.task_cwd.to_string_lossy().to_string(),
         root: wt.root.to_string_lossy().to_string(),
-        branch: wt.branch,
+        branch: wt.branch.clone(),
         excluded,
     };
-    floors.push(floor.clone());
-    write_file(&floors)?;
+    let duplicate_floor = {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut floors = read_file();
+        let duplicate = floors
+            .iter()
+            .any(|existing| existing.ground == floor.ground && existing.name == floor.name);
+        if !duplicate {
+            floors.push(floor.clone());
+            write_file(&floors)?;
+        }
+        duplicate
+    };
+    if duplicate_floor {
+        let error = "já existe um andar com esse nome nesse projeto";
+        let undo = crate::runs::worktrees::remove_with_branch(
+            Path::new(&ground),
+            &wt,
+            Path::new(""),
+            Path::new(""),
+            existing.is_none(),
+        );
+        return Err(match undo {
+            Ok(_) => error.into(),
+            Err(cleanup) => format!(
+                "{error}; além disso, o worktree ficou em {}: {cleanup}",
+                wt.root.display()
+            ),
+        });
+    }
     Ok(floor)
 }
 
 /// Saca un piso de la lista por id.
 pub fn take(floors: &mut Vec<Floor>, id: &str) -> Result<Floor, String> {
-    let at = floors.iter().position(|f| f.id == id).ok_or("Esse andar já não existe.")?;
+    let at = floors
+        .iter()
+        .position(|f| f.id == id)
+        .ok_or("Esse andar já não existe.")?;
     Ok(floors.remove(at))
 }
 
@@ -548,10 +660,20 @@ pub fn remove(id: &str, skills_dir: &Path) -> Result<Dropped, String> {
 
 /// Como `remove`. La rama solo se borra si la creó la app (`cc/…`): una que el usuario ya
 /// tenía no se toca, aunque esté mergeada. Con `keep_branch`, nunca se borra.
-pub(crate) fn remove_with(id: &str, skills_dir: &Path, keep_branch: bool) -> Result<Dropped, String> {
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut floors = read_file();
-    let floor = floors.iter().find(|f| f.id == id).cloned().ok_or("Esse andar já não existe.")?;
+pub(crate) fn remove_with(
+    id: &str,
+    skills_dir: &Path,
+    keep_branch: bool,
+) -> Result<Dropped, String> {
+    let floor = {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let floors = read_file();
+        floors
+            .iter()
+            .find(|f| f.id == id)
+            .cloned()
+            .ok_or("Esse andar já não existe.")?
+    };
 
     // Las skills que la app montó en el piso (una carpeta por agente) estorban a git: son
     // derivadas y se recrean solas.
@@ -568,7 +690,10 @@ pub(crate) fn remove_with(id: &str, skills_dir: &Path, keep_branch: bool) -> Res
         task_cwd: PathBuf::from(&floor.cwd),
         branch: floor.branch.clone(),
     };
-    let delete_branch = !keep_branch && floor.branch.starts_with(crate::runs::worktrees::BRANCH_PREFIX);
+    let delete_branch = !keep_branch
+        && floor
+            .branch
+            .starts_with(crate::runs::worktrees::BRANCH_PREFIX);
     let removed = crate::runs::worktrees::remove_with_branch(
         Path::new(&floor.ground),
         &wt,
@@ -577,9 +702,24 @@ pub(crate) fn remove_with(id: &str, skills_dir: &Path, keep_branch: bool) -> Res
         delete_branch,
     )?;
 
-    take(&mut floors, id)?;
-    write_file(&floors)?;
-    Ok(Dropped { name: floor.name, branch: floor.branch, branch_kept: removed.branch_kept })
+    {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut floors = read_file();
+        let current = floors
+            .iter()
+            .find(|candidate| candidate.id == id)
+            .ok_or("Esse andar foi alterado enquanto era removido.")?;
+        if current.root != floor.root || current.branch != floor.branch {
+            return Err("Esse andar foi alterado enquanto era removido.".into());
+        }
+        take(&mut floors, id)?;
+        write_file(&floors)?;
+    }
+    Ok(Dropped {
+        name: floor.name,
+        branch: floor.branch,
+        branch_kept: removed.branch_kept,
+    })
 }
 
 /// Lo que ve el frontend de una planta baja: ella misma y sus pisos.
@@ -593,7 +733,10 @@ pub struct FloorList {
 pub fn list_for(cwd: &str) -> FloorList {
     let floors = all();
     let ground = ground_for(&floors, cwd);
-    FloorList { floors: floors_of(&floors, &ground), ground }
+    FloorList {
+        floors: floors_of(&floors, &ground),
+        ground,
+    }
 }
 
 /// Piso que contém `cwd`, quando a pasta já é ou está dentro de um worktree gerido.
@@ -610,14 +753,16 @@ pub(crate) fn floor_for_path(cwd: &str) -> Option<Floor> {
 pub const CHANGED_EVENT: &str = "cc-floors-changed";
 
 #[tauri::command]
-pub fn floor_list(cwd: String) -> FloorList {
-    list_for(&cwd)
+pub async fn floor_list(cwd: String) -> Result<FloorList, String> {
+    tauri::async_runtime::spawn_blocking(move || list_for(&cwd))
+        .await
+        .map_err(|error| error.to_string())
 }
 
 /// `async`: `git worktree add` hace un checkout completo y en un repo grande tarda; en la
 /// hebra principal congelaría la ventana.
-#[tauri::command(async)]
-pub fn floor_create(
+#[tauri::command]
+pub async fn floor_create(
     app: tauri::AppHandle,
     cwd: String,
     name: String,
@@ -625,29 +770,41 @@ pub fn floor_create(
     existing_branch: Option<String>,
     exclude: Option<Vec<String>>,
 ) -> Result<Floor, String> {
-    use tauri::Emitter;
-    let opts = CreateOpts {
-        start: from,
-        existing_branch,
-        exclude: exclude.unwrap_or_default(),
-    };
-    let floor = create_with(&cwd, &name, opts)?;
-    let _ = app.emit(CHANGED_EVENT, &floor.id);
-    Ok(floor)
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Emitter;
+        let opts = CreateOpts {
+            start: from,
+            existing_branch,
+            exclude: exclude.unwrap_or_default(),
+        };
+        let floor = create_with(&cwd, &name, opts)?;
+        let _ = app.emit(CHANGED_EVENT, &floor.id);
+        Ok(floor)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// `async`: `git worktree remove` borra una carpeta entera.
-#[tauri::command(async)]
-pub fn floor_delete(app: tauri::AppHandle, id: String) -> Result<Dropped, String> {
-    use tauri::{Emitter, Manager};
-    let db = app.try_state::<crate::database::DbConnection>().ok_or("la base no está disponible")?.inner().clone();
-    let skills_dir = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        crate::skills::skills_dir_from_conn(&conn)?
-    };
-    let dropped = remove(&id, &skills_dir)?;
-    let _ = app.emit(CHANGED_EVENT, &id);
-    Ok(dropped)
+#[tauri::command]
+pub async fn floor_delete(app: tauri::AppHandle, id: String) -> Result<Dropped, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::{Emitter, Manager};
+        let db = app
+            .try_state::<crate::database::DbConnection>()
+            .ok_or("la base no está disponible")?
+            .inner()
+            .clone();
+        let skills_dir = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            crate::skills::skills_dir_from_conn(&conn)?
+        };
+        let dropped = remove(&id, &skills_dir)?;
+        let _ = app.emit(CHANGED_EVENT, &id);
+        Ok(dropped)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -671,7 +828,11 @@ mod test {
         let mut floors = vec![floor("A", "/p"), floor("B", "/p")];
         assert_eq!(take(&mut floors, "id-A").unwrap().name, "A");
         assert_eq!(floors.len(), 1);
-        assert!(take(&mut floors, "id-A").unwrap_err().contains("já não existe"));
+        assert!(
+            take(&mut floors, "id-A")
+                .unwrap_err()
+                .contains("já não existe")
+        );
         assert_eq!(floors[0].name, "B", "el otro no se toca");
     }
 
@@ -686,7 +847,11 @@ mod test {
         let floors = vec![floor("Refactor", "/proj")];
         assert_eq!(ground_for(&floors, "/proj"), "/proj");
         assert_eq!(ground_for(&floors, "/wt/Refactor/app"), "/proj");
-        assert_eq!(ground_for(&floors, "/wt/Refactor/app/src"), "/proj", "una subcarpeta del piso");
+        assert_eq!(
+            ground_for(&floors, "/wt/Refactor/app/src"),
+            "/proj",
+            "una subcarpeta del piso"
+        );
         assert_eq!(ground_for(&floors, "/wt/Refactor"), "/proj");
         assert_eq!(ground_for(&floors, "/otro"), "/otro");
     }
@@ -700,16 +865,29 @@ mod test {
     #[test]
     fn cada_proyecto_ve_solo_sus_pisos() {
         let floors = vec![floor("A", "/p1"), floor("B", "/p2"), floor("C", "/p1")];
-        let names: Vec<_> = floors_of(&floors, "/p1").into_iter().map(|f| f.name).collect();
+        let names: Vec<_> = floors_of(&floors, "/p1")
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
         assert_eq!(names, vec!["A", "C"]);
     }
 
     #[test]
     fn el_nombre_se_limpia_y_no_se_repite_en_el_proyecto() {
         let floors = vec![floor("Refactor", "/p1")];
-        assert_eq!(check_name(&floors, "/p1", "  Nova   ideia ").unwrap(), "Nova ideia");
-        assert!(check_name(&floors, "/p1", "refactor").unwrap_err().contains("Já existe"));
-        assert!(check_name(&floors, "/p2", "Refactor").is_ok(), "otro proyecto, otro espacio de nombres");
+        assert_eq!(
+            check_name(&floors, "/p1", "  Nova   ideia ").unwrap(),
+            "Nova ideia"
+        );
+        assert!(
+            check_name(&floors, "/p1", "refactor")
+                .unwrap_err()
+                .contains("Já existe")
+        );
+        assert!(
+            check_name(&floors, "/p2", "Refactor").is_ok(),
+            "otro proyecto, otro espacio de nombres"
+        );
         assert!(check_name(&floors, "/p1", "   ").is_err());
         assert!(check_name(&floors, "/p1", &"a".repeat(MAX_NAME + 1)).is_err());
         assert!(check_name(&floors, "/p1", "a\u{1b}b").is_err());
@@ -719,15 +897,26 @@ mod test {
     fn se_encuentra_por_nombre_o_id_y_el_error_lista_los_que_hay() {
         let floors = vec![floor("Refactor", "/p1"), floor("Docs", "/p1")];
         assert_eq!(find(&floors, "/p1", "docs").unwrap().name, "Docs");
-        assert_eq!(find(&floors, "/p1", "id-Refactor").unwrap().name, "Refactor");
+        assert_eq!(
+            find(&floors, "/p1", "id-Refactor").unwrap().name,
+            "Refactor"
+        );
         let err = find(&floors, "/p1", "nada").unwrap_err();
         assert!(err.contains("Refactor") && err.contains("Docs"), "{err}");
-        assert!(find(&floors, "/p2", "Docs").unwrap_err().contains("ainda não tem"));
+        assert!(
+            find(&floors, "/p2", "Docs")
+                .unwrap_err()
+                .contains("ainda não tem")
+        );
     }
 
     #[test]
     fn un_origen_con_guion_se_rechaza_antes_de_llegar_a_git() {
-        assert!(check_start(Some("--upload-pack=evil")).unwrap_err().contains("não pode começar com '-'"));
+        assert!(
+            check_start(Some("--upload-pack=evil"))
+                .unwrap_err()
+                .contains("não pode começar com '-'")
+        );
         assert_eq!(check_start(None).unwrap(), "HEAD");
         assert_eq!(check_start(Some("  main ")).unwrap(), "main");
         assert_eq!(check_start(Some("")).unwrap(), "HEAD");
@@ -742,7 +931,10 @@ mod test {
         assert_eq!(shared.mode, CargoTargetMode::Shared);
         assert_eq!(shared.path, agents_cargo_target_dir());
         assert_ne!(shared.path, repo.join("src-tauri").join("target"));
-        assert_eq!(cargo_target_dir(&repo, &worktree, Some(OsStr::new("shared"))), shared);
+        assert_eq!(
+            cargo_target_dir(&repo, &worktree, Some(OsStr::new("shared"))),
+            shared
+        );
 
         let isolated = cargo_target_dir(&repo, &worktree, Some(OsStr::new("per-worktree")));
         assert_eq!(isolated.mode, CargoTargetMode::PerWorktree);
@@ -769,7 +961,10 @@ mod test {
             assert!(block.contains(&format!("Raiz: {root}")), "{block}");
             assert!(block.contains("ags test affected --dry-run"), "{block}");
             assert!(block.contains("gh pr checks <n> --watch"), "{block}");
-            assert!(block.contains("migrações de banco, schema, código unsafe ou COM"), "{block}");
+            assert!(
+                block.contains("migrações de banco, schema, código unsafe ou COM"),
+                "{block}"
+            );
             assert!(block.contains("já verde neste hash"), "{block}");
             assert!(block.contains("fix_rounds.max"), "{block}");
             assert!(block.contains("última rodada"), "{block}");
@@ -798,7 +993,10 @@ mod test {
 
     #[test]
     fn node_modules_existente_nunca_e_substituido() {
-        let root = std::env::temp_dir().join(format!("ags-node-modules-existing-{}", uuid::Uuid::new_v4().simple()));
+        let root = std::env::temp_dir().join(format!(
+            "ags-node-modules-existing-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
         let repo = root.join("repo");
         let worktree = root.join("worktree");
         let target = repo.join("node_modules");
@@ -807,8 +1005,14 @@ mod test {
         std::fs::create_dir_all(&existing).unwrap();
         std::fs::write(existing.join("keep.txt"), "preservar").unwrap();
 
-        assert_eq!(prepare_node_modules_link(&repo, &worktree).unwrap(), NodeModulesLinkStatus::ExistingPreserved);
-        assert_eq!(std::fs::read_to_string(existing.join("keep.txt")).unwrap(), "preservar");
+        assert_eq!(
+            prepare_node_modules_link(&repo, &worktree).unwrap(),
+            NodeModulesLinkStatus::ExistingPreserved
+        );
+        assert_eq!(
+            std::fs::read_to_string(existing.join("keep.txt")).unwrap(),
+            "preservar"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -816,12 +1020,22 @@ mod test {
     fn worktree_real_recebe_link_de_node_modules_da_raiz() {
         use std::process::Command;
 
-        let scratch = std::env::temp_dir().join(format!("ags-floor-link-{}", uuid::Uuid::new_v4().simple()));
+        let scratch =
+            std::env::temp_dir().join(format!("ags-floor-link-{}", uuid::Uuid::new_v4().simple()));
         let repo = scratch.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
         let git = |args: &[&str]| {
-            let output = Command::new("git").arg("-C").arg(&repo).args(args).output().unwrap();
-            assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         };
         git(&["init", "--quiet"]);
         git(&["config", "user.name", "ADE AGS tests"]);
@@ -833,15 +1047,32 @@ mod test {
         git(&["add", ".gitignore", "README.md"]);
         git(&["commit", "--quiet", "-m", "fixture"]);
 
-        let wt = crate::runs::worktrees::create_from(&scratch.join("worktrees"), &repo, "junction fixture", "HEAD").unwrap();
+        let wt = crate::runs::worktrees::create_from(
+            &scratch.join("worktrees"),
+            &repo,
+            "junction fixture",
+            "HEAD",
+        )
+        .unwrap();
         let status = prepare_node_modules_link(&repo, &wt.root).unwrap();
         assert_eq!(status, NodeModulesLinkStatus::Created);
         let link = wt.root.join("node_modules");
-        assert_eq!(std::fs::read_to_string(link.join("marker.txt")).unwrap(), "shared\n");
+        assert_eq!(
+            std::fs::read_to_string(link.join("marker.txt")).unwrap(),
+            "shared\n"
+        );
         #[cfg(windows)]
-        assert!(crate::skills::is_mount(&link), "Windows deve criar um junction de diretório válido");
+        assert!(
+            crate::skills::is_mount(&link),
+            "Windows deve criar um junction de diretório válido"
+        );
         #[cfg(unix)]
-        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
 
         crate::skills::remove_mount(&link).unwrap();
         crate::runs::worktrees::remove(&repo, &wt, Path::new(""), Path::new("")).unwrap();
@@ -852,7 +1083,9 @@ mod test {
     fn las_carpetas_excluidas_se_validan() {
         assert_eq!(check_exclude(" docs/ ").unwrap(), "docs");
         assert_eq!(check_exclude("apps\\web").unwrap(), "apps/web");
-        for bad in ["", "   ", "-x", "../x", "a/../b", ".", "C:/x", "*.md", "pasta?"] {
+        for bad in [
+            "", "   ", "-x", "../x", "a/../b", ".", "C:/x", "*.md", "pasta?",
+        ] {
             assert!(check_exclude(bad).is_err(), "{bad:?} debía rechazarse");
         }
     }
@@ -861,13 +1094,25 @@ mod test {
     fn excluir_una_carpeta_la_saca_del_worktree_y_lo_demas_queda() {
         use std::process::Command;
 
-        let scratch = std::env::temp_dir().join(format!("ags-floor-exclude-{}", uuid::Uuid::new_v4().simple()));
+        let scratch = std::env::temp_dir().join(format!(
+            "ags-floor-exclude-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
         let repo = scratch.join("repo");
         std::fs::create_dir_all(repo.join("docs")).unwrap();
         std::fs::create_dir_all(repo.join("src")).unwrap();
         let git = |args: &[&str]| {
-            let output = Command::new("git").arg("-C").arg(&repo).args(args).output().unwrap();
-            assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         };
         git(&["init", "--quiet"]);
         git(&["config", "user.name", "ADE AGS tests"]);
@@ -878,11 +1123,20 @@ mod test {
         git(&["add", "."]);
         git(&["commit", "--quiet", "-m", "fixture"]);
 
-        let wt = crate::runs::worktrees::create_from(&scratch.join("worktrees"), &repo, "exclude fixture", "HEAD").unwrap();
+        let wt = crate::runs::worktrees::create_from(
+            &scratch.join("worktrees"),
+            &repo,
+            "exclude fixture",
+            "HEAD",
+        )
+        .unwrap();
         // Una carpeta que no existe en el repo tampouco é erro.
         apply_exclusions(&wt.root, &["docs".to_string(), "no-existe".to_string()]).unwrap();
 
-        assert!(!wt.root.join("docs").exists(), "la carpeta excluida no debe estar en el worktree");
+        assert!(
+            !wt.root.join("docs").exists(),
+            "la carpeta excluida no debe estar en el worktree"
+        );
         assert!(wt.root.join("src").join("main.rs").exists(), "el resto sí");
         assert!(wt.root.join("README.md").exists(), "la raíz sí");
 
