@@ -70,7 +70,16 @@ pub fn with_boot_lease<T>(
         db: db.clone(),
         owner,
     };
-    work().map(Some)
+    let result = work();
+    let released = db
+        .lock()
+        .map_err(|error| error.to_string())
+        .and_then(|conn| release(&conn, &_guard.owner));
+    match released {
+        Ok(true) => result.map(Some),
+        Ok(false) => Err("lease de boot foi perdido durante a reconciliação".into()),
+        Err(error) => Err(format!("não foi possível liberar o lease de boot: {error}")),
+    }
 }
 
 struct BootLeaseGuard {
@@ -80,6 +89,9 @@ struct BootLeaseGuard {
 
 impl Drop for BootLeaseGuard {
     fn drop(&mut self) {
+        if !std::thread::panicking() {
+            return;
+        }
         if let Err(error) = self
             .db
             .lock()

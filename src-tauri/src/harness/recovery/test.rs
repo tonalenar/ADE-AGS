@@ -30,6 +30,25 @@ fn duas_conexoes_no_mesmo_arquivo_serializam_o_lease_e_usam_agora_injetavel() {
 }
 
 #[test]
+fn perda_do_lease_durante_o_trabalho_vira_erro() {
+    let conn = Connection::open_in_memory().unwrap();
+    migrate(&conn).unwrap();
+    let db: crate::database::DbConnection =
+        std::sync::Arc::new(std::sync::Mutex::new(conn));
+
+    let result = with_boot_lease(&db, 20_000, || {
+        db.lock().unwrap().execute(
+            "UPDATE harness_recovery_lease SET owner='outro' WHERE id=1",
+            [],
+        ).unwrap();
+        Ok(())
+    });
+
+    assert!(result.is_err(), "a reconciliação não pode declarar sucesso após perder o lease");
+    assert!(result.unwrap_err().contains("lease"));
+}
+
+#[test]
 fn o_lease_de_boot_libera_depois_de_panico() {
     let path = temp_db();
     {
