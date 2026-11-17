@@ -569,10 +569,17 @@ fn erro_ao_preparar_home_antigravity_impede_lancamento_completo() {
         "login",
         None,
     );
-    assert!(
-        result.is_err(),
-        "não pode lançar com HOME parcial depois de falha na preparação"
-    );
+    if cfg!(target_os = "macos") {
+        assert!(
+            result.is_err(),
+            "não pode lançar com HOME parcial depois de falha na preparação"
+        );
+    } else {
+        assert!(
+            matches!(result, Ok(None)),
+            "uma plataforma sem contas Antigravity não pode produzir ambiente de lançamento: {result:?}"
+        );
+    }
 }
 
 // ── Antigravity: conta por HOME isolado ──────────────────────────
