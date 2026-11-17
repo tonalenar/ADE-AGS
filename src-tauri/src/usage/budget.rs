@@ -71,6 +71,7 @@ pub fn evaluate_budget(
     }
 }
 
+#[cfg(test)]
 pub fn budget_for_conn(conn: &Connection, mission: &str) -> Result<BudgetStatus, String> {
     let tokens = super::mission_tokens_for_conn(conn, mission)?;
     budget_from_tokens(conn, mission, &tokens)
@@ -154,6 +155,7 @@ fn observed_trend(previous_at: i64, previous_cost: f64, now: i64, cost: f64) -> 
         .then(|| (cost - previous_cost) * 3600.0 / (now - previous_at) as f64)
 }
 
+#[cfg(test)]
 pub fn require_budget(conn: &Connection, mission: &str) -> Result<(), String> {
     let status = budget_for_conn(conn, mission)?;
     require_from_status(&status)

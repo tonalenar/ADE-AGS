@@ -223,6 +223,7 @@ fn codex_records(path: &Path, cwd: &str) -> Vec<(UsageRecord, Option<String>)> {
     out
 }
 
+#[cfg(test)]
 pub fn mission_tokens_for_conn(
     conn: &Connection,
     mission_id: &str,

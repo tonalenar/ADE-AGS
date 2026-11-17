@@ -17,7 +17,7 @@ use crate::database::DbConnection;
 
 use super::claude::{parse_ts, UsageRecord};
 use super::pricing;
-use super::terminal::{mission_tokens_for_conn, mission_tokens_for_db, MissionTabTokens};
+use super::terminal::{mission_tokens_for_db, MissionTabTokens};
 
 const USAGE_MARK: &str = "\"output_tokens\"";
 

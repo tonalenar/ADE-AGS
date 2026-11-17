@@ -835,6 +835,7 @@ pub fn detail_for_owner(
     Ok(MemoryDetail { entry, revisions })
 }
 
+#[cfg(test)]
 pub fn snapshot_run(
     conn: &Connection,
     run_id: &str,
