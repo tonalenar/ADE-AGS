@@ -805,6 +805,11 @@ fn plan_tasks_watched(
         .get("budget_usd")
         .and_then(Value::as_f64)
         .filter(|b| *b > 0.0);
+    let repository_commit = if existing_run.is_none() {
+        crate::memory::repo::current_commit_for_db(db, &caller.workspace_id)
+    } else {
+        None
+    };
 
     let run_id = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -839,7 +844,7 @@ fn plan_tasks_watched(
                 store::update_run_limits(&tx, &run.id, max_parallel, budget)?;
                 run.clone()
             }
-            None => store::create_run_with_memory_snapshot(
+            None => store::create_run_with_memory_snapshot_and_commit(
                 &tx,
                 &caller.workspace_id,
                 caller.mission_id.as_deref(),
@@ -847,6 +852,7 @@ fn plan_tasks_watched(
                 &caller.cwd,
                 max_parallel.unwrap_or(2),
                 budget,
+                repository_commit,
             )?,
         };
         let linked_at = crate::util::now_ts_ms();

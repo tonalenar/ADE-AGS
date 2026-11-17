@@ -22,6 +22,16 @@ fn fixture() -> Connection {
 }
 
 #[test]
+fn consulta_git_de_proveniencia_libera_o_mutex_do_banco() {
+    let db = std::sync::Arc::new(std::sync::Mutex::new(fixture()));
+    let commit = current_commit_for_db_with(&db, "w", || {
+        assert!(db.try_lock().is_ok(), "git não deve rodar com o banco preso");
+        Some("abc123".into())
+    });
+    assert_eq!(commit.as_deref(), Some("abc123"));
+}
+
+#[test]
 fn approved_reader_rejects_traversal_and_keeps_pending_and_other_missions_out() {
     let c=fixture();
     c.execute("INSERT INTO missions(id,workspace_id,title,objective,cwd,created_at,updated_at) VALUES('other','w','Other','x','/test',0,0)",[]).unwrap();

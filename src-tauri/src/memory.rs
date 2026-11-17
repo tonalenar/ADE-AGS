@@ -841,6 +841,17 @@ pub fn snapshot_run(
     workspace_id: &str,
     mission_id: Option<&str>,
 ) -> Result<(), String> {
+    let repository_commit = repo::current_commit(conn, workspace_id);
+    snapshot_run_with_commit(conn, run_id, workspace_id, mission_id, repository_commit)
+}
+
+pub fn snapshot_run_with_commit(
+    conn: &Connection,
+    run_id: &str,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    repository_commit: Option<String>,
+) -> Result<(), String> {
     validate_owner(conn, "workspace", workspace_id, None)?;
     if let Some(mid) = mission_id {
         validate_owner(conn, "mission", workspace_id, Some(mid))?;
@@ -888,7 +899,7 @@ pub fn snapshot_run(
     if candidates.len() > 36 { index.push_str("- More entries: use memory_search.\n"); }
     let relevant = ranked.iter().filter_map(|hit| candidates.iter().find(|row| row.0 == hit.entry_id).cloned()).collect::<Vec<_>>();
     let mut selected = select_snapshot(run_id, relevant, RELEVANT_LIMIT, SnapshotMeta {
-        memory_index: index, repository_commit: repo::current_commit(conn, workspace_id),
+        memory_index: index, repository_commit,
         baseline_bytes: baseline.meta.context_bytes, baseline_tokens: baseline.meta.context_tokens,
         ..SnapshotMeta::default()
     });

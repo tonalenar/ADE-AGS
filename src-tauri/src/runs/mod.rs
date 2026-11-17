@@ -397,13 +397,14 @@ pub(crate) fn start_orchestration(
     }
     let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
     let max_parallel = spec.max_parallel.clamp(1, 6);
+    let repository_commit = crate::memory::repo::current_commit_for_db(db, spec.workspace_id);
 
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let tx =
             rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
                 .map_err(|e| e.to_string())?;
-        let run = store::create_run_with_memory_snapshot(
+        let run = store::create_run_with_memory_snapshot_and_commit(
             &tx,
             spec.workspace_id,
             spec.mission_id,
@@ -411,6 +412,7 @@ pub(crate) fn start_orchestration(
             spec.cwd,
             max_parallel,
             spec.budget_usd,
+            repository_commit,
         )?;
         if let Some(squad) = spec.squad {
             store::set_run_squad_snapshot(&tx, &run.id, squad)?;
@@ -1399,6 +1401,7 @@ pub async fn start_memory_dream(
         return Err("Sonhar requer Claude Code com ferramentas de escrita bloqueadas.".into());
     }
     let _guard = crate::agents::updates::activity_guard()?;
+    let repository_commit = crate::memory::repo::current_commit_for_db(db, workspace);
     let (task, dream_id) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let tx =
@@ -1406,7 +1409,7 @@ pub async fn start_memory_dream(
                 .map_err(|e| e.to_string())?;
         let input = crate::memory::dream::validate_start(&tx, workspace)?;
         let cwd:String=tx.query_row("SELECT cwd FROM runs WHERE workspace_id=?1 AND cwd<>'' ORDER BY created_at DESC LIMIT 1",[workspace],|r|r.get(0)).map_err(|_|"Workspace sem pasta no histórico.".to_string())?;
-        let run = store::create_run_with_memory_snapshot(
+        let run = store::create_run_with_memory_snapshot_and_commit(
             &tx,
             workspace,
             None,
@@ -1414,6 +1417,7 @@ pub async fn start_memory_dream(
             &cwd,
             1,
             None,
+            repository_commit,
         )?;
         let prompt = format!(
             "Leia os dados e proponha somente melhorias justificadas.\nUNTRUSTED DATA BEGIN\n{}\nUNTRUSTED DATA END",

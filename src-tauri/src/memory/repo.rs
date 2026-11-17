@@ -235,6 +235,11 @@ pub fn current_commit(conn: &Connection, workspace: &str) -> Option<String> {
     if !exists {
         return None;
     }
+    current_commit_for_workspace(workspace)
+}
+
+/// Busca o commit sem consultar o banco. O chamador deve confirmar antes se o workspace existe.
+pub fn current_commit_for_workspace(workspace: &str) -> Option<String> {
     let root = default_root().ok()?;
     let dirs = workspace_repo_dirs(&root, workspace).ok()?;
     let stable = workspace_repo_name(workspace);
@@ -247,6 +252,28 @@ pub fn current_commit(conn: &Connection, workspace: &str) -> Option<String> {
     };
     if path.is_symlink() || path.join(".git").is_symlink() || !path.join(".git").exists() { return None; }
     git(&path, &["rev-parse", "HEAD"]).ok()
+}
+
+/// Confirma o owner sob lock curto e só então faz filesystem/Git sem o mutex do banco.
+pub fn current_commit_for_db(db: &crate::database::DbConnection, workspace: &str) -> Option<String> {
+    current_commit_for_db_with(db, workspace, || current_commit_for_workspace(workspace))
+}
+
+fn current_commit_for_db_with(
+    db: &crate::database::DbConnection,
+    workspace: &str,
+    read: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    let exists = {
+        let conn = db.lock().ok()?;
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)",
+            [workspace],
+            |row| row.get::<_, bool>(0),
+        )
+        .ok()?
+    };
+    exists.then(read).flatten()
 }
 
 /// Injected by tests so a slow or failing git does not require a real binary.

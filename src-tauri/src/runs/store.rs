@@ -171,6 +171,17 @@ pub fn create_run_with_memory_snapshot(
     conn: &Connection, workspace_id: &str, mission_id: Option<&str>, objective: &str,
     cwd: &str, max_parallel: i64, budget_usd: Option<f64>,
 ) -> Result<Run, String> {
+    let repository_commit = crate::memory::repo::current_commit(conn, workspace_id);
+    create_run_with_memory_snapshot_and_commit(
+        conn, workspace_id, mission_id, objective, cwd, max_parallel, budget_usd, repository_commit,
+    )
+}
+
+/// Cria um Run usando provenance calculada antes da transação que grava o snapshot.
+pub fn create_run_with_memory_snapshot_and_commit(
+    conn: &Connection, workspace_id: &str, mission_id: Option<&str>, objective: &str,
+    cwd: &str, max_parallel: i64, budget_usd: Option<f64>, repository_commit: Option<String>,
+) -> Result<Run, String> {
     // A standalone SAVEPOINT starts a deferred transaction. Reserve the writer
     // before reading memory; caller-owned transactions retain their own lifetime.
     let transaction = if conn.is_autocommit() {
@@ -182,7 +193,7 @@ pub fn create_run_with_memory_snapshot(
         conn.execute("INSERT INTO runs(id,workspace_id,mission_id,objective,cwd,status,max_parallel,budget_usd,created_at)
             VALUES(?1,?2,?3,?4,?5,'running',?6,?7,?8)",
             rusqlite::params![id,workspace_id,mission_id,objective,cwd,max_parallel,budget_usd,now_ts()]).map_err(|e| e.to_string())?;
-        crate::memory::snapshot_run(conn, &id, workspace_id, mission_id)?;
+        crate::memory::snapshot_run_with_commit(conn, &id, workspace_id, mission_id, repository_commit)?;
         run_by_id(conn, &id)?.ok_or_else(|| "Run was not saved".to_string())
     })();
     match result {
@@ -1386,13 +1397,31 @@ pub(crate) fn take_recoverable_logs() -> Vec<String> {
 /// Grava o fim. Se a escrita falha, o erro fica no log e a tarefa aberta passa a
 /// `failed` com essa mensagem, em vez de seguir `running` sem rastro.
 pub fn persist_finish(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> TaskOutcome {
-    match finish_task(conn, task_id, outcome) {
+    persist_finish_inner(conn, task_id, outcome, None)
+}
+
+pub fn persist_finish_with_gate(
+    conn: &Connection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+    cache_green: bool,
+) -> TaskOutcome {
+    persist_finish_inner(conn, task_id, outcome, Some(cache_green))
+}
+
+fn persist_finish_inner(
+    conn: &Connection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+    cache_green: Option<bool>,
+) -> TaskOutcome {
+    match finish_task_with_gate(conn, task_id, outcome, cache_green) {
         Ok(()) => outcome.clone(),
         Err(error) => {
             let message = format!("erro recuperável ao gravar o fim da tarefa {task_id}: {error}");
             log_recoverable(&message);
             let failed = TaskOutcome::failed(message);
-            if let Err(again) = finish_task(conn, task_id, &failed) {
+            if let Err(again) = finish_task_with_gate(conn, task_id, &failed, cache_green) {
                 log_recoverable(&format!(
                     "erro recuperável ao gravar o fim da tarefa {task_id}: a tarefa segue aberta ({again})"
                 ));
@@ -1410,18 +1439,35 @@ pub fn persist_finish(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -
 /// tarea que falla AL LANZARSE (un binario que no está, una cuenta borrada) nunca llegó a
 /// correr, y sin eso se quedaría en `ready` para siempre.
 pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> Result<(), String> {
+    finish_task_with_gate(conn, task_id, outcome, None)
+}
+
+pub fn finish_task_with_cached_gate(
+    conn: &Connection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+    cache_green: bool,
+) -> Result<(), String> {
+    finish_task_with_gate(conn, task_id, outcome, Some(cache_green))
+}
+
+fn finish_task_with_gate(
+    conn: &Connection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+    cache_green: Option<bool>,
+) -> Result<(), String> {
     // Central finalization also covers IPC/runtime callers; no model-text heuristics.
     let mut outcome = outcome.clone();
     if outcome.ok {
         if let Some(task) = task_by_id(conn, task_id)? {
             // O verde já registrado no cache para esta árvore também é evidência (sem repetir a suíte).
-            let green_in_cache = || {
-                let dir = task.worktree_path.as_deref().unwrap_or(task.cwd.as_str());
-                crate::testspeed::run::full_gate_green(conn, std::path::Path::new(dir))
-            };
             if task.full_gate
                 && !super::fixrounds::full_gate_satisfied(outcome.result.as_deref().unwrap_or(""), task.structured_handoff.as_ref())
-                && !green_in_cache()
+                && !cache_green.unwrap_or_else(|| {
+                    let dir = task.worktree_path.as_deref().unwrap_or(task.cwd.as_str());
+                    crate::testspeed::run::full_gate_green(conn, std::path::Path::new(dir))
+                })
             {
                 outcome.ok = false;
                 outcome.error = Some(super::fixrounds::MISSING_GATE.into());
@@ -1487,6 +1533,31 @@ pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> R
         .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+pub fn full_gate_cache_green_for_outcome(
+    db: &DbConnection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+) -> Result<bool, String> {
+    if !outcome.ok {
+        return Ok(false);
+    }
+    let task = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        task_by_id(&conn, task_id)?
+    };
+    let Some(task) = task else { return Ok(false) };
+    if !task.full_gate
+        || super::fixrounds::full_gate_satisfied(
+            outcome.result.as_deref().unwrap_or(""),
+            task.structured_handoff.as_ref(),
+        )
+    {
+        return Ok(false);
+    }
+    let dir = task.worktree_path.as_deref().unwrap_or(task.cwd.as_str());
+    Ok(crate::testspeed::run::full_gate_green_db(db, std::path::Path::new(dir)))
 }
 
 /// Reconcilia tarefas deixadas pelo encerramento do app em uma única transação.
