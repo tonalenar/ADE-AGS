@@ -38,22 +38,21 @@ pub struct WorkspaceSnapshot {
 }
 
 /// Guarda (o reemplaza) el recuerdo de una carpeta.
-#[tauri::command]
-pub fn save_workspace_snapshot(
+pub(crate) fn save_workspace_snapshot_now(
     cwd: String,
     workspace_id: String,
     tabs: Vec<SnapshotTab>,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<(), String> {
     let tabs_json = serde_json::to_string(&tabs).map_err(|e| e.to_string())?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO workspace_snapshots (cwd, workspace_id, tabs_json, closed_at)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(cwd) DO UPDATE SET
-             workspace_id = excluded.workspace_id,
-             tabs_json    = excluded.tabs_json,
-             closed_at    = excluded.closed_at",
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(cwd) DO UPDATE SET
+                 workspace_id = excluded.workspace_id,
+                 tabs_json    = excluded.tabs_json,
+                 closed_at    = excluded.closed_at",
         rusqlite::params![cwd, workspace_id, tabs_json, now_ts()],
     )
     .map_err(|e| e.to_string())?;
@@ -61,11 +60,27 @@ pub fn save_workspace_snapshot(
 }
 
 #[tauri::command]
-pub fn list_workspace_snapshots(db: tauri::State<DbConnection>) -> Result<Vec<WorkspaceSnapshot>, String> {
+pub async fn save_workspace_snapshot(
+    cwd: String,
+    workspace_id: String,
+    tabs: Vec<SnapshotTab>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        save_workspace_snapshot_now(cwd, workspace_id, tabs, &db)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn list_workspace_snapshots_now(
+    db: &crate::database::DbConnection,
+) -> Result<Vec<WorkspaceSnapshot>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT cwd, workspace_id, tabs_json, closed_at FROM workspace_snapshots ORDER BY closed_at DESC")
-        .map_err(|e| e.to_string())?;
+            .prepare("SELECT cwd, workspace_id, tabs_json, closed_at FROM workspace_snapshots ORDER BY closed_at DESC")
+            .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |r| {
             Ok((
@@ -79,23 +94,34 @@ pub fn list_workspace_snapshots(db: tauri::State<DbConnection>) -> Result<Vec<Wo
 
     Ok(rows
         .filter_map(|r| r.ok())
-        .map(|(cwd, workspace_id, tabs_json, closed_at)| WorkspaceSnapshot {
-            cwd,
-            workspace_id,
-            // Un JSON ilegible (de una versión vieja del formato) no puede hacer
-            // desaparecer al resto de los workspaces cerrados: esa fila queda sin tabs y
-            // el panel la muestra igual, para poder borrarla.
-            tabs: serde_json::from_str(&tabs_json).unwrap_or_default(),
-            closed_at,
-        })
+        .map(
+            |(cwd, workspace_id, tabs_json, closed_at)| WorkspaceSnapshot {
+                cwd,
+                workspace_id,
+                // Un JSON ilegible (de una versión vieja del formato) no puede hacer
+                // desaparecer al resto de los workspaces cerrados: esa fila queda sin tabs y
+                // el panel la muestra igual, para poder borrarla.
+                tabs: serde_json::from_str(&tabs_json).unwrap_or_default(),
+                closed_at,
+            },
+        )
         .collect())
 }
 
-/// Lo devuelve y lo borra: reabrir un workspace consume su recuerdo.
 #[tauri::command]
-pub fn take_workspace_snapshot(
+pub async fn list_workspace_snapshots(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<WorkspaceSnapshot>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || list_workspace_snapshots_now(&db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Lo devuelve y lo borra: reabrir un workspace consume su recuerdo.
+pub(crate) fn take_workspace_snapshot_now(
     cwd: String,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<Option<WorkspaceSnapshot>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let row: Option<(String, String, i64)> = conn
@@ -107,7 +133,9 @@ pub fn take_workspace_snapshot(
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let Some((workspace_id, tabs_json, closed_at)) = row else { return Ok(None) };
+    let Some((workspace_id, tabs_json, closed_at)) = row else {
+        return Ok(None);
+    };
     conn.execute("DELETE FROM workspace_snapshots WHERE cwd = ?1", [&cwd])
         .map_err(|e| e.to_string())?;
 
@@ -119,11 +147,35 @@ pub fn take_workspace_snapshot(
     }))
 }
 
-/// Olvidar un workspace cerrado sin reabrirlo.
 #[tauri::command]
-pub fn forget_workspace_snapshot(cwd: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+pub async fn take_workspace_snapshot(
+    cwd: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Option<WorkspaceSnapshot>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || take_workspace_snapshot_now(cwd, &db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Olvidar un workspace cerrado sin reabrirlo.
+pub(crate) fn forget_workspace_snapshot_now(
+    cwd: String,
+    db: &crate::database::DbConnection,
+) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM workspace_snapshots WHERE cwd = ?1", [&cwd])
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn forget_workspace_snapshot(
+    cwd: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || forget_workspace_snapshot_now(cwd, &db))
+        .await
+        .map_err(|e| e.to_string())?
 }

@@ -8,11 +8,11 @@ use rusqlite::{Connection, OptionalExtension, Result as SqlResult, params};
 use serde::{Deserialize, Deserializer};
 use uuid::Uuid;
 
-use crate::util::now_ts;
+use crate::database::DbConnection;
 use crate::database::models::{
     ArchivedSkill, BoxRect, OpenTabLocation, SessionHistoryEntry, SiblingTab,
 };
-use crate::database::DbConnection;
+use crate::util::now_ts;
 
 /// Archiva el estado actual de una tab en `session_history` justo ANTES de que su fila
 /// desaparezca de `tabs` (autosave que ya no la incluye, o borrado de su ventana). Si
@@ -82,7 +82,9 @@ fn read_archive_input(conn: &Connection, tab_id: &str) -> Option<ArchiveInput> {
         .ok()
         .flatten()?;
 
-    let profile = account_id.as_deref().and_then(|id| crate::accounts::dir_for_conn(conn, id));
+    let profile = account_id
+        .as_deref()
+        .and_then(|id| crate::accounts::dir_for_conn(conn, id));
     let custom = crate::agents::find(conn, &agent_id);
     Some(ArchiveInput {
         agent_id,
@@ -109,10 +111,14 @@ fn read_archive_input(conn: &Connection, tab_id: &str) -> Option<ArchiveInput> {
 /// entrada nueva en vez de actualizar la conversación que de verdad se continuó.
 pub fn resolve_for_archive(db: &DbConnection, tab_id: &str) -> ResolvedSession {
     let input = {
-        let Ok(conn) = db.lock() else { return ResolvedSession::default() };
+        let Ok(conn) = db.lock() else {
+            return ResolvedSession::default();
+        };
         read_archive_input(&conn, tab_id)
     };
-    let Some(input) = input else { return ResolvedSession::default() };
+    let Some(input) = input else {
+        return ResolvedSession::default();
+    };
     let profile = input.profile.as_deref().map(std::path::Path::new);
 
     // O id que a app ESCOLHEU ao abrir a aba (agentes que deixam escolher) é a verdade: redescobrir "a sessão mais nova da pasta"
@@ -120,7 +126,10 @@ pub fn resolve_for_archive(db: &DbConnection, tab_id: &str) -> ResolvedSession {
     // (Perde-se acompanhar um `/resume` feito dentro da TUI: pior seria arquivar a conversa de outra pessoa.)
     if input.session_id.is_some() && crate::agents::assigns_session(&input.agent_id) {
         let title = resolve_title(&input, input.session_id.clone(), profile);
-        return ResolvedSession { session_id: input.session_id, title };
+        return ResolvedSession {
+            session_id: input.session_id,
+            title,
+        };
     }
 
     // Sin el lock: acá se lee disco y, para algunas TUIs, se lanza un proceso.
@@ -177,7 +186,11 @@ pub fn resolve_for_archive(db: &DbConnection, tab_id: &str) -> ResolvedSession {
 }
 
 /// O título com que arquivar a aba, resolvido contra a sessão real.
-fn resolve_title(input: &ArchiveInput, session_id: Option<String>, profile: Option<&std::path::Path>) -> Option<String> {
+fn resolve_title(
+    input: &ArchiveInput,
+    session_id: Option<String>,
+    profile: Option<&std::path::Path>,
+) -> Option<String> {
     // El título se resuelve contra la sesión real y no se confía en el que traía la tab.
     // Dos motivos, los dos verificados sobre un historial de verdad:
     //
@@ -218,9 +231,17 @@ pub(crate) fn archive_tab_row(
 ) -> Result<(), String> {
     // All closure paths converge here, including window/workspace deletion. Preserve
     // the resolved session before the disposable tabs row is removed.
-    conn.execute("UPDATE tabs SET session_id=COALESCE(?1,session_id) WHERE id=?2",rusqlite::params![resolved.session_id,tab_id]).map_err(|e|e.to_string())?;
+    conn.execute(
+        "UPDATE tabs SET session_id=COALESCE(?1,session_id) WHERE id=?2",
+        rusqlite::params![resolved.session_id, tab_id],
+    )
+    .map_err(|e| e.to_string())?;
     crate::usage::capture_mission_tabs(conn, boards)?;
-    conn.execute("UPDATE mission_usage_tabs SET closed_at=?1 WHERE tab_id=?2 AND closed_at IS NULL",rusqlite::params![now_ts(),tab_id]).map_err(|e|e.to_string())?;
+    conn.execute(
+        "UPDATE mission_usage_tabs SET closed_at=?1 WHERE tab_id=?2 AND closed_at IS NULL",
+        rusqlite::params![now_ts(), tab_id],
+    )
+    .map_err(|e| e.to_string())?;
     upsert_history_row(conn, tab_id, workspace_id, resolved, now_ts())?;
     Ok(())
 }
@@ -261,7 +282,9 @@ pub(crate) fn upsert_history_row(
         prelaunch,
         opened_at,
     )) = row
-    else { return Ok(None) };
+    else {
+        return Ok(None);
+    };
 
     // Lo resuelto fuera del lock manda; si no se resolvió nada, queda lo que traía la tab.
     let session_id = resolved.session_id.clone().or(session_id);
@@ -282,7 +305,11 @@ pub(crate) fn upsert_history_row(
         .map_err(|e| e.to_string())?;
     let archived: Vec<ArchivedSkill> = stmt
         .query_map(rusqlite::params![tab_id, workspace_id], |r| {
-            Ok(ArchivedSkill { id: r.get(0)?, name: r.get(1)?, scope: r.get(2)? })
+            Ok(ArchivedSkill {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                scope: r.get(2)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
@@ -304,7 +331,11 @@ pub(crate) fn upsert_history_row(
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(rusqlite::params![workspace_id, tab_id], |r| {
-                Ok(SiblingTab { title: r.get(0)?, agent_label: r.get(1)?, cwd: r.get(2)? })
+                Ok(SiblingTab {
+                    title: r.get(0)?,
+                    agent_label: r.get(1)?,
+                    cwd: r.get(2)?,
+                })
             })
             .map_err(|e| e.to_string())?;
         rows.filter_map(|r| r.ok()).collect()
@@ -322,13 +353,19 @@ pub(crate) fn upsert_history_row(
     //    agente en la misma carpeta es indistinguible de la anterior: se actualiza esa
     //    entrada en vez de acumular copias.
     let existing_id: Option<String> = if let Some(hid) = &history_id {
-        conn.query_row("SELECT id FROM session_history WHERE id = ?1", [hid], |r| r.get(0))
-            .optional()
-            .map_err(|e| e.to_string())?
+        conn.query_row("SELECT id FROM session_history WHERE id = ?1", [hid], |r| {
+            r.get(0)
+        })
+        .optional()
+        .map_err(|e| e.to_string())?
     } else if let Some(sid) = &session_id {
-        conn.query_row("SELECT id FROM session_history WHERE session_id = ?1", [sid], |r| r.get(0))
-            .optional()
-            .map_err(|e| e.to_string())?
+        conn.query_row(
+            "SELECT id FROM session_history WHERE session_id = ?1",
+            [sid],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
     } else {
         conn.query_row(
             "SELECT id FROM session_history
@@ -397,8 +434,11 @@ pub(crate) fn upsert_history_row(
 /// que se abre la app, para no encontrar nada.
 pub(crate) fn dedupe_session_history_once(conn: &Connection) -> SqlResult<()> {
     const FLAG: &str = "session_history_deduped";
-    let ya: i64 =
-        conn.query_row("SELECT COUNT(*) FROM settings WHERE key = ?1", [FLAG], |r| r.get(0))?;
+    let ya: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM settings WHERE key = ?1",
+        [FLAG],
+        |r| r.get(0),
+    )?;
     if ya > 0 {
         return Ok(());
     }
@@ -445,10 +485,17 @@ pub fn archived_skills_of_session(
     history_id: &str,
 ) -> Result<Vec<ArchivedSkill>, String> {
     let json: Option<String> = conn
-        .query_row("SELECT skills FROM session_history WHERE id = ?1", [history_id], |r| r.get(0))
+        .query_row(
+            "SELECT skills FROM session_history WHERE id = ?1",
+            [history_id],
+            |r| r.get(0),
+        )
         .optional()
         .map_err(|e| e.to_string())?;
-    Ok(json.as_deref().map(parse_archived_skills).unwrap_or_default())
+    Ok(json
+        .as_deref()
+        .map(parse_archived_skills)
+        .unwrap_or_default())
 }
 
 /// Lee la columna `skills` de `session_history` tolerando el formato viejo, que era un
@@ -461,7 +508,11 @@ fn parse_archived_skills(json: &str) -> Vec<ArchivedSkill> {
     serde_json::from_str::<Vec<String>>(json)
         .unwrap_or_default()
         .into_iter()
-        .map(|name| ArchivedSkill { id: String::new(), name, scope: "tab".to_string() })
+        .map(|name| ArchivedSkill {
+            id: String::new(),
+            name,
+            scope: "tab".to_string(),
+        })
         .collect()
 }
 
@@ -492,7 +543,9 @@ fn entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<SessionHistoryEntry> 
         opened_at: row.get(12)?,
         closed_at: row.get(13)?,
         preview: row.get(14)?,
-        box_rect: box_json.as_deref().and_then(|s| serde_json::from_str(s).ok()),
+        box_rect: box_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok()),
         pinned: row.get::<_, i64>(16)? != 0,
         custom_title: row.get(17)?,
         hidden: row.get::<_, i64>(18)? != 0,
@@ -501,17 +554,16 @@ fn entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<SessionHistoryEntry> 
     })
 }
 
-#[tauri::command]
-pub fn db_list_session_history(
+pub(crate) fn db_list_session_history_now(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<Vec<SessionHistoryEntry>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {ENTRY_COLUMNS} FROM session_history WHERE workspace_id = ?1 ORDER BY closed_at DESC"
-        ))
-        .map_err(|e| e.to_string())?;
+            .prepare(&format!(
+                "SELECT {ENTRY_COLUMNS} FROM session_history WHERE workspace_id = ?1 ORDER BY closed_at DESC"
+            ))
+            .map_err(|e| e.to_string())?;
 
     let entries = stmt
         .query_map([&workspace_id], entry_from_row)
@@ -520,6 +572,17 @@ pub fn db_list_session_history(
         .collect();
 
     Ok(entries)
+}
+
+#[tauri::command]
+pub async fn db_list_session_history(
+    workspace_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<SessionHistoryEntry>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db_list_session_history_now(workspace_id, &db))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Cuántas entradas débiles se recalculan por llamada de [`db_refresh_session_titles`].
@@ -534,7 +597,10 @@ const REFRESH_TITLES_LIMIT: usize = 200;
 /// igual que en `resolve_for_archive`; y la escritura vuelve a tomarlo. Nunca toca
 /// `custom_title`: lo que puso la persona manda. Un título que sigue siendo débil no se
 /// graba, así que una sesión que no se encuentra queda como estaba.
-pub(crate) fn refresh_weak_session_titles(db: &DbConnection, workspace_id: &str) -> Result<u32, String> {
+pub(crate) fn refresh_weak_session_titles(
+    db: &DbConnection,
+    workspace_id: &str,
+) -> Result<u32, String> {
     struct Candidate {
         id: String,
         agent_id: String,
@@ -650,8 +716,7 @@ pub(crate) fn refresh_weak_session_titles(db: &DbConnection, workspace_id: &str)
             };
             // Medir de nuevo y obtener lo mismo no es un cambio (la segunda pasada devuelve 0).
             let activity = activity.filter(|a| Some(*a) != c.old_activity.as_deref());
-            (new_title.is_some() || activity.is_some())
-                .then(|| (c.id.clone(), new_title, activity))
+            (new_title.is_some() || activity.is_some()).then(|| (c.id.clone(), new_title, activity))
         })
         .collect();
     if updates.is_empty() {
@@ -709,7 +774,10 @@ pub(crate) fn mission_session_ids(
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([workspace_id], |r| {
-            Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?))
+            Ok((
+                r.get::<_, Option<String>>(0)?,
+                r.get::<_, Option<String>>(1)?,
+            ))
         })
         .map_err(|e| e.to_string())?;
 
@@ -729,28 +797,48 @@ pub(crate) fn mission_session_ids(
 }
 
 /// Comando: ids de sesión de terminales de misiones del workspace (ver [`mission_session_ids`]).
-#[tauri::command]
-pub fn db_mission_session_ids(
+pub(crate) fn db_mission_session_ids_now(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<Vec<String>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     mission_session_ids(&conn, &workspace_id)
 }
 
+#[tauri::command]
+pub async fn db_mission_session_ids(
+    workspace_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<String>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db_mission_session_ids_now(workspace_id, &db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Borra una entrada del historial. No toca el archivo de sesión del agente en disco
 /// (vive fuera de la app, en `~/.claude/projects` y equivalentes): esto solo saca la
 /// sesión de la vista de Sesiones.
-#[tauri::command]
-pub fn db_delete_session_history(
+pub(crate) fn db_delete_session_history_now(
     history_id: String,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM session_history WHERE id = ?1", [&history_id])
         .map_err(|e| e.to_string())?;
     crate::database::forget_archived_message_index(&history_id);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn db_delete_session_history(
+    history_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db_delete_session_history_now(history_id, &db))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 // ── Historial vivo: checkpoints, edición y búsqueda ─────────────
@@ -814,7 +902,10 @@ fn clean_text(raw: &str, multiline: bool, max: usize) -> Option<String> {
 /// Un rectángulo solo se guarda si sus cuatro valores son números finitos: un NaN se
 /// serializaría como `null` y leerlo después daría una tarjeta sin posición.
 fn finite_box(b: BoxRect) -> Option<BoxRect> {
-    [b.x, b.y, b.w, b.h].iter().all(|v| v.is_finite()).then_some(b)
+    [b.x, b.y, b.w, b.h]
+        .iter()
+        .all(|v| v.is_finite())
+        .then_some(b)
 }
 
 /// Guarda un checkpoint de cada tab viva del workspace en `session_history`, SIN cerrarla
@@ -940,11 +1031,10 @@ pub(crate) fn update_session_history(
 }
 
 /// Cambia título propio, fijado u ocultar de una entrada del historial.
-#[tauri::command]
-pub fn db_update_session_history(
+pub(crate) fn db_update_session_history_now(
     history_id: String,
     patch: SessionPatch,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     update_session_history(&conn, &history_id, &patch)?;
@@ -952,6 +1042,20 @@ pub fn db_update_session_history(
         crate::database::invalidate_archived_message_index(&conn, &history_id)?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn db_update_session_history(
+    history_id: String,
+    patch: SessionPatch,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        db_update_session_history_now(history_id, patch, &db)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Escapa `%`, `_` y el propio escape `!` para usar `q` como texto literal dentro de LIKE.
@@ -971,15 +1075,29 @@ fn like_literal(q: &str) -> String {
 ///
 /// Usa LIKE de SQLite, que distingue mayúsculas solo para ASCII: "ação" no encuentra
 /// "AÇÃO". Si hace falta plegado Unicode, hay que filtrar en Rust.
-#[tauri::command]
-pub fn db_search_session_history(
+pub(crate) fn db_search_session_history_now(
     workspace_id: String,
     query: String,
     limit: Option<u32>,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<Vec<SessionHistoryEntry>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     search_session_history(&conn, &workspace_id, &query, limit)
+}
+
+#[tauri::command]
+pub async fn db_search_session_history(
+    workspace_id: String,
+    query: String,
+    limit: Option<u32>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<SessionHistoryEntry>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        db_search_session_history_now(workspace_id, query, limit, &db)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// La búsqueda en sí, sobre una conexión ya lockeada. Ver [`db_search_session_history`].
@@ -994,7 +1112,9 @@ pub(crate) fn search_session_history(
         return Ok(Vec::new());
     }
     let pattern = format!("%{}%", like_literal(q));
-    let limit = limit.unwrap_or(SEARCH_DEFAULT_LIMIT).clamp(1, SEARCH_MAX_LIMIT);
+    let limit = limit
+        .unwrap_or(SEARCH_DEFAULT_LIMIT)
+        .clamp(1, SEARCH_MAX_LIMIT);
 
     let mut stmt = conn
         .prepare(&format!(
@@ -1032,10 +1152,14 @@ pub fn session_history_entry(
 
 /// Nombre del workspace al que pertenece una sesión — para el encabezado del export.
 pub fn workspace_name(conn: &Connection, workspace_id: &str) -> Option<String> {
-    conn.query_row("SELECT name FROM workspaces WHERE id = ?1", [workspace_id], |r| r.get(0))
-        .optional()
-        .ok()
-        .flatten()
+    conn.query_row(
+        "SELECT name FROM workspaces WHERE id = ?1",
+        [workspace_id],
+        |r| r.get(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
 }
 
 /// Busca si esta conversación ya está abierta en alguna tab viva (ventana `is_open = 1`)
@@ -1050,16 +1174,35 @@ pub fn workspace_name(conn: &Connection, workspace_id: &str) -> Option<String> {
 /// - `history_id` es la entrada del historial de la que salió la tab. Una tab reabierta
 ///   desde Sesiones lo lleva puesto, así que identifica el caso que importa acá incluso sin
 ///   id de sesión.
-#[tauri::command]
-pub fn find_open_tab_for_session(
+pub(crate) fn find_open_tab_for_session_now(
     session_id: Option<String>,
     history_id: Option<String>,
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<Option<OpenTabLocation>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
-    open_tab_for_session(&conn, session_id.as_deref(), history_id.as_deref(), &workspace_id)
-        .map_err(|e| e.to_string())
+    open_tab_for_session(
+        &conn,
+        session_id.as_deref(),
+        history_id.as_deref(),
+        &workspace_id,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn find_open_tab_for_session(
+    session_id: Option<String>,
+    history_id: Option<String>,
+    workspace_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Option<OpenTabLocation>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        find_open_tab_for_session_now(session_id, history_id, workspace_id, &db)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// La búsqueda en sí, separada del comando para poder probarla.
@@ -1080,7 +1223,12 @@ pub(crate) fn open_tab_for_session(
              OR (?2 IS NOT NULL AND t.history_id = ?2))
          LIMIT 1",
         rusqlite::params![session_id, history_id, workspace_id],
-        |row| Ok(OpenTabLocation { window_label: row.get(0)?, tab_id: row.get(1)? }),
+        |row| {
+            Ok(OpenTabLocation {
+                window_label: row.get(0)?,
+                tab_id: row.get(1)?,
+            })
+        },
     )
     .optional()
 }
@@ -1159,12 +1307,17 @@ mod tests {
     }
 
     fn claude_line(text: &str) -> String {
-        serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string()
+        serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } })
+            .to_string()
     }
 
     /// Workspace `ws`, cuenta de Claude en `perfil` y una entrada `h1` con la sesión `sess-1`.
     /// `title` decide si el título es débil; `activity` es lo que ya se midió.
-    fn refresh_db(perfil: &std::path::Path, title: &str, activity: Option<&str>) -> crate::database::DbConnection {
+    fn refresh_db(
+        perfil: &std::path::Path,
+        title: &str,
+        activity: Option<&str>,
+    ) -> crate::database::DbConnection {
         let conn = crate::database::test_db();
         conn.execute_batch(
             "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
@@ -1216,14 +1369,26 @@ mod tests {
 
         assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(1));
         assert_eq!(entry_activity(&db).as_deref(), Some("task"));
-        assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(0), "la 2ª pasada no cambia nada");
+        assert_eq!(
+            refresh_weak_session_titles(&db, "ws"),
+            Ok(0),
+            "la 2ª pasada no cambia nada"
+        );
 
         let title: Option<String> = db
             .lock()
             .unwrap()
-            .query_row("SELECT title FROM session_history WHERE id = 'h1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT title FROM session_history WHERE id = 'h1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(title.as_deref(), Some("Mi tab"), "un título que no es débil no se toca");
+        assert_eq!(
+            title.as_deref(),
+            Some("Mi tab"),
+            "un título que no es débil no se toca"
+        );
         let _ = std::fs::remove_dir_all(&perfil);
     }
 
@@ -1242,18 +1407,42 @@ mod tests {
     fn una_sesion_vacia_que_despues_recibe_tarea_pasa_a_task_y_task_ya_no_se_mide() {
         let perfil = scratch_dir();
         // La sesión se midió "vacía" (la tab recién abierta), pero después la persona escribió algo.
-        write_claude_transcript(&perfil, &[claude_line("<local-command-caveat>solo ruido</local-command-caveat>")]);
+        write_claude_transcript(
+            &perfil,
+            &[claude_line(
+                "<local-command-caveat>solo ruido</local-command-caveat>",
+            )],
+        );
         let db = refresh_db(&perfil, "Mi tab", None);
         assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(1));
         assert_eq!(entry_activity(&db).as_deref(), Some("empty"));
-        assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(0), "medir de nuevo y obtener lo mismo no cambia nada");
+        assert_eq!(
+            refresh_weak_session_titles(&db, "ws"),
+            Ok(0),
+            "medir de nuevo y obtener lo mismo no cambia nada"
+        );
 
-        write_claude_transcript(&perfil, &[claude_line("<local-command-caveat>solo ruido</local-command-caveat>"), claude_line("arrumá o build")]);
+        write_claude_transcript(
+            &perfil,
+            &[
+                claude_line("<local-command-caveat>solo ruido</local-command-caveat>"),
+                claude_line("arrumá o build"),
+            ],
+        );
         assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(1));
-        assert_eq!(entry_activity(&db).as_deref(), Some("task"), "empty no es definitiva");
+        assert_eq!(
+            entry_activity(&db).as_deref(),
+            Some("task"),
+            "empty no es definitiva"
+        );
 
         // Y lo que ya es task no se vuelve a medir aunque el archivo cambie.
-        write_claude_transcript(&perfil, &[claude_line("<local-command-caveat>solo ruido</local-command-caveat>")]);
+        write_claude_transcript(
+            &perfil,
+            &[claude_line(
+                "<local-command-caveat>solo ruido</local-command-caveat>",
+            )],
+        );
         assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(0));
         assert_eq!(entry_activity(&db).as_deref(), Some("task"));
         let _ = std::fs::remove_dir_all(&perfil);
@@ -1272,14 +1461,24 @@ mod tests {
         .unwrap();
 
         crate::database::migrate_for_tests(&conn).unwrap();
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(version, 45);
         let title: Option<String> = conn
-            .query_row("SELECT title FROM session_history WHERE id = 'h1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT title FROM session_history WHERE id = 'h1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(title.as_deref(), Some("Algo"));
         let entry = conn
-            .query_row(&format!("SELECT {ENTRY_COLUMNS} FROM session_history WHERE id = 'h1'"), [], entry_from_row)
+            .query_row(
+                &format!("SELECT {ENTRY_COLUMNS} FROM session_history WHERE id = 'h1'"),
+                [],
+                entry_from_row,
+            )
             .unwrap();
         assert_eq!(entry.activity, None, "las filas viejas quedan sin medir");
 

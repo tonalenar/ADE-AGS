@@ -4,11 +4,11 @@
 use rusqlite::Connection;
 use uuid::Uuid;
 
-use crate::util::now_ts;
-use crate::database::models::{
-    row_to_window, WindowRow, Workspace, WorkspaceSummary, DEFAULT_WORKSPACE_ID,
-};
 use crate::database::DbConnection;
+use crate::database::models::{
+    DEFAULT_WORKSPACE_ID, WindowRow, Workspace, WorkspaceSummary, row_to_window,
+};
+use crate::util::now_ts;
 
 use super::sessions::{archive_tab_row, resolve_for_archive};
 
@@ -41,13 +41,14 @@ pub fn db_get_last_active_workspace_id(db: &DbConnection) -> Result<String, Stri
 
 /// Si `default` tiene algún tab abierto sin guardar, "Nuevo workspace" (que lo resetea)
 /// debe advertir antes de descartarlo. Cuenta tabs de ventanas `is_open=1` bajo `default`.
-#[tauri::command]
-pub fn default_workspace_has_content(db: tauri::State<DbConnection>) -> Result<bool, String> {
+pub(crate) fn default_workspace_has_content_now(
+    db: &crate::database::DbConnection,
+) -> Result<bool, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM tabs t JOIN windows w ON w.id = t.window_id
-             WHERE w.workspace_id = ?1 AND w.is_open = 1",
+                 WHERE w.workspace_id = ?1 AND w.is_open = 1",
             [DEFAULT_WORKSPACE_ID],
             |row| row.get(0),
         )
@@ -56,7 +57,18 @@ pub fn default_workspace_has_content(db: tauri::State<DbConnection>) -> Result<b
 }
 
 #[tauri::command]
-pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<WorkspaceSummary>, String> {
+pub async fn default_workspace_has_content(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<bool, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || default_workspace_has_content_now(&db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn db_list_workspaces_now(
+    db: &crate::database::DbConnection,
+) -> Result<Vec<WorkspaceSummary>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
@@ -64,14 +76,14 @@ pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<Workspac
             // un workspace cerrado (todas sus ventanas con is_open=0) sigue teniendo sus
             // tabs/cwd/scrollback persistidos, y debe seguir mostrando esos conteos.
             "SELECT w.id, w.name, w.last_active,
-                    COUNT(DISTINCT win.id) AS window_count,
-                    COUNT(t.id) AS tab_count
-             FROM workspaces w
-             LEFT JOIN windows win ON win.workspace_id = w.id
-             LEFT JOIN tabs t ON t.window_id = win.id
-             WHERE w.id != ?1 AND w.deleted_at IS NULL
-             GROUP BY w.id
-             ORDER BY w.last_active DESC",
+                        COUNT(DISTINCT win.id) AS window_count,
+                        COUNT(t.id) AS tab_count
+                 FROM workspaces w
+                 LEFT JOIN windows win ON win.workspace_id = w.id
+                 LEFT JOIN tabs t ON t.window_id = win.id
+                 WHERE w.id != ?1 AND w.deleted_at IS NULL
+                 GROUP BY w.id
+                 ORDER BY w.last_active DESC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -92,6 +104,16 @@ pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<Workspac
     Ok(workspaces)
 }
 
+#[tauri::command]
+pub async fn db_list_workspaces(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<WorkspaceSummary>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db_list_workspaces_now(&db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Borra (en cascada, vía FK) todas las ventanas/tabs guardadas de un workspace, sin
 /// tocar el registro del workspace en sí. Usado para "resetear" el bucket `default`:
 /// como nunca se guarda con nombre, "Nuevo workspace" simplemente lo vacía por completo
@@ -102,7 +124,9 @@ pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result
     // app.
     let resolved: std::collections::HashMap<String, super::sessions::ResolvedSession> = {
         let ids: Vec<String> = {
-            let Ok(conn) = db.lock() else { return Err("base ocupada".to_string()) };
+            let Ok(conn) = db.lock() else {
+                return Err("base ocupada".to_string());
+            };
             let mut stmt = conn
                 .prepare(
                     "SELECT t.id FROM tabs t JOIN windows w ON w.id = t.window_id
@@ -114,10 +138,12 @@ pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result
                 .map_err(|e| e.to_string())?;
             rows.filter_map(|r| r.ok()).collect()
         };
-        ids.into_iter().map(|id| {
-            let resolved = resolve_for_archive(db, &id);
-            (id, resolved)
-        }).collect()
+        ids.into_iter()
+            .map(|id| {
+                let resolved = resolve_for_archive(db, &id);
+                (id, resolved)
+            })
+            .collect()
     };
 
     let boards = crate::canvas::load_boards();
@@ -144,8 +170,11 @@ pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result
 
     let affected_dirs = crate::skills::link_dirs_of_workspace(&conn, workspace_id);
 
-    conn.execute("DELETE FROM windows WHERE workspace_id = ?1", [workspace_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM windows WHERE workspace_id = ?1",
+        [workspace_id],
+    )
+    .map_err(|e| e.to_string())?;
 
     drop(conn);
     crate::skills::reconcile_link_dirs_db(db, &affected_dirs);
@@ -157,11 +186,10 @@ pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result
 /// que se guarda) — no todas las ventanas que estén abiertas en el proceso. Así, una
 /// ventana "scratch" abierta vía "Nuevo workspace" (que vive en el bucket por defecto,
 /// oculto) no se cuela al guardar el workspace con el que sí estás trabajando.
-#[tauri::command]
-pub fn db_save_workspace(
+pub(crate) fn db_save_workspace_now(
     name: String,
     source_workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<Workspace, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let now = now_ts();
@@ -183,7 +211,26 @@ pub fn db_save_workspace(
 
     move_open_windows_to_workspace(&conn, &id, &source_workspace_id, now)?;
 
-    Ok(Workspace { id, name, created_at: now, last_active: now })
+    Ok(Workspace {
+        id,
+        name,
+        created_at: now,
+        last_active: now,
+    })
+}
+
+#[tauri::command]
+pub async fn db_save_workspace(
+    name: String,
+    source_workspace_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Workspace, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        db_save_workspace_now(name, source_workspace_id, &db)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Mueve al workspace `new_id` las ventanas abiertas de `source_id` — y, con ellas, los
@@ -236,23 +283,22 @@ pub(crate) fn move_open_windows_to_workspace(
     Ok(())
 }
 
-#[tauri::command]
-pub fn db_get_workspace_windows(
+pub(crate) fn db_get_workspace_windows_now(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<Vec<WindowRow>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare(
-            // ORDER BY last_active: el frontend usa la primera fila para decidir qué
-            // ventana enfocar cuando el workspace ya tiene varias vivas (focusIfOpen) —
-            // sin orden explícito, la fila que llegaba primero era arbitraria (orden de
-            // inserción de SQLite), no necesariamente la usada más recientemente.
-            "SELECT id, label, workspace_id, pos_x, pos_y, width, height, monitor, is_open, last_active
-             FROM windows WHERE workspace_id = ?1 AND is_open = 1
-             ORDER BY last_active DESC",
-        )
-        .map_err(|e| e.to_string())?;
+            .prepare(
+                // ORDER BY last_active: el frontend usa la primera fila para decidir qué
+                // ventana enfocar cuando el workspace ya tiene varias vivas (focusIfOpen) —
+                // sin orden explícito, la fila que llegaba primero era arbitraria (orden de
+                // inserción de SQLite), no necesariamente la usada más recientemente.
+                "SELECT id, label, workspace_id, pos_x, pos_y, width, height, monitor, is_open, last_active
+                 FROM windows WHERE workspace_id = ?1 AND is_open = 1
+                 ORDER BY last_active DESC",
+            )
+            .map_err(|e| e.to_string())?;
 
     let windows = stmt
         .query_map([&workspace_id], row_to_window)
@@ -261,6 +307,17 @@ pub fn db_get_workspace_windows(
         .collect();
 
     Ok(windows)
+}
+
+#[tauri::command]
+pub async fn db_get_workspace_windows(
+    workspace_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<WindowRow>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db_get_workspace_windows_now(workspace_id, &db))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Todas las ventanas guardadas de un workspace, sin importar `is_open` — a diferencia de
@@ -302,11 +359,10 @@ pub fn mark_window_open(db: &DbConnection, window_id: &str) -> Result<(), String
     Ok(())
 }
 
-#[tauri::command]
-pub fn db_rename_workspace(
+pub(crate) fn db_rename_workspace_now(
     workspace_id: String,
     name: String,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let affected = conn
@@ -327,19 +383,41 @@ pub fn db_rename_workspace(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn db_rename_workspace(
+    workspace_id: String,
+    name: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db_rename_workspace_now(workspace_id, name, &db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Elimina un workspace guardado (sus ventanas/tabs se borran en cascada vía FK).
 /// Rechaza borrar el workspace por defecto o uno que todavía tiene ventanas abiertas
 /// (evita que el autosave de esas ventanas quede apuntando a un workspace_id inexistente).
-#[tauri::command]
-pub fn db_delete_workspace(
+pub(crate) fn db_delete_workspace_now(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<(), String> {
-    let conn=db.lock().map_err(|e|e.to_string())?;
-    soft_delete_workspace(&conn,&workspace_id)
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    soft_delete_workspace(&conn, &workspace_id)
 }
 
-pub fn soft_delete_workspace(conn:&Connection,workspace_id:&str)->Result<(),String> {
+#[tauri::command]
+pub async fn db_delete_workspace(
+    workspace_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db_delete_workspace_now(workspace_id, &db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub fn soft_delete_workspace(conn: &Connection, workspace_id: &str) -> Result<(), String> {
     if workspace_id == DEFAULT_WORKSPACE_ID {
         return Err("Não é possível excluir o workspace padrão".to_string());
     }
@@ -357,14 +435,33 @@ pub fn soft_delete_workspace(conn:&Connection,workspace_id:&str)->Result<(),Stri
 
     // Retain memory, revisions and sessions for recovery. Expiry is metadata for
     // a future explicit purge, never permission to cascade-delete automatically.
-    conn.execute("UPDATE workspaces SET deleted_at=?2,delete_after=?3 WHERE id=?1", rusqlite::params![workspace_id,now_ts(),now_ts()+30*86400])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE workspaces SET deleted_at=?2,delete_after=?3 WHERE id=?1",
+        rusqlite::params![workspace_id, now_ts(), now_ts() + 30 * 86400],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn db_restore_workspace_now(
+    workspace_id: String,
+    db: &crate::database::DbConnection,
+) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let changed=conn.execute("UPDATE workspaces SET deleted_at=NULL,delete_after=NULL WHERE id=?1 AND deleted_at IS NOT NULL",[workspace_id]).map_err(|e|e.to_string())?;
+    if changed == 0 {
+        return Err("workspace is not in recovery".into());
+    }
     Ok(())
 }
 
 #[tauri::command]
-pub fn db_restore_workspace(workspace_id:String,db:tauri::State<DbConnection>)->Result<(),String>{
-    let conn=db.lock().map_err(|e|e.to_string())?;
-    let changed=conn.execute("UPDATE workspaces SET deleted_at=NULL,delete_after=NULL WHERE id=?1 AND deleted_at IS NOT NULL",[workspace_id]).map_err(|e|e.to_string())?;
-    if changed==0 {return Err("workspace is not in recovery".into());} Ok(())
+pub async fn db_restore_workspace(
+    workspace_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db_restore_workspace_now(workspace_id, &db))
+        .await
+        .map_err(|e| e.to_string())?
 }
