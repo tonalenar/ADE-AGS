@@ -638,11 +638,11 @@ pub(super) fn mission_startcheck(app: &AppHandle, args: &Value) -> Result<Value,
 pub(super) fn mission_efficiency(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
     let db = db(app)?;
-    let (mut efficiency, memory_context) = {
+    // A eficiência é lida numa conexão lateral, sem o mutex do banco do app.
+    let mut efficiency = json!(crate::missions::efficiency::get_db(&db, &id)?);
+    let memory_context = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let efficiency = json!(crate::missions::efficiency::get(&conn, &id)?);
-        let memory_context = crate::memory::context_metrics(&conn, None, Some(&id))?;
-        (efficiency, memory_context)
+        crate::memory::context_metrics(&conn, None, Some(&id))?
     };
     // Os transcripts são lidos uma vez e sem o mutex do banco preso; o orçamento reusa os tokens.
     let tokens = crate::usage::mission_tokens_for_db(&db, &id)?;

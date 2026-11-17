@@ -2082,3 +2082,33 @@ fn redeliver_reuses_existing_pr_and_test_result_when_overrides_are_none() {
     assert_eq!(outcome.test_result, TestResult::Passed);
     assert_eq!(outcome.new_status, status::DONE);
 }
+
+/// A eficiência é lida numa conexão lateral: a sonda confere, no instante em que a leitura
+/// vai começar, que o mutex do banco do app está solto. Base em arquivo, porque a conexão
+/// lateral precisa de um caminho.
+#[test]
+fn eficiencia_le_numa_conexao_lateral_sem_o_mutex_do_banco() {
+    let tmp = std::env::temp_dir().join(format!("cc-eficiencia-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let path = tmp.join("base.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        crate::database::migrate(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('w1', 'W', 0, 0);
+             INSERT INTO missions (id, workspace_id, title, objective, cwd, status, created_at, updated_at, started_at, ended_at)
+             VALUES ('m1', 'w1', 'M', 'O', '/repo', 'done', 0, 0, 1, 2000000000);",
+        )
+        .unwrap();
+    }
+    let db: DbConnection = Arc::new(Mutex::new(Connection::open(&path).unwrap()));
+    let probe = db.clone();
+    let mut leitura_iniciou = false;
+    let result = super::efficiency::get_db_with(&db, "m1", || {
+        assert!(probe.try_lock().is_ok(), "a leitura da eficiência rodou com o mutex do banco preso");
+        leitura_iniciou = true;
+    });
+    assert!(leitura_iniciou, "a sonda não foi alcançada");
+    assert!(result.is_ok(), "{result:?}");
+    let _ = std::fs::remove_dir_all(&tmp);
+}

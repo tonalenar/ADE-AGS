@@ -835,12 +835,11 @@ pub fn mission_timings(app: AppHandle, mission_id: String) -> Result<MissionTimi
 /// Eficiência de uma missão e medianas recentes, agrupadas pela quantidade de agentes.
 #[tauri::command]
 pub async fn mission_efficiency(app: AppHandle, mission_id: String) -> Result<MissionEfficiency, String> {
-    // Fora da thread principal. O cálculo é só SQL (sem disco nem git), mas ainda segura o
-    // mutex durante as consultas: ver a pendência de conexão de leitura em PR03.
+    // Fora da thread principal e numa conexão lateral de leitura: o mutex do banco só é tomado
+    // para achar o arquivo da base (ver `efficiency::get_db`).
     tauri::async_runtime::spawn_blocking(move || {
         let db = db_of(&app)?;
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        efficiency::get(&conn, &mission_id)
+        efficiency::get_db(&db, &mission_id)
     })
     .await
     .map_err(|e| e.to_string())?
