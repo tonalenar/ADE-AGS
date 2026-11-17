@@ -5,21 +5,18 @@
 //! transcripts: sus tokens no se deducen del ledger.
 
 use std::collections::{BTreeSet, HashSet};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rusqlite::{Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::database::DbConnection;
+use crate::missions::transcript_cache::read_incremental;
 
 use super::claude::{parse_ts, UsageRecord};
 use super::pricing;
 use super::terminal::{mission_tokens_for_db, MissionTabTokens};
-
-const USAGE_MARK: &str = "\"output_tokens\"";
 
 /// Totais exatos que aparecem no `usage` de um transcript.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -88,34 +85,6 @@ pub(crate) fn mission_transcripts(config_dir: &Path, cwd: &str) -> Vec<PathBuf> 
     transcripts
 }
 
-#[derive(Deserialize)]
-struct TranscriptLine {
-    timestamp: Option<String>,
-    cwd: Option<String>,
-    #[serde(rename = "sessionId")]
-    session_id: Option<String>,
-    message: Option<TranscriptMessage>,
-}
-
-#[derive(Deserialize)]
-struct TranscriptMessage {
-    id: Option<String>,
-    usage: Option<TranscriptUsage>,
-    model: Option<String>,
-}
-
-#[derive(Deserialize, Default)]
-struct TranscriptUsage {
-    #[serde(default)]
-    input_tokens: u64,
-    #[serde(default)]
-    output_tokens: u64,
-    #[serde(default)]
-    cache_creation_input_tokens: u64,
-    #[serde(default)]
-    cache_read_input_tokens: u64,
-}
-
 /// Lê um transcript sem falhar por linhas vazias, truncadas ou corrompidas.
 /// Quando a linha declara um cwd, ela precisa corresponder ao da missão.
 #[cfg(test)]
@@ -128,56 +97,45 @@ pub(crate) fn read_transcript_usage(path: &Path, cwd: &str) -> Vec<UsageRecord> 
 
 /// Igual que `read_transcript_usage`, pero cada registro trae el modelo que lo generó.
 pub(crate) fn read_transcript_priced(path: &Path, cwd: &str) -> Vec<(UsageRecord, Option<String>)> {
-    let Ok(file) = File::open(path) else {
+    let Ok(parsed) = read_incremental(path) else {
         return Vec::new();
     };
-    let mut reader = BufReader::new(file);
-    let mut bytes = Vec::new();
     let mut records = Vec::new();
     let mut seen = HashSet::new();
-
-    loop {
-        bytes.clear();
-        match reader.read_until(b'\n', &mut bytes) {
-            Ok(0) | Err(_) => break,
-            Ok(_) => {}
-        }
-        let line = String::from_utf8_lossy(&bytes);
-        if !line.contains(USAGE_MARK) {
-            continue;
-        }
-        let Ok(parsed) = serde_json::from_str::<TranscriptLine>(&line) else {
-            continue;
-        };
-        if parsed.cwd.as_deref().is_some_and(|line_cwd| {
+    for value in &parsed.lines {
+        if value.get("cwd").and_then(|value| value.as_str()).is_some_and(|line_cwd| {
             super::terminal::path_key(line_cwd) != super::terminal::path_key(cwd)
         }) {
             continue;
         }
-        let Some(at) = parsed.timestamp.as_deref().and_then(parse_ts) else {
+        let Some(at) = value.get("timestamp").and_then(|value| value.as_str()).and_then(parse_ts) else {
             continue;
         };
-        let Some(message) = parsed.message else {
+        let Some(message) = value.get("message") else {
             continue;
         };
         // Replayed transcript entries must not produce a second charge.
-        if let Some(id) = message.id.as_ref() {
-            if !seen.insert((parsed.session_id.clone(), id.clone())) {
+        let session_id = value
+            .get("sessionId")
+            .and_then(|value| value.as_str())
+            .map(str::to_owned);
+        if let Some(id) = message.get("id").and_then(|value| value.as_str()) {
+            if !seen.insert((session_id.clone(), id.to_owned())) {
                 continue;
             }
         }
-        let model = message.model;
-        let Some(usage) = message.usage else {
+        let Some(usage) = message.get("usage") else {
             continue;
         };
+        let model = message.get("model").and_then(|value| value.as_str()).map(str::to_owned);
         records.push((
             UsageRecord {
                 at,
-                input: usage.input_tokens,
-                output: usage.output_tokens,
-                cache_write: usage.cache_creation_input_tokens,
-                cache_read: usage.cache_read_input_tokens,
-                session: parsed.session_id.map(Arc::from),
+                input: usage.get("input_tokens").and_then(|value| value.as_u64()).unwrap_or(0),
+                output: usage.get("output_tokens").and_then(|value| value.as_u64()).unwrap_or(0),
+                cache_write: usage.get("cache_creation_input_tokens").and_then(|value| value.as_u64()).unwrap_or(0),
+                cache_read: usage.get("cache_read_input_tokens").and_then(|value| value.as_u64()).unwrap_or(0),
+                session: session_id.map(Arc::from),
             },
             model,
         ));
@@ -592,6 +550,49 @@ mod test {
         );
         assert_eq!(records[0].input, 1);
         assert_eq!(records[1].input, 3);
+    }
+
+    #[test]
+    #[ignore = "benchmark manual de abertura de missão com transcripts sintéticos"]
+    fn bench_transcripts() {
+        use std::time::Instant;
+
+        let temp = TempDir::new("bench-transcripts");
+        let files = (0..50)
+            .map(|file_index| {
+                let path = temp.path().join(format!("sessao-{file_index}.jsonl"));
+                let content = (0..128)
+                    .map(|line_index| {
+                        serde_json::json!({
+                            "timestamp": "2026-11-16T20:20:00.000Z",
+                            "cwd": "/bench",
+                            "sessionId": format!("s{file_index}"),
+                            "message": {
+                                "id": format!("m{line_index}"),
+                                "usage": {"input_tokens": 1, "output_tokens": 2}
+                            }
+                        })
+                        .to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                fs::write(&path, content).expect("cria transcript sintético");
+                path
+            })
+            .collect::<Vec<_>>();
+
+        let started = Instant::now();
+        // Oito abas da mesma missão consultam os mesmos cinquenta transcripts.
+        for _ in 0..8 {
+            for file in &files {
+                let records = read_transcript_priced(file, "/bench");
+                assert_eq!(records.len(), 128);
+            }
+        }
+        eprintln!(
+            "bench_transcripts: 50 transcripts sintéticos, 8 abas: {:?}",
+            started.elapsed()
+        );
     }
 }
 
