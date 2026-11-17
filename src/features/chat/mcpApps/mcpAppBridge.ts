@@ -62,6 +62,9 @@ export interface McpAppHostTarget {
   removeEventListener(type: string, listener: EventListener): void;
 }
 
+/** Quantas entradas do registro do app ficam em memória (as mais novas). */
+const MAX_APP_LOGS = 200;
+
 export interface McpAppSessionOptions {
   host?: McpAppHostTarget;
   getFrameWindow: () => Window | null;
@@ -109,6 +112,8 @@ export function createMcpAppSession(options: McpAppSessionOptions): { close: () 
       }
       const entry = { method: decision.method, note: decision.note };
       logs.push(entry);
+      // O registro guarda só as últimas entradas: um app que manda sem parar não faz a memória crescer.
+      if (logs.length > MAX_APP_LOGS) logs.splice(0, logs.length - MAX_APP_LOGS);
       try { options.onLog?.(entry); } catch { /* registro hostil não sobe */ }
       if (decision.kind === "refuse") {
         try { frame.postMessage(decision.response, "*"); } catch { /* canal já fechado */ }
