@@ -44,15 +44,19 @@ fn command_lock_violations(path: &str, source: &str) -> Vec<String> {
         let prefix = &production[after_attr..fn_pos];
         let Some(open_rel) = production[fn_pos..].find('{') else { break };
         let body_open = fn_pos + open_rel;
-        let Some(body_end) = matching_brace(production, body_open) else { break };
-        if !prefix.split_whitespace().any(|word| word == "async") {
-            let body = &production[body_open + 1..body_end];
-            if has_db_lock(body) {
-                let line = production[..attr].bytes().filter(|byte| *byte == b'\n').count() + 1;
-                let violation = format!("{path}:{line}");
-                if !ALLOW.iter().any(|entry| entry.starts_with(&format!("{violation}:"))) {
-                    found.push(violation);
-                }
+        let Some(body_end) = matching_delim(production, body_open, b'}') else { break };
+        let body = &production[body_open + 1..body_end];
+        // Em async, o lock só é aceito dentro de spawn_blocking; fora dele trava a thread do runtime.
+        let locked = if prefix.split_whitespace().any(|word| word == "async") {
+            has_db_lock(&without_blocking_calls(body))
+        } else {
+            has_db_lock(body)
+        };
+        if locked {
+            let line = production[..attr].bytes().filter(|byte| *byte == b'\n').count() + 1;
+            let violation = format!("{path}:{line}");
+            if !ALLOW.iter().any(|entry| entry.starts_with(&format!("{violation}:"))) {
+                found.push(violation);
             }
         }
         offset = body_end + 1;
@@ -89,23 +93,26 @@ fn test_item_end(source: &str, from: usize) -> Option<usize> {
             b'(' | b'[' => depth += 1,
             b')' | b']' => depth = depth.saturating_sub(1),
             b';' if depth == 0 => return Some(index + 1),
-            b'{' if depth == 0 => return matching_brace(source, index).map(|close| close + 1),
+            b'{' if depth == 0 => return matching_delim(source, index, b'}').map(|close| close + 1),
             _ => {}
         }
     }
     None
 }
 
-fn matching_brace(source: &str, open: usize) -> Option<usize> {
+// Índice do fechamento que casa com o delimitador de abertura em `open`.
+fn matching_delim(source: &str, open: usize, close: u8) -> Option<usize> {
     let bytes = source.as_bytes();
+    let open_byte = *bytes.get(open)?;
     let mut depth = 0usize;
     let mut index = open;
     let mut string = false;
     while index < bytes.len() {
         match bytes[index] {
             b'"' if index == 0 || bytes[index - 1] != b'\\' => string = !string,
-            b'{' if !string => depth += 1,
-            b'}' if !string => {
+            _ if string => {}
+            byte if byte == open_byte => depth += 1,
+            byte if byte == close => {
                 depth -= 1;
                 if depth == 0 { return Some(index); }
             }
@@ -116,8 +123,25 @@ fn matching_brace(source: &str, open: usize) -> Option<usize> {
     None
 }
 
+// Troca por espaços o conteúdo de spawn_blocking(...): o que roda ali sai da thread principal.
+fn without_blocking_calls(body: &str) -> String {
+    let mut masked = body.as_bytes().to_vec();
+    let mut offset = 0;
+    while let Some(found) = body[offset..].find("spawn_blocking(") {
+        let open = offset + found + "spawn_blocking".len();
+        let Some(close) = matching_delim(body, open, b')') else { break };
+        for byte in &mut masked[open..=close] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
+        }
+        offset = close + 1;
+    }
+    String::from_utf8(masked).unwrap_or_else(|_| body.to_string())
+}
+
 fn has_db_lock(body: &str) -> bool {
-    ["db.lock(", "state.db.lock(", "conn.lock("]
+    ["db.lock(", "state.db.lock(", "conn.lock(", "db(&app)?.lock(", "db(app)?.lock("]
         .iter()
         .any(|needle| body.contains(needle))
 }
@@ -147,7 +171,19 @@ mod test {
 
     #[test]
     fn detecta_lock_direto_e_qualificado_em_comando_sincrono() {
-        let source = "#[tauri::command]\npub fn a() { db.lock().unwrap(); }\n#[tauri::command]\npub fn b() { state.db.lock().unwrap(); }\n#[tauri::command]\npub fn c() { conn.lock().unwrap(); }\n#[tauri::command]\npub async fn d() { db.lock().unwrap(); }";
+        let source = "#[tauri::command]\npub fn a() { db.lock().unwrap(); }\n#[tauri::command]\npub fn b() { state.db.lock().unwrap(); }\n#[tauri::command]\npub fn c() { conn.lock().unwrap(); }";
         assert_eq!(super::command_lock_violations("x.rs", source).len(), 3);
+    }
+
+    #[test]
+    fn detecta_banco_obtido_por_funcao_auxiliar() {
+        let source = "#[tauri::command]\npub async fn a(app: AppHandle) { db(&app)?.lock().unwrap(); }\n#[tauri::command]\npub fn b(app: AppHandle) { store::list(&db(app)?.lock().unwrap()); }";
+        assert_eq!(super::command_lock_violations("x.rs", source), vec!["x.rs:1".to_string(), "x.rs:3".to_string()]);
+    }
+
+    #[test]
+    fn async_com_lock_fora_de_spawn_blocking_e_violacao() {
+        let source = "#[tauri::command]\npub async fn a() { db.lock().unwrap(); }\n#[tauri::command]\npub async fn b() { tauri::async_runtime::spawn_blocking(move || { db.lock().unwrap(); }); }\n#[tauri::command]\npub async fn c() { let _ = spawn_blocking(move || 1); db.lock().unwrap(); }";
+        assert_eq!(super::command_lock_violations("x.rs", source), vec!["x.rs:1".to_string(), "x.rs:5".to_string()]);
     }
 }

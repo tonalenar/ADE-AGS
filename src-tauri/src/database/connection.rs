@@ -54,6 +54,21 @@ pub fn db_boot_status() -> DbBootStatus {
 /// admite escrituras concurrentes, así que el `Mutex` es el que serializa el acceso.
 pub type DbConnection = Arc<Mutex<Connection>>;
 
+/// Roda `work` com a conexão travada numa thread de bloqueio, fora do runtime async.
+pub(crate) async fn blocking_db<T, F>(db: &DbConnection, work: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
+{
+    let db = db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        work(&conn)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 pub(crate) fn user_db_path() -> PathBuf {
     db_path()
 }
