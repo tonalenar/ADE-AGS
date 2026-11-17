@@ -10,7 +10,7 @@ import { SHELL_AGENT_ID } from "@/features/tabs/types";
 
 import { sendToConversation } from "../chatActions";
 import { chatPermissionNotify } from "../ipc";
-import { useChatLive } from "../liveStore";
+import { useChatLive, type TabTurn } from "../liveStore";
 import { unsnoozeConversation } from "../shelf";
 import { EMPTY_LIVE, type ThreadLive } from "../structured/model";
 import type { ThreadRow } from "../structured/ipc";
@@ -215,9 +215,27 @@ function askInputsOf(s: { threads: ThreadRow[]; live: Record<string, ThreadLive>
 }
 
 /**
+ * O que `pendingAsksOf` lê dos turnos e do aguardo: só o último passo e o diálogo das abas que têm diálogo na TUI.
+ * Texto curto: muda só quando um desses muda, e não a cada ferramenta de outra aba. Pura.
+ */
+export function tuiTurnSignature(turns: Record<string, TabTurn>, awaiting: Record<string, string>, tabIds: readonly string[]): string {
+  return tabIds.map((id) => {
+    const tools = turns[id]?.tools ?? [];
+    const last = tools[tools.length - 1];
+    return `${id}:${last ? `${last.name}\u0001${last.summary}` : "-"}\u0001${awaiting[id] ?? ""}`;
+  }).join("\n");
+}
+
+/** A assinatura de `tuiTurnSignature` para as abas com diálogo na TUI agora (`usePendingAsks` e a contagem a leem). */
+function useTuiTurnsKey(tui: TerminalPromptItem[]): string {
+  const tabIds = useMemo(() => tui.map((p) => p.tabId), [tui]);
+  return useChatLive((s) => tuiTurnSignature(s.turn, s.awaiting, tabIds));
+}
+
+/**
  * Todos os pedidos pendentes, de todas as fontes, o mais antigo primeiro. As abas de shell não
- * pedem nada; os respondidos aqui somem na hora. Assina o `live` inteiro: quem mostra a lista (a caixa, o cartão)
- * refaz a lista a cada pedaço de texto; quem só conta pedidos usa `usePendingAskCounts`.
+ * pedem nada; os respondidos aqui somem na hora. Assina só o que a lista lê: as conversas (os pedidos e os arquivos
+ * das edições), os diálogos da TUI e o turno das abas que têm um. Quem só conta pedidos usa `usePendingAskCounts`.
  */
 export function usePendingAsks(): PendingAsk[] {
   const threads = useStructured((s) => s.threads);
@@ -226,14 +244,13 @@ export function usePendingAsks(): PendingAsk[] {
   const answered = usePermissions((s) => s.answered);
   const tabs = useTabsStore((s) => s.tabs);
   const detected = useTabsStore((s) => s.detectedAgents);
-  const turns = useChatLive((s) => s.turn);
-  const awaiting = useChatLive((s) => s.awaiting);
+  const turnsKey = useTuiTurnsKey(tui);
   const approvals = useRunsStore((s) => s.approvals);
   const tasks = useRunsStore((s) => s.tasks);
-  return useMemo(
-    () => pendingAsksOf({ threads, live: useStructured.getState().live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks }),
-    [threads, askInputs, tui, answered, tabs, detected, turns, awaiting, approvals, tasks],
-  );
+  return useMemo(() => {
+    const { turn: turns, awaiting } = useChatLive.getState();
+    return pendingAsksOf({ threads, live: useStructured.getState().live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks });
+  }, [threads, askInputs, tui, answered, tabs, detected, turnsKey, approvals, tasks]);
 }
 
 /**
@@ -257,16 +274,16 @@ export function usePendingAskCounts(): { waiting: number; byConversation: Record
   const answered = usePermissions((s) => s.answered);
   const tabs = useTabsStore((s) => s.tabs);
   const detected = useTabsStore((s) => s.detectedAgents);
-  const turns = useChatLive((s) => s.turn);
-  const awaiting = useChatLive((s) => s.awaiting);
+  const turnsKey = useTuiTurnsKey(tui);
   const approvals = useRunsStore((s) => s.approvals);
   const tasks = useRunsStore((s) => s.tasks);
   return useMemo(() => {
+    const { turn: turns, awaiting } = useChatLive.getState();
     const asks = pendingAsksOf({ threads, live: useStructured.getState().live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks });
     const byConversation: Record<string, number> = {};
     for (const a of asks) if (a.conversation) byConversation[a.conversation] = (byConversation[a.conversation] ?? 0) + 1;
     return { waiting: waitingAgents(asks), byConversation };
-  }, [threads, requests, tui, answered, tabs, detected, turns, awaiting, approvals, tasks]);
+  }, [threads, requests, tui, answered, tabs, detected, turnsKey, approvals, tasks]);
 }
 
 /** O aviso do sistema de um pedido novo (só aparece com o app sem foco; ver `notifier.rs`). */
