@@ -10,7 +10,7 @@ Salvo indicação, `arquivo:linha` é relativo a `src-tauri/src/`.
 ## 1. Resumo
 
 - O IPC de hoje é um listener TCP em `127.0.0.1` com um token por processo, mais um canal de credencial com PID (§3). Ele não está exposto à rede **por causa do bind e do token**, não por um modelo de autorização.
-- O token, sozinho, não autoriza mais nada além de **27 métodos livres** (catálogo e metadado). Desde a correção completa de F-09, cada um dos 223 métodos tem uma **classe** em `ipc/authz.rs` (livre, escopo, pessoa, pessoa-ou-escopo), consultada no começo do despachador; método sem classe é recusado. O escopo é provado pelo PID do canal de credencial contra a árvore de processos do ADE (§6.1). O token continua legível por qualquer processo do mesmo usuário e não identifica cliente: quem roda **fora** de toda árvore do ADE e não declara identidade (a pessoa num terminal próprio, CI) mantém o acesso de sempre, e o servidor não a distingue de um agente que se destacou da árvore (limite conhecido).
+- O token, sozinho, não autoriza mais nada além de **28 métodos livres** (catálogo e metadado). Desde a correção completa de F-09, cada um dos 224 métodos tem uma **classe** em `ipc/authz.rs` (livre, escopo, pessoa, pessoa-ou-escopo), consultada no começo do despachador; método sem classe é recusado. O escopo é provado pelo PID do canal de credencial contra a árvore de processos do ADE (§6.1). O token continua legível por qualquer processo do mesmo usuário e não identifica cliente: quem roda **fora** de toda árvore do ADE e não declara identidade (a pessoa num terminal próprio, CI) mantém o acesso de sempre, e o servidor não a distingue de um agente que se destacou da árvore (limite conhecido).
 - **Decisão:** o listener atual não será exposto à rede, nem com TLS na frente. O host remoto precisa de um contrato novo (identidade de cliente, capacidades por método, versão, limites antes da autenticação). Não é um túnel para este listener.
 - Achados (§6): **1 alta**, **3 médias** confirmadas, **1 média** condicional (não verificada), **5 baixas**, **2 informativos**. **Estado:** corrigidos F-01, F-02, F-03, F-05, F-07, F-08 e **F-09 (completo)**; F-04 e F-10 seguem não verificados; F-06, F-11 e F-12 sem mudança. `peer.answer` e `fix.decide` agora exigem papel provado.
 - Guardas (§9): **seis testes** em `ipc/test.rs`, que passam no código atual. Nenhuma falha de produção apareceu que exigisse parar.
@@ -193,7 +193,7 @@ Nada disto abre o IPC à rede (o bind e o transporte ficam como estavam; as guar
     - *missão* (7) e *missão-coroa* (4): a missão do quadro de quem chama; aplicar, aceitar, reentregar e limpar só o orquestrador dela.
     - *fora* (5: `mission create|run|start`, `worktrees prune`, `pool delete`): só quem está fora da árvore do ADE, porque gastam orçamento, apagam disco ou mudam configuração da pessoa e nenhum fluxo documentado de agente depende deles.
   - **Fluxos legítimos.** Um teste por comando da skill usado por agentes passa o pedido pelo porteiro no escopo certo (integrante, orquestrador e agente da Frota), e um teste confere que a pessoa fora do app só perde o que é só da tela ou o que já exigia `ADE_TAB_ID`.
-  - **O que mudou para quem usa.** (1) `tab output|state`, `watch add|remove`, `chat <ação> <id>` e `mission <ação> <id>` só no alcance de quem chama; `tab close` só nas abas que o agente mesmo abriu. A pessoa **dentro de um terminal da ADE** é tratada como o agente daquela aba (não dá para distingui-la), como já era com `tab send`: ela usa a tela ou um terminal próprio. (2) `chat pending` sem id só fora do app. (3) `mission create|run|start`, `worktrees prune` e `pool delete` só fora do app (CI e a pessoa seguem). (4) `workspace open --close-current` só a pessoa. (5) `from` à mão (`--from <aba>`) deixou de valer: o `from` é o provado. (6) um `ags` por TCP (sem canal de credencial) só chama os 27 métodos livres.
+  - **O que mudou para quem usa.** (1) `tab output|state`, `watch add|remove`, `chat <ação> <id>` e `mission <ação> <id>` só no alcance de quem chama; `tab close` só nas abas que o agente mesmo abriu. A pessoa **dentro de um terminal da ADE** é tratada como o agente daquela aba (não dá para distingui-la), como já era com `tab send`: ela usa a tela ou um terminal próprio. (2) `chat pending` sem id só fora do app. (3) `mission create|run|start`, `worktrees prune` e `pool delete` só fora do app (CI e a pessoa seguem). (4) `workspace open --close-current` só a pessoa. (5) `from` à mão (`--from <aba>`) deixou de valer: o `from` é o provado. (6) um `ags` por TCP (sem canal de credencial) só chama os 28 métodos livres.
   - **Limites que ficam.**
     - O servidor não distingue a pessoa num terminal próprio de um agente que se destacou da árvore (`setsid`, duplo fork, `open -a Terminal`): ele ganha o acesso de `Outside`.
     - Nos Unix sem API de PID do peer só vale o token (fallback explícito de `authorize`).
@@ -312,7 +312,7 @@ Além das seis guardas, o módulo `autorizacao` de `ipc/test.rs` (F-09 completo)
 12. **Correções de F-02 a F-09 em runtime.** Testadas por unidade, por leitura de código e pelos contratos de `ipc/test.rs`. Não subi o app nem uma tarefa da Frota real para ver o `taskId` provado, nem medi a classificação por PID com um agente de verdade (o `parent_pid` só rodou nos testes que usam o próprio PID e PID 1).
 13. **Windows.** `pid_alive` (`OpenProcess`), o `accept_windows` com `Slots` e o prazo do pipe não foram compilados nem executados aqui.
 14. **Prova no macOS e Linux só pela descendência de PID.** Um agente que se destaca da árvore burla F-09 e a identidade sem `ADE_SESSION`; é o limite que F-01 já descrevia.
-10. **Classificação dos 221 métodos (F-09 completo).** A classe de cada um é uma decisão de projeto lida do handler e do uso na skill, não uma medição: o teste prova que a tabela é completa e que cada classe aceita e recusa o que diz, não que cada handler faz o que o doc dele diz. Os handlers de `portal.*` e `device.*` seguem resolvendo o alvo pelo canvas do `from`; o teste confere o código por leitura.
+10. **Classificação dos 224 métodos (F-09 completo).** A classe de cada um é uma decisão de projeto lida do handler e do uso na skill, não uma medição: o teste prova que a tabela é completa e que cada classe aceita e recusa o que diz, não que cada handler faz o que o doc dele diz. Os handlers de `portal.*` e `device.*` seguem resolvendo o alvo pelo canvas do `from`; o teste confere o código por leitura.
 11. **F-09 em runtime.** Não subi o app, um agente real nem uma aba com `ags` de verdade: a prova é por unidade (árvore de processos simulada), por leitura de código e pelos contratos de `ipc/test.rs`. Nenhuma medição de latência do porteiro (no Windows cada passo da árvore pede um snapshot de processos). O código só de Windows (`parent_pid`, `OpenProcess`) não foi compilado aqui; `principal_of` não acrescenta código por plataforma.
 
 ## 11. Ordem de trabalho
@@ -323,13 +323,13 @@ Só o que não muda comportamento pode seguir sem OK. O restante depende de OK e
 2. **Com OK, sem risco de runtime:** medição de F-04 numa sandbox de teste, sem rede externa.
 3. **Feito com OK (muda o IPC):** F-01 (`approval.decide` e `approval.list` recusados sempre) e F-02 (`taskId` provado pelo PID da tarefa).
 4. **Feito com OK (muda o transporte):** F-03 (vagas por canal, teto sem token, token cedo, prazo total), F-05, F-07 e F-08, mais `peer.answer`, `fix.decide` e o escopo de `tab.send` (primeira etapa de F-09).
-5. **Feito com OK (muda o IPC): F-09 completo.** Cada um dos 221 métodos tem classe em `ipc/authz.rs`; um teste falha quando um braço novo do despachador não tem entrada e o método sem classe é recusado. Isso fecha o item "método desconhecido é negado" do plano. Falta, para o host remoto, mapear as classes para capacidades nomeadas.
+5. **Feito com OK (muda o IPC): F-09 completo.** Cada um dos 224 métodos tem classe em `ipc/authz.rs`; um teste falha quando um braço novo do despachador não tem entrada e o método sem classe é recusado. Isso fecha o item "método desconhecido é negado" do plano. Falta, para o host remoto, mapear as classes para capacidades nomeadas.
 6. **Decisão de arquitetura:** host com Tauri sem janela ou binário separado (§7.2). Cabe um ADR.
 7. **Depois de 1 a 6:** identidade de dispositivo e pareamento (exige schema novo, com OK) e, só então, um cliente remoto mínimo.
 
 Clientes web e mobile ficam para depois do contrato do servidor (AMBIENTES_REMOTOS.md:110). Não recebem token do IPC nem chave de provider.
 
-## Anexo A: inventário dos 223 métodos e a classe de cada um
+## Anexo A: inventário dos 224 métodos e a classe de cada um
 
 A **classe real** de cada método está em `src-tauri/src/ipc/authz.rs` (`METHODS`); esta lista é a mesma tabela, por família, e o teste `a_contagem_por_classe_e_a_documentada` (`ipc/test.rs`) falha se os totais abaixo e o código divergirem. Cada item é `método classe`.
 
@@ -338,6 +338,7 @@ Classes: **livre** (catálogo ou metadado, sem identidade) · **escopo:<alvo>** 
 Alvos de escopo: *aba* (a própria, as ligadas no canvas, as que abriu) · *conversa* (o mesmo, sobre `thread:<id>`) · *chamador* (exige aba ou conversa provada; o handler resolve o alvo pelo canvas dela) · *chamador-ou-fora* (o mesmo, ou a pessoa fora do app) · *frota* (o `taskId` ou a aba declarada tem de ser a provada) · *tarefa* (só a tarefa) · *missão* e *missão-coroa* (a do quadro de quem chama; a segunda só o orquestrador) · *fora* (só quem está fora da árvore do ADE).
 
 - **account**: list livre
+- **credential**: redeem livre (ticket de uso único, vinculado ao PID autenticado)
 - **agent**: list livre
 - **app**: status livre
 - **approval**: decide pessoa, list pessoa
@@ -380,7 +381,7 @@ Alvos de escopo: *aba* (a própria, as ligadas no canvas, as que abriu) · *conv
 - **workspace**: list livre, status livre, restore pessoa, open escopo:chamador-ou-fora
 - **worktrees**: list livre, prune escopo:fora
 
-Totais: livre 27 · escopo 188 (chamador 94, chamador-ou-fora 32, frota 21, aba 8, conversa 9, tarefa 8, missão 7, missão-coroa 4, fora 5) · pessoa 4 · pessoa-ou-escopo 2 · **221**.
+Totais: livre 28 · escopo 190 (chamador 96, chamador-ou-fora 32, frota 21, aba 8, conversa 9, tarefa 8, missão 7, missão-coroa 4, fora 5) · pessoa 4 · pessoa-ou-escopo 2 · **224**.
 
 ### A classificação preliminar (histórica)
 

@@ -1222,6 +1222,7 @@
   "accounts.plan.unsupported": "Esta TUI no informa cuánto cupo te queda.",
   "accounts.plan.codexApiKey": "Cuenta por API key: Codex cobra por uso, sin ventanas de límite.",
   "accounts.plan.codexFailed": "No se pudo consultar a Codex.",
+  "accounts.credential.helperFailed": "No se pudo entregar la credencial al agente. Comprueba que ADE esté abierto y vuelve a abrir la pestaña.",
   "accounts.plan.codexLimited": "Codex está bloqueando esta cuenta hasta que se reinicie la ventana.",
   "accounts.plan.weekModel": "Semana ({{model}})",
   "accounts.plan.refresh": "Volver a preguntarle a la TUI",

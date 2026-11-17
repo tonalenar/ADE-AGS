@@ -1222,6 +1222,7 @@
   "accounts.plan.unsupported": "This TUI doesn't report how much quota you have left.",
   "accounts.plan.codexApiKey": "API key account: Codex bills per use, with no limit windows.",
   "accounts.plan.codexFailed": "Could not query Codex.",
+  "accounts.credential.helperFailed": "Could not deliver the credential to the agent. Check that ADE is open, then open the tab again.",
   "accounts.plan.codexLimited": "Codex is blocking this account until the window resets.",
   "accounts.plan.weekModel": "This week ({{model}})",
   "accounts.plan.refresh": "Ask the TUI again",

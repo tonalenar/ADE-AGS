@@ -38,15 +38,27 @@ const SHARED_SKILLS: &[&str] = &["config/skills", "antigravity-cli/skills"];
 /// Idempotente. Recusa quando a conta seria o próprio home (nunca é o caso de uma conta criada).
 pub(super) fn prepare(real_home: &Path, account_dir: &Path) -> std::io::Result<()> {
     if real_home == account_dir {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "a conta não pode ser o próprio home"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "a conta não pode ser o próprio home",
+        ));
     }
     std::fs::create_dir_all(account_dir.join(".gemini"))?;
     for entry in std::fs::read_dir(real_home)? {
         let name = entry?.file_name();
-        if NOT_LINKED.iter().any(|skip| name == std::ffi::OsStr::new(skip)) {
+        if NOT_LINKED
+            .iter()
+            .any(|skip| name == std::ffi::OsStr::new(skip))
+        {
             continue;
         }
-        link(&real_home.join(&name), &account_dir.join(&name));
+        let source = real_home.join(&name);
+        // A pasta de dados pode conter a própria conta; linká-la de volta criaria
+        // um ciclo em qualquer consumidor futuro que siga symlinks.
+        if account_dir == source || account_dir.starts_with(&source) {
+            continue;
+        }
+        link(&source, &account_dir.join(&name));
     }
     for sub in SHARED_SKILLS {
         let target = real_home.join(".gemini").join(sub);
@@ -85,12 +97,17 @@ mod tests {
     }
 
     fn dirs() -> (Root, std::path::PathBuf, std::path::PathBuf) {
-        let root = Root(std::env::temp_dir().join(format!("ade-agy-home-{}", uuid::Uuid::new_v4())));
+        let root =
+            Root(std::env::temp_dir().join(format!("ade-agy-home-{}", uuid::Uuid::new_v4())));
         let home = root.0.join("home");
         let account = root.0.join("accounts/antigravity/trabalho");
         std::fs::create_dir_all(home.join(".gemini/config/skills")).unwrap();
         std::fs::create_dir_all(home.join(".gemini/antigravity-acp")).unwrap();
-        std::fs::write(home.join(".gemini/antigravity-acp/acp_token.json"), "segredo").unwrap();
+        std::fs::write(
+            home.join(".gemini/antigravity-acp/acp_token.json"),
+            "segredo",
+        )
+        .unwrap();
         std::fs::create_dir_all(home.join("Library/Keychains")).unwrap();
         std::fs::create_dir_all(home.join(".ssh")).unwrap();
         std::fs::write(home.join(".gitconfig"), "[user]").unwrap();
@@ -103,8 +120,17 @@ mod tests {
         prepare(&home, &account).unwrap();
         // `.gemini` é da conta (um diretório próprio, vazio de credenciais) e `Library` não existe nela.
         assert!(account.join(".gemini").is_dir());
-        assert!(std::fs::symlink_metadata(account.join(".gemini")).unwrap().file_type().is_dir());
-        assert!(!account.join(".gemini/antigravity-acp/acp_token.json").exists());
+        assert!(
+            std::fs::symlink_metadata(account.join(".gemini"))
+                .unwrap()
+                .file_type()
+                .is_dir()
+        );
+        assert!(
+            !account
+                .join(".gemini/antigravity-acp/acp_token.json")
+                .exists()
+        );
         assert!(std::fs::symlink_metadata(account.join("Library")).is_err());
     }
 
@@ -112,9 +138,17 @@ mod tests {
     fn o_resto_do_home_continua_acessivel_para_as_ferramentas() {
         let (_root, home, account) = dirs();
         prepare(&home, &account).unwrap();
-        assert_eq!(std::fs::read_to_string(account.join(".gitconfig")).unwrap(), "[user]");
+        assert_eq!(
+            std::fs::read_to_string(account.join(".gitconfig")).unwrap(),
+            "[user]"
+        );
         assert!(account.join(".ssh").is_dir());
-        assert!(std::fs::symlink_metadata(account.join(".ssh")).unwrap().file_type().is_symlink());
+        assert!(
+            std::fs::symlink_metadata(account.join(".ssh"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
     }
 
     #[test]
@@ -122,9 +156,28 @@ mod tests {
         let (_root, home, account) = dirs();
         prepare(&home, &account).unwrap();
         assert!(account.join(".gemini/config/skills").exists());
-        assert!(std::fs::symlink_metadata(account.join(".gemini/config/skills")).unwrap().file_type().is_symlink());
+        assert!(
+            std::fs::symlink_metadata(account.join(".gemini/config/skills"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         // `.gemini/config` é um diretório real da conta: só `skills` é link.
-        assert!(std::fs::symlink_metadata(account.join(".gemini/config")).unwrap().file_type().is_dir());
+        assert!(
+            std::fs::symlink_metadata(account.join(".gemini/config"))
+                .unwrap()
+                .file_type()
+                .is_dir()
+        );
+    }
+
+    #[test]
+    fn a_pasta_de_dados_que_contem_a_conta_nao_e_linkada_de_volta() {
+        let (_root, home, _unused_account) = dirs();
+        let account = home.join(".ags/accounts/antigravity/trabalho");
+        std::fs::create_dir_all(&account).unwrap();
+        prepare(&home, &account).unwrap();
+        assert!(std::fs::symlink_metadata(account.join(".ags")).is_err());
     }
 
     #[test]
@@ -133,7 +186,10 @@ mod tests {
         prepare(&home, &account).unwrap();
         std::fs::write(account.join(".gemini/login-da-conta"), "x").unwrap();
         prepare(&home, &account).unwrap();
-        assert_eq!(std::fs::read_to_string(account.join(".gemini/login-da-conta")).unwrap(), "x");
+        assert_eq!(
+            std::fs::read_to_string(account.join(".gemini/login-da-conta")).unwrap(),
+            "x"
+        );
     }
 
     #[test]

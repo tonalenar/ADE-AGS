@@ -3,8 +3,10 @@
 //! ## Por qué variables de entorno
 //!
 //! Git lee configuración de `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`
-//! (desde 2.31) con la misma prioridad que un `-c` en la línea de comandos, pero sin que el
-//! valor aparezca en `ps`. Con eso, para cada host que tiene cuenta:
+//! (desde 2.31) con la misma prioridad que un `-c` en la línea de comandos, así que el valor
+//! no aparece en argv ni en `ps` estándar. Sigue en el entorno del proceso git y otro proceso
+//! del mismo usuario puede leerlo; es una credencial transitoria, no una protección frente a
+//! la inspección local. Con eso, para cada host que tiene cuenta:
 //!
 //! - `http.https://<host>/.extraheader = Authorization: Basic …` — git manda el token en
 //!   cada pedido a ese host, y a ningún otro (la clave lleva la URL).
@@ -19,19 +21,42 @@
 //! Los remotos por SSH no cambian: usan la llave SSH del usuario, como siempre.
 
 use base64::Engine;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use super::oauth;
-use super::provider::{bare_host, ForgeError, ForgeKind};
+use super::provider::{ForgeError, ForgeKind, bare_host};
 use super::secret::{self, Secret};
-use super::store::{self, data_dir, db, GitAccount};
+use super::store::{self, GitAccount, data_dir, db};
 use crate::util::now_ts;
 
-pub(super) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())
+lazy_static::lazy_static! {
+    /// Uma renovação por conta: o GitLab pode invalidar o refresh token anterior.
+    static ref REFRESH_LOCKS: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> = Mutex::new(HashMap::new());
+}
+
+fn refresh_lock(account_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    REFRESH_LOCKS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(account_id.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
+pub(super) async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// El token de la cuenta, renovado si venció (o está por vencer).
-pub(super) async fn token(app: &tauri::AppHandle, account: &GitAccount) -> Result<String, ForgeError> {
+pub(super) async fn token(
+    app: &tauri::AppHandle,
+    account: &GitAccount,
+) -> Result<String, ForgeError> {
     let dir = data_dir(app)?;
     let id = account.id.clone();
     let load_dir = dir.clone();
@@ -40,8 +65,24 @@ pub(super) async fn token(app: &tauri::AppHandle, account: &GitAccount) -> Resul
         .map_err(ForgeError::Auth)?;
     let expiring = secret.expires_at.is_some_and(|at| at - 60 < now_ts());
     match (&secret.refresh_token, expiring) {
-        (Some(refresh), true) => {
-            let fresh = oauth::refresh(account.kind, &account.host, refresh).await.map_err(ForgeError::Auth)?;
+        (Some(_refresh), true) => {
+            let lock = refresh_lock(&account.id);
+            let _refresh_guard = lock.lock().await;
+            // Outra chamada pode ter terminado a renovação enquanto esta aguardava a trava.
+            let reload_id = account.id.clone();
+            let reload_dir = dir.clone();
+            let latest: Secret = blocking(move || secret::load(&reload_dir, &reload_id))
+                .await?
+                .map_err(ForgeError::Auth)?;
+            if !latest.expires_at.is_some_and(|at| at - 60 < now_ts()) {
+                return Ok(latest.access_token);
+            }
+            let Some(refresh) = latest.refresh_token.as_deref() else {
+                return Ok(latest.access_token);
+            };
+            let fresh = oauth::refresh(account.kind, &account.host, refresh)
+                .await
+                .map_err(ForgeError::Auth)?;
             let token = fresh.access_token.clone();
             let id = account.id.clone();
             blocking(move || secret::save(&dir, &id, &fresh)).await??;
@@ -72,9 +113,15 @@ pub struct RepoTarget {
 
 fn git(dir: &str, args: &[&str]) -> Option<String> {
     let mut cmd = crate::util::spawn::hidden_command("git");
-    cmd.arg("-C").arg(dir).args(args).env("GIT_TERMINAL_PROMPT", "0");
-    let out = crate::util::output_with_timeout(&mut cmd, std::time::Duration::from_secs(10)).ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    cmd.arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0");
+    let out =
+        crate::util::output_with_timeout(&mut cmd, std::time::Duration::from_secs(10)).ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 pub(super) fn repo_root(cwd: &str) -> Option<String> {
@@ -83,7 +130,10 @@ pub(super) fn repo_root(cwd: &str) -> Option<String> {
 
 fn remotes(root: &str) -> Vec<(String, String)> {
     let raw = git(root, &["remote", "-v"]).unwrap_or_default();
-    crate::scm::parse_remotes(&raw).into_iter().map(|r| (r.name, r.url)).collect()
+    crate::scm::parse_remotes(&raw)
+        .into_iter()
+        .map(|r| (r.name, r.url))
+        .collect()
 }
 
 /// Resuelve el repo que contiene `cwd`. Errores que la UI y el agente saben leer: sin
@@ -107,13 +157,30 @@ pub(super) async fn target(app: &tauri::AppHandle, cwd: &str) -> Result<RepoTarg
     let (host, path) = crate::scm::host_and_path(&remote_url)
         .ok_or_else(|| ForgeError::Unsupported(format!("Unrecognized remote URL: {remote_url}")))?;
     let host = host.strip_prefix("ssh.").unwrap_or(&host).to_string();
-    let path = path.trim_start_matches('/').trim_end_matches('/').trim_end_matches(".git").to_string();
+    let path = path
+        .trim_start_matches('/')
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .to_string();
 
     let conn = db(app)?;
     let (account, accounts) = store::pick(&conn.lock().unwrap(), Some(&root), &host);
-    let kind = account.as_ref().map(|a| a.kind).or_else(|| ForgeKind::guess(&host));
+    let kind = account
+        .as_ref()
+        .map(|a| a.kind)
+        .or_else(|| ForgeKind::guess(&host));
     let ssh = !remote_url.starts_with("https://") && !remote_url.starts_with("http://");
-    Ok(RepoTarget { root, remote, remote_url, host, path, kind, account, accounts, ssh })
+    Ok(RepoTarget {
+        root,
+        remote,
+        remote_url,
+        host,
+        path,
+        kind,
+        account,
+        accounts,
+        ssh,
+    })
 }
 
 /// El host con puerto de una URL HTTPS, sin usuario. `None` si no es HTTPS.
@@ -126,7 +193,10 @@ pub(super) fn https_host(url: &str) -> Option<String> {
 
 pub(super) fn basic(user: &str, token: &str) -> String {
     let raw = format!("{user}:{token}");
-    format!("Authorization: Basic {}", base64::engine::general_purpose::STANDARD.encode(raw))
+    format!(
+        "Authorization: Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(raw)
+    )
 }
 
 /// Las variables que hacen que git se autentique con las cuentas de la app.
@@ -144,11 +214,19 @@ pub(super) fn env_for(entries: &[(String, String)]) -> Vec<(String, String)> {
 
 /// La clave usa el host de la CUENTA, con su puerto si tiene: git lo compara.
 fn entries_for(account: &GitAccount, token: &str) -> Vec<(String, String)> {
-    let user = account.kind.git_user(&account.login, account.git_user.as_deref());
+    let user = account
+        .kind
+        .git_user(&account.login, account.git_user.as_deref());
     let url_host = &account.host;
     vec![
-        (format!("http.https://{url_host}/.extraheader"), basic(&user, token)),
-        (format!("credential.https://{url_host}.helper"), String::new()),
+        (
+            format!("http.https://{url_host}/.extraheader"),
+            basic(&user, token),
+        ),
+        (
+            format!("credential.https://{url_host}.helper"),
+            String::new(),
+        ),
     ]
 }
 
@@ -159,7 +237,9 @@ fn remote_url(root: &str, remote: &str, push: bool) -> Option<String> {
         args.push("--push");
     }
     args.extend(["--", remote]);
-    git(root, &args).and_then(|out| out.lines().next().map(str::to_string)).filter(|s| !s.is_empty())
+    git(root, &args)
+        .and_then(|out| out.lines().next().map(str::to_string))
+        .filter(|s| !s.is_empty())
 }
 
 /// Las variables de git para hablar con UN remoto de `root`: solo si es HTTPS y su host
@@ -173,15 +253,23 @@ pub(crate) async fn git_env_for_remote(
     push: bool,
 ) -> Vec<(String, String)> {
     let (r, name) = (root.to_string(), remote.to_string());
-    let Some(url) = blocking(move || remote_url(&r, &name, push)).await.ok().flatten() else {
+    let Some(url) = blocking(move || remote_url(&r, &name, push))
+        .await
+        .ok()
+        .flatten()
+    else {
         return Vec::new();
     };
-    let Some(host) = https_host(&url) else { return Vec::new() };
+    let Some(host) = https_host(&url) else {
+        return Vec::new();
+    };
     let account = match db(app) {
         Ok(conn) => store::pick(&conn.lock().unwrap(), Some(root), bare_host(&host)).0,
         Err(_) => None,
     };
-    let Some(account) = account else { return Vec::new() };
+    let Some(account) = account else {
+        return Vec::new();
+    };
     match token(app, &account).await {
         Ok(token) => env_for(&entries_for(&account, &token)),
         Err(e) => {
@@ -197,7 +285,9 @@ pub(crate) async fn git_env_for_url(
     url: &str,
     account_id: Option<&str>,
 ) -> Result<Vec<(String, String)>, ForgeError> {
-    let Some(host) = https_host(url) else { return Ok(Vec::new()) };
+    let Some(host) = https_host(url) else {
+        return Ok(Vec::new());
+    };
     let account = {
         let conn = db(app)?;
         let conn = conn.lock().unwrap();
@@ -206,15 +296,23 @@ pub(crate) async fn git_env_for_url(
             None => store::for_host(&conn, bare_host(&host)).into_iter().next(),
         }
     };
-    let Some(account) = account else { return Ok(Vec::new()) };
+    let Some(account) = account else {
+        return Ok(Vec::new());
+    };
     let token = token(app, &account).await?;
     Ok(env_for(&entries_for(&account, &token)))
 }
 
 /// La API del repo, con su cuenta. Sin cuenta es `NoAccount(host)`: la UI ofrece iniciar
 /// sesión justo en ese host.
-pub(super) async fn api_for(app: &tauri::AppHandle, target: &RepoTarget) -> Result<super::api::Api, ForgeError> {
-    let account = target.account.as_ref().ok_or_else(|| ForgeError::NoAccount(target.host.clone()))?;
+pub(super) async fn api_for(
+    app: &tauri::AppHandle,
+    target: &RepoTarget,
+) -> Result<super::api::Api, ForgeError> {
+    let account = target
+        .account
+        .as_ref()
+        .ok_or_else(|| ForgeError::NoAccount(target.host.clone()))?;
     let token = token(app, account).await?;
     super::api::Api::new(account.kind, &account.host, &token)
 }

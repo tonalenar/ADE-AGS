@@ -26,8 +26,12 @@ struct PtySession {
     cwd: String,
     /// Token que este processo herda em `ADE_SESSION`. Sai do registro junto com o PTY.
     session_token: Option<String>,
-    /// Perfil do Codex com o token, fora do argv. Some só quando o arquivo existe.
+    /// Perfil do Codex com o token de sessão, fora do argv.
     codex_profile: Option<std::path::PathBuf>,
+    /// Helper Claude instalado neste perfil, removido ao encerrar o PTY.
+    claude_helper_cleanup: Option<(std::path::PathBuf, String)>,
+    /// Ticket de uso único, revogado quando a sessão termina.
+    credential_ticket: Option<String>,
     ai_memory_settings: Option<std::path::PathBuf>,
 }
 
@@ -122,7 +126,7 @@ fn registry() -> MutexGuard<'static, HashMap<u32, PtySession>> {
 }
 
 pub fn live_update_tabs() -> Vec<Option<String>> {
-    registry().values().map(|s|s.tab_id.clone()).collect()
+    registry().values().map(|s| s.tab_id.clone()).collect()
 }
 
 /// Um terminal vivo, para a tela de Diagnóstico (só leitura): o id, a aba e o total de saída.
@@ -137,10 +141,17 @@ pub struct PtySessionInfo {
 /// Os terminais vivos, por id. Lê o registro e o total de saída em separado: um lock de cada vez, nunca os dois
 /// juntos (o `output_total` também pega o próprio mutex).
 pub fn pty_sessions_snapshot() -> Vec<PtySessionInfo> {
-    let rows: Vec<(u32, Option<String>)> = registry().iter().map(|(id, s)| (*id, s.tab_id.clone())).collect();
+    let rows: Vec<(u32, Option<String>)> = registry()
+        .iter()
+        .map(|(id, s)| (*id, s.tab_id.clone()))
+        .collect();
     let mut out: Vec<PtySessionInfo> = rows
         .into_iter()
-        .map(|(id, tab_id)| PtySessionInfo { id, tab_id, output_bytes: output_total(id).unwrap_or(0) })
+        .map(|(id, tab_id)| PtySessionInfo {
+            id,
+            tab_id,
+            output_bytes: output_total(id).unwrap_or(0),
+        })
         .collect();
     out.sort_by_key(|s| s.id);
     out
@@ -182,7 +193,10 @@ pub fn pty_snapshot(id: u32) -> Result<PtySnapshot, String> {
         return Err(format!("PTY session {id} not found"));
     }
     let (bytes, total) = copy_scrollback_bytes(id).unwrap_or_default();
-    Ok(PtySnapshot { data: String::from_utf8_lossy(&bytes).into_owned(), total })
+    Ok(PtySnapshot {
+        data: String::from_utf8_lossy(&bytes).into_owned(),
+        total,
+    })
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -311,7 +325,10 @@ pub(super) const PARENT_SESSION_ENV: &[&str] = &[
 
 /// Retira marcadores que fariam um processo filho se passar pela sessão da ADE ou do Claude pai.
 pub(crate) fn scrub_app_child_env(cmd: &mut std::process::Command) {
-    for var in crate::app::app_only_env().into_iter().chain(PARENT_SESSION_ENV.iter().copied()) {
+    for var in crate::app::app_only_env()
+        .into_iter()
+        .chain(PARENT_SESSION_ENV.iter().copied())
+    {
         cmd.env_remove(var);
     }
     cmd.env_remove(super::SESSION_ENV);
@@ -320,7 +337,10 @@ pub(crate) fn scrub_app_child_env(cmd: &mut std::process::Command) {
 
 /// Aplica a mesma limpeza ao builder do PTY, preservando as variáveis adicionadas depois.
 pub(crate) fn scrub_pty_app_child_env(cmd: &mut CommandBuilder) {
-    for var in crate::app::app_only_env().into_iter().chain(PARENT_SESSION_ENV.iter().copied()) {
+    for var in crate::app::app_only_env()
+        .into_iter()
+        .chain(PARENT_SESSION_ENV.iter().copied())
+    {
         cmd.env_remove(var);
     }
     cmd.env_remove(super::SESSION_ENV);
@@ -331,7 +351,11 @@ pub(super) fn build_launch(command: &str, prelaunch: &[String]) -> Result<Comman
     build_launch_with_args(command, prelaunch, &[])
 }
 
-fn build_launch_with_args(command: &str, prelaunch: &[String], extra_args: &[String]) -> Result<CommandBuilder, String> {
+fn build_launch_with_args(
+    command: &str,
+    prelaunch: &[String],
+    extra_args: &[String],
+) -> Result<CommandBuilder, String> {
     if extra_args.is_empty() {
         if prelaunch.is_empty() {
             return direct_launch(command);
@@ -356,7 +380,11 @@ fn build_launch_with_args(command: &str, prelaunch: &[String], extra_args: &[Str
 
 #[cfg(unix)]
 fn shell_command_line(parts: &[String]) -> String {
-    parts.iter().map(|part| format!("'{}'", part.replace('\'', "'\\''"))).collect::<Vec<_>>().join(" ")
+    parts
+        .iter()
+        .map(|part| format!("'{}'", part.replace('\'', "'\\''")))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(windows)]
@@ -376,9 +404,11 @@ fn direct_launch_parts(parts: Vec<String>) -> Result<CommandBuilder, String> {
     let program = parts.next().ok_or("Comando do agente ausente.")?;
     #[cfg(windows)]
     {
-        let path = crate::util::find_program(program).unwrap_or_else(|| std::path::PathBuf::from(program));
+        let path =
+            crate::util::find_program(program).unwrap_or_else(|| std::path::PathBuf::from(program));
         let args: Vec<_> = parts.collect();
-        let native = crate::util::launch::external_command(&path, &args).map_err(|e| e.to_string())?;
+        let native =
+            crate::util::launch::external_command(&path, &args).map_err(|e| e.to_string())?;
         if crate::util::launch::is_batch(std::path::Path::new(native.get_program())) {
             return Err("Este script .cmd/.bat não é um shim npm reconhecido. Configure o executável ou intérprete diretamente.".into());
         }
@@ -451,7 +481,8 @@ fn shell_running(script: String) -> CommandBuilder {
     script.hash(&mut hasher);
     let dir = std::env::temp_dir().join("ags-launch");
     let file = dir.join(format!("{:016x}.cmd", hasher.finish()));
-    let written = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, batch_launch_contents(&script)));
+    let written = std::fs::create_dir_all(&dir)
+        .and_then(|_| std::fs::write(&file, batch_launch_contents(&script)));
     let mut cmd = CommandBuilder::new("cmd");
     cmd.arg("/C");
     match written {
@@ -467,7 +498,10 @@ fn shell_running(script: String) -> CommandBuilder {
 /// Al final, así nunca pisa un `ags` ya instalado. `None` si no hay nada que agregar.
 fn path_with_app_dir(current: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
     let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    if !dir.join(if cfg!(windows) { "ags.exe" } else { "ags" }).is_file() {
+    if !dir
+        .join(if cfg!(windows) { "ags.exe" } else { "ags" })
+        .is_file()
+    {
         return None;
     }
     let mut dirs: Vec<std::path::PathBuf> = std::env::split_paths(current).collect();
@@ -479,7 +513,10 @@ fn path_with_app_dir(current: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
 }
 
 fn shell_safe_id(value: &str) -> bool {
-    !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Codex corre los comandos de su agente en un sandbox que descarta las variables de entorno
@@ -498,8 +535,15 @@ fn command_stem(command: &str) -> String {
         _ => trimmed.find(char::is_whitespace).unwrap_or(trimmed.len()),
     };
     let program = trimmed[..head_len].trim_matches(|c| c == '"' || c == '\'');
-    let file = program.rsplit(['/', '\\']).next().unwrap_or("").to_ascii_lowercase();
-    file.strip_suffix(".exe").or_else(|| file.strip_suffix(".cmd")).unwrap_or(&file).to_string()
+    let file = program
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    file.strip_suffix(".exe")
+        .or_else(|| file.strip_suffix(".cmd"))
+        .unwrap_or(&file)
+        .to_string()
 }
 
 fn codex_stem(command: &str) -> bool {
@@ -511,7 +555,11 @@ fn codex_stem(command: &str) -> bool {
 /// Gerenciador de Tarefas mostram o nome do perfil, não o segredo.
 ///
 /// `profile` é só o nome (`ags-…`), já filtrado por [`shell_safe_id`].
-pub(super) fn with_codex_identity(command: &str, tab_id: Option<&str>, profile: Option<&str>) -> String {
+pub(super) fn with_codex_identity(
+    command: &str,
+    tab_id: Option<&str>,
+    profile: Option<&str>,
+) -> String {
     let tab = tab_id.filter(|value| shell_safe_id(value));
     let profile = profile.filter(|value| shell_safe_id(value));
     if tab.is_none() && profile.is_none() {
@@ -529,7 +577,9 @@ pub(super) fn with_codex_identity(command: &str, tab_id: Option<&str>, profile: 
     let mut flags = String::new();
     if let Some(tab) = tab {
         if !command.contains("shell_environment_policy.set.ADE_TAB_ID") {
-            flags.push_str(&format!(" -c 'shell_environment_policy.set.ADE_TAB_ID=\"{tab}\"'"));
+            flags.push_str(&format!(
+                " -c 'shell_environment_policy.set.ADE_TAB_ID=\"{tab}\"'"
+            ));
         }
     }
     if let Some(profile) = profile {
@@ -543,6 +593,44 @@ pub(super) fn with_codex_identity(command: &str, tab_id: Option<&str>, profile: 
     format!("{head}{flags}{tail}")
 }
 
+struct CodexProfileGuard(Option<std::path::PathBuf>);
+
+impl CodexProfileGuard {
+    fn new(path: std::path::PathBuf) -> Self {
+        Self(Some(path))
+    }
+    fn commit(mut self) -> std::path::PathBuf {
+        self.0.take().expect("perfil ativo")
+    }
+}
+
+impl Drop for CodexProfileGuard {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+struct ClaudeHelperGuard(Option<(std::path::PathBuf, String)>);
+
+impl ClaudeHelperGuard {
+    fn new(value: (std::path::PathBuf, String)) -> Self {
+        Self(Some(value))
+    }
+    fn commit(mut self) -> (std::path::PathBuf, String) {
+        self.0.take().expect("helper ativo")
+    }
+}
+
+impl Drop for ClaudeHelperGuard {
+    fn drop(&mut self) {
+        if let Some((config_dir, command)) = self.0.take() {
+            let _ = crate::accounts::broker::clear_claude_settings(&config_dir, &command);
+        }
+    }
+}
+
 fn codex_home() -> std::path::PathBuf {
     std::env::var_os("CODEX_HOME")
         .map(std::path::PathBuf::from)
@@ -553,14 +641,11 @@ fn codex_home() -> std::path::PathBuf {
 /// Grava `~/.codex/<nome>.config.toml` com o token, modo 0600 no Unix.
 /// O argv do Codex só leva `--profile <nome>`. O sandbox lê o `set` daqui,
 /// então o valor não aparece em `ps` nem no Gerenciador de Tarefas.
-pub(super) fn write_codex_session_profile(name: &str, token: &str) -> Result<std::path::PathBuf, String> {
-    write_codex_session_profile_at(&codex_home(), name, token)
-}
-
-pub(super) fn write_codex_session_profile_at(
+pub(super) fn write_codex_profile_with_auth_at(
     home: &std::path::Path,
     name: &str,
     token: &str,
+    auth_config: Option<&str>,
 ) -> Result<std::path::PathBuf, String> {
     if !shell_safe_id(name) || !shell_safe_id(token) {
         return Err("perfil do Codex recusou um valor inseguro".into());
@@ -568,7 +653,8 @@ pub(super) fn write_codex_session_profile_at(
     std::fs::create_dir_all(home).map_err(|e| e.to_string())?;
     let dest = home.join(format!("{name}.config.toml"));
     let tmp = home.join(format!("{name}.config.toml.tmp"));
-    let body = format!("[shell_environment_policy.set]\nADE_SESSION = \"{token}\"\n");
+    let prefix = auth_config.unwrap_or_default();
+    let body = format!("{prefix}[shell_environment_policy.set]\nADE_SESSION = \"{token}\"\n");
     std::fs::write(&tmp, body).map_err(|e| e.to_string())?;
     if let Err(error) = restrict_to_user(&tmp) {
         let _ = std::fs::remove_file(&tmp);
@@ -589,7 +675,8 @@ pub(super) fn write_codex_session_profile_at(
 #[cfg(unix)]
 fn restrict_to_user(path: &std::path::Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| e.to_string())
 }
 
 /// No Windows o arquivo nasce no perfil do usuário. A DACL fica protegida
@@ -600,12 +687,12 @@ fn restrict_to_user(path: &std::path::Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{CloseHandle, LocalFree};
     use windows_sys::Win32::Security::Authorization::{
-        SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, GRANT_ACCESS, NO_MULTIPLE_TRUSTEE,
-        SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
+        EXPLICIT_ACCESS_W, GRANT_ACCESS, NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT, SetEntriesInAclW,
+        SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
     };
     use windows_sys::Win32::Security::{
-        GetTokenInformation, TokenUser, DACL_SECURITY_INFORMATION, NO_INHERITANCE,
-        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
+        DACL_SECURITY_INFORMATION, GetTokenInformation, NO_INHERITANCE,
+        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER, TokenUser,
     };
     use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -624,7 +711,9 @@ fn restrict_to_user(path: &std::path::Path) -> Result<(), String> {
             CloseHandle(token);
             return Err("não foi possível ler o SID desta conta".into());
         }
-        let words = (needed as usize).div_ceil(std::mem::size_of::<usize>()).max(1);
+        let words = (needed as usize)
+            .div_ceil(std::mem::size_of::<usize>())
+            .max(1);
         let mut sid_buf = vec![0usize; words];
         if GetTokenInformation(
             token,
@@ -689,6 +778,12 @@ fn forget_session(session: &PtySession) {
     if let Some(token) = &session.session_token {
         super::release_token(token);
     }
+    if let Some((config_dir, command)) = &session.claude_helper_cleanup {
+        let _ = crate::accounts::broker::clear_claude_settings(config_dir, command);
+    }
+    if let Some(ticket) = &session.credential_ticket {
+        crate::accounts::broker::revoke_ticket(ticket);
+    }
     if let Some(path) = &session.codex_profile {
         let _ = std::fs::remove_file(path);
     }
@@ -703,7 +798,9 @@ pub(crate) fn open_pty(size: PtySize) -> Result<portable_pty::PtyPair, String> {
     }
     #[cfg(not(windows))]
     {
-        portable_pty::native_pty_system().openpty(size).map_err(|e| e.to_string())
+        portable_pty::native_pty_system()
+            .openpty(size)
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -746,21 +843,34 @@ pub async fn pty_create(
     app: AppHandle,
 ) -> Result<u32, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
-    let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
+    let size = PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    };
     let steps = prelaunch.unwrap_or_default();
     let extra_args = extra_args.unwrap_or_default();
     let env_after_account = env.unwrap_or_default();
     // A política e a configuração MCP não precisam das credenciais: valide-as antes de
     // abrir o keyring ou resolver qualquer segredo da conta.
     let mut requested_env = env_before_account.clone().unwrap_or_default();
-    requested_env.extend(env_after_account.iter().map(|(name, value)| (name.clone(), value.clone())));
-    let tab_id = requested_env.get("ADE_TAB_ID").cloned().filter(|tab| !tab.is_empty());
+    requested_env.extend(
+        env_after_account
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone())),
+    );
+    let tab_id = requested_env
+        .get("ADE_TAB_ID")
+        .cloned()
+        .filter(|tab| !tab.is_empty());
     // A política local de provedores também vale para abas abertas diretamente pelo ADE.
     // Abas de missão continuam sob a política por papel da orquestração, nunca por provedor.
     if requested_env.get("ADE_MISSION_ID").is_none()
         && let Some(agent_id) = agent_id.as_deref()
     {
-        let db = app.try_state::<crate::database::DbConnection>()
+        let db = app
+            .try_state::<crate::database::DbConnection>()
             .ok_or("Não foi possível conferir a política local deste projeto.")?;
         let conn = db.lock().map_err(|error| error.to_string())?;
         if let Some(tab_id) = tab_id.as_deref() {
@@ -775,7 +885,9 @@ pub async fn pty_create(
             if let Some((stored_agent_id, _stored_cwd)) = stored
                 && stored_agent_id != agent_id
             {
-                return Err("O provedor da aba mudou antes de o terminal iniciar. Tente novamente.".into());
+                return Err(
+                    "O provedor da aba mudou antes de o terminal iniciar. Tente novamente.".into(),
+                );
             }
         }
         crate::project_chat_policy::ensure_agent_enabled(&conn, &cwd, agent_id)?;
@@ -787,7 +899,9 @@ pub async fn pty_create(
         if !codex_stem(&command) {
             return Err("Argumentos MCP por sessão só podem ser aplicados ao Codex CLI.".into());
         }
-        let tab = tab_id.as_deref().ok_or("Overrides MCP exigem uma aba identificada pela ADE.")?;
+        let tab = tab_id
+            .as_deref()
+            .ok_or("Overrides MCP exigem uma aba identificada pela ADE.")?;
         let executable = crate::ipc::install::source_binary(&app)
             .ok_or("Não foi possível localizar o servidor MCP da ADE.")?;
         let mission = requested_env.get("ADE_MISSION_ID").map(String::as_str);
@@ -800,11 +914,16 @@ pub async fn pty_create(
         )
         .ok_or("Não foi possível gerar a configuração MCP desta aba.")?;
         if extra_args != expected {
-            return Err("Os argumentos MCP não correspondem à configuração preparada pela ADE.".into());
+            return Err(
+                "Os argumentos MCP não correspondem à configuração preparada pela ADE.".into(),
+            );
         }
     }
     let mut env = env_before_account.unwrap_or_default();
     let mut memory_env = env.clone();
+    let mut credential_account_id = None;
+    let mut credential_provider = None;
+    let mut account_profile_dir = None;
     if let Some(account_id) = account_id.as_deref() {
         if account_id.starts_with("system:") {
             return Err("A conta principal não usa um id de perfil no lançamento.".into());
@@ -812,13 +931,28 @@ pub async fn pty_create(
         let expected_agent_id = agent_id
             .as_deref()
             .ok_or("O provedor da conta não foi informado ao criar o terminal.")?;
-        let db = app.try_state::<crate::database::DbConnection>()
+        let db = app
+            .try_state::<crate::database::DbConnection>()
             .ok_or("Não foi possível acessar as contas desta instância.")?;
-        let account_env = crate::accounts::env_for_account_for_agent(
-            &db,
-            account_id,
-            expected_agent_id,
-        )?;
+        let account_env =
+            crate::accounts::env_for_account_for_agent(&db, account_id, expected_agent_id)?;
+        let account_kind =
+            crate::accounts::kind_for_account_for_agent(&db, account_id, expected_agent_id)?;
+        let profile_env = match expected_agent_id {
+            "claude-code" => "CLAUDE_CONFIG_DIR",
+            "codex" => "CODEX_HOME",
+            _ => "",
+        };
+        if !profile_env.is_empty() {
+            account_profile_dir = account_env.get(profile_env).map(std::path::PathBuf::from);
+        }
+        if account_kind == crate::accounts::AccountKind::ApiKey {
+            if !matches!(expected_agent_id, "claude-code" | "codex") {
+                return Err("O broker não oferece suporte a esse provedor de API key.".into());
+            }
+            credential_account_id = Some(account_id.to_string());
+            credential_provider = Some(expected_agent_id.to_string());
+        }
         // O ai-memory precisa do caminho do perfil para localizar a configuração do agente,
         // mas não precisa das variáveis de autenticação lidas do keyring.
         let credential_names = crate::agents::overriding_env(account_env.keys());
@@ -830,7 +964,11 @@ pub async fn pty_create(
         );
         env.extend(account_env);
     }
-    memory_env.extend(env_after_account.iter().map(|(name, value)| (name.clone(), value.clone())));
+    memory_env.extend(
+        env_after_account
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone())),
+    );
     env.extend(env_after_account);
     let env = (!env.is_empty()).then_some(env);
     let pair = open_pty(size)?;
@@ -839,18 +977,13 @@ pub async fn pty_create(
     // Só entra no registro depois que o processo existe. Um terminal restaurado
     // não passa por aqui: reanexa o PTY vivo e o processo conserva o token.
     let session_token = tab_id.as_ref().map(|_| uuid::Uuid::new_v4().to_string());
-    let codex_profile_name = session_token.as_ref().map(|_| format!("ags-{}", uuid::Uuid::new_v4().simple()));
-    let codex_profile = match (codex_profile_name.as_deref(), session_token.as_deref()) {
-        (Some(name), Some(token)) if codex_stem(&command) => match write_codex_session_profile(name, token) {
-            Ok(path) => Some(path),
-            Err(error) => {
-                eprintln!("[ade-ags] não gravei o perfil do Codex; a sessão não vai na linha de comando: {error}");
-                None
-            }
-        },
-        _ => None,
-    };
-    let command = with_codex_identity(&command, tab_id.as_deref(), codex_profile.as_ref().and(codex_profile_name.as_deref()));
+    let codex_profile_name = session_token
+        .as_ref()
+        .map(|_| format!("ags-{}", uuid::Uuid::new_v4().simple()));
+    if credential_provider.as_deref() == Some("codex") && codex_profile_name.is_none() {
+        return Err("A conta Codex por API key exige uma aba identificada pela ADE.".into());
+    }
+    let command = with_codex_identity(&command, tab_id.as_deref(), codex_profile_name.as_deref());
     let mut memory = crate::ai_memory::tabs::TabInjection::default();
     let mut continuity_binary = None;
     let mut continuity_hooks = false;
@@ -879,7 +1012,9 @@ pub async fn pty_create(
         // tarefas desta thread enquanto o processo roda.
         let (extras, cwd_path) = (memory_env, std::path::PathBuf::from(&cwd));
         let prepared = tokio::task::block_in_place(|| {
-            crate::ai_memory::tabs::prepare_new_tab(&tab, agent, &dir, &home, &cwd_path, &argv, &extras)
+            crate::ai_memory::tabs::prepare_new_tab(
+                &tab, agent, &dir, &home, &cwd_path, &argv, &extras,
+            )
         });
         continuity_hooks = prepared.hooks_configured;
         continuity_binary = prepared.binary;
@@ -889,7 +1024,8 @@ pub async fn pty_create(
         if !enabled || tab_id.is_none() || (memory.settings_file.is_none() && !continuity_hooks) {
             return Err("Não foi possível preparar hooks seguros para a continuidade; a aba de origem permanece aberta.".into());
         }
-        let binary = continuity_binary.ok_or("ai-memory 3.3.0 ou superior é necessário para continuar.")?;
+        let binary =
+            continuity_binary.ok_or("ai-memory 3.3.0 ou superior é necessário para continuar.")?;
         let native_program = argv.first().ok_or("Comando do agente ausente.")?;
         let executable = crate::util::path_env::find_program(native_program)
             .unwrap_or_else(|| std::path::PathBuf::from(native_program));
@@ -897,7 +1033,12 @@ pub async fn pty_create(
         if !extra_args.is_empty() {
             continuation_argv.splice(1..1, extra_args.iter().cloned());
         }
-        let wrapped = crate::ai_memory::continuation::argv(&binary, &executable, &continuation_argv, &memory.args)?;
+        let wrapped = crate::ai_memory::continuation::argv(
+            &binary,
+            &executable,
+            &continuation_argv,
+            &memory.args,
+        )?;
         // Mesmo caminho dos outros lançamentos: resolução do programa, regras do Windows e pré-comandos.
         build_launch(&crate::ai_memory::tabs::shell_args(&wrapped)?, &steps)?
     } else if steps.is_empty() {
@@ -927,7 +1068,10 @@ pub async fn pty_create(
     }
     // El PATH del hijo es el del PTY (en Windows sale del registro, no del proceso de la app: la
     // app puede tener la carpeta de su ejecutable en el suyo y el hijo no).
-    let child_path = cmd.get_env("PATH").map(|p| p.to_os_string()).unwrap_or_default();
+    let child_path = cmd
+        .get_env("PATH")
+        .map(|p| p.to_os_string())
+        .unwrap_or_default();
     // O `open` da ADE fica na frente para o Expo não abrir o Device Hub. Sem o
     // bloqueio instalado, o PATH do filho continua o de antes.
     if let Some(path) = path_with_app_dir(&child_path) {
@@ -971,6 +1115,67 @@ pub async fn pty_create(
         None => cmd.env_remove(super::SESSION_ENV),
     };
 
+    let credential_ticket = credential_account_id
+        .as_deref()
+        .map(crate::accounts::broker::PendingTicket::new);
+    let mut claude_helper_cleanup = None;
+    let mut codex_profile = None;
+    if let (Some(account_id), Some(provider), Some(ticket)) = (
+        credential_account_id.as_deref(),
+        credential_provider.as_deref(),
+        credential_ticket.as_ref(),
+    ) {
+        let ags = crate::ipc::install::source_binary(&app)
+            .ok_or("Não foi possível localizar o helper `ags` desta instância.")?;
+        match provider {
+            "claude-code" => {
+                let config_dir = account_profile_dir
+                    .as_deref()
+                    .ok_or("A pasta de configuração da conta Claude não está disponível.")?;
+                let command = crate::accounts::broker::write_claude_settings(
+                    config_dir,
+                    &ags,
+                    account_id,
+                    ticket.token(),
+                )?;
+                claude_helper_cleanup = Some((config_dir.to_path_buf(), command));
+            }
+            "codex" => {}
+            _ => return Err("O broker não oferece suporte a esse provedor de API key.".into()),
+        }
+    }
+    if let (Some(name), Some(token)) = (codex_profile_name.as_deref(), session_token.as_deref())
+        && codex_stem(&command)
+    {
+        let auth_config = if credential_provider.as_deref() == Some("codex") {
+            let account_id = credential_account_id
+                .as_deref()
+                .ok_or("A conta Codex não foi informada.")?;
+            let ticket = credential_ticket
+                .as_ref()
+                .ok_or("O ticket Codex não foi emitido.")?;
+            let ags = crate::ipc::install::source_binary(&app)
+                .ok_or("Não foi possível localizar o helper `ags` desta instância.")?;
+            Some(crate::accounts::broker::codex_provider_config(
+                &ags,
+                account_id,
+                ticket.token(),
+            )?)
+        } else {
+            None
+        };
+        let home = if credential_provider.as_deref() == Some("codex") {
+            account_profile_dir
+                .clone()
+                .ok_or("A pasta de configuração da conta Codex não está disponível.")?
+        } else {
+            account_profile_dir.clone().unwrap_or_else(codex_home)
+        };
+        let path = write_codex_profile_with_auth_at(&home, name, token, auth_config.as_deref())?;
+        codex_profile = Some(CodexProfileGuard::new(path));
+    }
+    let claude_helper_guard = claude_helper_cleanup.take().map(ClaudeHelperGuard::new);
+
     let id = {
         let mut counter = PTY_COUNTER.lock().unwrap_or_else(|e| e.into_inner());
         *counter += 1;
@@ -982,20 +1187,23 @@ pub async fn pty_create(
     let mut group = ProcessGroup::new(id);
     let child = match pair.slave.spawn_command(cmd) {
         Ok(child) => child,
-        Err(e) => {
-            if let Some(path) = &codex_profile {
-                let _ = std::fs::remove_file(path);
-            }
-            return Err(format!("Failed to spawn '{command}': {e}"));
-        }
+        Err(e) => return Err(format!("Failed to spawn '{command}': {e}")),
     };
     group.adopt(&*child);
     let root_pid = child.process_id();
+    if let Some(ticket) = credential_ticket.as_ref() {
+        let pid = root_pid
+            .ok_or("Não foi possível provar o PID do agente para o broker de credenciais.")?;
+        ticket
+            .bind(pid)
+            .map_err(|error| error.message().to_string())?;
+    }
 
-    let writer = Arc::new(Mutex::new(pair
-        .master
-        .take_writer()
-        .map_err(|e| format!("Failed to get PTY writer: {e}"))?));
+    let writer = Arc::new(Mutex::new(
+        pair.master
+            .take_writer()
+            .map_err(|e| format!("Failed to get PTY writer: {e}"))?,
+    ));
 
     let mut reader = pair
         .master
@@ -1009,27 +1217,39 @@ pub async fn pty_create(
     let replaced = {
         let mut reg = registry();
         let old: Vec<u32> = match &tab_id {
-            Some(tab) => reg.iter().filter(|(_, s)| s.tab_id.as_deref() == Some(tab.as_str())).map(|(k, _)| *k).collect(),
+            Some(tab) => reg
+                .iter()
+                .filter(|(_, s)| s.tab_id.as_deref() == Some(tab.as_str()))
+                .map(|(k, _)| *k)
+                .collect(),
             None => Vec::new(),
         };
         let removed: Vec<PtySession> = old.iter().filter_map(|k| reg.remove(k)).collect();
         for session in &removed {
             forget_session(session);
         }
-        if let (Some(tab), Some(token), Some(pid)) = (tab_id.as_deref(), session_token.as_deref(), root_pid) {
+        if let (Some(tab), Some(token), Some(pid)) =
+            (tab_id.as_deref(), session_token.as_deref(), root_pid)
+        {
             super::publish_token(tab, token, pid);
         }
-        reg.insert(id, PtySession {
-            master: pair.master,
-            writer,
-            killer: child,
-            group,
-            tab_id: tab_id.clone(),
-            cwd: cwd.clone(),
-            session_token: session_token.clone(),
-            codex_profile,
-            ai_memory_settings: memory.settings_file.take(),
-        });
+        reg.insert(
+            id,
+            PtySession {
+                master: pair.master,
+                writer,
+                killer: child,
+                group,
+                tab_id: tab_id.clone(),
+                cwd: cwd.clone(),
+                session_token: session_token.clone(),
+                codex_profile: codex_profile.map(CodexProfileGuard::commit),
+                claude_helper_cleanup: claude_helper_guard.map(ClaudeHelperGuard::commit),
+                credential_ticket: credential_ticket
+                    .map(crate::accounts::broker::PendingTicket::commit),
+                ai_memory_settings: memory.settings_file.take(),
+            },
+        );
         (old, removed)
     };
     for (k, mut session) in replaced.0.iter().copied().zip(replaced.1) {
@@ -1068,7 +1288,15 @@ pub async fn pty_create(
                     super::recorder::observe(id, &buf[..n]);
                     let data = text.push(&buf[..n]);
                     if !data.is_empty() {
-                        app_clone.emit(&event_name, PtyDataPayload { data, end: Some(stream_end) }).ok();
+                        app_clone
+                            .emit(
+                                &event_name,
+                                PtyDataPayload {
+                                    data,
+                                    end: Some(stream_end),
+                                },
+                            )
+                            .ok();
                     }
                 }
                 Err(_) => break,
@@ -1076,7 +1304,15 @@ pub async fn pty_create(
         }
         let rest = text.finish();
         if !rest.is_empty() {
-            app_clone.emit(&event_name, PtyDataPayload { data: rest, end: Some(stream_end) }).ok();
+            app_clone
+                .emit(
+                    &event_name,
+                    PtyDataPayload {
+                        data: rest,
+                        end: Some(stream_end),
+                    },
+                )
+                .ok();
         }
         // Se recoge el estado real del hijo antes de avisar al frontend. Sin este `wait`
         // el proceso queda además como zombie hasta que muere la app, porque nadie
@@ -1098,8 +1334,14 @@ pub async fn pty_create(
 
 /// El terminal vivo de una tab, si lo hay: el más nuevo con ese `ADE_TAB_ID`. Pura sobre las
 /// sesiones `(id del PTY, tab)`.
-pub(super) fn newest_for_tab<'a>(sessions: impl Iterator<Item = (u32, Option<&'a str>)>, tab_id: &str) -> Option<u32> {
-    sessions.filter(|(_, tab)| *tab == Some(tab_id)).map(|(id, _)| id).max()
+pub(super) fn newest_for_tab<'a>(
+    sessions: impl Iterator<Item = (u32, Option<&'a str>)>,
+    tab_id: &str,
+) -> Option<u32> {
+    sessions
+        .filter(|(_, tab)| *tab == Some(tab_id))
+        .map(|(id, _)| id)
+        .max()
 }
 
 /// ¿Esta tab ya tiene un terminal corriendo? Se pregunta al montar un terminal: si la ventana se
@@ -1109,7 +1351,10 @@ pub(super) fn newest_for_tab<'a>(sessions: impl Iterator<Item = (u32, Option<&'a
 #[tauri::command]
 pub fn pty_for_tab(tab_id: String) -> Option<u32> {
     let reg = registry();
-    newest_for_tab(reg.iter().map(|(id, s)| (*id, s.tab_id.as_deref())), &tab_id)
+    newest_for_tab(
+        reg.iter().map(|(id, s)| (*id, s.tab_id.as_deref())),
+        &tab_id,
+    )
 }
 
 /// A aba e a pasta de um PTY vivo. `None` = o PTY não existe ou não é de uma aba.
@@ -1122,14 +1367,20 @@ pub fn tab_and_cwd_of(id: u32) -> Option<(String, String)> {
 /// Toda aba com terminal vivo e a pasta dele (a do terminal mais novo de cada aba).
 pub fn live_tab_dirs() -> Vec<(String, String)> {
     let reg = registry();
-    let mut newest: std::collections::HashMap<String, (u32, String)> = std::collections::HashMap::new();
+    let mut newest: std::collections::HashMap<String, (u32, String)> =
+        std::collections::HashMap::new();
     for (id, session) in reg.iter() {
-        let Some(tab) = session.tab_id.clone() else { continue };
+        let Some(tab) = session.tab_id.clone() else {
+            continue;
+        };
         if newest.get(&tab).is_none_or(|(seen, _)| seen < id) {
             newest.insert(tab, (*id, session.cwd.clone()));
         }
     }
-    newest.into_iter().map(|(tab, (_, cwd))| (tab, cwd)).collect()
+    newest
+        .into_iter()
+        .map(|(tab, (_, cwd))| (tab, cwd))
+        .collect()
 }
 
 /// Se "conecta" a un PTY que ya existe (p. ej. al mover una tab a otra ventana sin
@@ -1182,7 +1433,8 @@ fn copy_scrollback_bytes(id: u32) -> Option<(Vec<u8>, u64)> {
 }
 
 pub fn scrollback_of(id: u32) -> Option<(String, u64)> {
-    copy_scrollback_bytes(id).map(|(data, total)| (String::from_utf8_lossy(&data).into_owned(), total))
+    copy_scrollback_bytes(id)
+        .map(|(data, total)| (String::from_utf8_lossy(&data).into_owned(), total))
 }
 
 /// Onde começa o fim de `data` com no máximo `max` bytes, sem cortar um caractere UTF-8 ao meio
@@ -1212,17 +1464,31 @@ pub fn tail_of(id: u32, max_bytes: usize) -> Option<String> {
 pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {
     // Pega o escritor e SOLTA o registro antes de escrever: um write bloqueado (TUI travada,
     // colagem grande) só espera ele mesmo.
-    let writer = registry().get(&id).map(|session| session.writer.clone()).ok_or_else(|| format!("PTY session {id} not found"))?;
+    let writer = registry()
+        .get(&id)
+        .map(|session| session.writer.clone())
+        .ok_or_else(|| format!("PTY session {id} not found"))?;
     let mut writer = writer.lock().unwrap_or_else(|e| e.into_inner());
-    writer.write_all(data.as_bytes()).map_err(|e| format!("PTY write error: {e}"))?;
+    writer
+        .write_all(data.as_bytes())
+        .map_err(|e| format!("PTY write error: {e}"))?;
     writer.flush().map_err(|e| format!("PTY flush error: {e}"))
 }
 
 /// Display an app notice as output. Never inject it as input into an agent's TUI.
-pub fn display_notice(app:&tauri::AppHandle,tab_id:&str,message:&str) {
-    let id={let reg=registry(); newest_for_tab(reg.iter().map(|(id,s)|(*id,s.tab_id.as_deref())),tab_id)};
-    if let Some(id)=id {
-        let _=app.emit(&format!("pty-data-{id}"),PtyDataPayload {data:format!("\r\n{message}\r\n"),end:None});
+pub fn display_notice(app: &tauri::AppHandle, tab_id: &str, message: &str) {
+    let id = {
+        let reg = registry();
+        newest_for_tab(reg.iter().map(|(id, s)| (*id, s.tab_id.as_deref())), tab_id)
+    };
+    if let Some(id) = id {
+        let _ = app.emit(
+            &format!("pty-data-{id}"),
+            PtyDataPayload {
+                data: format!("\r\n{message}\r\n"),
+                end: None,
+            },
+        );
     }
 }
 
@@ -1250,9 +1516,15 @@ pub(super) fn measured_pty_size(cols: u16, rows: u16) -> Option<PtySize> {
     })
 }
 
-pub(super) fn resize_measured_pty(master: &dyn MasterPty, cols: u16, rows: u16) -> Result<(), String> {
+pub(super) fn resize_measured_pty(
+    master: &dyn MasterPty,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
     if let Some(size) = measured_pty_size(cols, rows) {
-        master.resize(size).map_err(|e| format!("Resize error: {e}"))?;
+        master
+            .resize(size)
+            .map_err(|e| format!("Resize error: {e}"))?;
     }
     Ok(())
 }
@@ -1351,7 +1623,11 @@ mod source_tests {
                     continue;
                 }
                 let text = std::fs::read_to_string(&path).unwrap().to_ascii_lowercase();
-                assert!(!text.contains(&needle), "{} ainda menciona o processo de ACL", path.display());
+                assert!(
+                    !text.contains(&needle),
+                    "{} ainda menciona o processo de ACL",
+                    path.display()
+                );
             }
         }
     }

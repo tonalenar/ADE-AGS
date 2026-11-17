@@ -14,9 +14,7 @@
 //! Nada de esto gasta tokens. La key nunca aparece en lo que se devuelve.
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::Path;
-use std::process::Stdio;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -55,7 +53,13 @@ pub struct AccountHealth {
 
 impl AccountHealth {
     fn new(status: HealthStatus, detail: impl Into<String>) -> Self {
-        AccountHealth { status, detail: detail.into(), email: None, plan: None, checked_at: crate::util::now_ts() }
+        AccountHealth {
+            status,
+            detail: detail.into(),
+            email: None,
+            plan: None,
+            checked_at: crate::util::now_ts(),
+        }
     }
 }
 
@@ -82,7 +86,11 @@ pub(crate) fn record_identity(db: &DbConnection, account_key: &str, identity: &A
 /// La identidad guardada de una cuenta, sobre una conexión ya tomada.
 pub fn load_identity(conn: &rusqlite::Connection, account_key: &str) -> Option<AccountIdentity> {
     let raw: String = conn
-        .query_row("SELECT value FROM settings WHERE key = ?1", [identity_key(account_key)], |r| r.get(0))
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [identity_key(account_key)],
+            |r| r.get(0),
+        )
         .ok()?;
     serde_json::from_str(&raw).ok()
 }
@@ -102,7 +110,14 @@ pub fn refresh_codex_account(
         crate::runs::quota::record(db, account_key, quota.clone(), now);
     }
     if account.email.is_some() || account.plan.is_some() {
-        record_identity(db, account_key, &AccountIdentity { email: account.email.clone(), plan: account.plan.clone() });
+        record_identity(
+            db,
+            account_key,
+            &AccountIdentity {
+                email: account.email.clone(),
+                plan: account.plan.clone(),
+            },
+        );
     }
     Some(account)
 }
@@ -135,7 +150,13 @@ fn store_codex_usage(db: &DbConnection, account_key: &str, usage: &CodexUsage) {
 }
 
 fn empty_codex_usage() -> CodexUsage {
-    CodexUsage { email: None, plan: None, auth: None, quota: None, fetched_at: 0 }
+    CodexUsage {
+        email: None,
+        plan: None,
+        auth: None,
+        quota: None,
+        fetched_at: 0,
+    }
 }
 
 /// El cupo de una cuenta de Codex, preguntado en el momento (y guardado para el ruteo).
@@ -160,7 +181,8 @@ pub async fn codex_account_usage(
         } else {
             super::env_for_account(&db, &account_id).ok_or("Cuenta no encontrada")?
         };
-        let account = refresh_codex_account(&db, &account_id, &env).ok_or("No se pudo consultar a Codex")?;
+        let account =
+            refresh_codex_account(&db, &account_id, &env).ok_or("No se pudo consultar a Codex")?;
         let usage = CodexUsage {
             email: account.email,
             plan: account.plan,
@@ -177,7 +199,10 @@ pub async fn codex_account_usage(
 
 /// Verifica una cuenta: una creada en la app (su id) o la del sistema (`system:<agente>`).
 #[tauri::command]
-pub async fn account_health(account_id: String, db: tauri::State<'_, DbConnection>) -> Result<AccountHealth, String> {
+pub async fn account_health(
+    account_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<AccountHealth, String> {
     let db = (*db).clone();
     tokio::task::spawn_blocking(move || check(&db, &account_id))
         .await
@@ -188,23 +213,53 @@ fn check(db: &DbConnection, account_id: &str) -> AccountHealth {
     // La del sistema corre con el entorno de la app tal cual: es lo que reciben las tabs que
     // no eligen cuenta, así que es lo que hay que verificar.
     if let Some(agent_id) = account_id.strip_prefix("system:") {
-        return enrich(db, account_id, agent_id, &HashMap::new(), check_cli(agent_id, &HashMap::new()));
+        return enrich(
+            db,
+            account_id,
+            agent_id,
+            &HashMap::new(),
+            check_cli(agent_id, &HashMap::new()),
+        );
     }
-    let row: Option<(String, String, Option<String>)> = db.lock().ok().and_then(|conn| {
+    let row: Option<(String, String, Option<String>, String)> = db.lock().ok().and_then(|conn| {
         conn.query_row(
-            "SELECT agent_id, kind, base_url FROM agent_accounts WHERE id = ?1",
+            "SELECT agent_id, kind, base_url, dir FROM agent_accounts WHERE id = ?1",
             [account_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .ok()
     });
-    let Some((agent_id, kind, base_url)) = row else {
+    let Some((agent_id, kind, base_url, dir)) = row else {
         return AccountHealth::new(HealthStatus::Unknown, "account not found");
     };
     if AccountKind::parse(&kind) == AccountKind::ApiKey && agent_id == "claude-code" {
         return match super::secrets::load(account_id) {
-            Some(key) => check_anthropic_key(&key, base_url.as_deref()),
-            None => AccountHealth::new(HealthStatus::NotLoggedIn, "API key missing from the system keyring"),
+            Some(mut key) => {
+                let health = check_anthropic_key(&key, base_url.as_deref());
+                super::broker::wipe_secret(&mut key);
+                health
+            }
+            None => AccountHealth::new(
+                HealthStatus::NotLoggedIn,
+                "API key missing from the system keyring",
+            ),
+        };
+    }
+    if AccountKind::parse(&kind) == AccountKind::ApiKey && agent_id == "codex" {
+        if let Err(error) =
+            super::secrets::migrate_legacy_codex_api_key(account_id, Path::new(&dir))
+        {
+            return AccountHealth::new(HealthStatus::Unknown, error);
+        }
+        return match super::secrets::load(account_id) {
+            Some(mut key) => {
+                super::broker::wipe_secret(&mut key);
+                AccountHealth::new(HealthStatus::Ok, "API key in the system keyring")
+            }
+            None => AccountHealth::new(
+                HealthStatus::NotLoggedIn,
+                "API key missing from the system keyring",
+            ),
         };
     }
     match super::env_for_account(db, account_id) {
@@ -240,7 +295,14 @@ fn enrich(
             }
         }
         _ if health.email.is_some() || health.plan.is_some() => {
-            record_identity(db, account_key, &AccountIdentity { email: health.email.clone(), plan: health.plan.clone() });
+            record_identity(
+                db,
+                account_key,
+                &AccountIdentity {
+                    email: health.email.clone(),
+                    plan: health.plan.clone(),
+                },
+            );
         }
         _ => {}
     }
@@ -249,7 +311,11 @@ fn enrich(
 
 /// Corre la CLI con el entorno de la cuenta (sin lo que le ganaría al login, igual que al
 /// lanzarla). `None` si no se pudo ni arrancar.
-fn run_cli(agent_id: &str, args: &[&str], env: &HashMap<String, String>) -> Option<std::process::Output> {
+fn run_cli(
+    agent_id: &str,
+    args: &[&str],
+    env: &HashMap<String, String>,
+) -> Option<std::process::Output> {
     let program = crate::agents::agent_command(agent_id)?;
     let mut command = crate::util::program(program);
     command.args(args);
@@ -277,7 +343,10 @@ fn check_cli(agent_id: &str, env: &HashMap<String, String>) -> AccountHealth {
             Some(out) => parse_antigravity_models(out.status.success(), &combined(&out)),
             None => AccountHealth::new(HealthStatus::Unknown, "could not run agy"),
         },
-        other => AccountHealth::new(HealthStatus::Unknown, format!("no health check for {other}")),
+        other => AccountHealth::new(
+            HealthStatus::Unknown,
+            format!("no health check for {other}"),
+        ),
     }
 }
 
@@ -290,36 +359,74 @@ pub(crate) fn parse_antigravity_models(success: bool, out: &str) -> AccountHealt
     if success && models > 0 {
         return AccountHealth::new(HealthStatus::Ok, format!("{models} models"));
     }
-    let line = out.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("Fetching")).unwrap_or("no output");
-    AccountHealth::new(HealthStatus::Unknown, line.chars().take(120).collect::<String>())
+    let line = out
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("Fetching"))
+        .unwrap_or("no output");
+    AccountHealth::new(
+        HealthStatus::Unknown,
+        line.chars().take(120).collect::<String>(),
+    )
 }
 
 pub(crate) fn combined(out: &std::process::Output) -> String {
-    format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+    format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
 }
 
 /// `claude auth status --json`: `{"loggedIn": true, "authMethod": "claude.ai", "email": …,
 /// "subscriptionType": "max"}`. Sale con 1 sin sesión, pero el JSON igual llega.
 pub(crate) fn parse_claude_status(stdout: &str) -> AccountHealth {
     let Ok(json) = serde_json::from_str::<serde_json::Value>(stdout.trim()) else {
-        return AccountHealth::new(HealthStatus::Unknown, "unexpected output from claude auth status");
+        return AccountHealth::new(
+            HealthStatus::Unknown,
+            "unexpected output from claude auth status",
+        );
     };
-    let text = |key: &str| json.get(key).and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string);
-    let logged_in = json.get("loggedIn").and_then(|v| v.as_bool()).unwrap_or(false);
-    let status = if logged_in { HealthStatus::Ok } else { HealthStatus::NotLoggedIn };
+    let text = |key: &str| {
+        json.get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let logged_in = json
+        .get("loggedIn")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let status = if logged_in {
+        HealthStatus::Ok
+    } else {
+        HealthStatus::NotLoggedIn
+    };
     let mut detail = text("authMethod").unwrap_or_else(|| "none".into());
     if let Some(source) = text("apiKeySource") {
         detail = format!("{detail} ({source})");
     }
-    AccountHealth { email: text("email"), plan: text("subscriptionType"), ..AccountHealth::new(status, detail) }
+    AccountHealth {
+        email: text("email"),
+        plan: text("subscriptionType"),
+        ..AccountHealth::new(status, detail)
+    }
 }
 
 /// `codex login status`: "Logged in using ChatGPT" / "Logged in using an API key - ***" con
 /// 0, "Not logged in" con 1. Desde 0.164 la key sale como "API key configured - ***".
 pub(crate) fn parse_codex_status(success: bool, stdout: &str) -> AccountHealth {
-    let line = stdout.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("WARNING")).unwrap_or("");
+    let line = stdout
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("WARNING"))
+        .unwrap_or("");
     let logged = line.starts_with("Logged in") || line.starts_with("API key configured");
-    let status = if success && logged { HealthStatus::Ok } else { HealthStatus::NotLoggedIn };
+    let status = if success && logged {
+        HealthStatus::Ok
+    } else {
+        HealthStatus::NotLoggedIn
+    };
     AccountHealth::new(status, line)
 }
 
@@ -329,12 +436,18 @@ pub(crate) fn parse_opencode_list(stdout: &str) -> AccountHealth {
     let count = strip_ansi(stdout).lines().find_map(|l| {
         let l = l.trim_start_matches(|c: char| !c.is_ascii_digit());
         let (n, rest) = l.split_once(' ')?;
-        rest.trim().starts_with("credential").then(|| n.parse::<u32>().ok()).flatten()
+        rest.trim()
+            .starts_with("credential")
+            .then(|| n.parse::<u32>().ok())
+            .flatten()
     });
     match count {
         Some(0) => AccountHealth::new(HealthStatus::NotLoggedIn, "0 credentials"),
         Some(n) => AccountHealth::new(HealthStatus::Ok, format!("{n} credentials")),
-        None => AccountHealth::new(HealthStatus::Unknown, "unexpected output from opencode auth list"),
+        None => AccountHealth::new(
+            HealthStatus::Unknown,
+            "unexpected output from opencode auth list",
+        ),
     }
 }
 
@@ -360,7 +473,11 @@ fn strip_ansi(s: &str) -> String {
 /// tokens. Un 401/403 es una key rechazada; un 200 de un gateway solo dice que respondió
 /// (hay gateways que no piden la key para listar modelos).
 fn check_anthropic_key(key: &str, base_url: Option<&str>) -> AccountHealth {
-    let client = match reqwest::blocking::Client::builder().timeout(HTTP_TIMEOUT).build() {
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(HTTP_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
         Ok(c) => c,
         Err(e) => return AccountHealth::new(HealthStatus::Unknown, e.to_string()),
     };
@@ -391,52 +508,9 @@ pub(crate) fn http_health(code: u16, gateway: bool) -> AccountHealth {
     }
 }
 
-/// `codex login --with-api-key` en el perfil `dir`, con la key por stdin: en argumentos se
-/// vería en la lista de procesos. Codex la guarda en `dir/auth.json`, como un login de ChatGPT.
-pub(super) fn codex_login_with_api_key(dir: &Path, key: &str) -> Result<(), String> {
-    let program = crate::agents::agent_command("codex").ok_or("codex no está registrado")?;
-    let mut command = crate::util::program(program);
-    command
-        .args(["login", "--with-api-key"])
-        .env("CODEX_HOME", dir)
-        // Ni una key heredada de la app ni otra cuenta: solo la que se está guardando.
-        .env_remove("CODEX_API_KEY")
-        .env_remove("OPENAI_API_KEY")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // `util::program` já nasce sem console (`spawn::hidden_command`).
-    let mut child = command.spawn().map_err(|e| format!("No se pudo ejecutar codex: {e}"))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(format!("{key}\n").as_bytes())
-            .map_err(|e| format!("No se pudo pasar la key a codex: {e}"))?;
-    } // stdin se cierra acá: codex deja de esperar.
-    let deadline = std::time::Instant::now() + CLI_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(_)) => {
-                let mut stderr = String::new();
-                if let Some(mut pipe) = child.stderr.take() {
-                    let _ = std::io::Read::read_to_string(&mut pipe, &mut stderr);
-                }
-                let reason = stderr.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("WARNING")).unwrap_or("");
-                return Err(format!("codex no aceptó la API key: {reason}"));
-            }
-            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(Duration::from_millis(100)),
-            Ok(None) => {
-                let _ = child.kill();
-                return Err("codex login tardó demasiado".into());
-            }
-            Err(e) => return Err(e.to_string()),
-        }
-    }
-}
-
 #[cfg(test)]
 mod usage_cache_tests {
-    use super::{load_codex_usage, store_codex_usage, CodexUsage};
+    use super::{CodexUsage, load_codex_usage, store_codex_usage};
     use std::sync::{Arc, Mutex};
 
     #[test]

@@ -3,12 +3,12 @@
 use crate::database::DbConnection;
 use tauri::AppHandle;
 
-use super::profiles::{spec_for, PROFILES};
+use super::profiles::{PROFILES, spec_for};
 use crate::util::now_ts;
 
 use super::store::{
-    accounts_root, row_to_account, validate_name, AccountCapableAgent, AccountKind, AccountRow,
-    AgentAccount, ACCOUNT_COLUMNS,
+    ACCOUNT_COLUMNS, AccountCapableAgent, AccountKind, AccountRow, AgentAccount, accounts_root,
+    row_to_account, validate_name,
 };
 
 /// TUIs que pueden tener varias cuentas, marcando cuáles están instaladas.
@@ -47,9 +47,13 @@ pub fn list_agent_accounts(db: tauri::State<DbConnection>) -> Result<Vec<AgentAc
 /// roster de la flota, que necesita la lista sin pasar por un comando.
 pub fn list_accounts(conn: &rusqlite::Connection) -> Result<Vec<AgentAccount>, String> {
     let mut stmt = conn
-        .prepare(&format!("SELECT {ACCOUNT_COLUMNS} FROM agent_accounts ORDER BY agent_id, name"))
+        .prepare(&format!(
+            "SELECT {ACCOUNT_COLUMNS} FROM agent_accounts ORDER BY agent_id, name"
+        ))
         .map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], AccountRow::from_row).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], AccountRow::from_row)
+        .map_err(|e| e.to_string())?;
 
     let mut accounts = Vec::new();
     for row in rows {
@@ -124,12 +128,10 @@ fn supports_api_key(agent_id: &str) -> bool {
 
 /// Alta de una cuenta por API key: sin terminal de login.
 ///
-/// - **Claude Code** no tiene un login con key que la guarde en su perfil: la key va al
-///   llavero del sistema y se pone en el entorno al lanzar (ver `env_for_account`). Con
-///   `base_url`, va como token de un gateway compatible (OpenRouter, un proxy propio).
-/// - **Codex** sí: `codex login --with-api-key` la guarda en el perfil de la cuenta, igual
-///   que guarda un login de ChatGPT. La app se la pasa por stdin (no por argumentos, que se
-///   verían en la lista de procesos) y no se queda con ella.
+/// - **Claude Code** lê a chave do keyring pelo `apiKeyHelper` instalado no perfil da conta.
+///   O processo do agente recebe só a configuração pública de `base_url`, quando houver.
+/// - **Codex** usa um provedor configurado com `auth.command`; a chave continua no keyring e
+///   é entregue pelo mesmo broker, sem gravá-la em `auth.json`.
 ///
 /// La key no se verifica contra el proveedor acá: eso es [`account_health`], que el
 /// frontend corre enseguida. Así una key válida con la red caída igual se puede guardar.
@@ -143,14 +145,19 @@ pub async fn create_agent_api_key_account(
     db: tauri::State<'_, DbConnection>,
 ) -> Result<AgentAccount, String> {
     if !supports_api_key(&agent_id) {
-        return Err(format!("'{agent_id}' no acepta cuentas por API key: usá el login de la TUI"));
+        return Err(format!(
+            "'{agent_id}' no acepta cuentas por API key: usá el login de la TUI"
+        ));
     }
     let name = name.trim().to_string();
     validate_name(&name)?;
     let api_key = api_key.trim().to_string();
     super::secrets::validate_key(&api_key)?;
     let base_url = match base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-        Some(_) if !crate::agents::adapter_for(&agent_id).is_some_and(|adapter| adapter.supports_custom_api_base_url()) => {
+        Some(_)
+            if !crate::agents::adapter_for(&agent_id)
+                .is_some_and(|adapter| adapter.supports_custom_api_base_url()) =>
+        {
             return Err("Un endpoint propio solo se admite en cuentas de Claude Code".into());
         }
         Some(url) => Some(super::secrets::validate_base_url(url)?),
@@ -158,7 +165,8 @@ pub async fn create_agent_api_key_account(
     };
 
     let dir = accounts_root(&app)?.join(&agent_id).join(&name);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("No se pudo crear la carpeta de la cuenta: {e}"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("No se pudo crear la carpeta de la cuenta: {e}"))?;
     let id = uuid::Uuid::new_v4().to_string();
     let created_at = now_ts();
     let dir_str = dir.to_string_lossy().to_string();
@@ -166,14 +174,10 @@ pub async fn create_agent_api_key_account(
 
     // Primero el secreto, después la fila: una fila sin su key sería una cuenta que no
     // arranca. Si la fila falla después, se borra lo guardado.
-    let (secret_id, store_key, login_dir, login_key) = (id.clone(), api_key.clone(), dir.clone(), api_key);
-    let agent = agent_id.clone();
-    tokio::task::spawn_blocking(move || match agent.as_str() {
-        "claude-code" => super::secrets::save(&secret_id, &store_key),
-        _ => super::health::codex_login_with_api_key(&login_dir, &login_key),
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    let (secret_id, store_key) = (id.clone(), api_key);
+    tokio::task::spawn_blocking(move || super::secrets::save(&secret_id, &store_key))
+        .await
+        .map_err(|e| e.to_string())??;
 
     let inserted = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -228,8 +232,7 @@ pub fn delete_agent_account(
             .map_err(|e| e.to_string())?;
         dir
     };
-    // La key de una cuenta de Claude Code vive en el llavero, no en la carpeta: sin la fila
-    // no la usa nadie, así que se va siempre (no hay nada que "conservar" para re-agregarla).
+    // As chaves das contas Claude e Codex ficam no keyring, não na pasta do perfil.
     super::secrets::delete(&id);
 
     if delete_files {
@@ -248,7 +251,9 @@ pub fn delete_agent_account(
 /// esta app, existía antes. Sin esto, la barra de cuentas mostraba los perfiles alternativos
 /// y escondía justo la que el usuario usa siempre.
 #[tauri::command]
-pub async fn system_accounts(db: tauri::State<'_, DbConnection>) -> Result<Vec<AgentAccount>, String> {
+pub async fn system_accounts(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<AgentAccount>, String> {
     let db = (*db).clone();
     tokio::task::spawn_blocking(move || {
         let mut accounts: Vec<AgentAccount> = PROFILES

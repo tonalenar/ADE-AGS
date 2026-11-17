@@ -69,13 +69,22 @@ use Class::{Free, Person, PersonOrScope, Scope};
 
 const TAB: Class = Scope(Target::Tab("tab"));
 const TAB_OPENED: Class = Scope(Target::OpenedTab("tab"));
-const THREAD: Class = Scope(Target::Thread { arg: "thread", optional: false });
+const THREAD: Class = Scope(Target::Thread {
+    arg: "thread",
+    optional: false,
+});
 const CALLER: Class = Scope(Target::Caller);
 const CALLER_OR_OUTSIDE: Class = Scope(Target::CallerOrOutside);
 const FLEET: Class = Scope(Target::Fleet);
 const TASK: Class = Scope(Target::Task);
-const MISSION: Class = Scope(Target::Mission { arg: "mission", crown: false });
-const MISSION_CROWN: Class = Scope(Target::Mission { arg: "mission", crown: true });
+const MISSION: Class = Scope(Target::Mission {
+    arg: "mission",
+    crown: false,
+});
+const MISSION_CROWN: Class = Scope(Target::Mission {
+    arg: "mission",
+    crown: true,
+});
 const OUTSIDE: Class = Scope(Target::Outside);
 const CROWN: Class = PersonOrScope(Role::Crown);
 const SCREEN_APPROVAL: Class = Person(crate::ipc::APPROVAL_SCREEN_ONLY);
@@ -85,6 +94,8 @@ const SCREEN_MAINTENANCE: Class = Person(crate::ipc::AGENT_MAINTENANCE_DENIED);
 pub(crate) const METHODS: &[(&str, Class)] = &[
     // Catálogo e estado do app.
     ("account.list", Free),
+    // O broker aplica sua própria prova de PID, conta e ticket de uso único.
+    ("credential.redeem", Free),
     ("agent.list", Free),
     ("app.status", Free),
     ("prelaunch.list", Free),
@@ -138,7 +149,13 @@ pub(crate) const METHODS: &[(&str, Class)] = &[
     ("chat.settle", THREAD),
     ("chat.goal", THREAD),
     ("chat.compact", THREAD),
-    ("chat.pending", Scope(Target::Thread { arg: "thread", optional: true })),
+    (
+        "chat.pending",
+        Scope(Target::Thread {
+            arg: "thread",
+            optional: true,
+        }),
+    ),
     ("chat.new", CALLER_OR_OUTSIDE),
     // Navegadores do canvas (portais): o handler só enxerga os ligados a quem chama.
     ("portal.list", CALLER),
@@ -323,7 +340,10 @@ pub(crate) const METHODS: &[(&str, Class)] = &[
 
 /// A classe de um método, ou `None` se ele não foi classificado (e então é recusado).
 pub(crate) fn class_of(command: &str) -> Option<&'static Class> {
-    METHODS.iter().find(|(method, _)| *method == command).map(|(_, class)| class)
+    METHODS
+        .iter()
+        .find(|(method, _)| *method == command)
+        .map(|(_, class)| class)
 }
 
 fn unclassified(command: &str) -> String {
@@ -362,13 +382,20 @@ fn only_person(command: &str) -> String {
 }
 
 fn screen_only(command: &str, why: &str) -> String {
-    format!("`{command}`: {why} A pessoa decide pela tela da ADE AGS; um agente só com o papel provado de orquestrador.")
+    format!(
+        "`{command}`: {why} A pessoa decide pela tela da ADE AGS; um agente só com o papel provado de orquestrador."
+    )
 }
 
 /// O que o pedido declara de identidade tem de ser a aba provada.
 fn claims_match(args: &Value, me: &str) -> Result<(), String> {
     for key in ["from", "tabId"] {
-        if let Some(claimed) = args.get(key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) {
+        if let Some(claimed) = args
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
             if claimed != me {
                 return Err(format!(
                     "O pedido diz ser `{claimed}` ({key}), mas o processo que chamou é a aba `{me}`. Não defina ADE_TAB_ID nem --from à mão; \
@@ -389,7 +416,10 @@ fn with_key(args: &Value, key: &str, value: &str) -> Value {
 }
 
 fn text<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
-    args.get(key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty())
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
 }
 
 fn truthy(args: &Value, key: &str) -> bool {
@@ -404,7 +434,11 @@ const THREAD_PREFIX: &str = crate::chat_team::model::THREAD_PREFIX;
 
 /// A referência de conversa de um recurso: `thread:<id>` (aceita o id já com o prefixo).
 fn thread_ref(id: &str) -> String {
-    if id.starts_with(THREAD_PREFIX) { id.to_string() } else { format!("{THREAD_PREFIX}{id}") }
+    if id.starts_with(THREAD_PREFIX) {
+        id.to_string()
+    } else {
+        format!("{THREAD_PREFIX}{id}")
+    }
 }
 
 fn out_of_reach(command: &str, kind: &str, target: &str) -> String {
@@ -426,7 +460,9 @@ pub(crate) fn authorize(
     boards: impl FnOnce() -> Boards,
     opened_by: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Value, String> {
-    let Some(class) = class_of(command) else { return Err(unclassified(command)) };
+    let Some(class) = class_of(command) else {
+        return Err(unclassified(command));
+    };
     match *class {
         Class::Free => Ok(args.clone()),
         Class::Person(message) => Err(message.to_string()),
@@ -436,11 +472,17 @@ pub(crate) fn authorize(
                 if crate::canvas::is_orchestrator(&boards(), &me) {
                     Ok(with_key(args, "from", &me))
                 } else {
-                    Err(screen_only(command, "Só o orquestrador (a coroa no canvas) decide ou responde por um integrante; um integrante leva a dúvida a ele."))
+                    Err(screen_only(
+                        command,
+                        "Só o orquestrador (a coroa no canvas) decide ou responde por um integrante; um integrante leva a dúvida a ele.",
+                    ))
                 }
             }
             Principal::Task(_) => Err(task_refusal(command)),
-            Principal::Outside => Err(screen_only(command, "Quem roda fora do app não prova papel nenhum.")),
+            Principal::Outside => Err(screen_only(
+                command,
+                "Quem roda fora do app não prova papel nenhum.",
+            )),
             Principal::Unknown => Err(tcp_unknown(command)),
         },
         Class::Scope(target) => scope(command, args, target, who()?, boards, opened_by),
@@ -459,37 +501,53 @@ fn scope(
         // Fora de toda árvore do ADE, sem identidade: a pessoa num terminal próprio (ou CI). O acesso de sempre.
         (Target::Outside, Principal::Outside) => Ok(args.clone()),
         (Target::Outside, _) => Err(only_person(command)),
-        (Target::Tab(_) | Target::OpenedTab(_) | Target::Thread { .. } | Target::Fleet | Target::Mission { .. } | Target::CallerOrOutside, Principal::Outside) => {
-            Ok(args.clone())
-        }
+        (
+            Target::Tab(_)
+            | Target::OpenedTab(_)
+            | Target::Thread { .. }
+            | Target::Fleet
+            | Target::Mission { .. }
+            | Target::CallerOrOutside,
+            Principal::Outside,
+        ) => Ok(args.clone()),
         (Target::Caller | Target::Task, Principal::Outside) => Err(not_in_ade(command)),
         (_, Principal::Unknown) => Err(tcp_unknown(command)),
 
         // A tarefa da Frota.
         (Target::Fleet | Target::Task, Principal::Task(task)) => {
             if text(args, "from").is_some() || text(args, "tabId").is_some() {
-                return Err(format!("A tarefa `{task}` declarou uma aba em `{command}`: uma tarefa age como tarefa. O comando foi recusado."));
+                return Err(format!(
+                    "A tarefa `{task}` declarou uma aba em `{command}`: uma tarefa age como tarefa. O comando foi recusado."
+                ));
             }
             match text(args, "taskId") {
-                Some(declared) if declared != task => Err(format!("O pedido diz ser a tarefa `{declared}`, mas o processo que chamou é o da tarefa `{task}`.")),
+                Some(declared) if declared != task => Err(format!(
+                    "O pedido diz ser a tarefa `{declared}`, mas o processo que chamou é o da tarefa `{task}`."
+                )),
                 Some(_) => Ok(args.clone()),
                 None => Ok(with_key(args, "taskId", &task)),
             }
         }
-        (Target::Task, Principal::Tab(_)) => Err(format!("`{command}` é uma ferramenta de tarefa da Frota (MCP `--task`): uma aba usa `ags memory search`, `ags memory index` ou `ags memory open`.")),
+        (Target::Task, Principal::Tab(_)) => Err(format!(
+            "`{command}` é uma ferramenta de tarefa da Frota (MCP `--task`): uma aba usa `ags memory search`, `ags memory index` ou `ags memory open`."
+        )),
         (_, Principal::Task(_)) => Err(task_refusal(command)),
 
         // Uma aba ou conversa provada.
         (Target::Fleet, Principal::Tab(me)) => {
             claims_match(args, &me)?;
             if text(args, "taskId").is_some() {
-                return Err(format!("`{command}` declara uma tarefa da Frota, mas quem chamou é a aba `{me}`: o `taskId` só vale para o processo da tarefa."));
+                return Err(format!(
+                    "`{command}` declara uma tarefa da Frota, mas quem chamou é a aba `{me}`: o `taskId` só vale para o processo da tarefa."
+                ));
             }
             Ok(args.clone())
         }
         (Target::OpenedTab(arg), Principal::Tab(me)) => {
             claims_match(args, &me)?;
-            let Some(tab) = text(args, arg) else { return Err(format!("`{command}` precisa do alvo (--{arg}).")) };
+            let Some(tab) = text(args, arg) else {
+                return Err(format!("`{command}` precisa do alvo (--{arg})."));
+            };
             if opened_by(tab).as_deref() == Some(me.as_str()) {
                 Ok(args.clone())
             } else {
@@ -501,7 +559,9 @@ Peça à pessoa para fechar o resto."
         }
         (Target::Tab(arg), Principal::Tab(me)) => {
             claims_match(args, &me)?;
-            let Some(tab) = text(args, arg) else { return Err(format!("`{command}` precisa do alvo (--{arg}).")) };
+            let Some(tab) = text(args, arg) else {
+                return Err(format!("`{command}` precisa do alvo (--{arg})."));
+            };
             if crate::ipc::guard::in_reach(&boards(), &me, tab, opened_by(tab).as_deref()) {
                 Ok(args.clone())
             } else {
@@ -512,7 +572,9 @@ Peça à pessoa para fechar o resto."
             claims_match(args, &me)?;
             let Some(thread) = text(args, arg) else {
                 return if optional {
-                    Err(format!("`{command}` sem a conversa lista as de todo mundo: um agente diz qual (--{arg} <id>)."))
+                    Err(format!(
+                        "`{command}` sem a conversa lista as de todo mundo: um agente diz qual (--{arg} <id>)."
+                    ))
                 } else {
                     Err(format!("`{command}` precisa da conversa (--{arg})."))
                 };
@@ -526,13 +588,19 @@ Peça à pessoa para fechar o resto."
         }
         (Target::Mission { arg, crown }, Principal::Tab(me)) => {
             claims_match(args, &me)?;
-            let Some(mission) = text(args, arg) else { return Err(format!("`{command}` precisa da missão (--{arg}).")) };
+            let Some(mission) = text(args, arg) else {
+                return Err(format!("`{command}` precisa da missão (--{arg})."));
+            };
             let boards = boards();
             if crate::canvas::mission_of_tab(&boards, &me).as_deref() != Some(mission) {
-                return Err(format!("A missão {mission} não é a do seu quadro: `{command}` só age na missão a que você pertence."));
+                return Err(format!(
+                    "A missão {mission} não é a do seu quadro: `{command}` só age na missão a que você pertence."
+                ));
             }
             if crown && !crate::canvas::is_orchestrator(&boards, &me) {
-                return Err(format!("`{command}` muda o resultado da missão: só o orquestrador dela (a coroa no canvas) o faz, ou a pessoa pela tela."));
+                return Err(format!(
+                    "`{command}` muda o resultado da missão: só o orquestrador dela (a coroa no canvas) o faz, ou a pessoa pela tela."
+                ));
             }
             Ok(args.clone())
         }
@@ -580,10 +648,17 @@ Use `--pre-preset` com um item que a pessoa salvou, ou peça ao orquestrador."
 
 /// Há um passo de pré-lançamento com comando cru (não um item salvo pelo nome).
 fn typed_prelaunch(args: &Value) -> bool {
-    args.get("prelaunch").and_then(Value::as_array).is_some_and(|steps| {
-        steps.iter().any(|step| {
-            step.get("command").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty())
-                || step.get("pre").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty())
+    args.get("prelaunch")
+        .and_then(Value::as_array)
+        .is_some_and(|steps| {
+            steps.iter().any(|step| {
+                step.get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| !s.trim().is_empty())
+                    || step
+                        .get("pre")
+                        .and_then(Value::as_str)
+                        .is_some_and(|s| !s.trim().is_empty())
+            })
         })
-    })
 }

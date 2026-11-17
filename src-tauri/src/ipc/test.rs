@@ -577,6 +577,39 @@ fn a_skill_diz_que_so_a_pessoa_decide_na_tela() {
     assert!(!skill.contains("`approval list`, `approval decide`"));
 }
 
+#[test]
+fn credential_redeem_tem_despacho_pid_e_saida_bruta_na_cli() {
+    let authz = include_str!("authz.rs");
+    let dispatch = include_str!("commands/dispatch.rs");
+    let server = include_str!("server.rs");
+    let cli = include_str!("../bin/cli.rs");
+    let broker = include_str!("../accounts/broker.rs");
+    assert!(
+        authz.contains("(\"credential.redeem\", Free)"),
+        "o broker deve validar o PID sem negar a classe do método"
+    );
+    assert!(
+        dispatched_commands().contains(&"credential.redeem".to_string()),
+        "o IPC não despacha a entrega da chave"
+    );
+    assert!(
+        dispatch.contains("current_client_pid()") && dispatch.contains("broker::redeem"),
+        "o broker precisa validar o PID do socket local"
+    );
+    assert!(
+        server.contains("credential.redeem") && server.contains("record_response"),
+        "a resposta de credencial precisa pular a gravação de telemetria"
+    );
+    assert!(
+        cli.contains("credential.redeem") && broker.contains("apiKeyHelper"),
+        "a CLI helper precisa usar o método reservado e ser configurada pelo broker"
+    );
+    assert!(
+        cli.contains("write_all(secret.as_bytes())") && cli.contains("wipe_secret"),
+        "o helper escreve apenas a chave em stdout e limpa a cópia local"
+    );
+}
+
 /// Que `ags` nombre un comando que el backend ya no atiende no rompe nada en compilación
 /// —son dos tablas de strings, en archivos distintos— y solo se nota cuando alguien lo
 /// ejecuta y recibe "Comando desconocido". Este test es lo que ata las dos puntas.
@@ -1216,8 +1249,9 @@ fn browser_act_aceita_timeout_e_o_prazo_e_o_mesmo_do_portal_act() {
     assert!(src.contains(
         r#""browser.run" if args.pointer("/request/op").and_then(Value::as_str) == Some("act")"#
     ));
+    assert!(src.contains("\"portal.act\" => {"));
     assert!(src.contains(
-        r#""portal.act" => Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs"#
+        "ade_ags_lib::ipc::mcp::act_timeout_secs(args.get(\"timeout\")) + 30"
     ));
 }
 
@@ -3171,7 +3205,7 @@ mod provas {
             .find("crate::ipc::guard::task_proof_error(args")
             .expect("o despachador não prova o taskId");
         let politica = dispatch
-            .find("guard_task(&conn, args.get(\"taskId\")")
+            .find("crate::runs::policy::guard_task(")
             .expect("a política da tarefa mudou de forma");
         let banco = dispatch
             .find("try_state::<crate::database::DbConnection>()")
@@ -4057,7 +4091,7 @@ mod autorizacao {
             "atualize o HOST_REMOTO.md junto com a tabela"
         );
     }
-    const LIVRE: usize = 27;
+    const LIVRE: usize = 28;
     const ESCOPO: usize = 190;
     const PESSOA: usize = 4;
     const PAPEL: usize = 2;
@@ -4072,7 +4106,7 @@ mod autorizacao {
             .find("crate::ipc::guard::task_proof_error(args")
             .expect("a prova do taskId sumiu");
         let politica = fonte
-            .find("guard_task(&conn, args.get(\"taskId\")")
+            .find("crate::runs::policy::guard_task(")
             .expect("a política da tarefa mudou de forma");
         let braco = fonte.find("let result = match command {").unwrap();
         assert!(
@@ -5135,7 +5169,7 @@ mod autorizacao {
         let docs = include_str!("../../../docs/decisoes/HOST_REMOTO.md");
         assert!(
             docs.contains("F-09 (completo)")
-                && docs.contains("Anexo A: inventário dos 223 métodos e a classe de cada um")
+                && docs.contains("Anexo A: inventário dos 224 métodos e a classe de cada um")
         );
     }
 

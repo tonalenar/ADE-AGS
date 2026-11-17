@@ -1243,3 +1243,18 @@ fn comandos_que_exigem_prova_levam_so_a_identidade_do_ambiente() {
     );
     assert_eq!(lista["from"], "real-tab");
 }
+
+#[test]
+fn credential_helper_sem_app_retorna_erro_em_portugues() {
+    let handshake =
+        std::env::temp_dir().join(format!("ags-ipc-ausente-{}.json", uuid::Uuid::new_v4()));
+    let error = send_at("credential.redeem", json!({}), &handshake).unwrap_err();
+    assert_ne!(error.code, EXIT_OK);
+    assert!(
+        error
+            .message
+            .contains("O ADE AGS não parece estar em execução"),
+        "{}",
+        error.message
+    );
+}

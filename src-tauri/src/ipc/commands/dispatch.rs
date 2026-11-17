@@ -15,27 +15,31 @@ use tauri::AppHandle;
 use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
 use super::ask::user_ask;
-use super::events::{events_since, events_wait};
-use super::missions;
-use super::notify::notify_send;
-use super::notes::{note_create, note_edit, note_list, note_read, note_write};
-use super::renders::{render_list, render_publish};
+use super::browser::browser_run;
+use super::chat::{chat_recall, chat_say};
 use super::devices::{device_action, device_create, device_list};
+use super::events::{events_since, events_wait};
+use super::floor::{floor_create, floor_list};
+use super::missions;
+use super::notes::{note_create, note_edit, note_list, note_read, note_write};
+use super::notify::notify_send;
+use super::peers::{
+    ci_watch, peer_ask, peer_check, peer_connect, peer_deliver, peer_disconnect, peer_handoff,
+    peer_list, peer_recruit, peer_role, peer_tell,
+};
 use super::pool::{pool_create, pool_delete, pool_list};
 use super::portals::{portal_action, portal_close, portal_create, portal_list, portal_open};
+use super::renders::{render_list, render_publish};
+use super::replay::{replay_start, replay_status, replay_stop};
 use super::role::{role_create, role_edit, role_list, role_show};
-use super::floor::{floor_create, floor_list};
 use super::routine::{
-    routine_create, routine_delete, routine_disable, routine_edit, routine_enable, routine_list, routine_run, routine_show,
+    routine_create, routine_delete, routine_disable, routine_edit, routine_enable, routine_list,
+    routine_run, routine_show,
 };
-use super::chat::{chat_recall, chat_say};
-use super::peers::{ci_watch, peer_ask, peer_deliver, peer_handoff, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_role, peer_tell};
-use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
 use super::shared::bridge_call;
 use super::skills::{skill_edit, skill_install, skill_list, skill_new, skill_search, skill_show};
 use super::tabs::{tab_create, tab_list, tab_output, tab_send};
-use super::replay::{replay_start, replay_status, replay_stop};
 use super::watch::{watch_add, watch_list, watch_remove, watch_wait};
 use super::windows::{window_create, window_list};
 use super::workspaces::{workspace_list, workspace_open, workspace_status};
@@ -66,7 +70,12 @@ fn design_command(app: &AppHandle, command: &str, args: &Value) -> Result<Value,
     if command == "design.artboard.resize"
         && let Some(map) = args.as_object_mut()
     {
-        map.retain(|k, _| matches!(k.as_str(), "artboardId" | "width" | "height" | "x" | "y" | "radius" | "expectedVersion"));
+        map.retain(|k, _| {
+            matches!(
+                k.as_str(),
+                "artboardId" | "width" | "height" | "x" | "y" | "radius" | "expectedVersion"
+            )
+        });
     }
     if args.get("html").is_none() {
         if let Some(content) = args.get("content").cloned() {
@@ -93,7 +102,8 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
     }
     // F-02: o `taskId` é declarado pelo chamador. Só vale se o PID do outro lado é o do agente da tarefa; vale para
     // todos os comandos, inclusive `run.approve`.
-    if let Some(error) = crate::ipc::guard::task_proof_error(args, crate::ipc::current_client_pid()) {
+    if let Some(error) = crate::ipc::guard::task_proof_error(args, crate::ipc::current_client_pid())
+    {
         return Response::err(error);
     }
     // F-09: a tabela de classes por método (ipc/authz.rs). Prova quem chama pelo PID do canal de credencial e devolve os
@@ -103,7 +113,12 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         args,
         || {
             let text = |key: &str| args.get(key).and_then(Value::as_str);
-            crate::terminal::principal_of(text("session"), &[text("from").unwrap_or(""), text("tabId").unwrap_or("")], text("taskId"), crate::ipc::current_client_pid())
+            crate::terminal::principal_of(
+                text("session"),
+                &[text("from").unwrap_or(""), text("tabId").unwrap_or("")],
+                text("taskId"),
+                crate::ipc::current_client_pid(),
+            )
         },
         crate::canvas::load_boards,
         &crate::ipc::guard::opened_by,
@@ -117,8 +132,14 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         let Some(db) = app.try_state::<crate::database::DbConnection>() else {
             return Response::err("database unavailable");
         };
-        let Ok(conn) = db.lock() else { return Response::err("database unavailable"); };
-        if let Err(error) = crate::runs::policy::guard_task(&conn, args.get("taskId").and_then(Value::as_str), command) {
+        let Ok(conn) = db.lock() else {
+            return Response::err("database unavailable");
+        };
+        if let Err(error) = crate::runs::policy::guard_task(
+            &conn,
+            args.get("taskId").and_then(Value::as_str),
+            command,
+        ) {
             return Response::err(error);
         }
     }
@@ -277,6 +298,21 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "recall.get" => chat_recall(app, args),
         "agent.list" => agent_list(app),
         "account.list" => account_list(app),
+        "credential.redeem" => {
+            use tauri::Manager;
+            let Some(db) = app.try_state::<crate::database::DbConnection>() else {
+                return Response::err("Não foi possível acessar as contas desta instância.");
+            };
+            crate::accounts::broker::redeem(
+                args.get("ticket").and_then(Value::as_str).unwrap_or(""),
+                args.get("accountId").and_then(Value::as_str).unwrap_or(""),
+                args.get("agentId").and_then(Value::as_str).unwrap_or(""),
+                crate::ipc::current_client_pid(),
+                &db,
+            )
+            .map(Value::String)
+            .map_err(|error| error.message().to_string())
+        }
         "prelaunch.list" => prelaunch_list(app),
         "watch.add" => watch_add(app, args),
         "watch.remove" => watch_remove(app, args),
@@ -324,7 +360,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "run.addFact" => run_orchestrate(app, "run.addFact", args),
         "run.facts" => run_orchestrate(app, "run.facts", args),
         "run.factBody" => run_orchestrate(app, "run.factBody", args),
-        "memory.workspaceHistory" => run_orchestrate(app,"memory.workspaceHistory",args),
+        "memory.workspaceHistory" => run_orchestrate(app, "memory.workspaceHistory", args),
         "memory.list" => run_orchestrate(app, "memory.list", args),
         "memory.get" => run_orchestrate(app, "memory.get", args),
         "memory.searchApproved" => run_orchestrate(app, "memory.searchApproved", args),
@@ -351,9 +387,9 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "mission.timings" => missions::mission_timings(app, args),
         "mission.startcheck" => missions::mission_startcheck(app, args),
         "mission.efficiency" => missions::mission_efficiency(app, args),
-        "mission.cleanup" => missions::mission_cleanup(app,args),
-        "worktrees.list" => missions::worktrees(app,args,false),
-        "worktrees.prune" => missions::worktrees(app,args,true),
+        "mission.cleanup" => missions::mission_cleanup(app, args),
+        "worktrees.list" => missions::worktrees(app, args, false),
+        "worktrees.prune" => missions::worktrees(app, args, true),
         "mission.precheck" => missions::mission_precheck(app, args),
         "memory.search" => missions::memory_search(app, args),
         "memory.index" => missions::memory_repo_read(app, args, true),

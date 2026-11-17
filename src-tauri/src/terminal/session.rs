@@ -101,14 +101,20 @@ pub(crate) fn publish_token(tab_id: &str, token: &str, root_pid: u32) {
 }
 
 fn publish_in(sessions: &mut Sessions, tab_id: &str, token: &str, root_pid: u32) {
-    if let Some(previous) = sessions.by_tab.insert(tab_id.to_string(), token.to_string()) {
+    if let Some(previous) = sessions
+        .by_tab
+        .insert(tab_id.to_string(), token.to_string())
+    {
         if previous != token {
             sessions.by_token.remove(&previous);
         }
     }
     sessions.by_token.insert(
         token.to_string(),
-        Bound { tab: tab_id.to_string(), root_pid },
+        Bound {
+            tab: tab_id.to_string(),
+            root_pid,
+        },
     );
 }
 
@@ -174,7 +180,11 @@ fn bound_tab(session: Option<&str>, claimed_tab: Option<&str>) -> Result<Bound, 
 
 /// Token e ancestralidade. `client_pid` é o processo que abriu o IPC.
 /// Sem ele, ou se não descende do PTY, a chamada fecha.
-pub fn authorize(session: Option<&str>, claimed_tab: Option<&str>, client_pid: Option<u32>) -> Result<String, String> {
+pub fn authorize(
+    session: Option<&str>,
+    claimed_tab: Option<&str>,
+    client_pid: Option<u32>,
+) -> Result<String, String> {
     let bound = bound_tab(session, claimed_tab)?;
     if !ancestry_required() {
         return Ok(bound.tab);
@@ -194,11 +204,20 @@ pub fn authorize(session: Option<&str>, claimed_tab: Option<&str>, client_pid: O
 /// recusada: não há como provar a identidade, e o token não existe para ela.
 ///
 /// Só quem chama isto aceita conversa. `memory.*` e `swarm.*` continuam em [`authorize`], só de terminal.
-pub fn authorize_actor(session: Option<&str>, claimed_tab: Option<&str>, client_pid: Option<u32>) -> Result<String, String> {
-    if session.map(str::trim).is_some_and(|value| !value.is_empty()) {
+pub fn authorize_actor(
+    session: Option<&str>,
+    claimed_tab: Option<&str>,
+    client_pid: Option<u32>,
+) -> Result<String, String> {
+    if session
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+    {
         return authorize(session, claimed_tab, client_pid);
     }
-    let tab = claimed_tab.map(str::trim).filter(|value| value.starts_with(crate::chat_team::model::THREAD_PREFIX));
+    let tab = claimed_tab
+        .map(str::trim)
+        .filter(|value| value.starts_with(crate::chat_team::model::THREAD_PREFIX));
     let Some(tab) = tab else {
         return Err(ERR_MISSING.into());
     };
@@ -239,7 +258,11 @@ pub fn authorize_task(task_id: &str, client_pid: Option<u32>) -> Result<(), Stri
     authorize_task_with(task_id, client_pid, parent_pid)
 }
 
-fn authorize_task_with(task_id: &str, client_pid: Option<u32>, parent: impl FnMut(u32) -> Option<u32>) -> Result<(), String> {
+fn authorize_task_with(
+    task_id: &str,
+    client_pid: Option<u32>,
+    parent: impl FnMut(u32) -> Option<u32>,
+) -> Result<(), String> {
     if !ancestry_required() {
         return Ok(());
     }
@@ -249,7 +272,11 @@ fn authorize_task_with(task_id: &str, client_pid: Option<u32>, parent: impl FnMu
     let Some(client) = client_pid.filter(|pid| *pid > 0) else {
         return Err(ERR_NO_PID.into());
     };
-    if descends_from(client, root, parent) { Ok(()) } else { Err(ERR_TASK_ANCESTRY.into()) }
+    if descends_from(client, root, parent) {
+        Ok(())
+    } else {
+        Err(ERR_TASK_ANCESTRY.into())
+    }
 }
 
 /// Quem chama, depois de o servidor provar o que pôde (F-09, `peer.answer`, `fix.decide`).
@@ -265,11 +292,20 @@ pub enum Caller {
 /// Classifica quem chama. Identidade declarada (`ADE_SESSION` ou `ADE_TAB_ID`) tem de ser provada ([`authorize_actor`]); sem
 /// nenhuma, o cliente tem de estar fora de toda árvore de processos do ADE (PTYs, conversas, tarefas): quem está dentro e
 /// chamou sem identidade apagou o ambiente de propósito (ou por sandbox) e é recusado. Sem PID do cliente não há como saber.
-pub fn classify_caller(session: Option<&str>, from: Option<&str>, client_pid: Option<u32>) -> Result<Caller, String> {
+pub fn classify_caller(
+    session: Option<&str>,
+    from: Option<&str>,
+    client_pid: Option<u32>,
+) -> Result<Caller, String> {
     classify_caller_with(session, from, client_pid, parent_pid)
 }
 
-fn classify_caller_with(session: Option<&str>, from: Option<&str>, client_pid: Option<u32>, parent: impl FnMut(u32) -> Option<u32>) -> Result<Caller, String> {
+fn classify_caller_with(
+    session: Option<&str>,
+    from: Option<&str>,
+    client_pid: Option<u32>,
+    parent: impl FnMut(u32) -> Option<u32>,
+) -> Result<Caller, String> {
     let declared = |value: Option<&str>| value.map(str::trim).is_some_and(|v| !v.is_empty());
     if declared(session) || declared(from) {
         return authorize_actor(session, from, client_pid).map(Caller::Tab);
@@ -280,7 +316,11 @@ fn classify_caller_with(session: Option<&str>, from: Option<&str>, client_pid: O
     let Some(client) = client_pid.filter(|pid| *pid > 0) else {
         return Err(ERR_NO_PID.into());
     };
-    if inside_an_ade_process(client, parent) { Err(ERR_STRIPPED.into()) } else { Ok(Caller::Outside) }
+    if inside_an_ade_process(client, parent) {
+        Err(ERR_STRIPPED.into())
+    } else {
+        Ok(Caller::Outside)
+    }
 }
 
 // ── Quem chama, para a tabela de autorização por método (HOST_REMOTO.md, F-09) ─────────────
@@ -319,8 +359,18 @@ fn owner_of(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> Option<Owne
             .by_token
             .values()
             .map(|bound| (Owner::Tab(bound.tab.clone()), bound.root_pid))
-            .chain(sessions.conversations.iter().map(|(tab, root)| (Owner::Tab(tab.clone()), *root)))
-            .chain(sessions.task_roots.iter().map(|(task, root)| (Owner::Task(task.clone()), *root)))
+            .chain(
+                sessions
+                    .conversations
+                    .iter()
+                    .map(|(tab, root)| (Owner::Tab(tab.clone()), *root)),
+            )
+            .chain(
+                sessions
+                    .task_roots
+                    .iter()
+                    .map(|(task, root)| (Owner::Task(task.clone()), *root)),
+            )
             .collect()
     };
     if pid == 0 {
@@ -352,7 +402,12 @@ fn owner_of(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> Option<Owne
 /// - o cliente está na árvore de uma tarefa: é essa tarefa (e não declara aba);
 /// - fora de toda árvore: [`Principal::Outside`], **desde que não declare identidade**: um `from` sem prova é forjado;
 /// - sem PID (TCP, CLI antiga), nas plataformas com socket local: [`Principal::Unknown`] (só métodos livres).
-pub fn principal_of(session: Option<&str>, claims: &[&str], task_id: Option<&str>, client_pid: Option<u32>) -> Result<Principal, String> {
+pub fn principal_of(
+    session: Option<&str>,
+    claims: &[&str],
+    task_id: Option<&str>,
+    client_pid: Option<u32>,
+) -> Result<Principal, String> {
     principal_with(session, claims, task_id, client_pid, parent_pid)
 }
 
@@ -379,8 +434,11 @@ fn principal_with(
     if !ancestry_required() {
         // Sem API de PID do peer (outros Unix): o token é o que há, como em `authorize`.
         return match (session, claims.first()) {
-            (Some(session), claim) => bound_tab(Some(&session), claim.map(String::as_str)).map(|bound| Principal::Tab(bound.tab)),
-            (None, Some(claim)) if claim.starts_with(crate::chat_team::model::THREAD_PREFIX) => authorize_actor(None, Some(claim), client_pid).map(Principal::Tab),
+            (Some(session), claim) => bound_tab(Some(&session), claim.map(String::as_str))
+                .map(|bound| Principal::Tab(bound.tab)),
+            (None, Some(claim)) if claim.starts_with(crate::chat_team::model::THREAD_PREFIX) => {
+                authorize_actor(None, Some(claim), client_pid).map(Principal::Tab)
+            }
             (None, Some(_)) => Err(ERR_MISSING.into()),
             (None, None) => Ok(Principal::Outside),
         };
@@ -425,12 +483,18 @@ fn inside_an_ade_process(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -
             .chain(sessions.task_roots.values().copied())
             .collect()
     };
-    roots.into_iter().any(|root| descends_from(pid, root, &mut parent))
+    roots
+        .into_iter()
+        .any(|root| descends_from(pid, root, &mut parent))
 }
 
 /// `client` é `root` ou um descendente, segundo `parent`. Para no init,
 /// em ciclo ou depois de [`MAX_ANCESTORS`] passos.
-pub(crate) fn descends_from(client: u32, root: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> bool {
+pub(crate) fn descends_from(
+    client: u32,
+    root: u32,
+    mut parent: impl FnMut(u32) -> Option<u32>,
+) -> bool {
     if client == 0 || root == 0 {
         return false;
     }
@@ -453,7 +517,7 @@ pub(crate) fn descends_from(client: u32, root: u32, mut parent: impl FnMut(u32) 
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn parent_pid(pid: u32) -> Option<u32> {
+pub(crate) fn parent_pid(pid: u32) -> Option<u32> {
     let text = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("PPid:") {
@@ -466,11 +530,17 @@ fn parent_pid(pid: u32) -> Option<u32> {
 /// `getpeereid` não traz PID. O pai vem de `proc_pidinfo(PROC_PIDTBSDINFO)`, em `pbi_ppid`.
 /// (Não `sysctl(KERN_PROC_PID)`: a `libc` não expõe `kinfo_proc` no macOS e o build quebrava.)
 #[cfg(target_os = "macos")]
-fn parent_pid(pid: u32) -> Option<u32> {
+pub(crate) fn parent_pid(pid: u32) -> Option<u32> {
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
     let read = unsafe {
-        libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDTBSDINFO, 0, &mut info as *mut libc::proc_bsdinfo as *mut libc::c_void, size)
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            &mut info as *mut libc::proc_bsdinfo as *mut libc::c_void,
+            size,
+        )
     };
     if read != size {
         return None;
@@ -481,10 +551,11 @@ fn parent_pid(pid: u32) -> Option<u32> {
 /// `CreateToolhelp32Snapshot` enxerga o pai. Se o PID não está no
 /// snapshot, a checagem fecha: não há como provar a descendência.
 #[cfg(windows)]
-fn parent_pid(pid: u32) -> Option<u32> {
+pub(crate) fn parent_pid(pid: u32) -> Option<u32> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
     };
 
     unsafe {
@@ -519,7 +590,7 @@ fn parent_pid(pid: u32) -> Option<u32> {
     target_os = "macos",
     target_os = "windows"
 )))]
-fn parent_pid(_pid: u32) -> Option<u32> {
+pub(crate) fn parent_pid(_pid: u32) -> Option<u32> {
     None
 }
 
@@ -553,24 +624,48 @@ mod tests {
         let issued = Issued::new("forged");
         let err = verified_tab(Some(&issued.token), Some("other-tab")).unwrap_err();
         assert!(err.contains("ADE_TAB_ID"), "{err}");
-        assert_eq!(verified_tab(Some(&issued.token), Some(&issued.tab)).unwrap(), issued.tab);
+        assert_eq!(
+            verified_tab(Some(&issued.token), Some(&issued.tab)).unwrap(),
+            issued.tab
+        );
         assert_eq!(verified_tab(Some(&issued.token), None).unwrap(), issued.tab);
-        assert_eq!(verified_tab(Some(&issued.token), Some("  ")).unwrap(), issued.tab);
+        assert_eq!(
+            verified_tab(Some(&issued.token), Some("  ")).unwrap(),
+            issued.tab
+        );
     }
 
     #[test]
     fn missing_or_unknown_session_is_rejected() {
         let issued = Issued::new("unknown");
-        assert!(verified_tab(None, Some(&issued.tab)).unwrap_err().contains("ausente"));
-        assert!(verified_tab(Some(""), Some(&issued.tab)).unwrap_err().contains("ausente"));
-        assert!(verified_tab(Some("not-a-session"), Some(&issued.tab)).unwrap_err().contains("não é reconhecida"));
+        assert!(
+            verified_tab(None, Some(&issued.tab))
+                .unwrap_err()
+                .contains("ausente")
+        );
+        assert!(
+            verified_tab(Some(""), Some(&issued.tab))
+                .unwrap_err()
+                .contains("ausente")
+        );
+        assert!(
+            verified_tab(Some("not-a-session"), Some(&issued.tab))
+                .unwrap_err()
+                .contains("não é reconhecida")
+        );
     }
 
     #[test]
     fn reattached_terminal_keeps_its_token() {
         let issued = Issued::new("reattach");
-        assert_eq!(verified_tab(Some(&issued.token), Some(&issued.tab)).unwrap(), issued.tab);
-        assert_eq!(verified_tab(Some(&issued.token), Some(&issued.tab)).unwrap(), issued.tab);
+        assert_eq!(
+            verified_tab(Some(&issued.token), Some(&issued.tab)).unwrap(),
+            issued.tab
+        );
+        assert_eq!(
+            verified_tab(Some(&issued.token), Some(&issued.tab)).unwrap(),
+            issued.tab
+        );
     }
 
     #[test]
@@ -583,7 +678,11 @@ mod tests {
         assert!(verified_tab(Some(&first), Some(&tab)).is_err());
         assert_eq!(verified_tab(Some(&second), Some(&tab)).unwrap(), tab);
         release_token(&second);
-        assert!(verified_tab(Some(&second), Some(&tab)).unwrap_err().contains("não é reconhecida"));
+        assert!(
+            verified_tab(Some(&second), Some(&tab))
+                .unwrap_err()
+                .contains("não é reconhecida")
+        );
     }
 
     #[test]
@@ -591,22 +690,45 @@ mod tests {
         let thread = format!("{}teste-actor", crate::chat_team::model::THREAD_PREFIX);
         let outra = format!("{}teste-outra", crate::chat_team::model::THREAD_PREFIX);
         // Sem registro: recusada, mesmo com PID.
-        assert!(authorize_actor(None, Some(&thread), Some(std::process::id())).unwrap_err().contains("não tem um processo"));
+        assert!(
+            authorize_actor(None, Some(&thread), Some(std::process::id()))
+                .unwrap_err()
+                .contains("não tem um processo")
+        );
         register_conversation(&thread, std::process::id());
         if ancestry_required() {
-            assert_eq!(authorize_actor(None, Some(&thread), Some(std::process::id())).unwrap(), thread);
-            assert!(authorize_actor(None, Some(&thread), None).unwrap_err().contains("PID"));
-            assert!(authorize_actor(None, Some(&thread), Some(1)).unwrap_err().contains("não pertence"));
+            assert_eq!(
+                authorize_actor(None, Some(&thread), Some(std::process::id())).unwrap(),
+                thread
+            );
+            assert!(
+                authorize_actor(None, Some(&thread), None)
+                    .unwrap_err()
+                    .contains("PID")
+            );
+            assert!(
+                authorize_actor(None, Some(&thread), Some(1))
+                    .unwrap_err()
+                    .contains("não pertence")
+            );
             // Outra conversa não herda o processo desta.
             register_conversation(&outra, std::process::id().wrapping_add(7_000_000));
             assert!(authorize_actor(None, Some(&outra), Some(std::process::id())).is_err());
         }
         // Terminal sem token continua recusado, e o `authorize` de memória/swarm não aceita conversa.
-        assert!(authorize_actor(None, Some("tab-de-terminal"), Some(std::process::id())).unwrap_err().contains("ausente"));
+        assert!(
+            authorize_actor(None, Some("tab-de-terminal"), Some(std::process::id()))
+                .unwrap_err()
+                .contains("ausente")
+        );
         assert!(authorize(None, Some(&thread), Some(std::process::id())).is_err());
         // Token de terminal não vale para outra aba mesmo com o PID certo.
         let issued = Issued::new("actor");
-        assert!(authorize_actor(Some(&issued.token), Some(&thread), Some(std::process::id())).unwrap_err().contains("ADE_TAB_ID"));
+        assert!(
+            authorize_actor(Some(&issued.token), Some(&thread), Some(std::process::id()))
+                .unwrap_err()
+                .contains("ADE_TAB_ID")
+        );
     }
 
     #[test]
@@ -626,15 +748,28 @@ mod tests {
     fn token_without_client_pid_is_refused_when_ancestry_is_required() {
         let issued = Issued::new("pid");
         if !ancestry_required() {
-            assert_eq!(authorize(Some(&issued.token), Some(&issued.tab), None).unwrap(), issued.tab);
+            assert_eq!(
+                authorize(Some(&issued.token), Some(&issued.tab), None).unwrap(),
+                issued.tab
+            );
             return;
         }
         let missing = authorize(Some(&issued.token), Some(&issued.tab), None).unwrap_err();
         assert!(missing.contains("PID"), "{missing}");
-        let forged = authorize(Some(&issued.token), Some("other-tab"), Some(std::process::id())).unwrap_err();
+        let forged = authorize(
+            Some(&issued.token),
+            Some("other-tab"),
+            Some(std::process::id()),
+        )
+        .unwrap_err();
         assert!(forged.contains("ADE_TAB_ID"), "{forged}");
         assert_eq!(
-            authorize(Some(&issued.token), Some(&issued.tab), Some(std::process::id())).unwrap(),
+            authorize(
+                Some(&issued.token),
+                Some(&issued.tab),
+                Some(std::process::id())
+            )
+            .unwrap(),
             issued.tab
         );
     }
@@ -643,7 +778,10 @@ mod tests {
     #[test]
     fn a_spawned_child_belongs_to_this_process_and_init_does_not() {
         let issued = Issued::new("child");
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
         let pid = child.id();
         assert_eq!(
             authorize(Some(&issued.token), Some(&issued.tab), Some(pid)).unwrap(),
@@ -658,9 +796,18 @@ mod tests {
 
     #[test]
     fn cada_recusa_diz_o_que_fazer_e_nenhuma_manda_reiniciar_o_app() {
-        for err in [ERR_MISSING, ERR_UNKNOWN, ERR_FORGED, ERR_NO_PID, ERR_CONVERSATION_UNKNOWN, ERR_ANCESTRY] {
+        for err in [
+            ERR_MISSING,
+            ERR_UNKNOWN,
+            ERR_FORGED,
+            ERR_NO_PID,
+            ERR_CONVERSATION_UNKNOWN,
+            ERR_ANCESTRY,
+        ] {
             assert!(
-                ["Rode ", "Peça ", "Use ", "Mande ", "Não defina "].iter().any(|verb| err.contains(verb)),
+                ["Rode ", "Peça ", "Use ", "Mande ", "Não defina "]
+                    .iter()
+                    .any(|verb| err.contains(verb)),
                 "a recusa precisa dizer o próximo passo: {err}"
             );
             // Reiniciar o app fecha os terminais e agentes da pessoa (AGENTS.md, regra 2.1).
@@ -703,12 +850,24 @@ mod tests {
         }
         let task = task_id("tarefa");
         register_task_process(&task, 100);
-        assert!(authorize_task_with(&task, None, |_| None).unwrap_err().contains("PID"), "o TCP não traz PID");
+        assert!(
+            authorize_task_with(&task, None, |_| None)
+                .unwrap_err()
+                .contains("PID"),
+            "o TCP não traz PID"
+        );
         // Um id inventado (ou de uma tarefa que já saiu) não tem processo: não há como provar.
         let inventado = task_id("inventada");
-        assert!(authorize_task_with(&inventado, Some(100), |_| None).unwrap_err().contains("não tem um processo"));
+        assert!(
+            authorize_task_with(&inventado, Some(100), |_| None)
+                .unwrap_err()
+                .contains("não tem um processo")
+        );
         release_task_process(&task);
-        assert!(authorize_task_with(&task, Some(100), |_| None).is_err(), "depois de liberada a tarefa não se prova mais");
+        assert!(
+            authorize_task_with(&task, Some(100), |_| None).is_err(),
+            "depois de liberada a tarefa não se prova mais"
+        );
     }
 
     #[test]
@@ -720,7 +879,10 @@ mod tests {
         register_task_process(&a, 100);
         register_task_process(&b, 500);
         assert!(authorize_task_with(&a, Some(100), |_| None).is_ok());
-        assert!(authorize_task_with(&b, Some(100), |_| None).is_err(), "a tarefa A agiu como a tarefa B");
+        assert!(
+            authorize_task_with(&b, Some(100), |_| None).is_err(),
+            "a tarefa A agiu como a tarefa B"
+        );
         release_task_process(&a);
         release_task_process(&b);
     }
@@ -730,7 +892,11 @@ mod tests {
     #[test]
     fn quem_chama_de_um_terminal_provado_e_a_aba() {
         let issued = Issued::new("quem");
-        let caller = classify_caller(Some(&issued.token), Some(&issued.tab), Some(std::process::id()));
+        let caller = classify_caller(
+            Some(&issued.token),
+            Some(&issued.tab),
+            Some(std::process::id()),
+        );
         assert_eq!(caller.unwrap(), Caller::Tab(issued.tab.clone()));
     }
 
@@ -740,7 +906,14 @@ mod tests {
         // ADE_TAB_ID sem sessão: declarado, não provado.
         assert!(classify_caller(None, Some(&issued.tab), Some(std::process::id())).is_err());
         // Sessão de outra aba com a identidade de uma terceira.
-        assert!(classify_caller(Some(&issued.token), Some("outra-aba"), Some(std::process::id())).is_err());
+        assert!(
+            classify_caller(
+                Some(&issued.token),
+                Some("outra-aba"),
+                Some(std::process::id())
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -761,8 +934,15 @@ mod tests {
             return;
         }
         // PID 1 nunca descende de PTY nenhum.
-        assert_eq!(classify_caller(None, None, Some(1)).unwrap(), Caller::Outside);
-        assert_eq!(classify_caller(Some(" "), Some(""), Some(1)).unwrap(), Caller::Outside, "campos vazios não são identidade");
+        assert_eq!(
+            classify_caller(None, None, Some(1)).unwrap(),
+            Caller::Outside
+        );
+        assert_eq!(
+            classify_caller(Some(" "), Some(""), Some(1)).unwrap(),
+            Caller::Outside,
+            "campos vazios não são identidade"
+        );
         // Sem PID (TCP) não dá para saber de que lado está: recusa.
         assert!(classify_caller(None, None, None).is_err());
     }
@@ -796,14 +976,30 @@ mod tests {
             return;
         }
         let aba = Fake::new(4_100_000_001);
-        let parents = HashMap::from([(4_100_000_003, 4_100_000_002), (4_100_000_002, 4_100_000_001)]);
+        let parents = HashMap::from([
+            (4_100_000_003, 4_100_000_002),
+            (4_100_000_002, 4_100_000_001),
+        ]);
         let parent = |pid: u32| parents.get(&pid).copied();
         // O próprio shell, um filho e um neto (o `ags mcp` do agente) são a aba, sem `ADE_TAB_ID` nem sessão (`env -i`).
         for pid in [4_100_000_001, 4_100_000_002, 4_100_000_003] {
-            assert_eq!(principal_with(None, &[], None, Some(pid), parent), Ok(Principal::Tab(aba.tab.clone())), "pid {pid}");
+            assert_eq!(
+                principal_with(None, &[], None, Some(pid), parent),
+                Ok(Principal::Tab(aba.tab.clone())),
+                "pid {pid}"
+            );
         }
         // Declarar o que bate (aba e sessão) também serve; campos vazios não são declaração.
-        assert_eq!(principal_with(Some(&aba.token), &[&aba.tab, "", " "], None, Some(4_100_000_003), parent), Ok(Principal::Tab(aba.tab.clone())));
+        assert_eq!(
+            principal_with(
+                Some(&aba.token),
+                &[&aba.tab, "", " "],
+                None,
+                Some(4_100_000_003),
+                parent
+            ),
+            Ok(Principal::Tab(aba.tab.clone()))
+        );
     }
 
     #[test]
@@ -816,11 +1012,26 @@ mod tests {
         let parents = HashMap::from([(4_100_000_012, 4_100_000_011)]);
         let parent = |pid: u32| parents.get(&pid).copied();
         // Dentro da aba `minha`, dizer ser `outra` (por `from`/`tabId` ou pela sessão dela).
-        let forjada = principal_with(None, &[&outra.tab], None, Some(4_100_000_012), parent).unwrap_err();
+        let forjada =
+            principal_with(None, &[&outra.tab], None, Some(4_100_000_012), parent).unwrap_err();
         assert!(forjada.contains("ADE_TAB_ID"), "{forjada}");
-        assert!(principal_with(None, &["", &outra.tab], None, Some(4_100_000_012), parent).is_err());
-        assert!(principal_with(Some(&outra.token), &[], None, Some(4_100_000_012), parent).is_err(), "o token de outra aba não prova esta");
-        assert!(principal_with(Some("token-inventado"), &[], None, Some(4_100_000_012), parent).is_err());
+        assert!(
+            principal_with(None, &["", &outra.tab], None, Some(4_100_000_012), parent).is_err()
+        );
+        assert!(
+            principal_with(Some(&outra.token), &[], None, Some(4_100_000_012), parent).is_err(),
+            "o token de outra aba não prova esta"
+        );
+        assert!(
+            principal_with(
+                Some("token-inventado"),
+                &[],
+                None,
+                Some(4_100_000_012),
+                parent
+            )
+            .is_err()
+        );
         drop(minha);
     }
 
@@ -833,15 +1044,28 @@ mod tests {
         let parents = HashMap::from([(4_100_000_041, 4_100_000_040)]);
         let parent = |pid: u32| parents.get(&pid).copied();
         // Um terminal próprio, fora de todo processo do ADE.
-        assert_eq!(principal_with(None, &[], None, Some(4_100_000_041), parent), Ok(Principal::Outside));
-        assert_eq!(principal_with(Some(" "), &["", ""], None, Some(4_100_000_041), parent), Ok(Principal::Outside));
+        assert_eq!(
+            principal_with(None, &[], None, Some(4_100_000_041), parent),
+            Ok(Principal::Outside)
+        );
+        assert_eq!(
+            principal_with(Some(" "), &["", ""], None, Some(4_100_000_041), parent),
+            Ok(Principal::Outside)
+        );
         // Mas dizer ser uma aba sem estar nela é forjar (um `setsid` com o ambiente herdado, `--from` à mão).
-        let forjada = principal_with(None, &[&aba.tab], None, Some(4_100_000_041), parent).unwrap_err();
+        let forjada =
+            principal_with(None, &[&aba.tab], None, Some(4_100_000_041), parent).unwrap_err();
         assert!(forjada.contains("não está dentro dela"), "{forjada}");
         assert!(principal_with(Some(&aba.token), &[], None, Some(4_100_000_041), parent).is_err());
         // O TCP não traz PID: não é a pessoa, é um chamador desconhecido.
-        assert_eq!(principal_with(None, &[], None, None, parent), Ok(Principal::Unknown));
-        assert_eq!(principal_with(None, &[&aba.tab], None, Some(0), parent), Ok(Principal::Unknown));
+        assert_eq!(
+            principal_with(None, &[], None, None, parent),
+            Ok(Principal::Unknown)
+        );
+        assert_eq!(
+            principal_with(None, &[&aba.tab], None, Some(0), parent),
+            Ok(Principal::Unknown)
+        );
     }
 
     #[test]
@@ -851,21 +1075,46 @@ mod tests {
         }
         let tarefa = task_id("principal");
         register_task_process(&tarefa, 4_100_000_051);
-        let parents = HashMap::from([(4_100_000_053, 4_100_000_052), (4_100_000_052, 4_100_000_051)]);
+        let parents = HashMap::from([
+            (4_100_000_053, 4_100_000_052),
+            (4_100_000_052, 4_100_000_051),
+        ]);
         let parent = |pid: u32| parents.get(&pid).copied();
         // Sem declarar nada, o `ags` do shell do agente da tarefa é a tarefa; declarando o `taskId` certo também.
-        assert_eq!(principal_with(None, &[], None, Some(4_100_000_053), parent), Ok(Principal::Task(tarefa.clone())));
-        assert_eq!(principal_with(None, &[], Some(&tarefa), Some(4_100_000_053), parent), Ok(Principal::Task(tarefa.clone())));
+        assert_eq!(
+            principal_with(None, &[], None, Some(4_100_000_053), parent),
+            Ok(Principal::Task(tarefa.clone()))
+        );
+        assert_eq!(
+            principal_with(None, &[], Some(&tarefa), Some(4_100_000_053), parent),
+            Ok(Principal::Task(tarefa.clone()))
+        );
         // `taskId` de outra tarefa, ou de um processo que não é o dela: recusado.
         let outra = task_id("outra");
         assert!(principal_with(None, &[], Some(&outra), Some(4_100_000_053), parent).is_err());
         assert!(principal_with(None, &[], Some(&tarefa), Some(4_100_000_099), parent).is_err());
-        assert!(principal_with(None, &[], Some(&tarefa), None, parent).is_err(), "o TCP não prova tarefa");
+        assert!(
+            principal_with(None, &[], Some(&tarefa), None, parent).is_err(),
+            "o TCP não prova tarefa"
+        );
         // Uma tarefa não é uma aba: declarar as duas é trocar de identidade.
-        assert!(principal_with(None, &["uma-aba"], Some(&tarefa), Some(4_100_000_053), parent).unwrap_err().contains("tarefa"));
+        assert!(
+            principal_with(
+                None,
+                &["uma-aba"],
+                Some(&tarefa),
+                Some(4_100_000_053),
+                parent
+            )
+            .unwrap_err()
+            .contains("tarefa")
+        );
         assert!(principal_with(None, &["uma-aba"], None, Some(4_100_000_053), parent).is_err());
         release_task_process(&tarefa);
         // Liberada, o processo dela volta a ser um estranho ao ADE.
-        assert_eq!(principal_with(None, &[], None, Some(4_100_000_053), parent), Ok(Principal::Outside));
+        assert_eq!(
+            principal_with(None, &[], None, Some(4_100_000_053), parent),
+            Ok(Principal::Outside)
+        );
     }
 }

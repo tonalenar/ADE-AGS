@@ -86,7 +86,7 @@ Claude, Codex e OpenCode usam esse diretório. Gemini e Kimi ignoram o argumento
 
 Módulo `accounts/`. Uma conta é um diretório. A tab envia ao backend só o ID da conta, que resolve o diretório e prepara o ambiente do processo. Não há symlink do "perfil ativo": duas tabs vivas não podem dividir o mesmo arquivo de credencial.
 
-A app cria o diretório vazio em `<app data>/accounts/<agente>/<nome>`. O login de perfil acontece no terminal do próprio agente; uma API key do Claude fica só no keyring. O backend carrega perfil e credencial para o PTY na hora do spawn e não devolve o ambiente ao WebView. O que se lê do perfil é só o marcador de "está logado" e, para o Claude, o email em `.claude.json` → `oauthAccount.emailAddress`.
+A app cria o diretório vazio em `<app data>/accounts/<agente>/<nome>`. O login de perfil acontece no terminal do próprio agente; as API keys de Claude e Codex ficam só no keyring. Um `apiKeyHelper` do Claude ou `auth.command` do Codex pede a chave ao broker local, que valida o PID descendente e um ticket de uso único. A chave não vai no ambiente nem volta pelo IPC ao WebView. O `auth.json` legado do Codex é migrado ao keyring antes de o perfil abrir, preservando os outros campos. O que se lê do perfil é só o marcador de "está logado" e, para o Claude, o email em `.claude.json` → `oauthAccount.emailAddress`.
 
 | Agente | Variável | Diretório padrão quando a variável não está setada | Marcador de login | Onde o marcador da conta do sistema é lido |
 |---|---|---|---|---|
@@ -96,9 +96,9 @@ A app cria o diretório vazio em `<app data>/accounts/<agente>/<nome>`. O login 
 
 `default_dir()` em `profiles.rs` tem braços só para `XDG_DATA_HOME` e `CODEX_HOME`. Qualquer outra variável cai em `~/.claude`. Ligar Gemini sem um braço próprio faria a conta do sistema apontar para a pasta do Claude.
 
-A conta do sistema não é uma linha em `agent_accounts`. O id sintético é `system:<agent>`. As contas criadas na app são linhas. Para uma aba, o WebView envia somente o id da conta; o backend confere se ela pertence ao provedor e injeta perfil/credenciais no PTY. A frota também resolve o ambiente no backend. Segredos do keyring nunca voltam pelo IPC.
+A conta do sistema não é uma linha em `agent_accounts`. O id sintético é `system:<agent>`. As contas criadas na app são linhas. Para uma aba, o WebView envia somente o id da conta; o backend confere se ela pertence ao provedor e injeta apenas a configuração do perfil no PTY. O helper autentica pelo socket IPC com PID do peer e recebe a chave só no stdout local. A frota também resolve o ambiente no backend. Segredos do keyring nunca voltam ao WebView.
 
-Credenciais de git do forge usam o keyring do SO (`keyring` com `windows-native`), não um arquivo de token da ADE.
+Credenciais de git do forge usam o keyring do SO (`keyring` com `windows-native`). Arquivos de token legados são migrados ao keyring; falha do cofre interrompe a operação e não grava novas cópias em arquivo.
 
 ## Skills
 
