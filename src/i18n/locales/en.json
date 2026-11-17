@@ -36,6 +36,7 @@
   "btn.back": "Back",
   "btn.next": "Next",
   "btn.save": "Save",
+  "btn.retry": "Try again",
   "home.step1": "1 · Project folder",
   "home.step2": "2 · Agent / TUI",
   "home.step3": "3 · Skills (optional)",

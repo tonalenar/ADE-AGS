@@ -5,6 +5,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button, CloseIcon, Progress } from "neogestify-ui-components";
 
 import { ExternalIcon } from "@/app/icons";
+import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 import { Markdown } from "@/shared/ui/LazyMarkdown";
 
 import { useUpdatesStore } from "./store";
@@ -109,7 +111,7 @@ export function UpdateNotifier() {
           </Button>
           {info.install === "auto" ? (
             phase === "installed" ? (
-              <Button size="sm" variant="primary" onClick={() => restart().catch(console.error)}>{t("updates.restart")}</Button>
+              <Button size="sm" variant="primary" onClick={() => restart().catch((e) => AlertaToast(t("updates.restart"), uiErrorText(e), "error", 7000))}>{t("updates.restart")}</Button>
             ) : (
               <Button size="sm" variant="primary" disabled={phase === "installing"} onClick={() => install()}>
                 {phase === "installing" ? t("updates.installing") : t("updates.install")}

@@ -36,6 +36,7 @@
   "btn.back": "Atrás",
   "btn.next": "Siguiente",
   "btn.save": "Guardar",
+  "btn.retry": "Intentar de nuevo",
   "home.step1": "1 · Carpeta del proyecto",
   "home.step2": "2 · Agente / TUI",
   "home.step3": "3 · Skills (opcional)",

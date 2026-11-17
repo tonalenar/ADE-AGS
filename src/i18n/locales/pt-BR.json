@@ -36,6 +36,7 @@
   "btn.back": "Voltar",
   "btn.next": "Próximo",
   "btn.save": "Salvar",
+  "btn.retry": "Tentar de novo",
   "home.step1": "1 · Pasta do projeto",
   "home.step2": "2 · Agente/TUI",
   "home.step3": "3 · Habilidades (opcional)",

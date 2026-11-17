@@ -50,14 +50,15 @@ export const useUpdatesStore = create<UpdatesState>()((set, get) => ({
 
   install: async () => {
     set({ phase: "installing", progress: { downloaded: 0, total: null }, error: null });
-    const off = await listen<UpdateProgress>("cc-update-progress", (e) => set({ progress: e.payload }));
+    let off: (() => void) | undefined;
     try {
+      off = await listen<UpdateProgress>("cc-update-progress", (e) => set({ progress: e.payload }));
       await updateInstall();
       set({ phase: "installed" });
     } catch (e) {
       set({ phase: "error", error: String(e) });
     } finally {
-      off();
+      off?.();
     }
   },
 
