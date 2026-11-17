@@ -13,6 +13,8 @@ mod queries;
 mod schema;
 mod seeds;
 #[cfg(test)]
+mod lock_lint;
+#[cfg(test)]
 mod test;
 
 pub use wal::spawn_wal_maintenance;
