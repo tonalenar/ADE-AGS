@@ -68,7 +68,13 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
           const title = found && found.source !== "fallback" ? found.title.trim() : "";
           if (!alive) return;
           if (title) {
-            if (title !== row.title) upsert(await updateConversation(row.id, { title }));
+            if (title !== row.title) {
+              try {
+                upsert(await updateConversation(row.id, { title }));
+              } catch {
+                /* o próximo tick tenta de novo */
+              }
+            }
             break;
           }
         }
