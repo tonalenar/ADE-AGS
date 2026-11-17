@@ -1,4 +1,7 @@
 import { useEffect } from "react";
+import i18n from "i18next";
+import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 import { listen } from "@tauri-apps/api/event";
 
 import { useTabsStore } from "@/features/tabs/store";
@@ -41,9 +44,8 @@ export function useFleetEvents() {
     // Listar antes las mostraría trabajando. `whenSweepDone` espera ese aviso.
     whenSweepDone().then(() => {
       if (cancel) return;
-      if (workspaceId) loadTasks(workspaceId).catch(console.error);
-      // La cola no es por workspace, y puede haber pedidos de antes de montar esta ventana.
-      loadApprovals().catch(console.error);
+      if (workspaceId) loadTasks(workspaceId).catch((e) => AlertaToast(i18n.t("fleet.title"), uiErrorText(e), "error", 7000));
+      loadApprovals().catch((e) => AlertaToast(i18n.t("fleet.title"), uiErrorText(e), "error", 7000));
     });
     return () => {
       cancel = true;
