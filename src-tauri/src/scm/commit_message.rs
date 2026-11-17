@@ -15,7 +15,7 @@ pub(crate) fn parse_diff(raw: &str) -> DiffSummary {
             if let Some((_, path)) = rest.split_once(" b/") {
                 summary.files.push(path.trim_matches('"').to_string());
             }
-        } else if line.starts_with("+++") || line.starts_with("---") || line.starts_with("\\ ") {
+        } else if line.starts_with("+++ ") || line.starts_with("--- ") || line.starts_with("\\ ") {
             continue;
         } else if line.starts_with('+') {
             summary.insertions += 1;
@@ -60,7 +60,12 @@ pub(crate) fn build_prompt(
     let history = history
         .lines()
         .take(8)
-        .map(|line| line.chars().take(120).collect::<String>())
+        .map(|line| {
+            line.replace("END UNTRUSTED LOCAL COMMIT SUBJECTS", "END UNTRUSTED LOCAL COMMIT SUBJECTS [texto]")
+                .chars()
+                .take(120)
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let summary = parse_diff(&diff);
@@ -113,6 +118,8 @@ mod tests {
         let summary = parse_diff(FIXTURE);
         assert_eq!(summary.files, ["src/lib.rs"]);
         assert_eq!((summary.insertions, summary.deletions), (2, 1));
+        let plusplus = parse_diff("diff --git a/a b/a\n--- a/a\n+++ b/a\n+-- kept\n++plus\n");
+        assert_eq!((plusplus.insertions, plusplus.deletions), (2, 0));
     }
 
     #[test]

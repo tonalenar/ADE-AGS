@@ -28,7 +28,11 @@ pub(crate) fn normalize_cwd(cwd: &str) -> Result<String, String> {
     if cwd.trim().is_empty() || cwd.len() > MAX_PROJECT_PATH || cwd.contains('\0') {
         return Err("A pasta do projeto está inválida".into());
     }
-    let path = cwd.replace('\\', "/");
+    let mut path = cwd.replace('\\', "/");
+    #[cfg(windows)]
+    {
+        path = path.to_ascii_lowercase();
+    }
     let absolute = path.starts_with('/')
         || (path.as_bytes().get(1) == Some(&b':')
             && path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic));

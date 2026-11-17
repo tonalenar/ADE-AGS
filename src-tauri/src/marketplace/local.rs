@@ -27,6 +27,10 @@ pub(super) fn scan_local_registry(
         let mut out = Vec::new();
         for (i, s) in manifest.skills.into_iter().enumerate() {
             progress.emit("scanning", i as u32, Some(total), Some(s.path.clone()));
+            let rel = std::path::Path::new(&s.path);
+            if rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                continue;
+            }
             if !base.join(&s.path).join("SKILL.md").is_file() {
                 continue; // declarada en el manifest pero ausente en disco, se saltea
             }

@@ -366,6 +366,9 @@ pub async fn download_into(staging: &Path, id: &str) -> Result<PathBuf, String> 
 /// acá la carpeta temporal se borra apenas termina la instalación. Se necesitan archivos
 /// de verdad para poder copiarlos a la biblioteca global.
 pub fn install_into(staging: &Path, target: &str) -> Result<PathBuf, String> {
+    if target.starts_with('-') || target.contains('\0') || target.contains(' ') {
+        return Err("nome de skill inválido para npx skills add".into());
+    }
     std::fs::create_dir_all(staging).map_err(|e| e.to_string())?;
 
     let mut cmd = npx_command();

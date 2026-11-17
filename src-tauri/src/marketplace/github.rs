@@ -26,9 +26,13 @@ struct GhTreeEntry {
     kind: String,
 }
 
+const HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+const MAX_RAW_BYTES: usize = 2 * 1024 * 1024;
+
 fn gh_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent("ADE-AGS-App")
+        .timeout(HTTP_TIMEOUT)
         .build()
         .map_err(|e| e.to_string())
 }
@@ -147,7 +151,15 @@ async fn fetch_raw_github(
     if !resp.status().is_success() {
         return Err(format!("Não foi possível baixar {path} ({})", resp.status()));
     }
-    resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+    let mut body = Vec::new();
+    let mut resp = resp;
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+        if body.len().saturating_add(chunk.len()) > MAX_RAW_BYTES {
+            return Err(format!("{path} excedeu o limite de 2 MiB"));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 pub(super) async fn fetch_github_registry(
