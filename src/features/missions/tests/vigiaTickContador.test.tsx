@@ -66,7 +66,8 @@ function registroGuardado(): { nudges: number; lastNudge?: number } | undefined 
 /** O último aviso que o Vigia escreveu no chat. */
 function ultimoRelatorio(): string | undefined {
   const calls = mocks.invoke.mock.calls as unknown as [string, { text?: string } | undefined][];
-  return calls.filter(([name]) => name === "vigia_report").at(-1)?.[1]?.text;
+  const deRelatorio = calls.filter(([name]) => name === "vigia_report");
+  return deRelatorio[deRelatorio.length - 1]?.[1]?.text;
 }
 
 /** O Orquestrador manda uma mensagem ao integrante, como o backend emite em `cc-peer-message`. */
