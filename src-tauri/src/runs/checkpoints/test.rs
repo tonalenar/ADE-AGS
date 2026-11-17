@@ -352,6 +352,103 @@ fn rollback_nao_corre_com_dispatch() {
     assert_eq!(read(&r.0, "a.txt").as_deref(), Some("a trabalhou\n"), "a pasta não pode ser restaurada com a tarefa viva");
 }
 
+/// O git do rollback fica bloqueado no meio (o gancho segura o I/O). Enquanto isso, o lock do tick tem que estar livre
+/// e o run tem que estar marcado: o tick não despacha nada dele. Liberar o git só depois das checagens evita deixar
+/// uma thread presa segurando o lock se algo falhar.
+#[test]
+fn rollback_com_git_bloqueado_nao_prende_o_lock_do_tick() {
+    let r = repo();
+    let cwd = r.0.to_string_lossy().to_string();
+    let (db, run) = db_con_run(&cwd);
+    let a = tarea(&db, &run, "a", &cwd, &[]);
+    take(&db, &run, Some(&a), &r.0, kind::BEFORE, "antes de a").unwrap();
+    std::fs::write(r.0.join("a.txt"), "a trabalhou\n").unwrap();
+    {
+        let conn = db.lock().unwrap();
+        conn.execute("UPDATE tasks SET status = 'done' WHERE id = ?1", [&a]).unwrap();
+    }
+    let p = plan_de(&db, &run, &a).unwrap();
+
+    let (no_git_tx, no_git_rx) = std::sync::mpsc::channel::<()>();
+    let (liberar_tx, liberar_rx) = std::sync::mpsc::channel::<()>();
+    let (db2, run2, p2) = (db.clone(), run.clone(), p.clone());
+    let voltar = std::thread::spawn(move || {
+        rollback_com(&db2, &run2, &p2, move || {
+            no_git_tx.send(()).unwrap();
+            liberar_rx.recv().unwrap();
+        })
+    });
+    no_git_rx.recv().unwrap();
+    // Tentativas limitadas, sem espera: com o lock livre a primeira já passa.
+    let livre = (0..1_000).any(|_| crate::runs::scheduler::try_tick_lock().is_some());
+    let marcado = crate::runs::scheduler::em_manutencao(&run);
+    liberar_tx.send(()).unwrap();
+    let primeiro = voltar.join().unwrap();
+
+    assert!(livre, "o lock do tick ficou preso durante o git do rollback");
+    assert!(marcado, "o run tem que estar marcado enquanto o git roda");
+    assert!(primeiro.is_ok(), "{primeiro:?}");
+    assert!(!crate::runs::scheduler::em_manutencao(&run), "a marca sai quando o rollback termina");
+}
+
+/// Um run já marcado (outro rollback ou restauração em curso) recusa o segundo rollback, sem tocar em arquivo.
+#[test]
+fn segundo_rollback_do_mesmo_run_e_recusado_enquanto_o_primeiro_roda() {
+    let r = repo();
+    let cwd = r.0.to_string_lossy().to_string();
+    let (db, run) = db_con_run(&cwd);
+    let a = tarea(&db, &run, "a", &cwd, &[]);
+    take(&db, &run, Some(&a), &r.0, kind::BEFORE, "antes de a").unwrap();
+    std::fs::write(r.0.join("a.txt"), "a trabalhou\n").unwrap();
+    {
+        let conn = db.lock().unwrap();
+        conn.execute("UPDATE tasks SET status = 'done' WHERE id = ?1", [&a]).unwrap();
+    }
+    let p = plan_de(&db, &run, &a).unwrap();
+    assert!(crate::runs::scheduler::marcar_manutencao(&run));
+    let resultado = rollback(&db, &run, &p);
+    crate::runs::scheduler::desmarcar_manutencao(&run);
+
+    assert!(resultado.is_err(), "o segundo rollback correu junto com outro: {resultado:?}");
+    assert_eq!(read(&r.0, "a.txt").as_deref(), Some("a trabalhou\n"), "nenhum arquivo pode ser tocado");
+}
+
+/// A restauração de uma foto também fica fora do lock do tick enquanto o git roda.
+#[test]
+fn restauracao_com_git_bloqueado_nao_prende_o_lock_do_tick() {
+    let r = repo();
+    let cwd = r.0.to_string_lossy().to_string();
+    let (db, run) = db_con_run(&cwd);
+    let a = tarea(&db, &run, "a", &cwd, &[]);
+    let cp = take(&db, &run, Some(&a), &r.0, kind::BEFORE, "antes de a").unwrap();
+    std::fs::write(r.0.join("a.txt"), "a trabalhou\n").unwrap();
+    {
+        let conn = db.lock().unwrap();
+        conn.execute("UPDATE tasks SET status = 'done' WHERE id = ?1", [&a]).unwrap();
+    }
+
+    let (no_git_tx, no_git_rx) = std::sync::mpsc::channel::<()>();
+    let (liberar_tx, liberar_rx) = std::sync::mpsc::channel::<()>();
+    let (db2, id) = (db.clone(), cp.id.clone());
+    let restaurar = std::thread::spawn(move || {
+        restaurar_com(&db2, &id, move || {
+            no_git_tx.send(()).unwrap();
+            liberar_rx.recv().unwrap();
+        })
+    });
+    no_git_rx.recv().unwrap();
+    let livre = (0..1_000).any(|_| crate::runs::scheduler::try_tick_lock().is_some());
+    let marcado = crate::runs::scheduler::em_manutencao(&run);
+    liberar_tx.send(()).unwrap();
+    let resultado = restaurar.join().unwrap();
+
+    assert!(livre, "o lock do tick ficou preso durante o git da restauração");
+    assert!(marcado, "o run tem que estar marcado enquanto a restauração roda");
+    assert!(resultado.is_ok(), "{resultado:?}");
+    assert!(!crate::runs::scheduler::em_manutencao(&run), "a marca sai quando a restauração termina");
+    assert_eq!(read(&r.0, "a.txt").as_deref(), Some("uno\n"), "a foto foi restaurada");
+}
+
 #[test]
 fn las_fotos_viejas_de_un_run_se_sueltan_pero_la_lista_sale_en_orden() {
     let (db, run) = db_con_run("/tmp/p");
