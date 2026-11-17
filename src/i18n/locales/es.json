@@ -5415,6 +5415,8 @@
   "chat.team.dissolveConfirm": "Las conversaciones siguen abiertas; solo se quitan las conexiones.",
   "chat.team.dissolveYes": "Deshacer",
   "chat.team.unlink": "Desconectar",
+  "chat.team.unlinkFailed": "No se pudo desconectar al integrante: {{error}}",
+  "chat.team.dissolveFailed": "No se pudo deshacer el equipo: {{error}}",
   "chat.team.open": "Abrir",
   "chat.team.modelDefault": "predeterminado",
   "chat.team.thread": "conversación en el chat",

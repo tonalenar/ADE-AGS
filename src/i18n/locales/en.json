@@ -5415,6 +5415,8 @@
   "chat.team.dissolveConfirm": "The conversations stay open; only the links go.",
   "chat.team.dissolveYes": "Dissolve",
   "chat.team.unlink": "Unlink",
+  "chat.team.unlinkFailed": "Could not unlink the member: {{error}}",
+  "chat.team.dissolveFailed": "Could not dissolve the team: {{error}}",
   "chat.team.open": "Open",
   "chat.team.modelDefault": "default",
   "chat.team.thread": "chat conversation",

@@ -5415,6 +5415,8 @@
   "chat.team.dissolveConfirm": "As conversas continuam abertas; só as ligações saem.",
   "chat.team.dissolveYes": "Desfazer",
   "chat.team.unlink": "Desligar",
+  "chat.team.unlinkFailed": "Não deu para desligar o integrante: {{error}}",
+  "chat.team.dissolveFailed": "Não deu para desfazer o time: {{error}}",
   "chat.team.open": "Abrir",
   "chat.team.modelDefault": "padrão",
   "chat.team.thread": "conversa no chat",
