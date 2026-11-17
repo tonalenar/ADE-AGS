@@ -74,8 +74,14 @@ pub(crate) fn revisions_coordinated_with(
         plan_purge(&conn, entry_id, revision, scope.events_root.is_some())?
     };
     antes_do_io();
-    // NDJSON antes do commit: se falhar, a revisão continua no banco e a tentativa seguinte
-    // ainda tem o texto.
+    // Antes de tocar em qualquer arquivo, confere com o mutex que a memória ainda é a lida no
+    // plano: se mudou, recusa sem alterar NDJSON.
+    {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        confirm_unchanged(&conn, &plan, revision)?;
+    }
+    // NDJSON antes do commit: se a redação falhar, a revisão continua no banco e a tentativa
+    // seguinte ainda tem o texto.
     scrub_event_paths(&plan.event_paths, scope.events_root.as_deref(), &plan.bodies())?;
     let applied = {
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
@@ -142,8 +148,19 @@ fn plan_purge(conn: &Connection, entry_id: &str, revision: Option<i64>, with_eve
     Ok(Plan { workspace, entry_id: entry_id.to_string(), rows, audited_ids: Vec::new(), event_paths })
 }
 
-/// Grava o purge. Antes, confere que as revisões são as mesmas que foram lidas: se a memória
-/// mudou enquanto o mutex estava solto, não apaga o que não foi lido nem o que não foi redigido.
+/// Confere que as revisões são as mesmas que foram lidas no plano. Se a memória mudou enquanto
+/// o mutex estava solto, não apaga o que não foi lido nem o que não foi redigido.
+fn confirm_unchanged(conn: &Connection, plan: &Plan, revision: Option<i64>) -> Result<(), String> {
+    if plan.rows.is_empty() {
+        return Ok(());
+    }
+    if revision_bodies(conn, &plan.entry_id, revision)? != plan.rows {
+        return Err("A memória mudou durante o apagamento. Repita o apagamento para concluir.".into());
+    }
+    Ok(())
+}
+
+/// Grava o purge, depois de conferir com `confirm_unchanged`.
 fn commit_purge(conn: &Connection, plan: Plan, revision: Option<i64>) -> Result<Applied, String> {
     if plan.rows.is_empty() {
         return Ok(Applied {
@@ -153,9 +170,7 @@ fn commit_purge(conn: &Connection, plan: Plan, revision: Option<i64>) -> Result<
             bodies: Vec::new(),
         });
     }
-    if revision_bodies(conn, &plan.entry_id, revision)? != plan.rows {
-        return Err("A memória mudou durante o apagamento. Repita o apagamento para concluir.".into());
-    }
+    confirm_unchanged(conn, &plan, revision)?;
     let revisions: Vec<i64> = plan.rows.iter().map(|(id, _)| *id).collect();
     let bodies = plan.bodies();
     delete_revisions(conn, &plan.workspace, &plan.entry_id, &revisions, &bodies)?;

@@ -1642,4 +1642,101 @@ mod tests {
         assert_eq!(apagadas, vec![(target.entry_id.clone(), target.revision)]);
         assert!(after.contains(&(other.entry_id.clone(), other.revision)), "a outra memória foi tocada");
     }
+
+    /// Se a memória muda entre o plano e a gravação, o purge recusa; então o NDJSON não pode
+    /// já ter sido redigido.
+    #[test]
+    fn purge_recusado_nao_redige_o_ndjson() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _other) = approved_pair(&db, &sync);
+        let events = root.path().join("events");
+        std::fs::create_dir_all(&events).unwrap();
+        let log = events.join("task.ndjson");
+        std::fs::write(&log, "{\"text\":\"PURGE_TARGET_BODY\"}\n").unwrap();
+        {
+            let conn = db.lock().unwrap();
+            conn.execute("INSERT INTO runs (id, workspace_id, objective, cwd, created_at) VALUES ('r1', 'w', 'o', '/tmp', 0)", []).unwrap();
+            conn.execute(
+                "INSERT INTO tasks (id, run_id, title, prompt, agent_id, cwd, events_path, created_at) VALUES ('t1', 'r1', 't', 'p', 'claude-code', '/tmp', ?1, 0)",
+                [log.to_string_lossy().to_string()],
+            )
+            .unwrap();
+        }
+        let scope = crate::memory::purge::Scope {
+            memory_root: root.path().to_path_buf(),
+            database_file: None,
+            events_root: Some(events),
+        };
+        let sonda_db = db.clone();
+        let mudou = std::cell::Cell::new(false);
+        let revisao = target.revision;
+        let result = crate::memory::purge::revisions_coordinated_with(&db, &sync, &target.entry_id, None, &scope, &|| {
+            if !mudou.replace(true) {
+                let conn = sonda_db.lock().unwrap();
+                crate::memory::propose(
+                    &conn,
+                    "workspace",
+                    "w",
+                    None,
+                    &ProposalInput {
+                        scope: "workspace".into(),
+                        key: "alvo".into(),
+                        kind: "note".into(),
+                        body: "PURGE_NOVA_REVISAO".into(),
+                        priority: 0,
+                        operation: "update".into(),
+                        expected_revision: Some(revisao),
+                        source_fact_id: None,
+                        reason: None,
+                        acknowledge_secret: false,
+                    },
+                    ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None },
+                )
+                .unwrap();
+            }
+        });
+        assert!(result.is_err(), "o purge deveria recusar: a memória mudou durante o apagamento");
+        let texto = std::fs::read_to_string(&log).unwrap();
+        assert!(texto.contains("PURGE_TARGET_BODY"), "o NDJSON foi redigido antes de o purge recusar: {texto}");
+    }
+
+    /// Se a redação do NDJSON falha, a revisão tem que continuar no banco: o texto ainda está
+    /// lá e a tentativa seguinte consegue redigir.
+    #[cfg(unix)]
+    #[test]
+    fn purge_com_ndjson_que_falha_mantem_a_revisao_no_banco() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _other) = approved_pair(&db, &sync);
+        let events = root.path().join("events");
+        std::fs::create_dir_all(&events).unwrap();
+        let real = root.path().join("real.ndjson");
+        std::fs::write(&real, "{\"text\":\"PURGE_TARGET_BODY\"}\n").unwrap();
+        let log = events.join("task.ndjson");
+        std::os::unix::fs::symlink(&real, &log).unwrap();
+        {
+            let conn = db.lock().unwrap();
+            conn.execute("INSERT INTO runs (id, workspace_id, objective, cwd, created_at) VALUES ('r1', 'w', 'o', '/tmp', 0)", []).unwrap();
+            conn.execute(
+                "INSERT INTO tasks (id, run_id, title, prompt, agent_id, cwd, events_path, created_at) VALUES ('t1', 'r1', 't', 'p', 'claude-code', '/tmp', ?1, 0)",
+                [log.to_string_lossy().to_string()],
+            )
+            .unwrap();
+        }
+        let before = revision_set(&db);
+        let scope = crate::memory::purge::Scope {
+            memory_root: root.path().to_path_buf(),
+            database_file: None,
+            events_root: Some(events),
+        };
+        let result = crate::memory::purge::revisions_coordinated_with(&db, &sync, &target.entry_id, Some(target.revision), &scope, &|| {});
+        assert!(result.is_err(), "a redação falhou e o purge deveria recusar");
+        let after = revision_set(&db);
+        assert_eq!(before, after, "a redação do NDJSON falhou, mas a revisão saiu do banco");
+    }
 }
