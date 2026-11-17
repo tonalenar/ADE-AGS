@@ -313,15 +313,15 @@ fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, dev
 }
 
 /// Os agentes (abas) ligados ao nó `node` no canvas `key`.
-fn agents_of(key: &str, node: &str) -> Vec<String> {
-    let boards = canvas::load_boards().unwrap_or_default();
-    let Some(board) = boards.get(key) else { return Vec::new() };
-    board
+fn agents_of(key: &str, node: &str) -> Result<Vec<String>, String> {
+    let boards = canvas::load_boards()?;
+    let Some(board) = boards.get(key) else { return Ok(Vec::new()) };
+    Ok(board
         .edges
         .iter()
         .filter_map(|e| if e.a == node { Some(e.b.clone()) } else if e.b == node { Some(e.a.clone()) } else { None })
         .filter(|other| !canvas::is_portal(other))
-        .collect()
+        .collect())
 }
 
 /// A pessoa escreveu na conversa do simulador: vai para cada agente conectado ao nó, pela fila de cada um
@@ -333,7 +333,7 @@ pub fn simulator_tell(app: AppHandle, key: String, node: String, name: String, t
         return Err("A mensagem está vazia.".into());
     }
     let tabs = open_tabs(&app)?;
-    let targets: Vec<_> = agents_of(&key, &node).into_iter().filter_map(|id| tabs.iter().find(|t| t.id == id).cloned()).collect();
+    let targets: Vec<_> = agents_of(&key, &node)?.into_iter().filter_map(|id| tabs.iter().find(|t| t.id == id).cloned()).collect();
     if targets.is_empty() {
         return Err("Nenhum agente está conectado a este simulador. Ligue um terminal a ele com a corda.".into());
     }

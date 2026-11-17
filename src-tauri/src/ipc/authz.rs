@@ -413,7 +413,7 @@ pub(crate) fn authorize(
     command: &str,
     args: &Value,
     who: impl FnOnce() -> Result<Principal, String>,
-    boards: impl FnOnce() -> Boards,
+    boards: impl FnOnce() -> Result<Boards, String>,
     opened_by: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Value, String> {
     let Some(class) = class_of(command) else { return Err(unclassified(command)) };
@@ -423,7 +423,7 @@ pub(crate) fn authorize(
         Class::PersonOrScope(Role::Crown) => match who()? {
             Principal::Tab(me) => {
                 claims_match(args, &me)?;
-                if crate::canvas::is_orchestrator(&boards(), &me) {
+                if crate::canvas::is_orchestrator(&boards()?, &me) {
                     Ok(with_key(args, "from", &me))
                 } else {
                     Err(screen_only(command, "Só o orquestrador (a coroa no canvas) decide ou responde por um integrante; um integrante leva a dúvida a ele."))
@@ -441,7 +441,7 @@ fn scope(
     args: &Value,
     target: Target,
     principal: Principal,
-    boards: impl FnOnce() -> Boards,
+    boards: impl FnOnce() -> Result<Boards, String>,
     opened_by: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Value, String> {
     match (target, principal) {
@@ -476,7 +476,7 @@ fn scope(
         (Target::Tab(arg), Principal::Tab(me)) => {
             claims_match(args, &me)?;
             let Some(tab) = text(args, arg) else { return Err(format!("`{command}` precisa do alvo (--{arg}).")) };
-            if crate::ipc::guard::in_reach(&boards(), &me, tab, opened_by(tab).as_deref()) {
+            if crate::ipc::guard::in_reach(&boards()?, &me, tab, opened_by(tab).as_deref()) {
                 Ok(args.clone())
             } else {
                 Err(out_of_reach(command, "aba", tab))
@@ -492,7 +492,7 @@ fn scope(
                 };
             };
             let key = thread_ref(thread);
-            if crate::ipc::guard::in_reach(&boards(), &me, &key, opened_by(&key).as_deref()) {
+            if crate::ipc::guard::in_reach(&boards()?, &me, &key, opened_by(&key).as_deref()) {
                 Ok(args.clone())
             } else {
                 Err(out_of_reach(command, "conversa", thread))
@@ -501,7 +501,7 @@ fn scope(
         (Target::Mission { arg, crown }, Principal::Tab(me)) => {
             claims_match(args, &me)?;
             let Some(mission) = text(args, arg) else { return Err(format!("`{command}` precisa da missão (--{arg}).")) };
-            let boards = boards();
+            let boards = boards()?;
             if crate::canvas::mission_of_tab(&boards, &me).as_deref() != Some(mission) {
                 return Err(format!("A missão {mission} não é a do seu quadro: `{command}` só age na missão a que você pertence."));
             }

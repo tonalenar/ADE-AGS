@@ -3007,6 +3007,7 @@
   "canvas.agentDeleteConfirm": "Fechar?",
   "canvas.role": "Papel: {{role}}",
   "canvas.floor.title": "Andares",
+  "canvas.floor.loadError": "Não foi possível ler a lista de andares; o arquivo foi mantido intacto. {{error}}",
   "canvas.floor.ground": "Térreo",
   "canvas.floor.groundHint": "O projeto original",
   "canvas.floor.add": "+ Andar",

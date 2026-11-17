@@ -171,6 +171,7 @@ pub async fn vigia_check(
 /// atenção (o `ags say` é que pede atenção).
 #[tauri::command]
 pub fn vigia_report(app: AppHandle, tab_id: String, text: String) -> Result<(), String> {
+    let boards = crate::canvas::load_boards()?;
     let text = crate::chat::clean_text(&text)?;
     let now = crate::util::now_ts();
     crate::chat::update(&tab_id, |conv| {
@@ -179,7 +180,6 @@ pub fn vigia_report(app: AppHandle, tab_id: String, text: String) -> Result<(), 
         Ok(())
     })?;
     let _ = app.emit(crate::ipc::commands::chat::CHANGED_EVENT, &tab_id);
-    let boards = crate::canvas::load_boards().unwrap_or_default();
     let db = app.state::<crate::database::DbConnection>();
     let conn = db.lock().map_err(|e| e.to_string())?;
     let name: String = conn.query_row(

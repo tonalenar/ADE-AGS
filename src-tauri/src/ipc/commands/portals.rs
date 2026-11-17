@@ -268,14 +268,14 @@ pub(crate) fn request_for(action: &str, args: &Value) -> Result<Value, String> {
 
 pub(super) fn portal_list(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
-    let portals = reachable(&canvas::load_boards().unwrap_or_default(), &from);
+    let portals = reachable(&canvas::load_boards()?, &from);
     Ok(json!({ "portals": with_states(app, &portals), "window": crate::ipc::bridge::window_report() }))
 }
 
 /// `ags portal close <portal>`: el agente limpia lo que creó. Mismo permiso que el resto: un portal conectado con él.
 pub(super) fn portal_close(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
-    let portals = reachable(&canvas::load_boards().unwrap_or_default(), &from);
+    let portals = reachable(&canvas::load_boards()?, &from);
     let target = resolve_portal(&portals, &arg_str(args, "name")?)?;
     let raw = ask_frontend_within(
         app,
@@ -340,7 +340,7 @@ pub(super) fn portal_create(app: &AppHandle, args: &Value) -> Result<Value, Stri
         .into_iter()
         .find(|t| t.id == from)
         .ok_or_else(|| "A sua aba não está aberta em nenhuma janela.".to_string())?;
-    let mine = reachable(&canvas::load_boards().unwrap_or_default(), &from);
+    let mine = reachable(&canvas::load_boards()?, &from);
     let fresh = args.get("new").and_then(Value::as_bool).unwrap_or(false);
     let name = arg_str_opt(args, "name").filter(|n| !n.trim().is_empty());
     let url = arg_str_opt(args, "url").map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
@@ -426,7 +426,7 @@ pub(super) fn portal_open(app: &AppHandle, args: &Value) -> Result<Value, String
         return Ok(json!({ "opened": "system", "url": parsed.as_str() }));
     }
     let from = caller(args)?;
-    let portals = reachable(&canvas::load_boards().unwrap_or_default(), &from);
+    let portals = reachable(&canvas::load_boards()?, &from);
     if let Some(existing) = portals.iter().find(|p| same_origin(&p.portal.url, parsed.as_str())) {
         let mut nav = args.clone();
         nav["name"] = json!(existing.id);
@@ -451,7 +451,7 @@ fn act_timeout(args: &Value) -> Result<u64, String> {
 /// `ags portal <acción> <portal> …`: lo que el agente le pide a ese navegador.
 pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Result<Value, String> {
     let from = caller(args)?;
-    let boards = canvas::load_boards().unwrap_or_default();
+    let boards = canvas::load_boards()?;
     let portals = reachable(&boards, &from);
     let target = resolve_portal(&portals, &arg_str(args, "name")?)?;
     let request = request_for(action, args)?;

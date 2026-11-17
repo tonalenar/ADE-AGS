@@ -1,5 +1,5 @@
 use super::super::user_json::{
-    read_user_json, write_user_json, write_user_json_if_unchanged, UserJsonError,
+    read_user_json, read_user_json_snapshot, write_user_json, write_user_json_if_unchanged, UserJsonError,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -40,6 +40,34 @@ fn ilegivel_vira_unreadable_e_preserva_original() {
     };
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
     assert_eq!(std::fs::read(quarantined).unwrap(), bytes);
+}
+
+#[test]
+fn quarentena_reutiliza_conteudo_igual_e_limita_cinco_copias() {
+    let (path, _dir) = temp_file("quarantine-retention");
+    let bytes = br#"{"value":"truncado""#;
+    std::fs::write(&path, bytes).unwrap();
+
+    let first = read_user_json::<Sample>(&path).unwrap_err();
+    let UserJsonError::Unreadable { quarantined: first_copy, .. } = first else {
+        panic!("esperava JSON ilegível");
+    };
+    let second = read_user_json::<Sample>(&path).unwrap_err();
+    let UserJsonError::Unreadable { quarantined: second_copy, .. } = second else {
+        panic!("esperava JSON ilegível");
+    };
+    assert_eq!(first_copy, second_copy, "conteúdo idêntico não ganha outra cópia");
+
+    for index in 0..6 {
+        std::fs::write(&path, format!("{{\"value\":{index}" )).unwrap();
+        let _ = read_user_json::<Sample>(&path);
+    }
+    let copies = std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().contains(".corrupt-"))
+        .count();
+    assert_eq!(copies, 5);
 }
 
 #[test]
@@ -89,14 +117,15 @@ fn temporarios_concorrentes_nao_colidem() {
 #[test]
 fn escrita_condicional_preserva_alteracao_concorrente() {
     let (path, _dir) = temp_file("concurrent-update");
-    let original = br#"{"value":"antigo"}"#;
-    std::fs::write(&path, original).unwrap();
+    let original = Sample { value: "antigo".into() };
+    write_user_json(&path, &original).unwrap();
+    let (_, snapshot) = read_user_json_snapshot::<Sample>(&path).unwrap().unwrap();
     let next = Sample {
         value: "novo pela ADE".into(),
     };
     std::fs::write(&path, br#"{"value":"novo pelo Claude"}"#).unwrap();
 
-    let error = write_user_json_if_unchanged(&path, &next, Some(original)).unwrap_err();
+    let error = write_user_json_if_unchanged(&path, &next, Some(&snapshot)).unwrap_err();
 
     assert!(error.contains("alterado"));
     assert_eq!(

@@ -48,21 +48,21 @@ pub(crate) fn member_refusal(lead: Option<&str>) -> Option<Value> {
 
 /// O orquestrador do time de `tab`, se ela é integrante (não o próprio orquestrador): o time do modo
 /// chat, senão a equipe do canvas.
-pub(super) fn lead_of(app: &AppHandle, tab: &str) -> Option<String> {
+pub(super) fn lead_of(app: &AppHandle, tab: &str) -> Result<Option<String>, String> {
     use tauri::Manager;
     if let Some(db) = app.try_state::<crate::database::DbConnection>()
         && let Ok(conn) = db.lock()
         && let Some(view) = crate::chat_team::api::team_of(&conn, tab).ok().flatten()
     {
-        return (view.team.led() && view.team.orchestrator != tab).then(|| crate::chat_team::api::orchestrator_peer_name(&conn, &view.team));
+        return Ok((view.team.led() && view.team.orchestrator != tab).then(|| crate::chat_team::api::orchestrator_peer_name(&conn, &view.team)));
     }
-    let boards = crate::canvas::load_boards().unwrap_or_default();
+    let boards = crate::canvas::load_boards()?;
     if crate::canvas::is_orchestrator(&boards, tab) {
-        return None;
+        return Ok(None);
     }
-    let lead = crate::canvas::team_of(&boards, tab).into_iter().find(|t| t != tab && crate::canvas::is_orchestrator(&boards, t))?;
+    let Some(lead) = crate::canvas::team_of(&boards, tab).into_iter().find(|t| t != tab && crate::canvas::is_orchestrator(&boards, t)) else { return Ok(None) };
     let name = super::peers::open_tabs(app).ok().and_then(|tabs| tabs.into_iter().find(|t| t.id == lead).map(|t| t.name));
-    Some(name.unwrap_or(lead))
+    Ok(Some(name.unwrap_or(lead)))
 }
 
 /// O que o agente recebe quando o prazo vence sem resposta. Nunca é aprovação. Pura.
@@ -110,7 +110,7 @@ pub(super) fn user_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
         .clamp(30, ASK_TIMEOUT_SECS);
 
     let tab = args.get("tabId").and_then(Value::as_str).filter(|t| !t.is_empty());
-    if let Some(refusal) = tab.and_then(|tab| member_refusal(lead_of(app, tab).as_deref())) {
+    if let Some(refusal) = tab.map(|tab| lead_of(app, tab)).transpose()?.and_then(|lead| member_refusal(lead.as_deref())) {
         return Ok(refusal);
     }
     let task = args.get("taskId").and_then(Value::as_str).filter(|t| !t.is_empty());

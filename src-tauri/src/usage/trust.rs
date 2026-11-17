@@ -119,27 +119,40 @@ pub(super) fn with_trusted(config: &Value, dir: &str) -> Option<Value> {
 
 /// Deja `dir` pre-aprobada para esa cuenta. No hace nada si ya lo estaba.
 pub(super) fn trust_dir(config_path: &Path, dir: &str) -> Result<(), String> {
+    trust_dir_with_hook(config_path, dir, || {})
+}
+
+pub(super) fn trust_dir_with_hook(
+    config_path: &Path,
+    dir: &str,
+    mut before_write: impl FnMut(),
+) -> Result<(), String> {
     let _guard = TRUST_LOCK
         .lock()
         .map_err(|e| format!("Não foi possível bloquear a configuração do Claude: {e}"))?;
-    // Só a ausência é normal; os demais erros protegem o login e os projetos do usuário.
-    let (config, original_bytes): (Value, Option<Vec<u8>>) =
-        match crate::util::user_json::read_user_json_snapshot(config_path)
+    // O Claude CLI não compartilha este lock: depois de até três merges ainda resta uma
+    // janela mínima entre a última comparação do snapshot e o rename atômico.
+    for attempt in 0..=3 {
+        let (config, snapshot) = match crate::util::user_json::read_user_json_snapshot(config_path)
             .map_err(|e| e.to_string())?
         {
-            Some((config, bytes)) => (config, Some(bytes)),
+            Some((config, snapshot)) => (config, Some(snapshot)),
             None => (json!({}), None),
         };
-
-    let Some(next) = with_trusted(&config, dir) else {
-        return Ok(());
-    };
-
-    crate::util::user_json::write_user_json_if_unchanged(
-        config_path,
-        &next,
-        original_bytes.as_deref(),
-    )
+        let Some(next) = with_trusted(&config, dir) else {
+            return Ok(());
+        };
+        before_write();
+        match crate::util::user_json::write_user_json_if_unchanged(config_path, &next, snapshot.as_ref()) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.contains("foi alterado durante a atualização") && attempt < 3 => continue,
+            Err(error) if error.contains("foi alterado durante a atualização") => {
+                return Err("O arquivo .claude.json mudou durante três tentativas de retry; nenhuma alteração foi gravada.".into());
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err("O arquivo .claude.json mudou durante três tentativas; nenhuma alteração foi gravada.".into())
 }
 
 /// Pré-aprova a pasta dos worktrees das missões na conta principal do Claude Code.
@@ -149,13 +162,18 @@ pub(super) fn trust_dir(config_path: &Path, dir: &str) -> Result<(), String> {
 /// parado. A TUI herda a confiança das pastas pai, então basta a raiz. Melhor esforço:
 /// uma falha aqui não impede a missão, só deixa o diálogo aparecer.
 pub(crate) fn trust_worktrees_root(base: &Path, account_dirs: &[String]) {
-    let _ = std::fs::create_dir_all(base);
+    if let Err(error) = std::fs::create_dir_all(base) {
+        eprintln!("[ags] aviso: não foi possível criar a raiz de worktrees para confiança do Claude em {}: {error}", base.display());
+        return;
+    }
     let base = base.to_string_lossy();
     // Cada conta do Claude Code tem o seu `.claude.json` (CLAUDE_CONFIG_DIR): sem isto, um
     // membro do Squad que usa uma conta própria continuava parado no diálogo.
     let configs = std::iter::once(config_file(None))
         .chain(account_dirs.iter().map(|dir| config_file(Some(dir))));
     for config in configs.flatten() {
-        let _ = trust_dir(&config, &base);
+        if let Err(error) = trust_dir(&config, &base) {
+            eprintln!("[ags] aviso: não foi possível atualizar a confiança do Claude em {}: {error}", config.display());
+        }
     }
 }

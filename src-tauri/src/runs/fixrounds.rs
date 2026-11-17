@@ -928,7 +928,8 @@ pub fn cli(app: &tauri::AppHandle, command: &str, args: &Value) -> Result<Value,
     if command == "fix.decide" {
         let clean = |key: &str| args.get(key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty());
         let caller = crate::terminal::classify_caller(clean("session"), clean("from"), crate::ipc::current_client_pid())?;
-        if let Some(error) = crate::ipc::guard::fix_decide_error(&crate::canvas::load_boards().unwrap_or_default(), &caller, arg(args, "scope")?) {
+        let boards = crate::canvas::load_boards()?;
+        if let Some(error) = crate::ipc::guard::fix_decide_error(&boards, &caller, arg(args, "scope")?) {
             return Err(error);
         }
     }

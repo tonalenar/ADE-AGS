@@ -134,6 +134,41 @@ pub(crate) fn free_name(dir: &Path, name: &str, is_dir: bool) -> PathBuf {
 /// Copia recursiva. Los symlinks se copian como symlinks: seguirlos metería adentro una
 /// carpeta de skills entera (o se colgaría con uno que apunta a un ancestro).
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    copy_tree_with(from, to, &mut |_| Ok(()))
+}
+
+pub(super) fn copy_tree_new(from: &Path, to: &Path) -> std::io::Result<()> {
+    copy_tree_new_with(from, to, || Ok(()))
+}
+
+fn copy_tree_new_with(
+    from: &Path,
+    to: &Path,
+    before_copy: impl FnOnce() -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    if exists(to) {
+        return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "o destino já existe"));
+    }
+    before_copy()?;
+    copy_tree(from, to)
+}
+
+pub(super) fn copy_into_free_name(
+    from: &Path,
+    name: &str,
+    dir: &Path,
+    copy: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> Result<PathBuf, String> {
+    let to = free_name(dir, name, from.is_dir());
+    copy(from, &to).map_err(|e| format!("no se pudo copiar {}: {e}", from.display()))?;
+    Ok(to)
+}
+
+pub(super) fn copy_tree_with(
+    from: &Path,
+    to: &Path,
+    before_file: &mut impl FnMut(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
     let meta = from.symlink_metadata()?;
     if meta.file_type().is_symlink() {
         let target = fs::read_link(from)?;
@@ -148,13 +183,31 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     }
     if meta.is_dir() {
         fs::create_dir(to)?;
-        for entry in fs::read_dir(from)? {
-            let entry = entry?;
-            copy_tree(&entry.path(), &to.join(entry.file_name()))?;
+        let result = (|| {
+            let mut entries = fs::read_dir(from)?.collect::<Result<Vec<_>, _>>()?;
+            entries.sort_by_key(|entry| entry.file_name());
+            for entry in entries {
+                copy_tree_with(&entry.path(), &to.join(entry.file_name()), before_file)?;
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_dir_all(to);
         }
-        return Ok(());
+        return result;
     }
-    fs::copy(from, to).map(|_| ())
+    before_file(from)?;
+    let mut input = fs::File::open(from)?;
+    let mut output = fs::OpenOptions::new().write(true).create_new(true).open(to)?;
+    if let Err(error) = std::io::copy(&mut input, &mut output) {
+        let _ = fs::remove_file(to);
+        return Err(error);
+    }
+    if let Err(error) = fs::set_permissions(to, meta.permissions()) {
+        let _ = fs::remove_file(to);
+        return Err(error);
+    }
+    Ok(())
 }
 
 /// `inner` es `outer` o está adentro. Se compara canonicalizado: con symlinks o `..` de
@@ -196,12 +249,7 @@ pub fn explorer_copy(path: String, dir: String) -> Result<String, String> {
     if from.is_dir() && is_within(&dir, &from) {
         return Err("no se puede copiar una carpeta adentro de sí misma".into());
     }
-    let to = free_name(&dir, &name, from.is_dir());
-    copy_tree(&from, &to).map_err(|e| {
-        // Una copia a medias de una carpeta confunde más que ninguna.
-        let _ = if to.is_dir() { fs::remove_dir_all(&to) } else { fs::remove_file(&to) };
-        format!("no se pudo copiar {}: {e}", from.display())
-    })?;
+    let to = copy_into_free_name(&from, &name, &dir, copy_tree_new)?;
     Ok(out(&to))
 }
 

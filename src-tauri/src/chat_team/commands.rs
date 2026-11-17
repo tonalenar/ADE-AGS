@@ -115,7 +115,8 @@ pub fn chat_team_promote(app: AppHandle, db: State<'_, DbConnection>, input: Pro
         team: NewTeam { orchestrator: input.orchestrator, agent_id: input.agent_id, label: input.label, cwd: input.cwd, title: input.title, board_key: input.board_key, ..Default::default() },
         members,
     };
-    let mission_refs = crate::canvas::mission_refs(&crate::canvas::load_boards().unwrap_or_default());
+    let boards = crate::canvas::load_boards()?;
+    let mission_refs = crate::canvas::mission_refs(&boards);
     let promoted = api::promote(&*lock(&db)?, promotion, &mission_refs, crate::util::now_ts_ms())?;
     announce(&app, &promoted.team.team.id);
     Ok(promoted)
@@ -240,9 +241,9 @@ pub fn chat_team_lead(app: AppHandle, db: State<'_, DbConnection>, input: LeadIn
 /// É só a troca de endereço; quem converte (fecha uma, abre a outra) é quem chama.
 #[tauri::command]
 pub fn chat_team_rebind(app: AppHandle, db: State<'_, DbConnection>, old_ref: String, new_ref: String) -> Result<Option<api::Rebound>, String> {
+    let mut boards = crate::canvas::load_boards()?;
     let rebound = api::rebind(&*lock(&db)?, &old_ref, &new_ref, crate::util::now_ts_ms())?;
     let Some(rebound) = rebound else { return Ok(None) };
-    let mut boards = crate::canvas::load_boards().unwrap_or_default();
     for key in crate::canvas::rebind_ref(&mut boards, old_ref.trim(), new_ref.trim()) {
         if let Some(board) = boards.get(&key) {
             crate::canvas::save_board(&key, board.clone())?;

@@ -357,7 +357,7 @@ pub(super) fn delegation_snapshot(
 /// do canvas e supervisionado.
 pub(super) fn team_create(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = peers::caller(args)?;
-    let boards = crate::canvas::load_boards().unwrap_or_default();
+    let boards = crate::canvas::load_boards()?;
     if !crate::canvas::is_orchestrator(&boards, &from) {
         return Err("Só quem a pessoa marcou como orquestrador cria um time (a coroa no canvas, ou \"Tornar orquestrador\" no painel Time do modo chat).".into());
     }

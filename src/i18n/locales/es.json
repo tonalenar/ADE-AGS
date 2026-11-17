@@ -3007,6 +3007,7 @@
   "canvas.agentDeleteConfirm": "¿Cerrar?",
   "canvas.role": "Rol: {{role}}",
   "canvas.floor.title": "Pisos",
+  "canvas.floor.loadError": "No se pudo leer la lista de pisos; el archivo se conservó intacto. {{error}}",
   "canvas.floor.ground": "Planta baja",
   "canvas.floor.groundHint": "El proyecto original",
   "canvas.floor.add": "+ Piso",

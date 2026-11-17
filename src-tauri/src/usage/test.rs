@@ -19,6 +19,28 @@ fn trust_dir_mantem_permissao_privada_e_projetos_anteriores() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn trust_dir_refaz_merge_apos_mudanca_externa_entre_leitura_e_gravacao() {
+    let root = std::env::temp_dir().join(format!("ags-trust-retry-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join(".claude.json");
+    std::fs::write(&path, br#"{"projects":{"/keep":{"hasTrustDialogAccepted":true}}}"#).unwrap();
+    let mut injected = false;
+
+    super::trust::trust_dir_with_hook(&path, "/worktree", || {
+        if !injected {
+            injected = true;
+            std::fs::write(&path, br#"{"external":true,"projects":{"/keep":{"hasTrustDialogAccepted":true}}}"#).unwrap();
+        }
+    }).unwrap();
+
+    let config: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(config["external"], true);
+    assert_eq!(config["projects"]["/keep"]["hasTrustDialogAccepted"], true);
+    assert_eq!(config["projects"]["/worktree"]["hasTrustDialogAccepted"], true);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn trust_erro_de_permissao_nao_regrava() {

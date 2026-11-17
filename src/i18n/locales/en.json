@@ -3007,6 +3007,7 @@
   "canvas.agentDeleteConfirm": "Close?",
   "canvas.role": "Role: {{role}}",
   "canvas.floor.title": "Floors",
+  "canvas.floor.loadError": "Could not read the floor list; the file was left intact. {{error}}",
   "canvas.floor.ground": "Ground",
   "canvas.floor.groundHint": "The original project",
   "canvas.floor.add": "+ Floor",
