@@ -25,6 +25,37 @@ fn account(id: &str, host: &str, login: &str) -> GitAccount {
 }
 
 #[test]
+fn tag_de_release_recusa_drive_e_dois_pontos() {
+    assert!(super::tools::release_tag_ok("v1.2.3"));
+    assert!(!super::tools::release_tag_ok("C:arquivo"));
+    assert!(!super::tools::release_tag_ok("/etc/passwd"));
+    assert!(!super::tools::release_tag_ok("a/b"));
+    assert!(!super::tools::release_tag_ok("-x"));
+}
+
+#[test]
+fn save_account_grava_segredo_antes_da_conta() {
+    let src = include_str!("commands.rs");
+    let secret = src.find("secret::save").expect("secret::save");
+    let upsert = src.find("store::upsert").expect("store::upsert");
+    assert!(secret < upsert);
+}
+
+#[test]
+fn checkout_ff_only_propaga_erro() {
+    let src = include_str!("commands.rs");
+    let ff = src.find("merge\", \"--ff-only").expect("ff-only");
+    assert!(src[ff..ff + 80].contains("map_err"), "{}", &src[ff..ff + 80]);
+}
+
+#[test]
+fn imagem_tem_teto_no_stream() {
+    let src = include_str!("api.rs");
+    assert!(src.contains("chunk()"));
+    assert!(src.contains("20 * 1024 * 1024"));
+}
+
+#[test]
 fn el_host_se_normaliza_como_lo_escribiria_cualquiera() {
     assert_eq!(normalize_host("https://GitHub.com/").unwrap(), "github.com");
     assert_eq!(normalize_host(" git.empresa.com:8443 ").unwrap(), "git.empresa.com:8443");
