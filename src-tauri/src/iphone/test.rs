@@ -731,3 +731,98 @@ fn com_quadros_demais_presos_solta_os_mais_velhos_mesmo_em_uso() {
     assert_eq!(plan.release, vec![0, 1, 2, 3]);
     assert_eq!(plan.forced, 4);
 }
+
+// ── Diagnóstico da descoberta de aparelhos (PR14) ──
+
+#[test]
+fn timeout_nao_vira_falta_de_xcode() {
+    // Só o ENOENT do binário `xcrun` é a falta do Xcode. O estouro do prazo é uma falha momentânea da consulta.
+    let estouro = std::io::Error::new(std::io::ErrorKind::TimedOut, "el comando no terminó en 20s");
+    assert_eq!(classify_spawn_error(&estouro), DiscoveryError::Timeout);
+    let sem_binario = std::io::Error::from(std::io::ErrorKind::NotFound);
+    assert_eq!(classify_spawn_error(&sem_binario), DiscoveryError::XcodeMissing);
+    let outra = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "negado");
+    assert!(matches!(classify_spawn_error(&outra), DiscoveryError::Other(_)));
+}
+
+#[test]
+fn falha_do_devicectl_tem_causa_propria() {
+    assert_eq!(classify_failure("ERROR: device is not paired"), DiscoveryError::NotTrusted);
+    assert!(matches!(classify_failure("erro qualquer"), DiscoveryError::Other(m) if m.contains("erro qualquer")));
+    // Saída de erro vazia não vira uma mensagem vazia.
+    assert!(matches!(classify_failure("  "), DiscoveryError::Other(m) if !m.trim().is_empty()));
+}
+
+#[test]
+fn erro_de_descoberta_chega_ao_front_com_o_tipo() {
+    // O contrato com o front: `kind` em camelCase; `message` só nas variantes com texto.
+    assert_eq!(serde_json::to_value(DiscoveryError::Timeout).unwrap(), serde_json::json!({ "kind": "timeout" }));
+    assert_eq!(serde_json::to_value(DiscoveryError::XcodeMissing).unwrap(), serde_json::json!({ "kind": "xcodeMissing" }));
+    assert_eq!(
+        serde_json::to_value(DiscoveryError::Other("x".into())).unwrap(),
+        serde_json::json!({ "kind": "other", "message": "x" })
+    );
+}
+
+#[test]
+fn arquivos_temporarios_do_devicectl_nao_colidem() {
+    // Dois pedidos no mesmo milissegundo (a lista da UI e um `apps` de agente) não podem usar o mesmo arquivo.
+    let dir = std::env::temp_dir();
+    assert_ne!(temp_json_path(&dir), temp_json_path(&dir));
+}
+
+#[test]
+fn foto_nao_sobrescreve_a_do_mesmo_segundo() {
+    let dir = std::env::temp_dir().join(format!("ade-teste-foto-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let primeira = primeiro_caminho_livre(&dir, "iPhone 2026-11-17 10.00.00", "png");
+    std::fs::write(&primeira, b"x").unwrap();
+    let segunda = primeiro_caminho_livre(&dir, "iPhone 2026-11-17 10.00.00", "png");
+    assert_ne!(primeira, segunda);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pausa_so_termina_no_prazo() {
+    // Um despertar antes do prazo (o `park_timeout` pode acordar sem motivo) não encurta a pausa do toque.
+    let t0 = std::time::Instant::now();
+    let prazo = t0 + std::time::Duration::from_millis(60);
+    assert_eq!(restante_ate(prazo, t0), std::time::Duration::from_millis(60));
+    assert_eq!(restante_ate(prazo, t0 + std::time::Duration::from_millis(80)), std::time::Duration::ZERO);
+}
+
+#[test]
+fn entrada_antes_do_inicio_devolve_erro() {
+    // Antes de a sessão começar, nada pode ir ao helper, e o agente recebe o motivo (não um "ok").
+    let mut escritas = Vec::new();
+    let resultado = deliver_input(&["tap 10 20".to_string()], false, false, |linha| {
+        escritas.push(linha.to_string());
+        true
+    });
+    assert_eq!(resultado, Err("sessão ainda não começou".to_string()));
+    assert!(escritas.is_empty(), "nada pode ir ao helper antes do início");
+}
+
+#[test]
+fn entrada_com_toque_pronto_chega_na_ordem() {
+    let mut escritas = Vec::new();
+    let resultado = deliver_input(&["a".to_string(), "b".to_string()], true, true, |linha| {
+        escritas.push(linha.to_string());
+        true
+    });
+    assert_eq!(resultado, Ok(()));
+    assert_eq!(escritas, vec!["a".to_string(), "b".to_string()]);
+}
+
+#[test]
+fn entrada_sem_toque_pronto_nao_finge_ok() {
+    // Helper que caiu (toque `false`): não é "ok" para um toque que não chega.
+    let resultado = deliver_input(&["a".to_string()], true, false, |_| true);
+    assert!(resultado.is_err());
+}
+
+#[test]
+fn entrada_que_o_helper_recusa_vira_erro() {
+    let resultado = deliver_input(&["a".to_string()], true, true, |_| false);
+    assert!(resultado.is_err());
+}

@@ -120,7 +120,7 @@ fn physical_inventory(
         }
         match crate::iphone::commands::mac::devices() {
             Ok(devices) => (devices, None),
-            Err(error) => (Vec::new(), Some(crate::iphone::model::device_error_help(&error))),
+            Err(error) => (Vec::new(), Some(crate::iphone::model::device_error_help(&error.to_string()))),
         }
     }
     #[cfg(not(target_os = "macos"))]
