@@ -344,7 +344,8 @@ pub(crate) mod unix_tree {
 #[cfg(windows)]
 pub(crate) mod imp {
     use std::os::windows::io::RawHandle;
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use std::time::Duration;
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject, TerminateJobObject,
         JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -353,6 +354,10 @@ pub(crate) mod imp {
 
     pub struct Group {
         job: HANDLE,
+        /// O pid do filho, para o plano B (`taskkill /T`) quando o Job Object não ficou com ele.
+        pid: Option<u32>,
+        /// `true` só se o `AssignProcessToJobObject` deu certo. Sem isso, `TerminateJobObject` não alcança nada.
+        atribuido: bool,
     }
 
     // El handle del job es propiedad exclusiva de esta struct y solo se toca detrás del
@@ -377,35 +382,61 @@ pub(crate) mod imp {
                 );
             }
         }
-        Group { job }
+        Group { job, pid: None, atribuido: false }
     }
 
     pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
+        g.pid = child.pid();
         if g.job.is_null() {
+            eprintln!("[containment] sem Job Object: o encerramento do processo vai pelo taskkill /T");
             return;
         }
         // Se usa el handle que ya tiene `portable-pty` en vez de reabrir por pid: evita la
         // carrera de que ese pid haya sido reutilizado, que en Windows pasa seguido.
-        let Some(handle) = child.raw_handle() else { return };
-        unsafe {
-            AssignProcessToJobObject(g.job, handle as RawHandle as HANDLE);
+        let Some(handle) = child.raw_handle() else {
+            eprintln!("[containment] o processo não expôs o handle: o encerramento vai pelo taskkill /T");
+            return;
+        };
+        // El retorno antes se ignoraba: sin el proceso en el job, `TerminateJobObject` no mataba nada y la
+        // descendencia quedaba viva. Ahora el error queda registrado y el encerramento cae al taskkill.
+        let ok = unsafe { AssignProcessToJobObject(g.job, handle as RawHandle as HANDLE) };
+        if ok != 0 {
+            g.atribuido = true;
+        } else {
+            let erro = unsafe { GetLastError() };
+            eprintln!("[containment] AssignProcessToJobObject falhou (erro {erro}): o encerramento vai pelo taskkill /T");
         }
     }
 
     #[cfg(test)]
     pub fn is_escape_proof(g: &Group) -> bool {
-        !g.job.is_null()
+        g.atribuido
     }
 
     pub fn kill_all(g: &mut Group) {
-        if g.job.is_null() {
-            return;
+        if !g.job.is_null() {
+            unsafe {
+                TerminateJobObject(g.job, 1);
+                CloseHandle(g.job);
+            }
+            g.job = std::ptr::null_mut();
         }
-        unsafe {
-            TerminateJobObject(g.job, 1);
-            CloseHandle(g.job);
+        // Sem o processo no job, o TerminateJobObject não alcançou nada: a árvore sai pelo pid.
+        if !g.atribuido {
+            if let Some(pid) = g.pid.take() {
+                matar_arvore_por_pid(pid);
+            }
         }
-        g.job = std::ptr::null_mut();
+    }
+
+    /// `taskkill /T /F` mata o processo e os filhos que ainda estão ligados a ele. É o plano B quando o Job Object não
+    /// ficou com o processo. Com prazo, pelo helper de processos do app.
+    fn matar_arvore_por_pid(pid: u32) {
+        let mut cmd = crate::util::spawn::hidden_command("taskkill");
+        cmd.args(["/T", "/F", "/PID", &pid.to_string()]);
+        if let Err(erro) = crate::util::spawn::output(&mut cmd, Duration::from_secs(5)) {
+            eprintln!("[containment] taskkill /T do pid {pid} falhou: {erro}");
+        }
     }
 
     #[cfg(test)]
