@@ -2,6 +2,25 @@ use super::claude::parse_ts;
 
 #[cfg(unix)]
 #[test]
+fn trust_dir_mantem_permissao_privada_e_projetos_anteriores() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = std::env::temp_dir().join(format!("ags-trust-config-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join(".claude.json");
+
+    super::trust::trust_dir(&path, "/primeiro").unwrap();
+    super::trust::trust_dir(&path, "/segundo").unwrap();
+
+    let config: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(config["projects"]["/primeiro"]["hasTrustDialogAccepted"], true);
+    assert_eq!(config["projects"]["/segundo"]["hasTrustDialogAccepted"], true);
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn trust_erro_de_permissao_nao_regrava() {
     use std::os::unix::fs::PermissionsExt;
 

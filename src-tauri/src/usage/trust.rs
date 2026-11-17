@@ -18,8 +18,11 @@
 //! levantar.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde_json::{json, Value};
+
+static TRUST_LOCK: Mutex<()> = Mutex::new(());
 
 /// La carpeta donde se abre el sondeo: vacía, de la app, la misma para todas las cuentas.
 ///
@@ -112,6 +115,7 @@ pub(super) fn with_trusted(config: &Value, dir: &str) -> Option<Value> {
 
 /// Deja `dir` pre-aprobada para esa cuenta. No hace nada si ya lo estaba.
 pub(super) fn trust_dir(config_path: &Path, dir: &str) -> Result<(), String> {
+    let _guard = TRUST_LOCK.lock().map_err(|e| format!("Não foi possível bloquear a configuração do Claude: {e}"))?;
     // Só a ausência é normal; os demais erros protegem o login e os projetos do usuário.
     let config: Value = crate::util::user_json::read_user_json(config_path)
         .map_err(|e| e.to_string())?
