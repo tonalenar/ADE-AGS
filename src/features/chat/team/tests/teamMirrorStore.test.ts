@@ -2,11 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** O backend do time, em memória: o que os comandos `chat_team_*` gravam. */
-const backend = vi.hoisted(() => ({ team: null as Record<string, unknown> | null, calls: [] as [string, Record<string, unknown>][] }));
+const backend = vi.hoisted(() => ({ team: null as Record<string, unknown> | null, calls: [] as [string, Record<string, unknown>][], failLink: false }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args: Record<string, unknown> = {}) => {
     backend.calls.push([cmd, args]);
+    if (backend.failLink && cmd === "chat_team_link") return Promise.reject(new Error("aba já está em outro time"));
     const team = backend.team as { members: Record<string, unknown>[] } | null;
     const input = (args.input ?? {}) as Record<string, unknown>;
     if (cmd === "chat_team_list") return Promise.resolve(team ? [team] : []);
@@ -133,6 +134,18 @@ describe("o espelho canvas -> chat no app", () => {
     expect(calls("chat_team_unlead")).toHaveLength(0);
   });
 
+
+  it("corda que o time não aceita sai do canvas: a falha do espelho não fica como acordo", async () => {
+    backend.failLink = true;
+    try {
+      canvasActions().connect(KEY, "lead", "a");
+      await settle();
+      expect(calls("chat_team_link")).toHaveLength(1);
+      expect(board().edges.some((e) => (e.a === "lead" && e.b === "a") || (e.a === "a" && e.b === "lead"))).toBe(false);
+    } finally {
+      backend.failLink = false;
+    }
+  });
 
   it("corda para um terminal comum (shell) não vira integrante", async () => {
     canvasActions().connect(KEY, "lead", "sh");
