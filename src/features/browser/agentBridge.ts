@@ -18,7 +18,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath, isLocalUrl, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
-import { toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
+import { setColumnTabResource, setRightPanel, toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
+import { browserScope } from "@/features/chat/columnTabs";
 import { subscribeToMeasuredChatBrowser } from "@/features/chat/browserMeasurement";
 import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { useStructured } from "@/features/chat/structured/store";
@@ -166,22 +167,28 @@ async function openPortalFor(owner: ViewOwner, url: string): Promise<string | nu
   return created.id;
 }
 
-/** Uma espera de medida por vista: a miniatura abre só quando o slot real publicar o retângulo dele. */
+/** Uma espera por vista: a miniatura abre na primeira medida real do slot que mostra a página do agente. */
 const pendingMiniatureMeasures = new Map<string, () => void>();
 
-/** Mostra sobre o chat a página que o agente acabou de abrir, quando a conversa é a atual. */
-function autoShowAgentBrowser(viewId: string, owner: ViewOwner | null): void {
+/**
+ * Mostra sobre o chat a página que o agente acabou de abrir, quando a conversa é a atual. O slot do navegador só monta
+ * com o painel no navegador, então o painel abre primeiro, a aba de navegador da coluna passa a mostrar a página do
+ * agente, e a miniatura abre na primeira medida real desse slot. Não há retângulo inventado: a origem é essa medida.
+ */
+export function autoShowAgentBrowser(viewId: string, owner: ViewOwner | null): void {
   if (!owner || !readBrowserPreferences().autoShowFloatingPreview || !chatShellOn(useUiStore.getState())) return;
   const chat = useChatStore.getState();
   const activeTabId = useTabsStore.getState().activeTabId;
   const belongsToCurrentChat = owner.kind === "thread"
     ? owner.id === `thread:${chat.thread}`
     : owner.kind === "tab" && owner.id === activeTabId;
-  if (!belongsToCurrentChat) return;
+  const view = useViewTabsStore.getState().views.find((candidate) => candidate.id === viewId);
+  if (!belongsToCurrentChat || !view || view.kind !== "browser") return;
   if (chat.browserFloating && chat.browser?.viewId === viewId) return;
-  // Sem retângulo medido não há origem para a miniatura: espera o primeiro medido do slot real (um 560×400 falso
-  // fazia a página ser renderizada com o layout errado na primeira vez).
   pendingMiniatureMeasures.get(viewId)?.();
+  // Painel no navegador: é a única forma de o slot montar e medir. Com o painel fechado a miniatura nunca abria.
+  if (chat.panel !== "browser") setRightPanel("browser");
+  adoptBrowserInColumn(view.cwd, owner, viewId);
   const stop = subscribeToMeasuredChatBrowser(viewId, (measured) => {
     pendingMiniatureMeasures.delete(viewId);
     const current = useChatStore.getState();
@@ -189,6 +196,13 @@ function autoShowAgentBrowser(viewId: string, owner: ViewOwner | null): void {
     toggleChatBrowserFloating();
   });
   pendingMiniatureMeasures.set(viewId, stop);
+}
+
+/** A aba de navegador da coluna passa a mostrar a página do agente nesse escopo: o slot mede o que a aba mostra. */
+function adoptBrowserInColumn(cwd: string, owner: ViewOwner, viewId: string): void {
+  const state = useChatStore.getState();
+  const tab = state.columnTabs.find((candidate) => candidate.id === state.columnActive && candidate.kind === "browser");
+  if (tab) setColumnTabResource(tab.id, browserScope(cwd, owner), viewId);
 }
 
 /**
