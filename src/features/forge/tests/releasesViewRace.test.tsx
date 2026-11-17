@@ -62,11 +62,11 @@ const target: RepoTarget = {
   ssh: false,
 };
 
-const row: Release = {
-  tag: "v1", name: "um", body: null, draft: false, prerelease: false, webUrl: "https://example.com", createdAt: null, author: null,
-};
+const release = (tag: string, name: string): Release => ({
+  tag, name, body: null, draft: false, prerelease: false, webUrl: "https://example.com", createdAt: null, author: null,
+});
 
-describe("ReleasesView corrida ao desmontar", () => {
+describe("ReleasesView corrida ao trocar cwd", () => {
   let host: HTMLDivElement;
   let root: Root;
 
@@ -82,21 +82,36 @@ describe("ReleasesView corrida ao desmontar", () => {
     host.remove();
   });
 
-  it("promessa adiada depois do unmount não pinta a lista", async () => {
-    const pending = deferred<Release[]>();
-    mocks.forgeReleases.mockReturnValue(pending.promise);
+  it("a lista de A em voo não substitui B", async () => {
+    const pendingA = deferred<Release[]>();
+    const pendingB = deferred<Release[]>();
+    mocks.forgeReleases.mockImplementation((cwd: string) => (
+      cwd === "/repo-a" ? pendingA.promise : pendingB.promise
+    ));
+
     await act(async () => {
-      root.render(<ReleasesView cwd="/repo" target={target} />);
+      root.render(<ReleasesView cwd="/repo-a" target={target} />);
     });
     await act(async () => {
-      root.unmount();
+      root.render(<ReleasesView cwd="/repo-b" target={target} />);
     });
-    root = createRoot(host);
+
     await act(async () => {
-      pending.resolve([row]);
+      pendingB.resolve([release("v-b", "bravo")]);
       await Promise.resolve();
     });
-    expect(host.textContent).not.toContain("v1");
-    expect(host.textContent).not.toContain("um");
+    expect(host.textContent).toContain("v-b");
+    expect(host.textContent).toContain("bravo");
+    expect(host.textContent).not.toContain("v-a");
+    expect(host.textContent).not.toContain("alfa");
+
+    await act(async () => {
+      pendingA.resolve([release("v-a", "alfa")]);
+      await Promise.resolve();
+    });
+    expect(host.textContent).toContain("v-b");
+    expect(host.textContent).toContain("bravo");
+    expect(host.textContent).not.toContain("v-a");
+    expect(host.textContent).not.toContain("alfa");
   });
 });
