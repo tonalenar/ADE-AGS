@@ -281,10 +281,10 @@ pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String
 /// el diálogo en otra ventana en vez de cerrar. Por eso acá se hace cleanup manual +
 /// `std::process::exit`, salteando por completo el ciclo de eventos de Tauri.
 #[tauri::command]
-pub fn confirm_exit_all(app: tauri::AppHandle) {
+pub async fn confirm_exit_all(app: tauri::AppHandle) {
     // `process::exit` pula o `RunEvent::Exit`: a limpeza única (IPC + sessões PTY) tem
     // que rodar aqui, antes do cleanup do Tauri.
-    crate::app::shutdown_once();
+    let _ = tokio::task::spawn_blocking(|| crate::app::shutdown_once()).await;
     app.cleanup_before_exit();
     std::process::exit(0);
 }

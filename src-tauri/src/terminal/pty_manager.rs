@@ -1329,12 +1329,22 @@ fn stop_session(mut session: PtySession) -> Result<(), String> {
 /// job tiene `KILL_ON_JOB_CLOSE`, así que un cierre forzado desde el Administrador de
 /// tareas igual se lleva todo cuando el kernel cierra los handles del proceso muerto.
 pub fn kill_all_sessions() {
-    let sessions: Vec<PtySession> = registry().drain().map(|(_, s)| s).collect();
-    for mut session in sessions {
+    let mut sessions: Vec<PtySession> = registry().drain().map(|(_, s)| s).collect();
+    for session in &sessions {
         forget_session(&session);
-        session.group.kill_all();
+    }
+    super::containment::kill_all_groups(sessions.iter_mut().map(|session| &mut session.group));
+    for mut session in sessions {
         let _ = session.killer.kill();
-        let _ = session.killer.wait();
+        let deadline = std::time::Instant::now() + KILL_WAIT;
+        loop {
+            if matches!(session.killer.try_wait(), Ok(Some(_)) | Err(_))
+                || std::time::Instant::now() >= deadline
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
     }
     buffers().clear();
 }
