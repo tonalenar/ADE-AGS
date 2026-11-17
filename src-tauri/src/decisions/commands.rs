@@ -242,15 +242,27 @@ pub(crate) fn ping(settings: &Settings, key: Option<String>) -> ConnectionTest {
 }
 
 #[tauri::command]
-pub fn decision_shadow_report(db: State<DbConnection>) -> Result<log::ShadowReport, String> {
-    let conn = db.lock().map_err(|error| error.to_string())?;
-    log::report(&conn)
+pub async fn decision_shadow_report(db: State<'_, DbConnection>) -> Result<log::ShadowReport, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshot = {
+            let conn = db.lock().map_err(|error| error.to_string())?;
+            log::snapshot(&conn)?
+        };
+        log::report_from_snapshot(snapshot)
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn decision_shadow_export_csv(db: State<DbConnection>) -> Result<String, String> {
-    let conn = db.lock().map_err(|error| error.to_string())?;
-    log::export_csv(&conn)
+pub async fn decision_shadow_export_csv(db: State<'_, DbConnection>) -> Result<String, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshot = {
+            let conn = db.lock().map_err(|error| error.to_string())?;
+            log::snapshot(&conn)?
+        };
+        log::export_csv_from_snapshot(snapshot)
+    }).await.map_err(|error| error.to_string())?
 }
 
 fn public_error(error: &DecisionError, secret: Option<&str>) -> String {
