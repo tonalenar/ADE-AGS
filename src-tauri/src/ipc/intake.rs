@@ -20,6 +20,57 @@ pub(super) const MAX_UNAUTHENTICATED: usize = 32;
 /// Tamanho máximo de um pedido (um handoff ou uma memória, que têm tetos próprios bem abaixo disto).
 pub(super) const MAX_REQUEST_BYTES: u64 = 8 * 1024 * 1024;
 
+/// Bytes de pedidos em voo no processo (os dois canais somados). Sem isso, 256+256 conexões de 8 MiB passam de 4 GiB.
+pub(super) const MAX_IN_FLIGHT_BYTES: usize = 64 * 1024 * 1024;
+
+static IN_FLIGHT_BYTES: AtomicUsize = AtomicUsize::new(0);
+
+/// Reserva `n` bytes no orçamento global até o valor sair de escopo.
+pub(super) struct InFlightBytes {
+    n: usize,
+}
+
+impl InFlightBytes {
+    pub(super) fn empty() -> Self {
+        Self { n: 0 }
+    }
+
+    /// Acrescenta `extra` ao que esta reserva segura. `None` se o teto global estouraria.
+    pub(super) fn add(&mut self, extra: usize) -> Option<()> {
+        if extra == 0 {
+            return Some(());
+        }
+        loop {
+            let cur = IN_FLIGHT_BYTES.load(Ordering::SeqCst);
+            let new = cur.saturating_add(extra);
+            if new > MAX_IN_FLIGHT_BYTES {
+                return None;
+            }
+            if IN_FLIGHT_BYTES
+                .compare_exchange(cur, new, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                self.n = self.n.saturating_add(extra);
+                return Some(());
+            }
+        }
+    }
+}
+
+impl Drop for InFlightBytes {
+    fn drop(&mut self) {
+        if self.n > 0 {
+            IN_FLIGHT_BYTES.fetch_sub(self.n, Ordering::SeqCst);
+        }
+    }
+}
+
+pub(super) fn try_reserve_inflight_bytes(n: usize) -> Option<InFlightBytes> {
+    let mut hold = InFlightBytes::empty();
+    hold.add(n)?;
+    Some(hold)
+}
+
 /// O token tem que estar nestes primeiros bytes da linha. A CLI serializa `token` primeiro.
 pub(super) const TOKEN_WINDOW: usize = 1024;
 
@@ -120,7 +171,13 @@ fn token_in(head: &[u8]) -> Option<&[u8]> {
 /// 2. só então o resto, até [`MAX_REQUEST_BYTES`] e [`REQUEST_DEADLINE_MS`] no total.
 ///
 /// `now_ms` é o relógio (injetável, para os testes não esperarem). `on_authenticated` roda uma vez, quando o token bate.
-pub(super) fn read_request(reader: &mut impl BufRead, expected_token: &str, now_ms: &mut dyn FnMut() -> u64, on_authenticated: &mut dyn FnMut()) -> Intake {
+pub(super) fn read_request(
+    reader: &mut impl BufRead,
+    expected_token: &str,
+    now_ms: &mut dyn FnMut() -> u64,
+    on_authenticated: &mut dyn FnMut(),
+    budget: &mut InFlightBytes,
+) -> Intake {
     let started = now_ms();
     let mut line: Vec<u8> = Vec::new();
     let mut authenticated = false;
@@ -154,6 +211,9 @@ pub(super) fn read_request(reader: &mut impl BufRead, expected_token: &str, now_
         let take = newline.map_or(chunk.len(), |at| at + 1);
         line.extend_from_slice(&chunk[..take]);
         reader.consume(take);
+        if budget.add(take).is_none() {
+            return Intake::Refused("Orçamento global de IPC esgotado (máximo 64 MB em voo)".into());
+        }
         if !authenticated && newline.is_some() && line.iter().all(u8::is_ascii_whitespace) {
             return Intake::Closed;
         }
