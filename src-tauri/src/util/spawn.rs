@@ -16,7 +16,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, Read};
 use std::process::{Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// `CREATE_NO_WINDOW`. Sem isso um binário de console aberto por um app de janela
@@ -162,13 +162,16 @@ fn output_with_stdout_limit_inner(
         let _ = child.wait();
         return Err(io::Error::other("stderr indisponível"));
     };
+    let stderr_capture = Arc::new(Mutex::new(Vec::with_capacity(STDERR_CAPTURE_LIMIT)));
+    let stderr_shared = stderr_capture.clone();
+    let (stderr_done_tx, stderr_done_rx) = std::sync::mpsc::channel();
     let stderr_reader = std::thread::spawn(move || {
-        let mut bytes = Vec::with_capacity(STDERR_CAPTURE_LIMIT);
         let mut chunk = [0_u8; 8192];
         loop {
             match stderr_pipe.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(count) => {
+                    let Ok(mut bytes) = stderr_shared.lock() else { break };
                     let remaining = STDERR_CAPTURE_LIMIT.saturating_sub(bytes.len());
                     bytes.extend_from_slice(&chunk[..count.min(remaining)]);
                 }
@@ -176,7 +179,7 @@ fn output_with_stdout_limit_inner(
                 Err(_) => break,
             }
         }
-        bytes
+        let _ = stderr_done_tx.send(());
     });
     let Some(mut pipe) = child.stdout.take() else {
         guard.kill();
@@ -220,7 +223,7 @@ fn output_with_stdout_limit_inner(
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
-            let _ = stderr_reader.join();
+            drop(stderr_reader);
             log_finish(&program, &argv, started.elapsed(), None);
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -240,7 +243,7 @@ fn output_with_stdout_limit_inner(
                     let _ = child.kill();
                     let _ = child.wait();
                     let _ = reader.join();
-                    let _ = stderr_reader.join();
+                    drop(stderr_reader);
                     log_finish(&program, &argv, started.elapsed(), None);
                     return Err(error);
                 }
@@ -257,7 +260,7 @@ fn output_with_stdout_limit_inner(
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
-            let _ = stderr_reader.join();
+            drop(stderr_reader);
             log_finish(&program, &argv, started.elapsed(), None);
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
@@ -272,16 +275,36 @@ fn output_with_stdout_limit_inner(
         .map_err(|_| io::Error::other("a leitura de stdout falhou"))??;
     let truncated = exceeded.load(Ordering::Acquire);
     if truncated && !keep_truncated {
+        guard.kill();
+        drop(stderr_reader);
         log_finish(&program, &argv, started.elapsed(), status.code());
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("stdout excedeu o limite de {max_stdout_bytes} bytes"),
         ));
     }
+    if stderr_done_rx
+        .recv_timeout(timeout.saturating_sub(started.elapsed()))
+        .is_err()
+    {
+        // O processo principal já terminou, mas um descendente pode manter o pipe herdado.
+        // Mata o grupo e não espera além do prazo por um leitor preso num pipe ainda aberto.
+        guard.kill();
+        if stderr_done_rx.try_recv().is_ok() {
+            let _ = stderr_reader.join();
+        } else {
+            drop(stderr_reader);
+        }
+    } else {
+        stderr_reader
+            .join()
+            .map_err(|_| io::Error::other("a leitura de stderr falhou"))?;
+    }
+    let stderr = stderr_capture
+        .lock()
+        .map_err(|_| io::Error::other("a captura de stderr falhou"))?
+        .clone();
     log_finish(&program, &argv, started.elapsed(), status.code());
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| io::Error::other("a leitura de stderr falhou"))?;
     Ok((Output { status, stdout, stderr }, truncated))
 }
 
@@ -693,5 +716,48 @@ mod tests {
         let out = output_with_stdout_limit(&mut cmd, Duration::from_secs(5), 256).unwrap();
         assert!(out.status.success());
         assert_eq!(out.stderr.len(), STDERR_CAPTURE_LIMIT);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn stderr_aberto_por_descendente_nao_prende_o_retorno_apos_o_prazo() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        use std::sync::mpsc;
+
+        let fifo = std::env::temp_dir().join(format!("ags-stderr-{}.fifo", uuid::Uuid::new_v4()));
+        let c_path = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        // SAFETY: o caminho é um CString válido e o FIFO é exclusivo deste teste.
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        let mut keep_fifo_open = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&fifo)
+            .unwrap();
+
+        let script = "( read _ < \"$1\"; printf 'descendente\\n' >&2 ) >/dev/null & printf 'principal\\n' >&2; exit 0";
+        let mut cmd = hidden_command("sh");
+        cmd.args(["-c", script, "sh", fifo.to_str().unwrap()]);
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = output_with_stdout_limit(&mut cmd, Duration::from_millis(100), 256);
+            let _ = tx.send(result);
+        });
+
+        let returned_before_cleanup = rx.recv_timeout(Duration::from_millis(200));
+        let returned_early = returned_before_cleanup.is_ok();
+        // Libera o processo descendente para que o teste também limpe a versão defeituosa.
+        use std::io::Write;
+        let _ = keep_fifo_open.write_all(b"liberar\n");
+        let result = match returned_before_cleanup {
+            Ok(result) => result,
+            Err(_) => rx.recv_timeout(Duration::from_secs(2)).expect("a coleta de stderr precisa terminar"),
+        };
+        let _ = std::fs::remove_file(fifo);
+
+        assert!(returned_early, "a coleta excedeu o prazo injetado");
+        let out = result.unwrap();
+        assert!(out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains("principal"));
     }
 }
