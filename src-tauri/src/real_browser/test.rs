@@ -1,7 +1,7 @@
 //! Testes da superfície nativa do navegador (o Portal): o contrato do `Place` que chega do front e a lógica pura
 //! que decide o que mudou, o que a máscara desenha e quando a vista é escondida.
 
-use super::surface::{diff_place, empty_clip_visibility, outline, rounded_parts, PathStep, PlaceChanges, PlaceState};
+use super::surface::{diff_place, effective_zoom, empty_clip_visibility, outline, rounded_parts, PathStep, PlaceChanges, PlaceState};
 use super::{Place, Rect};
 use serde_json::json;
 
@@ -81,4 +81,12 @@ fn recorte_vazio_transitorio_nao_esconde() {
     assert!(!empty_clip_visibility(&mut empty_count, &mut hidden, false, false));
     // O `visible: false` explícito (a desmontagem) esconde na hora, mesmo com recorte.
     assert!(empty_clip_visibility(&mut empty_count, &mut hidden, false, true));
+}
+
+#[test]
+fn zoom_zero_mantem_o_ultimo_zoom_valido() {
+    // A vista sem largura manda zoom 0: não é 100%, é "sem zoom novo".
+    assert_eq!(effective_zoom(0.0, Some(0.8)), 0.8);
+    assert_eq!(effective_zoom(0.0, None), 1.0);
+    assert_eq!(effective_zoom(0.5, Some(0.8)), 0.5);
 }

@@ -29,7 +29,7 @@ use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 use tokio::sync::oneshot;
 
-use super::surface::{diff_place, empty_clip_visibility, outline, rounded_parts, PathStep, PlaceState, RoundedPart};
+use super::surface::{diff_place, effective_zoom, empty_clip_visibility, outline, rounded_parts, PathStep, PlaceState, RoundedPart};
 use super::{emit, on_binding};
 
 const CEF_FRAMEWORK_BUNDLE: &str = "Chromium Embedded Framework.framework";
@@ -908,6 +908,7 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
             if let Some(portal) = portals.borrow_mut().get_mut(&id) {
                 // Só o que mudou desde o último `place` é reaplicado: a posição, a máscara, o zoom e a repintura do CEF.
                 let parent = unsafe { portal.host_view.superview() };
+                let zoom = effective_zoom(zoom, portal.last_place.as_ref().map(|state| state.zoom));
                 let next = PlaceState { frame: rect, parts: parts.clone(), radius: corner_radius, zoom };
                 let changes = diff_place(portal.last_place.as_ref(), &next);
                 if changes.frame {

@@ -105,3 +105,10 @@ pub(super) fn empty_clip_visibility(empty_count: &mut u8, hidden: &mut bool, emp
     }
     *hidden
 }
+
+/// O zoom que vale para um `place`. Zero (a vista sem largura, por um `display:none` ou um painel recolhido) não é um
+/// zoom: é "sem zoom novo", e mantém o último válido. Tratá-lo como 100% faria a página voltar ao tamanho padrão e
+/// aparecer cortada quando a vista reaparece.
+pub(super) fn effective_zoom(zoom: f64, last: Option<f64>) -> f64 {
+    if zoom > 0.0 && zoom.is_finite() { zoom } else { last.unwrap_or(1.0) }
+}
