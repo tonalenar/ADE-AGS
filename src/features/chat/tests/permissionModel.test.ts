@@ -178,3 +178,24 @@ describe("quem decide", () => {
     expect(decidedByBackend({ ref: { source: "fleet", approvalId: "x" } })).toBe(false);
   });
 });
+
+describe("risco: leitura sensível e código inline (A210, A211)", () => {
+  it("leitura de segredo ou de arquivo fora da pasta não é baixo risco", () => {
+    expect(riskOf(ask({ detail: "cat ~/.aws/credentials" }))).toBe("medium");
+    expect(riskOf(ask({ detail: "cat /etc/hosts" }))).toBe("medium");
+    expect(riskOf(ask({ detail: "cat .env" }))).toBe("medium");
+    // Leitura de arquivo da própria pasta continua baixa: a regra não ficou mais dura do que precisa.
+    expect(riskOf(ask({ detail: "cat src/a.ts" }))).toBe("low");
+  });
+
+  it("código inline de interpretador nunca é decidido por regra nem vira padrão «programa *» sugerido", () => {
+    // O risco continua «médio»: as fixtures compartilhadas com o backend fixam `python -c` e `sh -c` nesse nível.
+    const inline = ask({ detail: `python3 -c "import shutil; shutil.rmtree('${CWD}')"` });
+    expect(riskOf(inline)).toBe("medium");
+    expect(suggestPattern(ask({ detail: `python3 -c "print(1)"` }))).toBeNull();
+    expect(autoAllowRule([rule({ pattern: "python3 *" })], inline)).toBeNull();
+    // Script em arquivo segue com o padrão de sempre.
+    expect(suggestPattern(ask({ detail: "python3 script.py" }))).toBe("python3 *");
+    expect(autoAllowRule([rule({ pattern: "python3 *" })], ask({ detail: "python3 script.py" }))?.pattern).toBe("python3 *");
+  });
+});
