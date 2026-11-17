@@ -81,4 +81,11 @@ describe("A501 startComparison: attach falhou", () => {
     expect(mocks.buildComparison).not.toHaveBeenCalled();
     expect(mocks.upsertComparison).not.toHaveBeenCalled();
   });
+
+  it("attach que resolve null conta como falha: não monta o canvas nem grava", async () => {
+    mocks.compareAttach.mockResolvedValue(null);
+    await expect(startComparison(input)).rejects.toThrow();
+    expect(mocks.buildComparison).not.toHaveBeenCalled();
+    expect(mocks.upsertComparison).not.toHaveBeenCalled();
+  });
 });

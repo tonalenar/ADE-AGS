@@ -3953,6 +3953,7 @@
   "compare.error.many": "No máximo 6 modelos.",
   "compare.error.agent": "Escolha o agente de cada modelo.",
   "compare.error.unavailable": "Um dos agentes escolhidos não está instalado nesta máquina.",
+  "compare.error.attach": "A comparação não foi salva: o backend não confirmou as abas dos modelos.",
   "compare.error.duplicate": "Dois modelos estão iguais (mesmo agente, modelo e esforço).",
   "compare.error.repo": "Para isolar os modelos a pasta precisa ser um repositório git com pelo menos um commit.",
   "compare.groupTitle": "Comparação: {{title}}",

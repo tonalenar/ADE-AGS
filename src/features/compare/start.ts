@@ -69,12 +69,14 @@ export async function startComparison(input: StartInput): Promise<Comparison> {
   });
 
   // Sem o attach a comparação não existe: não vai ao store nem ao canvas, e o erro volta ao diálogo.
-  let saved: typeof cmp;
+  let saved: typeof cmp | null;
   try {
     saved = await compareAttach(cmp.id, opened.map((o) => ({ pick: o.entry.pick, tabId: o.tabId })));
   } catch (e) {
     throw new Error(uiErrorText(e));
   }
+  // Um attach que volta sem a comparação também é falha: sem ela o canvas e o store não podem ser montados.
+  if (!saved) throw new Error(t("compare.error.attach"));
   upsertComparison(saved);
 
   const key = compareBoardKey(input.cwd, cmp.id);
