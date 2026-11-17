@@ -22,7 +22,7 @@ vi.mock("neogestify-ui-components", () => ({
   Button: ({ children, variant: _v, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string }) => <button {...rest}>{children}</button>,
   EmptyState: ({ title }: { title: string }) => <p data-empty>{title}</p>,
   Skeleton: () => <div data-skeleton />,
-  AddIcon: () => null, Alert: () => null, ChevronDownIcon: () => null, ChevronRightIcon: () => null, CloudIcon: () => null,
+  AddIcon: () => null, Alert: ({ children }: { children: React.ReactNode }) => <div role="alert">{children}</div>, ChevronDownIcon: () => null, ChevronRightIcon: () => null, CloudIcon: () => null,
   DocumentIcon: () => null, MinusIcon: () => null, TextArea: () => null, Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 vi.mock("@/app/icons", () => ({
@@ -92,5 +92,28 @@ describe("ScmPanel: cada painel lê o próprio estado", () => {
     expect(first.querySelector("[data-skeleton]")).toBeNull();
     expect(first.querySelector("[data-empty]")?.textContent).toBe("scm.notRepo");
     expect(second.querySelector("[data-empty]")?.textContent).toBe("scm.notRepo");
+  });
+});
+
+const repo = {
+  root: "/a", branch: "main", head: "abc", detached: false, initial: false, upstream: null, published: true,
+  ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [], truncated: false, remotes: [], operation: null,
+};
+
+describe("ScmPanel: erro do git passa por uiErrorText", () => {
+  it("leitura que falha com objeto de mensagem mostra a mensagem, não [object Object]", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.scmStatus.mockResolvedValueOnce(repo).mockRejectedValue({ message: "git falhou" });
+      const host = mount();
+      await act(async () => { hosts[0].root.render(<ScmPanel cwd="/a" />); });
+      await flush();
+      await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+      await flush();
+      expect(host.textContent).toContain("git falhou");
+      expect(host.textContent).not.toContain("[object Object]");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

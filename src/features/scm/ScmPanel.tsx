@@ -148,7 +148,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
       }
     } catch (e) {
       if (!gens.status.isCurrent(gen)) return;
-      setError(isScmError(e) ? e : { kind: "git", message: String(e) });
+      setError(isScmError(e) ? e : { kind: "git", message: uiErrorText(e) });
     }
   }, [cwd, gens]);
 
@@ -203,7 +203,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
     try {
       await op();
     } catch (e) {
-      setError(isScmError(e) ? e : { kind: "git", message: String(e) });
+      setError(isScmError(e) ? e : { kind: "git", message: uiErrorText(e) });
     } finally {
       await load();
       if (root) invalidateRepoInfo(root);
