@@ -41,7 +41,8 @@ function click(label: string) {
   act(() => {
     button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1 }));
     button.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, pointerId: 1 }));
-    button.click();
+    // O happy-dom não gera o `click` depois do ponteiro; o navegador gera. Despacha-se o evento, não a ativação `.click()`.
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
   });
 }
 
