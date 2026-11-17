@@ -669,10 +669,14 @@ fn memory_cursor(entry: &MemoryEntry) -> String {
 pub struct MemoryFilter {
     pub query: Option<String>, pub kind: Option<String>, pub status: Option<String>, pub used: Option<bool>,
     pub duplicate_of: Option<bool>, pub contradicts: Option<bool>, pub verification_expired: Option<bool>,
+    #[serde(default)]
+    pub repo_key: Option<String>,
 }
 
 pub fn list_for_owner(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, cursor: Option<&str>, limit: usize) -> Result<MemoryPage,String> {
-    list_filtered(conn,workspace_id,mission_id,cursor,limit,&MemoryFilter::default())
+    let mut filter = MemoryFilter::default();
+    filter.repo_key = mission_id.and_then(|m| repo_scope::mission_repo_key(conn, m));
+    list_filtered(conn,workspace_id,mission_id,cursor,limit,&filter)
 }
 
 pub fn list_filtered(
@@ -723,13 +727,13 @@ pub fn list_filtered(
     let sql = format!(
         "{ENTRY_SELECT} WHERE e.scope=?1 AND e.workspace_id=?2 AND (?3 IS NULL OR e.mission_id=?3) AND (?9 IS NULL OR COALESCE(p.kind,e.kind)=?9) AND (?10 IS NULL OR CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END=?10) AND (?11 IS NULL OR instr(lower(e.key||' '||COALESCE(p.body,a.body,(SELECT body FROM memory_revisions WHERE entry_id=e.id AND status='rejected' ORDER BY revision DESC LIMIT 1),'')),lower(?11))>0) AND (?12 IS NULL OR EXISTS(SELECT 1 FROM run_memory_snapshot WHERE entry_id=e.id)=?12) AND (?5 IS NULL OR (CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,-e.priority,e.key COLLATE BINARY,e.id)>(?5,?6,?7,?8)) ORDER BY CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,e.priority DESC,e.key COLLATE BINARY,e.id LIMIT ?4"
     );
-    let sql = sql.replace(" ORDER BY CASE", &format!(" AND ({decision_predicate}) AND (?15 IS NULL OR (e.id IN (SELECT value FROM json_each(?13)))=?15) AND (?16 IS NULL OR (e.id IN (SELECT value FROM json_each(?14)))=?16) AND (?17 IS NULL OR (e.ttl_days IS NOT NULL AND (e.last_verified IS NULL OR e.last_verified<=?18-e.ttl_days*86400))=?17) ORDER BY CASE"));
+    let sql = sql.replace(" ORDER BY CASE", &format!(" AND ({decision_predicate}) AND (?15 IS NULL OR (e.id IN (SELECT value FROM json_each(?13)))=?15) AND (?16 IS NULL OR (e.id IN (SELECT value FROM json_each(?14)))=?16) AND (?17 IS NULL OR (e.ttl_days IS NOT NULL AND (e.last_verified IS NULL OR e.last_verified<=?18-e.ttl_days*86400))=?17) AND (?19 IS NULL OR e.repo_key IS NULL OR e.repo_key=?19) ORDER BY CASE"));
     let mut stmt = conn
         .prepare(&sql)
         .map_err(|_| "could not list memories".to_string())?;
     let rows = stmt
         .query_map(
-            params![scope, workspace_id, mission_id, limit + 1, position.as_ref().map(|p| &p.2),position.as_ref().map(|p| -p.3),position.as_ref().map(|p| &p.4),position.as_ref().map(|p| &p.5),filter.kind,entry_status,filter.query,filter.used,serde_json::to_string(&duplicates).map_err(|e|e.to_string())?,serde_json::to_string(&contradictions).map_err(|e|e.to_string())?,filter.duplicate_of,filter.contradicts,filter.verification_expired,now()],
+            params![scope, workspace_id, mission_id, limit + 1, position.as_ref().map(|p| &p.2),position.as_ref().map(|p| -p.3),position.as_ref().map(|p| &p.4),position.as_ref().map(|p| &p.5),filter.kind,entry_status,filter.query,filter.used,serde_json::to_string(&duplicates).map_err(|e|e.to_string())?,serde_json::to_string(&contradictions).map_err(|e|e.to_string())?,filter.duplicate_of,filter.contradicts,filter.verification_expired,now(),filter.repo_key],
             entry_from_row,
         )
         .map_err(|_| "could not list memories".to_string())?;
@@ -795,13 +799,14 @@ pub fn detail_for_owner(
         "workspace"
     };
     validate_owner(conn, scope, workspace_id, mission_id)?;
+    let repo = mission_id.and_then(|m| repo_scope::mission_repo_key(conn, m));
     let sql = format!(
-        "{ENTRY_SELECT} WHERE e.id=?1 AND e.workspace_id=?2 AND e.scope=?3 AND (?4 IS NULL OR e.mission_id=?4)"
+        "{ENTRY_SELECT} WHERE e.id=?1 AND e.workspace_id=?2 AND e.scope=?3 AND (?4 IS NULL OR e.mission_id=?4) AND (?5 IS NULL OR e.repo_key IS NULL OR e.repo_key=?5)"
     );
     let entry = conn
         .query_row(
             &sql,
-            params![entry_id, workspace_id, scope, mission_id],
+            params![entry_id, workspace_id, scope, mission_id, repo],
             entry_from_row,
         )
         .optional()
@@ -872,9 +877,10 @@ pub fn snapshot_run_with_commit(
     {
         return Err("Run memory scope does not match the Run owner".into());
     }
-    let mut stmt=conn.prepare("SELECT e.id,r.revision,e.scope,e.key,r.kind,r.body,e.priority,r.content_hash FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id AND r.revision=e.current_revision AND r.status='approved' WHERE e.workspace_id=?1 AND e.status='active' AND e.current_revision IS NOT NULL AND (e.scope='workspace' OR (?2 IS NOT NULL AND e.scope='mission' AND e.mission_id=?2)) ORDER BY e.priority DESC,CASE WHEN e.scope='mission' THEN 0 ELSE 1 END,e.key COLLATE BINARY,e.id").map_err(|_|"could not select run memory".to_string())?;
+    let repo = mission_id.and_then(|m| repo_scope::mission_repo_key(conn, m));
+    let mut stmt=conn.prepare("SELECT e.id,r.revision,e.scope,e.key,r.kind,r.body,e.priority,r.content_hash FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id AND r.revision=e.current_revision AND r.status='approved' WHERE e.workspace_id=?1 AND e.status='active' AND e.current_revision IS NOT NULL AND (e.scope='workspace' OR (?2 IS NOT NULL AND e.scope='mission' AND e.mission_id=?2)) AND (?3 IS NULL OR e.repo_key IS NULL OR e.repo_key=?3) ORDER BY e.priority DESC,CASE WHEN e.scope='mission' THEN 0 ELSE 1 END,e.key COLLATE BINARY,e.id").map_err(|_|"could not select run memory".to_string())?;
     let candidates = stmt
-        .query_map(params![workspace_id, mission_id], |r| {
+        .query_map(params![workspace_id, mission_id, repo], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, i64>(1)?,
@@ -1235,9 +1241,10 @@ fn task_authorized_entry(
         let (scope,mission)=owner.ok_or("memory entry is outside the dream workspace")?;
         return Ok((workspace_id,mission,actor,run_id,scope));
     }
+    let repo = mission_id.as_deref().and_then(|m| repo_scope::mission_repo_key(conn, m));
     let scope:Option<String>=conn.query_row(
-        "SELECT scope FROM memory_entries WHERE id=?1 AND workspace_id=?2 AND ((scope='workspace' AND mission_id IS NULL) OR (scope='mission' AND ?3 IS NOT NULL AND mission_id=?3))",
-        params![entry_id,workspace_id,mission_id],|r|r.get(0),
+        "SELECT scope FROM memory_entries WHERE id=?1 AND workspace_id=?2 AND ((scope='workspace' AND mission_id IS NULL) OR (scope='mission' AND ?3 IS NOT NULL AND mission_id=?3)) AND (?4 IS NULL OR repo_key IS NULL OR repo_key=?4)",
+        params![entry_id,workspace_id,mission_id,repo],|r|r.get(0),
     ).optional().map_err(|_|"could not authorize memory entry".to_string())?;
     let scope = scope.ok_or("memory entry is outside the caller's Run")?;
     Ok((workspace_id, mission_id, actor, run_id, scope))
@@ -1319,12 +1326,15 @@ pub fn task_tool(
                 ),
                 _ => return Err("scope must be workspace or mission".into()),
             };
-            let mut page = list_for_owner(
+            let mut filter = MemoryFilter::default();
+            filter.repo_key = mission_id.as_deref().and_then(|m| repo_scope::mission_repo_key(conn, m));
+            let mut page = list_filtered(
                 conn,
                 &workspace_id,
                 owner_mission,
                 input.cursor.as_deref(),
                 input.limit.unwrap_or(LIST_LIMIT),
+                &filter,
             )?;
             page.items = page.items.into_iter().map(approved_agent_entry).collect();
             while untrusted_memory_response(&serde_json::to_string(&page).map_err(|_| "could not encode memory page")?).len() > LIST_BYTES {

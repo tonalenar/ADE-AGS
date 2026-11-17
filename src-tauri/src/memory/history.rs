@@ -86,6 +86,7 @@ pub fn history_for_entry(
     mission_id: Option<&str>,
     entry_id: &str,
 ) -> Result<Vec<MemoryValidityInterval>, String> {
+    let repo = mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m));
     let mut statement = conn
         .prepare(
             "SELECT r.entry_id,r.revision,r.status,r.operation,r.kind,r.priority,r.body,r.content_hash,r.actor_kind,r.source_run_id,r.source_task_id,r.source_fact_id,r.reason,r.expected_revision,r.created_at,r.decided_at
@@ -93,11 +94,12 @@ pub fn history_for_entry(
                JOIN memory_revisions r ON r.entry_id=e.id
               WHERE e.id=?1 AND e.workspace_id=?2 AND r.status='approved'
                 AND (e.scope='workspace' OR (e.scope='mission' AND ?3 IS NOT NULL AND e.mission_id=?3))
+                AND (?4 IS NULL OR e.repo_key IS NULL OR e.repo_key=?4)
               ORDER BY r.decided_at ASC, r.revision ASC",
         )
         .map_err(|_| "could not read memory history".to_string())?;
     let revisions = statement
-        .query_map(params![entry_id, workspace_id, mission_id], |row| {
+        .query_map(params![entry_id, workspace_id, mission_id, repo], |row| {
             Ok(MemoryRevision {
                 entry_id: row.get(0)?,
                 revision: row.get(1)?,

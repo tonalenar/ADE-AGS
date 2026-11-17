@@ -239,7 +239,7 @@ fn measure_entry_select_before_optimizing_it() {
     let start=std::time::Instant::now();let mut old=Vec::new();
     for _ in 0..20 {old=search::legacy_load_docs_at(&conn,"w1",None,now()).unwrap();}
     let before=start.elapsed();let start=std::time::Instant::now();let mut new=Vec::new();
-    for _ in 0..20 {let mut stmt=conn.prepare(search::DOCS_AT_SQL).unwrap();new=stmt.query_map(params!["w1",Option::<String>::None,now()],|r|Ok(search::Doc{entry_id:r.get(0)?,scope:r.get(1)?,key:r.get(2)?,kind:r.get(3)?,priority:r.get(4)?,body:r.get(5)?})).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();}
+    for _ in 0..20 {let mut stmt=conn.prepare(search::DOCS_AT_SQL).unwrap();new=stmt.query_map(params!["w1",Option::<String>::None,now(),Option::<String>::None],|r|Ok(search::Doc{entry_id:r.get(0)?,scope:r.get(1)?,key:r.get(2)?,kind:r.get(3)?,priority:r.get(4)?,body:r.get(5)?})).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();}
     let after=start.elapsed();assert_eq!(old,new);
     println!("load_docs_at N+1 baseline {before:?}; batched window query {after:?} (128 entries x20)");
 }
@@ -2178,4 +2178,56 @@ fn git_history(repo: &std::path::Path) -> String {
     }
     walk(repo, &mut out);
     out
+}
+
+fn git_repo_with_origin(origin: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("ags-mem-repo-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&root).unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    };
+    git(&["init", "-q"]);
+    std::fs::write(root.join("a"), "1").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "a"]);
+    git(&["remote", "add", "origin", origin]);
+    root
+}
+
+#[test]
+fn memory_list_get_e_historico_isolam_por_repo_key() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    let mine = git_repo_with_origin("https://github.com/acme/app.git");
+    let other = git_repo_with_origin("https://github.com/acme/other.git");
+    conn.execute("INSERT INTO missions(id,workspace_id,title,objective,cwd,status,max_parallel,auto_account,created_at,updated_at) VALUES('m1','w1','M1','o',?1,'draft',2,1,0,0)", [mine.to_string_lossy().as_ref()]).unwrap();
+    conn.execute("INSERT INTO missions(id,workspace_id,title,objective,cwd,status,max_parallel,auto_account,created_at,updated_at) VALUES('m2','w1','M2','o',?1,'draft',2,1,0,0)", [other.to_string_lossy().as_ref()]).unwrap();
+    seed_run(&conn, "r1", "w1", Some("m1"));
+    seed_task(&conn, "lead", "r1", Some("lead"));
+    let ours = activate(&conn, "workspace", None, "ours", "from this repo");
+    let theirs = activate(&conn, "workspace", None, "theirs", "from other repo");
+    activate(&conn, "workspace", None, "shared", "no repo");
+    conn.execute("UPDATE memory_entries SET repo_key='github.com/acme/app' WHERE id=?1", [&ours.entry_id]).unwrap();
+    conn.execute("UPDATE memory_entries SET repo_key='github.com/acme/other' WHERE id=?1", [&theirs.entry_id]).unwrap();
+    let listed = task_tool(&conn, "lead", "memory.list", json!({"scope":"workspace"})).unwrap();
+    let page: MemoryPage = serde_json::from_str(agent_json(&listed)).unwrap();
+    let keys: Vec<_> = page.items.iter().map(|e| e.key.as_str()).collect();
+    assert!(keys.contains(&"ours") && keys.contains(&"shared"));
+    assert!(!keys.contains(&"theirs"));
+    assert!(task_tool(&conn, "lead", "memory.get", json!({"entry_id": theirs.entry_id})).is_err());
+    assert!(task_tool(&conn, "lead", "memory.get", json!({"entry_id": ours.entry_id})).is_ok());
+    snapshot_run(&conn, "r1", "w1", Some("m1")).unwrap();
+    let snap = snapshot_for_run(&conn, "r1").unwrap();
+    assert!(snap.meta.memory_index.contains("ours"));
+    assert!(!snap.meta.memory_index.contains("theirs"));
+    assert!(history::history_for_entry(&conn, "w1", Some("m1"), &theirs.entry_id).unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(&mine);
+    let _ = std::fs::remove_dir_all(&other);
 }
