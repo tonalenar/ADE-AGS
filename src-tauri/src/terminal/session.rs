@@ -115,10 +115,12 @@ pub(crate) fn ancestry_required() -> bool {
 
 /// Publica o token já gerado para o PTY desta aba, amarrado ao PID do
 /// processo que o PTY lançou. Substitui o token anterior da mesma aba.
+#[cfg(test)]
 pub(crate) fn publish_token(tab_id: &str, token: &str, root_pid: u32) -> Result<(), String> {
     publish_identity(tab_id, token, ProcessIdentity::current(root_pid))
 }
 
+#[cfg(test)]
 fn publish_identity(tab_id: &str, token: &str, root: ProcessIdentity) -> Result<(), String> {
     if root.pid == 0 {
         return Err(ERR_NO_PID.into());
@@ -132,6 +134,11 @@ fn publish_identity(tab_id: &str, token: &str, root: ProcessIdentity) -> Result<
     }
     publish_in(&mut registry(), tab_id, token, root);
     Ok(())
+}
+
+pub(crate) fn publish_validated_identity(tab_id: &str, token: &str, root: ProcessIdentity) {
+    debug_assert!(root.pid > 0 && root.start_time.is_some());
+    publish_in(&mut registry(), tab_id, token, root);
 }
 
 fn publish_in(sessions: &mut Sessions, tab_id: &str, token: &str, root: ProcessIdentity) {
@@ -175,11 +182,27 @@ pub(crate) fn register_conversation(tab_id: &str, root_pid: u32) -> Result<(), S
     register_conversation_identity(tab_id, ProcessIdentity::current(root_pid))
 }
 
+pub(crate) fn process_identity_with(
+    pid: u32,
+    mut start_of: impl FnMut(u32) -> Option<u64>,
+) -> Result<ProcessIdentity, String> {
+    if pid == 0 {
+        return Err(ERR_NO_PID.into());
+    }
+    let start_time = start_of(pid);
+    if start_time.is_none() {
+        return Err(ERR_ROOT_START.into());
+    }
+    Ok(ProcessIdentity { pid, start_time })
+}
+
 fn register_conversation_identity(tab_id: &str, root: ProcessIdentity) -> Result<(), String> {
     if root.pid == 0 {
+        registry().pending.remove(tab_id);
         return Err(ERR_NO_PID.into());
     }
     if root.start_time.is_none() {
+        registry().pending.remove(tab_id);
         eprintln!(
             "[ade-ags] conversa {tab_id}: PID {} sem horário de início; o registro foi recusado",
             root.pid
@@ -192,6 +215,10 @@ fn register_conversation_identity(tab_id: &str, root: ProcessIdentity) -> Result
         publish_in(&mut sessions, tab_id, &token, root);
     }
     Ok(())
+}
+
+pub(crate) fn discard_pending_conversation_token(tab_id: &str) {
+    registry().pending.remove(tab_id);
 }
 
 /// O PTY saiu do registro (fechou, foi substituído ou a app encerrou a sessão).
@@ -348,6 +375,7 @@ const ERR_TASK_START: &str = "Não foi possível ler o horário de início do pr
 Rode a tarefa de novo a partir do app; sem esse horário não dá para recusar um PID reutilizado.";
 const ERR_STRIPPED: &str = "Este processo roda dentro de um terminal ou conversa do ADE AGS, mas chamou sem a identidade dele (sem ADE_SESSION e sem ADE_TAB_ID: \
 `env -i`, sandbox ou ambiente limpo). O comando foi recusado: rode o `ags` com o ambiente que o app deu ao terminal do agente.";
+const ERR_PROCESS_IDENTITY: &str = "Não foi possível comprovar a identidade do processo chamador. O ADE AGS recusou o comando porque não conseguiu verificar a árvore de processos.";
 
 /// O processo do agente de uma tarefa da Frota. O supervisor registra o PID ao lançá-lo; o `taskId` de um pedido só
 /// vale se o cliente do IPC for ele ou um descendente (F-02). Substitui o registro anterior da mesma tarefa.
@@ -445,6 +473,16 @@ fn classify_caller_with(
     client_pid: Option<u32>,
     parent: impl FnMut(u32) -> Option<u32>,
 ) -> Result<Caller, String> {
+    classify_caller_with_identity(session, from, client_pid, parent, process_start_time)
+}
+
+fn classify_caller_with_identity(
+    session: Option<&str>,
+    from: Option<&str>,
+    client_pid: Option<u32>,
+    parent: impl FnMut(u32) -> Option<u32>,
+    start_of: impl FnMut(u32) -> Option<u64>,
+) -> Result<Caller, String> {
     let declared = |value: Option<&str>| value.map(str::trim).is_some_and(|v| !v.is_empty());
     if declared(session) || declared(from) {
         return authorize_actor(session, from, client_pid).map(Caller::Tab);
@@ -455,7 +493,7 @@ fn classify_caller_with(
     let Some(client) = client_pid.filter(|pid| *pid > 0) else {
         return Err(ERR_NO_PID.into());
     };
-    if inside_an_ade_process(client, parent) {
+    if inside_an_ade_process_with(client, parent, start_of)? {
         Err(ERR_STRIPPED.into())
     } else {
         Ok(Caller::Outside)
@@ -625,7 +663,11 @@ fn principal_with(
 }
 
 /// `pid` é (ou descende de) o processo de algum PTY, conversa ou tarefa registrados.
-fn inside_an_ade_process(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> bool {
+fn inside_an_ade_process_with(
+    pid: u32,
+    mut parent: impl FnMut(u32) -> Option<u32>,
+    mut start_of: impl FnMut(u32) -> Option<u64>,
+) -> Result<bool, String> {
     let roots: Vec<ProcessIdentity> = {
         let sessions = registry();
         sessions
@@ -636,9 +678,9 @@ fn inside_an_ade_process(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -
             .chain(sessions.task_roots.values().copied())
             .collect()
     };
-    roots
-        .into_iter()
-        .any(|root| descends_from_identity(pid, root, &mut parent, process_start_time))
+    let chain = identity_chain(pid, &mut parent, &mut start_of)
+        .map_err(|()| ERR_PROCESS_IDENTITY.to_string())?;
+    Ok(roots.iter().any(|root| chain.contains(root)))
 }
 
 /// Confirma a instância de cada PID observado e compara também o início da raiz registrada.
@@ -1140,6 +1182,29 @@ mod tests {
         .unwrap_err();
         assert!(err.contains("horário de início"), "{err}");
         assert!(!registry().conversations.contains_key(&tab));
+    }
+
+    #[test]
+    fn falha_ao_registrar_conversa_descarta_token_pendente() {
+        let tab = format!(
+            "{}falha-start-{}",
+            crate::chat_team::model::THREAD_PREFIX,
+            uuid::Uuid::new_v4()
+        );
+        let token = issue_conversation_token(&tab).unwrap();
+        let error = register_conversation_identity(
+            &tab,
+            ProcessIdentity {
+                pid: 42,
+                start_time: None,
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.contains("horário de início"), "{error}");
+        let sessions = registry();
+        assert!(!sessions.pending.contains_key(&tab));
+        assert!(!sessions.by_token.contains_key(&token));
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
@@ -1756,5 +1821,21 @@ mod tests {
             "a aba aninhada na tarefa vence por proximidade, sem ambiguidade"
         );
         release_task_process(&tarefa);
+    }
+
+    #[test]
+    fn identidade_ilegivel_nao_classifica_o_chamador_como_fora() {
+        let issued = Issued::new("identidade-ilegivel");
+        let error = classify_caller_with_identity(
+            None,
+            None,
+            Some(std::process::id()),
+            |_| None,
+            |_| None,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("Não foi possível comprovar a identidade"), "{error}");
+        drop(issued);
     }
 }

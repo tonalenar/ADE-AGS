@@ -34,11 +34,12 @@ pub(crate) use session::authorize_actor;
 pub(crate) use session::parent_pid;
 pub(crate) use session::ProcessIdentity;
 pub(crate) use session::descends_from_identity;
+pub(crate) use session::discard_pending_conversation_token;
 pub(crate) use session::process_start_time;
 pub use session::{
     Caller, Principal, authorize_task, classify_caller, principal_of, register_task_process,
     release_task_process,
 };
-pub(crate) use session::{
-    authorize, issue_conversation_token, publish_token, register_conversation, release_token,
-};
+pub(crate) use session::{authorize, issue_conversation_token, register_conversation, release_token};
+#[cfg(test)]
+pub(crate) use session::publish_token;

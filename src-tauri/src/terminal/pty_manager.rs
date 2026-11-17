@@ -1187,7 +1187,7 @@ pub async fn pty_create(
     // El grupo se crea ANTES del spawn para que ya exista cuando el proceso empiece a
     // tener descendencia propia.
     let mut group = ProcessGroup::new(id);
-    let child = match pair.slave.spawn_command(cmd) {
+    let mut child = match pair.slave.spawn_command(cmd) {
         Ok(child) => child,
         Err(e) => return Err(format!("Failed to spawn '{command}': {e}")),
     };
@@ -1218,22 +1218,41 @@ pub async fn pty_create(
     // open in another app") y su memoria. Al llegar el nuevo, el anterior de esa tab se va.
     let replaced = {
         let mut reg = registry();
-        let old: Vec<u32> = match &tab_id {
-            Some(tab) => reg
-                .iter()
-                .filter(|(_, s)| s.tab_id.as_deref() == Some(tab.as_str()))
-                .map(|(k, _)| *k)
-                .collect(),
-            None => Vec::new(),
+        let prepared = remove_previous_tab_sessions(
+            &mut reg,
+            tab_id.as_deref(),
+            |session, tab| session.tab_id.as_deref() == Some(tab),
+            || {
+                if let Some(tab) = tab_id.as_deref() {
+                    let pid = root_pid.ok_or_else(|| {
+                        "Não foi possível provar o PID do novo terminal; o lançamento foi recusado."
+                            .to_string()
+                    })?;
+                    let identity = super::session::process_identity_with(
+                        pid,
+                        super::session::process_start_time,
+                    )?;
+                    Ok(Some((tab.to_string(), session_token.clone(), identity)))
+                } else {
+                    Ok(None)
+                }
+            },
+        );
+        let (old, removed, identity) = match prepared {
+            Ok(removed) => removed,
+            Err(error) => {
+                drop(reg);
+                group.kill_all();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
         };
-        let removed: Vec<PtySession> = old.iter().filter_map(|k| reg.remove(k)).collect();
         for session in &removed {
             forget_session(session);
         }
-        if let (Some(tab), Some(token), Some(pid)) =
-            (tab_id.as_deref(), session_token.as_deref(), root_pid)
-        {
-            super::publish_token(tab, token, pid)?;
+        if let Some((tab, Some(token), identity)) = identity {
+            super::session::publish_validated_identity(&tab, &token, identity);
         }
         reg.insert(
             id,
@@ -1568,6 +1587,25 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
 /// Quanto o `pty_kill` espera o processo sair depois do sinal.
 const KILL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
+fn remove_previous_tab_sessions<T, V>(
+    sessions: &mut HashMap<u32, T>,
+    tab_id: Option<&str>,
+    matches_tab: impl Fn(&T, &str) -> bool,
+    validate_replacement: impl FnOnce() -> Result<V, String>,
+) -> Result<(Vec<u32>, Vec<T>, V), String> {
+    let prepared = validate_replacement()?;
+    let old: Vec<u32> = match tab_id {
+        Some(tab) => sessions
+            .iter()
+            .filter(|(_, session)| matches_tab(session, tab))
+            .map(|(id, _)| *id)
+            .collect(),
+        None => Vec::new(),
+    };
+    let removed: Vec<T> = old.iter().filter_map(|id| sessions.remove(id)).collect();
+    Ok((old, removed, prepared))
+}
+
 fn stop_session(mut session: PtySession) -> Result<(), String> {
     // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
     // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los
@@ -1615,6 +1653,25 @@ pub fn kill_all_sessions() {
 
 #[cfg(test)]
 mod source_tests {
+    use super::remove_previous_tab_sessions;
+    use std::collections::HashMap;
+
+    #[test]
+    fn falha_ao_provar_identidade_nova_mantem_o_terminal_anterior_registrado() {
+        let mut sessions = HashMap::from([(7, "terminal anterior")]);
+        let result = remove_previous_tab_sessions(
+            &mut sessions,
+            Some("aba"),
+            |_, _| true,
+            || {
+                super::super::session::process_identity_with(8, |_| None).map(|_| ())
+            },
+        );
+
+        assert!(result.unwrap_err().contains("horário de início"));
+        assert_eq!(sessions.get(&7), Some(&"terminal anterior"));
+    }
+
     #[test]
     fn perfil_do_codex_nao_chama_processo_externo_de_acl() {
         let needle = ["ica", "cls"].concat();

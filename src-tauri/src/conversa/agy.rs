@@ -556,7 +556,7 @@ async fn ensure_process(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Não consegui abrir o Antigravity: {e}"))?;
-    crate::chat_team::env::register_process(&row.id, child.id());
+    crate::chat_team::env::register_process(&row.id, child.id())?;
     super::memoria::record_unsupported(app, db, &row);
     let stdin = child.stdin.take().ok_or("sem stdin")?;
     let stdout = child.stdout.take().ok_or("sem stdout")?;
