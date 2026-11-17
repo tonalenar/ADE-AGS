@@ -800,6 +800,19 @@ mod envio {
         }
         assert_eq!(highest.load(Ordering::SeqCst), 1);
     }
+
+    /// O gate de envio de uma conversa é o mesmo para quem usa e para quem espera. Quando ninguém mais o segura, sai do
+    /// mapa: o mapa não guarda as conversas que já passaram.
+    #[test]
+    fn o_gate_da_conversa_some_quando_ninguem_o_segura() {
+        let mut mapa = std::collections::HashMap::new();
+        let a = crate::conversa::api::gate_in(&mut mapa, "t1");
+        let a2 = crate::conversa::api::gate_in(&mut mapa, "t1");
+        assert!(Arc::ptr_eq(&a, &a2), "quem chega enquanto há dono pega o mesmo gate");
+        drop((a, a2));
+        let _b = crate::conversa::api::gate_in(&mut mapa, "t2");
+        assert_eq!(mapa.keys().collect::<Vec<_>>(), ["t2"], "o gate de t1 saiu: ninguém o segura");
+    }
 }
 
 // ── Etapa 3 (A1): retomar a sessão sem esquecer em silêncio ─────────────
