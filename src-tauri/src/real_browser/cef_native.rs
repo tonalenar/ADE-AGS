@@ -29,7 +29,7 @@ use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 use tokio::sync::oneshot;
 
-use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, outline, rounded_parts, PathStep, PlaceState, RoundedPart};
+use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, outline, rounded_parts, CreationState, PathStep, PlaceState, RoundedPart};
 use super::{emit, on_binding};
 
 const CEF_FRAMEWORK_BUNDLE: &str = "Chromium Embedded Framework.framework";
@@ -52,6 +52,8 @@ macro_rules! cef_trace {
     };
 }
 static PUMP_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Cada criação de Portal ganha uma geração; um callback tardio de outra geração não mexe no Portal novo.
+static NEXT_PORTAL_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 fn is_helper_switch(argument: &OsStr) -> bool {
     let argument = argument.to_string_lossy();
@@ -141,6 +143,8 @@ struct Portal {
     /// Quadros seguidos sem recorte à vista, e se a vista está escondida (ver `empty_clip_visibility`).
     empty_clips: u8,
     hidden: bool,
+    /// A criação deste Portal: um timeout a cancela enquanto ela não ficou pronta.
+    creation: CreationState,
 }
 
 #[derive(Default)]
@@ -508,7 +512,7 @@ wrap_dev_tools_message_observer! {
 }
 
 wrap_life_span_handler! {
-    struct ADELifeSpanHandler { id: String }
+    struct ADELifeSpanHandler { id: String, generation: u64 }
     impl LifeSpanHandler {
         /// Pop-ups (OAuth, `window.open`, `target=_blank`) viram uma aba nova da ADE. O CEF cria o
         /// browser como vista filha de um host oculto; a aba adota esse id e o `opener` continua vivo.
@@ -531,7 +535,7 @@ wrap_life_span_handler! {
             let Some(url) = target_url.map(ToString::to_string) else { return 1 };
             cef_trace!("on_before_popup {} -> {url}", self.id);
             match prepare_popup(&self.id, &url) {
-                Some((popup, host, app)) => {
+                Some((popup, host, app, generation)) => {
                     if let Some(window_info) = window_info {
                         let bounds = host.bounds();
                         *window_info = window_info.clone().set_as_child(
@@ -539,7 +543,7 @@ wrap_life_span_handler! {
                             &Rect { x: 0, y: 0, width: bounds.size.width.max(1.0) as i32, height: bounds.size.height.max(1.0) as i32 },
                         );
                     }
-                    if let Some(client) = client { *client = Some(ADEClient::new(popup.clone(), app.clone())); }
+                    if let Some(client) = client { *client = Some(ADEClient::new(popup.clone(), app.clone(), generation)); }
                     emit(&app, "real-browser-popup", json!({ "id": self.id, "popup": popup, "url": url }));
                     0
                 }
@@ -553,26 +557,40 @@ wrap_life_span_handler! {
             // Com o primeiro navegador a bomba volta a rodar (ela para quando não há nenhum).
             schedule_pump(0);
             let Some(browser) = browser else { return };
-            PORTALS.with(|portals| {
-                if let Some(portal) = portals.borrow_mut().get_mut(&self.id) {
-                    portal.browser = Some(browser.clone());
-                    // O `place` que chegou antes da criação ficou só registrado: aplica agora o zoom e a medida
-                    // dele, senão a página segue com o zoom padrão até o próximo movimento.
-                    if let Some(state) = portal.last_place.as_ref() {
-                        if let Some(host) = browser.host() {
-                            host.set_zoom_level(chrome_zoom_level(state.zoom));
-                            host.was_resized();
-                        }
-                    }
-                    if let Some(ready) = portal.ready.take() { let _ = ready.send(()); }
+            let accepted = PORTALS.with(|portals| {
+                let mut portals = portals.borrow_mut();
+                let Some(portal) = portals.get_mut(&self.id) else { return false };
+                if !portal.creation.mark_ready(self.generation) { return false; }
+                portal.browser = Some(browser.clone());
+                // O `place` que chegou antes da criação ficou só registrado: aplica agora o zoom e a medida
+                // dele, senão a página segue com o zoom padrão até o próximo movimento.
+                if let Some(state) = portal.last_place.as_ref() {
                     if let Some(host) = browser.host() {
-                        let mut observer = ADEDevToolsObserver::new(self.id.clone(), app_handle_for_portal(&self.id), portal.pending.clone());
-                        let registration = host.add_dev_tools_message_observer(Some(&mut observer));
-                        portal._observer = Some(observer);
-                        portal._registration = registration;
+                        host.set_zoom_level(chrome_zoom_level(state.zoom));
+                        host.was_resized();
                     }
                 }
+                let bounds = portal.host_view.bounds();
+                if let Some(host) = browser.host() {
+                    let child = host.window_handle() as *mut AnyObject;
+                    if !child.is_null() {
+                        let view: &NSView = unsafe { &*child.cast() };
+                        view.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), bounds.size));
+                    }
+                }
+                if let Some(ready) = portal.ready.take() { let _ = ready.send(()); }
+                if let Some(host) = browser.host() {
+                    let mut observer = ADEDevToolsObserver::new(self.id.clone(), app_handle_for_portal(&self.id), portal.pending.clone());
+                    let registration = host.add_dev_tools_message_observer(Some(&mut observer));
+                    portal._observer = Some(observer);
+                    portal._registration = registration;
+                }
+                true
             });
+            if !accepted {
+                // A criação foi cancelada (o `create` estourou o prazo): este navegador tardio não tem dono.
+                if let Some(host) = browser.host() { host.close_browser(1); }
+            }
         }
 
         /// Nunca deixa o CEF mandar `performClose:` à janela de topo: para uma vista filha, ela é a
@@ -618,7 +636,7 @@ wrap_life_span_handler! {
 }
 
 /// Prepara o host oculto e o registro de um pop-up aberto por `opener`. `None` recusa o pop-up.
-fn prepare_popup(opener: &str, url: &str) -> Option<(String, Retained<ADEPortalHost>, AppHandle)> {
+fn prepare_popup(opener: &str, url: &str) -> Option<(String, Retained<ADEPortalHost>, AppHandle, u64)> {
     let mtm = MainThreadMarker::new()?;
     if !super::popup_allowed(url) { return None; }
     let app = PORTAL_APPS.with(|apps| apps.borrow().get(opener).cloned())?;
@@ -628,6 +646,7 @@ fn prepare_popup(opener: &str, url: &str) -> Option<(String, Retained<ADEPortalH
         Some((unsafe { host.superview() }?, host.frame()))
     })?;
     let popup = uuid::Uuid::new_v4().to_string();
+    let generation = NEXT_PORTAL_GENERATION.fetch_add(1, Ordering::SeqCst);
     super::adopt_popup(opener, &popup)?;
     let host = ADEPortalHost::new(mtm, &popup, frame);
     // Escondido até a aba nova mandar o primeiro `place`.
@@ -637,10 +656,10 @@ fn prepare_popup(opener: &str, url: &str) -> Option<(String, Retained<ADEPortalH
     PORTALS.with(|portals| {
         portals.borrow_mut().insert(popup.clone(), Portal {
             host_view: host.clone(), browser: None, _observer: None, _registration: None,
-            pending: Arc::new(Mutex::new(HashMap::new())), ready: None, last_place: None, empty_clips: 0, hidden: true,
+            pending: Arc::new(Mutex::new(HashMap::new())), ready: None, last_place: None, empty_clips: 0, hidden: true, creation: CreationState::new(generation),
         });
     });
-    Some((popup, host, app))
+    Some((popup, host, app, generation))
 }
 
 fn ask_permission(origin: &str, resources: &str) -> bool {
@@ -752,9 +771,9 @@ wrap_load_handler! {
 }
 
 wrap_client! {
-    struct ADEClient { id: String, app: AppHandle }
+    struct ADEClient { id: String, app: AppHandle, generation: u64 }
     impl Client {
-        fn life_span_handler(&self) -> Option<LifeSpanHandler> { Some(ADELifeSpanHandler::new(self.id.clone())) }
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> { Some(ADELifeSpanHandler::new(self.id.clone(), self.generation)) }
         fn display_handler(&self) -> Option<DisplayHandler> { Some(ADEDisplayHandler::new(self.id.clone(), self.app.clone())) }
         fn load_handler(&self) -> Option<LoadHandler> { Some(ADELoadHandler::new(self.id.clone(), self.app.clone())) }
         fn permission_handler(&self) -> Option<PermissionHandler> { Some(ADEPermissionHandler::new()) }
@@ -800,12 +819,32 @@ pub async fn create(app: &AppHandle, parent: isize, id: &str, profile: PathBuf, 
     let app = app.clone();
     let main_thread_app = app.clone();
     let id = id.to_string();
+    let timeout_id = id.clone();
     let (ready, created) = oneshot::channel();
-    on_main(&app, move || create_on_main(&main_thread_app, parent as *mut AnyObject, &id, profile, rect, ready)).await?;
-    tokio::time::timeout(BROWSER_READY_TIMEOUT, created)
-        .await
-        .map_err(|_| "O Chromium não abriu a página a tempo.".to_string())?
-        .map_err(|_| "O Chromium fechou a página antes de abri-la.".to_string())
+    let generation = on_main(&app, move || create_on_main(&main_thread_app, parent as *mut AnyObject, &id, profile, rect, ready)).await?;
+    match tokio::time::timeout(BROWSER_READY_TIMEOUT, created).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) => Err("O Chromium fechou a página antes de abri-la.".to_string()),
+        Err(_) => {
+            // O prazo estourou: o Portal sai do registro e a NSView sai da janela. Um navegador que o CEF entregar
+            // depois não tem dono e é fechado em `on_after_created`.
+            on_main(&app, move || {
+                PORTALS.with(|portals| {
+                    let mut portals = portals.borrow_mut();
+                    let cancelled = portals.get_mut(&timeout_id).is_some_and(|portal| portal.creation.cancel_if_pending(generation));
+                    if cancelled {
+                        if let Some(portal) = portals.remove(&timeout_id) {
+                            portal.host_view.removeFromSuperview();
+                        }
+                        PORTAL_APPS.with(|apps| { apps.borrow_mut().remove(&timeout_id); });
+                    }
+                });
+                Ok(())
+            })
+            .await?;
+            Err("O Chromium não abriu a página a tempo.".to_string())
+        }
+    }
 }
 
 const BROWSER_READY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -829,25 +868,33 @@ pub async fn wait_ready(app: &AppHandle, id: &str) -> Result<(), String> {
         .map_err(|_| "O pop-up fechou antes de abrir.".to_string())
 }
 
-fn create_on_main(app: &AppHandle, parent: *mut AnyObject, id: &str, profile: PathBuf, rect: [i32; 4], ready: oneshot::Sender<()>) -> Result<(), String> {
+fn create_on_main(app: &AppHandle, parent: *mut AnyObject, id: &str, profile: PathBuf, rect: [i32; 4], ready: oneshot::Sender<()>) -> Result<u64, String> {
     let _mtm = MainThreadMarker::new().ok_or("A vista CEF precisa ser criada na thread principal do macOS.")?;
     load_cef(false)?;
     initialize_cef(Some(app.clone()))?;
-    if PORTALS.with(|portals| portals.borrow().contains_key(id)) {
-        let _ = ready.send(());
-        return Ok(());
+    // Um Portal que já existe: pronto, a criação já deu certo; ainda preparando, não é sucesso (devolver `Ok` aqui
+    // fazia o chamador achar que havia navegador).
+    if let Some((attached, generation)) = PORTALS.with(|portals| {
+        portals.borrow().get(id).map(|portal| (portal.browser.is_some(), portal.creation.generation()))
+    }) {
+        if attached {
+            let _ = ready.send(());
+            return Ok(generation);
+        }
+        return Err("O navegador deste Portal ainda está preparando a página.".into());
     }
     let context = request_context(&profile)?;
     let root: &NSView = unsafe { &*parent.cast() };
     let host = ADEPortalHost::new(_mtm, id, frame_in_parent(root, rect));
     root.addSubview(&host);
     let pending = Arc::new(Mutex::new(HashMap::new()));
+    let generation = NEXT_PORTAL_GENERATION.fetch_add(1, Ordering::SeqCst);
     PORTAL_APPS.with(|apps| { apps.borrow_mut().insert(id.to_string(), app.clone()); });
     PORTALS.with(|portals| {
-        portals.borrow_mut().insert(id.to_string(), Portal { host_view: host.clone(), browser: None, _observer: None, _registration: None, pending: pending.clone(), ready: Some(ready), last_place: None, empty_clips: 0, hidden: false });
+        portals.borrow_mut().insert(id.to_string(), Portal { host_view: host.clone(), browser: None, _observer: None, _registration: None, pending: pending.clone(), ready: Some(ready), last_place: None, empty_clips: 0, hidden: false, creation: CreationState::new(generation) });
     });
 
-    let mut client = ADEClient::new(id.to_string(), app.clone());
+    let mut client = ADEClient::new(id.to_string(), app.clone(), generation);
     let child = WindowInfo::default().set_as_child(
         Retained::as_ptr(&host) as *mut AnyObject as *mut std::ffi::c_void,
         &Rect { x: 0, y: 0, width: rect[2].max(1), height: rect[3].max(1) },
@@ -860,10 +907,11 @@ fn create_on_main(app: &AppHandle, parent: *mut AnyObject, id: &str, profile: Pa
     cef_trace!("create_browser {id} -> {created}");
     if created != 1 {
         PORTALS.with(|portals| { portals.borrow_mut().remove(id); });
+        PORTAL_APPS.with(|apps| { apps.borrow_mut().remove(id); });
         host.removeFromSuperview();
         return Err("O CEF não criou uma vista filha para o navegador.".into());
     }
-    Ok(())
+    Ok(generation)
 }
 
 async fn on_main<T: Send + 'static>(app: &AppHandle, task: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {

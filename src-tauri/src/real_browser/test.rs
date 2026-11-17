@@ -1,7 +1,7 @@
 //! Testes da superfície nativa do navegador (o Portal): o contrato do `Place` que chega do front e a lógica pura
 //! que decide o que mudou, o que a máscara desenha e quando a vista é escondida.
 
-use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, outline, rounded_parts, PathStep, PlaceChanges, PlaceState};
+use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, outline, rounded_parts, CreationState, PathStep, PlaceChanges, PlaceState};
 use super::{Place, Rect};
 use serde_json::json;
 
@@ -97,4 +97,21 @@ fn bomba_do_cef_so_roda_com_navegador_aberto() {
     assert!(!keeps_pumping(0));
     assert!(keeps_pumping(1));
     assert!(keeps_pumping(3));
+}
+
+#[test]
+fn timeout_limpa_registro() {
+    // Uma criação pendente que estoura o prazo é cancelada: o callback tardio dela não é aceito.
+    let mut creation = CreationState::new(7);
+    assert!(creation.cancel_if_pending(7));
+    assert!(!creation.accepts_callback(7));
+    assert!(!creation.accepts_callback(8));
+}
+
+#[test]
+fn timeout_nao_desfaz_criacao_ja_pronta() {
+    let mut creation = CreationState::new(3);
+    assert!(creation.mark_ready(3));
+    assert!(!creation.cancel_if_pending(3));
+    assert!(creation.accepts_callback(3));
 }

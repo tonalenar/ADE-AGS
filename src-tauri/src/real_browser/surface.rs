@@ -118,3 +118,30 @@ pub(super) fn effective_zoom(zoom: f64, last: Option<f64>) -> f64 {
 pub(super) fn keeps_pumping(open_browsers: usize) -> bool {
     open_browsers > 0
 }
+
+/// O estado de uma criação de Portal. Um timeout cancela só a criação que ainda não ficou pronta, e um callback
+/// do CEF que chega depois do cancelamento não é aceito: o navegador que ele trouxe não tem dono.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct CreationState {
+    generation: u64,
+    cancelled: bool,
+    ready: bool,
+}
+
+impl CreationState {
+    pub fn new(generation: u64) -> Self { Self { generation, cancelled: false, ready: false } }
+    /// O callback de criação (`on_after_created`) só vale para a geração atual e antes de um cancelamento.
+    pub fn mark_ready(&mut self, generation: u64) -> bool {
+        if !self.accepts_callback(generation) { return false; }
+        self.ready = true;
+        true
+    }
+    /// Cancela só uma criação ainda pendente: uma que já ficou pronta não é desfeita por um timeout tardio.
+    pub fn cancel_if_pending(&mut self, generation: u64) -> bool {
+        if self.generation != generation || self.cancelled || self.ready { return false; }
+        self.cancelled = true;
+        true
+    }
+    pub fn generation(&self) -> u64 { self.generation }
+    pub fn accepts_callback(&self, generation: u64) -> bool { !self.cancelled && self.generation == generation }
+}
