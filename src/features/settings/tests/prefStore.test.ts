@@ -6,6 +6,7 @@ import { createPrefStore } from "../prefStore";
 describe("createPrefStore", () => {
   it("rele a chave quando outra aba dispara storage", () => {
     localStorage.clear();
+    const applied: number[] = [];
     const store = createPrefStore({
       key: "cc-test-pref",
       defaults: { n: 1 },
@@ -15,11 +16,13 @@ describe("createPrefStore", () => {
         }
         return { n: 1 };
       },
+      apply: (value) => { applied.push(value.n); },
     });
     store.save({ n: 2 });
-    expect(store.read()).toEqual({ n: 2 });
+    applied.length = 0;
     localStorage.setItem("cc-test-pref", JSON.stringify({ n: 9 }));
     window.dispatchEvent(new StorageEvent("storage", { key: "cc-test-pref", newValue: JSON.stringify({ n: 9 }) }));
+    expect(applied).toEqual([9]);
     expect(store.read()).toEqual({ n: 9 });
   });
 });

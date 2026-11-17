@@ -7,7 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const invokeMock = vi.fn();
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invokeMock(...a) }));
+const listenMock = vi.hoisted(() => ({
+  listen: vi.fn<(name: string, cb: (event: { payload: string }) => void) => Promise<() => void>>(
+    async () => () => {},
+  ),
+}));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: listenMock.listen }));
 const i18nResult = { t: (k: string, o?: Record<string, unknown>) => (o ? `${k} ${JSON.stringify(o)}` : k) };
 vi.mock("react-i18next", () => ({ useTranslation: () => i18nResult }));
 
@@ -78,6 +84,8 @@ async function mount(current: DecisionSettings) {
 
 beforeEach(() => {
   invokeMock.mockReset();
+  listenMock.listen.mockReset();
+  listenMock.listen.mockResolvedValue(() => {});
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -183,5 +191,32 @@ describe("seção Decisões (experimental)", () => {
     expect(text).toContain("revisar → aprovar ×2");
     // A pergunta sem rótulo cego não ganha a frase do "nunca devolve".
     expect(text.match(/settings\.decisions\.q\.blind/g)).toHaveLength(1);
+  });
+
+  it("formulário sujo não recarrega quando o modelo sobe sozinho", async () => {
+    let onUpdated: ((event: { payload: string }) => void) | undefined;
+    listenMock.listen.mockImplementation(async (name, cb) => {
+      if (name === "decisions-model-updated") onUpdated = cb;
+      return () => {};
+    });
+    await mount(settings({ provider: "jev", model: "jev-latest", baseUrl: "https://api.typesafe.ai" }));
+    const url = host.querySelector<HTMLInputElement>('input[aria-label="settings.decisions.baseUrl"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(url, "https://editado.exemplo");
+      url.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { await Promise.resolve(); });
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "decision_settings_get") {
+        return settings({ provider: "jev", model: "jev-novo", baseUrl: "https://api.typesafe.ai" });
+      }
+      if (cmd === "decision_shadow_report") return report;
+      if (cmd === "jev_models") return ["jev-latest", "jev-novo"];
+      return undefined;
+    });
+    await act(async () => { onUpdated?.({ payload: "jev-novo" }); });
+    expect(url.value).toBe("https://editado.exemplo");
+    expect(host.textContent).toContain("settings.decisions.autoUpdatedKeepEdits");
+    expect(host.textContent).not.toContain("settings.decisions.autoUpdated ");
   });
 });
