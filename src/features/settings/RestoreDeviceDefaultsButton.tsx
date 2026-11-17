@@ -25,7 +25,7 @@ export function RestoreDeviceDefaultsButton() {
   const [changed, setChanged] = useState<readonly DeviceDefault[] | null>(null);
 
   const refresh = useCallback(() => {
-    void changedDeviceDefaults(DEVICE_DEFAULTS).then(setChanged);
+    void changedDeviceDefaults(DEVICE_DEFAULTS).then(setChanged).catch(() => setChanged([]));
   }, []);
 
   useEffect(() => {

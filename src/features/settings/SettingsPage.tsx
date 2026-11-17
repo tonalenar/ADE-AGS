@@ -69,7 +69,7 @@ export function SettingsPage() {
   useScrollToTarget(section, scrollRef);
 
   useEffect(() => {
-    loadSkillsDir();
+    void loadSkillsDir().catch(console.error);
     loadCustomAgents().catch(console.error);
   }, [loadSkillsDir, loadCustomAgents]);
 

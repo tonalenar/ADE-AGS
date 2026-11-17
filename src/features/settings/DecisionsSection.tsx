@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 
@@ -170,6 +170,7 @@ export function DecisionsSection() {
   const [secondaryConn, setSecondaryConn] = useState<{ ok: boolean; text: string } | null>(null);
   const [report, setReport] = useState<ShadowReport | null>(null);
   const [jevList, setJevList] = useState<string[]>([]);
+  const dirtyRef = useRef(false);
 
   useEffect(() => {
     const loadSettings = () => getDecisionSettings()
@@ -188,6 +189,11 @@ export function DecisionsSection() {
     let off: Promise<() => void> = Promise.resolve(() => {});
     try {
       off = listen<string>("decisions-model-updated", (event) => {
+        if (dirtyRef.current) {
+          setStatus(t("settings.decisions.autoUpdatedKeepEdits", { model: event.payload }));
+          jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
+          return;
+        }
         void loadSettings();
         jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
         setStatus(t("settings.decisions.autoUpdated", { model: event.payload }));
@@ -203,6 +209,7 @@ export function DecisionsSection() {
     () => isDirty(settings, saved) || keyDraft.trim() !== "" || secondaryKeyDraft.trim() !== "",
     [settings, saved, keyDraft, secondaryKeyDraft],
   );
+  dirtyRef.current = dirty;
   const providerLabel = (id: DecisionProviderId) => t(`settings.decisions.provider.${id === "laya_local" ? "layaLocal" : id === "laya_studio" ? "layaStudio" : id}`);
   const active = settings.enabled && settings.provider !== "none";
   const secondaryOn = settings.secondaryProvider !== "none";
