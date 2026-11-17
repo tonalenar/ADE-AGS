@@ -276,33 +276,10 @@ mod arbol {
 
 #[cfg(unix)]
 #[test]
-fn pid_com_inicio_diferente_nao_recebe_sigkill() {
-    use crate::terminal::containment::unix_tree::{
-        ProcessIdentity, terminate_with_grace,
-    };
-    use std::time::Duration;
-
-    let pid = std::process::id();
-    let identity = ProcessIdentity { pid, start_time: 100, pgid: None };
-    let mut signals = Vec::new();
-    terminate_with_grace(
-        &[identity],
-        Duration::ZERO,
-        |pid, signal| signals.push((pid, signal)),
-        |_| {},
-        |_| Some(101),
-    );
-    assert!(!signals.iter().any(|(_, signal)| *signal == libc::SIGKILL));
-}
-
-#[cfg(unix)]
-#[test]
 fn processo_que_trata_term_sai_durante_a_graca_sem_sigkill() {
-    use crate::terminal::containment::unix_tree::{ProcessIdentity, terminate_with_grace};
+    use crate::terminal::containment::unix_tree::terminate_with_grace;
     use std::io::BufRead;
     use std::process::Command;
-    use std::cell::Cell;
-    use std::time::Instant;
     use std::time::Duration;
 
     let mut child = Command::new("sh")
@@ -314,12 +291,10 @@ fn processo_que_trata_term_sai_durante_a_graca_sem_sigkill() {
     std::io::BufReader::new(child.stdout.take().unwrap()).read_line(&mut ready).unwrap();
     assert_eq!(ready.trim(), "pronto");
     let pid = child.id();
-    let identity = ProcessIdentity { pid, start_time: 1, pgid: None };
     let mut sent_kill = false;
     let mut signals = Vec::new();
-    let exited = Cell::new(false);
     terminate_with_grace(
-        &[identity],
+        &[pid],
         Duration::from_secs(2),
         |pid, signal| {
             signals.push(signal);
@@ -327,21 +302,11 @@ fn processo_que_trata_term_sai_durante_a_graca_sem_sigkill() {
             unsafe { libc::kill(pid as i32, signal); }
         },
         |grace| {
-            let deadline = Instant::now() + grace;
-            loop {
-                if child.try_wait().unwrap().is_some() {
-                    exited.set(true);
-                    break;
-                }
-                if Instant::now() >= deadline {
-                    break;
-                }
-                std::thread::yield_now();
-            }
+            assert_eq!(grace, Duration::from_secs(2));
+            child.wait().unwrap();
         },
-        |_| (!exited.get()).then_some(1),
+        |_| false,
     );
-    assert!(exited.get(), "o teste precisa recolher o filho antes do prazo");
     assert_eq!(signals, [libc::SIGTERM]);
     assert!(!sent_kill, "o processo saiu ao tratar TERM antes do fim da graça");
 }

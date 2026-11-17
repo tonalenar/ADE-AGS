@@ -117,7 +117,7 @@ impl ProcessGroup {
     /// Mata todo lo que quede adentro. Idempotente: se llama explícitamente al cerrar una
     /// tab y otra vez desde `Drop`.
     pub fn kill_all(&mut self) {
-        kill_all_groups(std::iter::once(self));
+        imp::kill_all(&mut self.imp);
     }
 
     /// ¿Hay detrás un mecanismo del kernel del que la descendencia no pueda escaparse?
@@ -139,45 +139,6 @@ impl ProcessGroup {
     }
 }
 
-/// Encerra grupos juntos para que a janela de graça não se multiplique pela quantidade de
-/// sessões. No Unix, todos recebem HUP/TERM antes de começar o prazo compartilhado.
-pub(crate) fn kill_all_groups<'a>(groups: impl IntoIterator<Item = &'a mut ProcessGroup>) {
-    kill_all_groups_with_grace(groups, std::time::Duration::from_secs(2));
-}
-
-pub(crate) fn kill_all_groups_with_grace<'a>(
-    groups: impl IntoIterator<Item = &'a mut ProcessGroup>,
-    grace: std::time::Duration,
-) {
-    let mut groups: Vec<_> = groups.into_iter().collect();
-    #[cfg(all(unix, not(target_os = "linux")))]
-    if groups.len() == 1 {
-        imp::kill_all_with_grace(&mut groups[0].imp, grace);
-        return;
-    }
-    #[cfg(unix)]
-    {
-        for group in &mut groups {
-            imp::begin_shutdown(&mut group.imp);
-        }
-        let deadline = std::time::Instant::now() + grace;
-        while std::time::Instant::now() < deadline
-            && groups.iter().any(|group| !imp::shutdown_complete(&group.imp))
-        {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        for group in &mut groups {
-            imp::force_shutdown(&mut group.imp);
-        }
-    }
-    #[cfg(windows)]
-    let _ = grace;
-    #[cfg(windows)]
-    for group in &mut groups {
-        imp::kill_all(&mut group.imp);
-    }
-}
-
 impl Drop for ProcessGroup {
     fn drop(&mut self) {
         self.kill_all();
@@ -195,8 +156,6 @@ pub(crate) mod imp {
         /// `None` si no se pudo crear el cgroup; ahí se cae al respaldo por `ppid`.
         dir: Option<PathBuf>,
         leader: Option<u32>,
-        leader_identity: Option<super::unix_tree::ProcessIdentity>,
-        pending: Vec<super::unix_tree::ProcessIdentity>,
     }
 
     /// El cgroup de la propia app, leído de `/proc/self/cgroup`. En cgroup v2 hay una sola
@@ -217,13 +176,12 @@ pub(crate) mod imp {
         let dir = own_cgroup()
             .map(|own| own.join(format!("cc-tab-{id}")))
             .filter(|d| std::fs::create_dir(d).is_ok());
-        Group { dir, leader: None, leader_identity: None, pending: Vec::new() }
+        Group { dir, leader: None }
     }
 
     pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
         let Some(pid) = child.pid() else { return };
         g.leader = Some(pid);
-        g.leader_identity = super::unix_tree::capture_identity(pid);
         if let Some(dir) = &g.dir {
             // Mover el pid al cgroup arrastra al proceso entero; lo que nazca de él
             // después hereda la pertenencia y no puede salirse.
@@ -241,7 +199,7 @@ pub(crate) mod imp {
         g.dir.is_some()
     }
 
-    pub fn begin_shutdown(g: &mut Group) {
+    pub fn kill_all(g: &mut Group) {
         // Los dos mecanismos se usan juntos, y en este orden, porque cada uno tapa el
         // agujero del otro:
         //
@@ -256,34 +214,30 @@ pub(crate) mod imp {
         // alcanza a cerrar sus archivos — importa, porque las TUIs escriben su transcript
         // al salir y de ahí sale el título de la sesión.
         if let Some(pid) = g.leader.take() {
-            g.pending = super::unix_tree::begin_tree_shutdown(pid, g.leader_identity.take());
+            super::unix_tree::kill_tree(pid);
         }
-    }
-
-    pub fn shutdown_complete(g: &Group) -> bool {
-        let cgroup_empty = g.dir.as_ref().is_some_and(|dir| {
-            std::fs::read_to_string(dir.join("cgroup.procs"))
-                .map(|s| s.trim().is_empty())
-                .unwrap_or(true)
-        });
-        cgroup_empty || g.pending.iter().all(|p| !super::unix_tree::is_same_process(p))
-    }
-
-    pub fn force_shutdown(g: &mut Group) {
-        super::unix_tree::signal_victims(&g.pending, libc::SIGKILL);
-        g.pending.clear();
         let Some(dir) = g.dir.take() else { return };
-        // cgroup.kill cobre também descendentes que saíram do grupo de sessão.
-        let still_populated = std::fs::read_to_string(dir.join("cgroup.procs"))
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false);
-        if still_populated {
-            let _ = std::fs::write(dir.join("cgroup.kill"), "1");
+
+        // Se espera a que el cgroup se vacíe solo por el SIGHUP anterior, y recién si
+        // queda alguien se recurre al SIGKILL de `cgroup.kill`. En el caso normal esto
+        // sale del bucle en pocos milisegundos sin matar nada a la fuerza.
+        let limite = std::time::Instant::now() + GRACIA;
+        while std::time::Instant::now() < limite {
+            match std::fs::read_to_string(dir.join("cgroup.procs")) {
+                Ok(s) if s.trim().is_empty() => break,
+                Ok(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                Err(_) => break, // el cgroup ya no está
+            }
         }
+        let _ = std::fs::write(dir.join("cgroup.kill"), "1");
         // El rmdir solo funciona con el cgroup ya vacío; si algo quedó, se lo lleva la
         // muerte del scope de systemd de la app.
         let _ = std::fs::remove_dir(&dir);
     }
+
+    /// Cuánto se espera a que los procesos se vayan por las buenas antes del SIGKILL.
+    /// Corto a propósito: esto corre al cerrar una tab, con el usuario mirando.
+    const GRACIA: std::time::Duration = std::time::Duration::from_millis(300);
 
     #[cfg(test)]
     pub fn usa_cgroup(g: &Group) -> bool {
@@ -303,17 +257,14 @@ pub(crate) mod imp {
 pub(crate) mod imp {
     pub struct Group {
         leader: Option<u32>,
-        leader_identity: Option<super::unix_tree::ProcessIdentity>,
-        pending: Vec<super::unix_tree::ProcessIdentity>,
     }
 
     pub fn create(_id: u32) -> Group {
-        Group { leader: None, leader_identity: None, pending: Vec::new() }
+        Group { leader: None }
     }
 
     pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
         g.leader = child.pid();
-        g.leader_identity = g.leader.and_then(super::unix_tree::capture_identity);
     }
 
     #[cfg(test)]
@@ -322,24 +273,9 @@ pub(crate) mod imp {
         false
     }
 
-    pub fn begin_shutdown(g: &mut Group) {
+    pub fn kill_all(g: &mut Group) {
         if let Some(pid) = g.leader.take() {
-            g.pending = super::unix_tree::begin_tree_shutdown(pid, g.leader_identity.take());
-        }
-    }
-
-    pub fn shutdown_complete(g: &Group) -> bool {
-        g.pending.iter().all(|p| !super::unix_tree::is_same_process(p))
-    }
-
-    pub fn force_shutdown(g: &mut Group) {
-        super::unix_tree::signal_victims(&g.pending, libc::SIGKILL);
-        g.pending.clear();
-    }
-
-    pub fn kill_all_with_grace(g: &mut Group, grace: std::time::Duration) {
-        if let Some(pid) = g.leader.take() {
-            super::unix_tree::kill_tree(pid, g.leader_identity.take(), grace);
+            super::unix_tree::kill_tree(pid);
         }
     }
 }
@@ -351,13 +287,6 @@ pub(crate) mod imp {
 /// el kernel reasigna a sus hijos y el vínculo que los identificaba se pierde.
 #[cfg(unix)]
 pub(crate) mod unix_tree {
-    #[derive(Clone, Copy, Debug)]
-    pub(crate) struct ProcessIdentity {
-        pub(crate) pid: u32,
-        pub(crate) start_time: u64,
-        pub(crate) pgid: Option<u32>,
-    }
-
     /// `(pid, ppid)` de todos los procesos del sistema. Se usa `ps` y no `/proc` porque
     /// este camino existe sobre todo para macOS, que no tiene `/proc`.
     fn snapshot() -> Vec<(u32, u32)> {
@@ -393,131 +322,50 @@ pub(crate) mod unix_tree {
         found
     }
 
-    #[cfg(target_os = "linux")]
-    fn process_info(pid: u32) -> Option<(u64, u32)> {
-        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        // comm pode conter espaços e parênteses; os campos começam após o último ')'.
-        let fields: Vec<_> = stat.rsplit_once(')')?.1.split_whitespace().collect();
-        Some((fields.get(19)?.parse().ok()?, fields.get(2)?.parse().ok()?))
-    }
-
-    #[cfg(target_os = "macos")]
-    fn process_info(pid: u32) -> Option<(u64, u32)> {
-        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-        let read = unsafe {
-            libc::proc_pidinfo(
-                pid as libc::c_int,
-                libc::PROC_PIDTBSDINFO,
-                0,
-                &mut info as *mut libc::proc_bsdinfo as *mut libc::c_void,
-                size,
-            )
-        };
-        (read == size).then_some((
-            (info.pbi_start_tvsec as u64)
-                .saturating_mul(1_000_000)
-                .saturating_add(info.pbi_start_tvusec as u64),
-            info.pbi_pgid as u32,
-        ))
-    }
-
-    pub(crate) fn capture_identity(pid: u32) -> Option<ProcessIdentity> {
-        let (start_time, pgid) = process_info(pid)?;
-        Some(ProcessIdentity { pid, start_time, pgid: Some(pgid) })
-    }
-
-    pub(crate) fn is_same_process(victim: &ProcessIdentity) -> bool {
-        process_info(victim.pid).is_some_and(|(start, _)| start == victim.start_time)
-    }
-
-    pub(crate) fn signal_if_same(victim: &ProcessIdentity, signal: i32) {
-        if is_same_process(victim) {
-            unsafe { libc::kill(victim.pid as i32, signal); }
-        }
-    }
-
-    pub(crate) fn signal_victims(victims: &[ProcessIdentity], signal: i32) {
-        if signal == libc::SIGKILL {
-            for victim in victims {
-                signal_if_same(victim, signal);
-            }
-            return;
-        }
-        let leader = victims.iter().find(|victim| victim.pgid == Some(victim.pid));
-        let grouped_pgid = leader.and_then(|leader| {
-            if !is_same_process(leader) { return None; }
-            let pgid = leader.pgid?;
-            if !victims
-                .iter()
-                .filter(|victim| victim.pgid == Some(pgid))
-                .all(is_same_process)
-            {
-                return None;
-            }
-            (unsafe { libc::killpg(pgid as i32, signal) } == 0).then_some(pgid)
-        });
-        for victim in victims {
-            if victim.pgid != grouped_pgid {
-                signal_if_same(victim, signal);
-            }
-        }
-    }
-
-    pub(crate) fn begin_tree_shutdown(
-        root: u32,
-        root_identity: Option<ProcessIdentity>,
-    ) -> Vec<ProcessIdentity> {
+    pub fn kill_tree(root: u32) {
         let procs = snapshot();
         let mut victims = descendants(root, &procs);
-        victims.reverse(); // hojas primeiro
+        victims.reverse(); // hojas primero
         victims.push(root);
-        let identities: Vec<_> = victims
-            .into_iter()
-            .filter_map(|pid| {
-                if pid == root { root_identity }
-                else { capture_identity(pid) }
-            })
-            .filter(is_same_process)
-            .collect();
-        signal_victims(&identities, libc::SIGHUP);
-        signal_victims(&identities, libc::SIGTERM);
-        identities
-    }
-
-    #[cfg(target_os = "macos")]
-    pub(crate) fn kill_tree(
-        root: u32,
-        root_identity: Option<ProcessIdentity>,
-        grace: std::time::Duration,
-    ) {
-        let victims = begin_tree_shutdown(root, root_identity);
-        let deadline = std::time::Instant::now() + grace;
-        while std::time::Instant::now() < deadline && victims.iter().any(is_same_process) {
-            std::thread::sleep(std::time::Duration::from_millis(10));
+        for pid in &victims {
+            unsafe {
+                libc::kill(*pid as i32, libc::SIGHUP);
+            }
         }
-        signal_victims(&victims, libc::SIGKILL);
+        // O TERM precisa de uma janela para o agente fechar arquivos e filhos. O atraso
+        // roda numa thread própria: `kill_tree` nunca segura a thread que pediu o fechamento.
+        let pending = victims.clone();
+        if std::thread::Builder::new()
+            .name("ade-process-grace".into())
+            .spawn(move || {
+                terminate_with_grace(
+                    &pending,
+                    std::time::Duration::from_secs(2),
+                    |pid, signal| unsafe { libc::kill(pid as i32, signal); },
+                    std::thread::sleep,
+                    |pid| unsafe { libc::kill(pid as i32, 0) == 0 },
+                )
+            })
+            .is_err()
+        {
+            for pid in victims {
+                unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+            }
+        }
     }
 
     /// Espera uma janela injetável após TERM e só força os processos que continuam vivos.
-    #[cfg(test)]
     pub(crate) fn terminate_with_grace(
-        victims: &[ProcessIdentity],
+        victims: &[u32],
         grace: std::time::Duration,
         mut signal: impl FnMut(u32, i32),
         wait: impl FnOnce(std::time::Duration),
-        mut current_start_time: impl FnMut(u32) -> Option<u64>,
+        mut is_alive: impl FnMut(u32) -> bool,
     ) {
-        for victim in victims {
-            if current_start_time(victim.pid) == Some(victim.start_time) {
-                signal(victim.pid, libc::SIGTERM);
-            }
-        }
+        for pid in victims { signal(*pid, libc::SIGTERM); }
         wait(grace);
-        for victim in victims {
-            if current_start_time(victim.pid) == Some(victim.start_time) {
-                signal(victim.pid, libc::SIGKILL);
-            }
+        for pid in victims {
+            if is_alive(*pid) { signal(*pid, libc::SIGKILL); }
         }
     }
 }
