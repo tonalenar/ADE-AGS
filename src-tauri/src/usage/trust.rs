@@ -161,19 +161,33 @@ pub(super) fn trust_dir_with_hook(
 /// para em "Is this a project you trust?" (com "No, exit" marcado) e o time inteiro fica
 /// parado. A TUI herda a confiança das pastas pai, então basta a raiz. Melhor esforço:
 /// uma falha aqui não impede a missão, só deixa o diálogo aparecer.
-pub(crate) fn trust_worktrees_root(base: &Path, account_dirs: &[String]) {
+pub(crate) fn trust_worktrees_root(base: &Path, account_dirs: &[String]) -> Vec<String> {
+    let configs = std::iter::once(config_file(None))
+        .chain(account_dirs.iter().map(|dir| config_file(Some(dir))))
+        .flatten();
+    trust_worktrees_root_with_configs(base, configs)
+}
+
+pub(super) fn trust_worktrees_root_with_configs(
+    base: &Path,
+    configs: impl IntoIterator<Item = PathBuf>,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
     if let Err(error) = std::fs::create_dir_all(base) {
-        eprintln!("[ags] aviso: não foi possível criar a raiz de worktrees para confiança do Claude em {}: {error}", base.display());
-        return;
+        warnings.push(format!(
+            "não foi possível criar a raiz de worktrees para confiança do Claude em {}: {error}",
+            base.display()
+        ));
+        return warnings;
     }
     let base = base.to_string_lossy();
-    // Cada conta do Claude Code tem o seu `.claude.json` (CLAUDE_CONFIG_DIR): sem isto, um
-    // membro do Squad que usa uma conta própria continuava parado no diálogo.
-    let configs = std::iter::once(config_file(None))
-        .chain(account_dirs.iter().map(|dir| config_file(Some(dir))));
-    for config in configs.flatten() {
+    for config in configs {
         if let Err(error) = trust_dir(&config, &base) {
-            eprintln!("[ags] aviso: não foi possível atualizar a confiança do Claude em {}: {error}", config.display());
+            warnings.push(format!(
+                "não foi possível atualizar a confiança do Claude em {}: {error}",
+                config.display()
+            ));
         }
     }
+    warnings
 }

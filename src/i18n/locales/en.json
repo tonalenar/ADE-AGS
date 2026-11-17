@@ -2908,6 +2908,7 @@
   "missions.timings.delegationSource.span": "History: first measured lead peer ask.",
   "missions.workspace.unavailable": "Workspace unavailable for {{name}}.",
   "missions.workspace.shared": "Workspace unexpectedly shared by {{name}}.",
+  "missions.worktrees.trustWarning": "The worktrees folder was not pre-approved in Claude; the operation continued. {{error}}",
   "missions.efficiency.title": "Agent efficiency",
   "missions.efficiency.active": "Active time",
   "missions.efficiency.turnDetail": "Per-turn detail: {{time}}",

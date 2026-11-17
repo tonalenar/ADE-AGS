@@ -2908,6 +2908,7 @@
   "missions.timings.delegationSource.span": "Histórico: primer peer ask medido del orquestador.",
   "missions.workspace.unavailable": "Worktree no disponible para {{name}}.",
   "missions.workspace.shared": "Worktree compartido indebidamente por {{name}}.",
+  "missions.worktrees.trustWarning": "La carpeta de worktrees no se preaprobó en Claude; la operación continuó. {{error}}",
   "missions.efficiency.title": "Eficiencia entre agentes",
   "missions.efficiency.active": "Tiempo activo",
   "missions.efficiency.turnDetail": "Detalle por turno: {{time}}",

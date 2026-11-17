@@ -680,7 +680,7 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
     };
     let cwd = match explicit_floor {
         Some(wanted) => super::floor::recruit_cwd(&me.cwd, &wanted)?,
-        None => mission_workspace.as_ref().map(|w| w.cwd.clone()).unwrap_or_else(|| me.cwd.clone()),
+        None => mission_workspace.as_ref().map(|w| w.workspace.cwd.clone()).unwrap_or_else(|| me.cwd.clone()),
     };
     if tabs.iter().any(|t| t.cwd == cwd && (mission_id.is_some() || t.name.eq_ignore_ascii_case(name.trim()))) {
         return Err("O worktree solicitado já tem um agente aberto. Escolha um piso exclusivo.".into());
@@ -723,7 +723,7 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let configured_target = std::env::var_os(crate::floors::CARGO_TARGET_DIR_SETTING);
     let cargo_target = crate::floors::cargo_target_dir(&repo_root, &worktree_root, configured_target.as_deref());
     let (shell, shell_label) = crate::floors::worktree_shell();
-    let environment = mission_workspace.as_ref().map(|w| w.environment.clone()).unwrap_or_else(|| crate::floors::worktree_environment_block(
+    let environment = mission_workspace.as_ref().map(|w| w.workspace.environment.clone()).unwrap_or_else(|| crate::floors::worktree_environment_block(
         &worktree_root.to_string_lossy(),
         &cargo_target.path.to_string_lossy(),
         &shell_label,
@@ -767,6 +767,9 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         "model": llm.model, "effort": llm.effort, "fast": llm.fast, "llmSource": llm.source.as_str(),
         "depth": child_depth,
     } });
+    if let Some(prepared) = &mission_workspace {
+        out["trustWarnings"] = json!(prepared.trust_warnings);
+    }
     let prompt = arg_str_opt(args, "prompt").filter(|p| !p.trim().is_empty());
     // O bloco de ambiente sempre vai primeiro, mesmo sem tarefa: o recruit já sabe onde
     // está, qual shell usar e como validar antes de receber a tarefa seguinte.

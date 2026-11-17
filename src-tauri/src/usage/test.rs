@@ -1,5 +1,24 @@
 use super::claude::parse_ts;
 
+#[test]
+fn trust_worktrees_root_retorna_aviso_quando_claude_json_esta_ilegivel() {
+    let root = std::env::temp_dir().join(format!("ags-trust-warning-{}", uuid::Uuid::new_v4()));
+    let base = root.join("worktrees");
+    let config_dir = root.join("perfil");
+    std::fs::create_dir_all(config_dir.join(".claude.json")).unwrap();
+
+    let warnings = super::trust::trust_worktrees_root_with_configs(
+        &base,
+        [config_dir.join(".claude.json")],
+    );
+
+    assert!(base.is_dir(), "a raiz de worktrees deve ser criada apesar do erro de confiança");
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains(".claude.json"));
+    assert!(warnings[0].contains("Is a directory") || warnings[0].contains("diretório"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn trust_dir_mantem_permissao_privada_e_projetos_anteriores() {

@@ -2906,6 +2906,7 @@
   "missions.timings.firstDelegation": "Até a primeira delegação",
   "missions.workspace.unavailable": "Worktree indisponível para {{name}}.",
   "missions.workspace.shared": "Worktree compartilhado indevidamente por {{name}}.",
+  "missions.worktrees.trustWarning": "A pasta de worktrees não foi pré-aprovada no Claude; a operação continuou. {{error}}",
   "missions.timings.delegationSource.peer_message": "Medido no envio do primeiro peer tell/ask do orquestrador.",
   "missions.timings.delegationSource.span": "Histórico: primeiro peer ask medido do orquestrador.",
   "missions.efficiency.title": "Eficiência entre agentes",
