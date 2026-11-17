@@ -12,6 +12,11 @@ import { useDocumentVisible } from "@/shared/useDocumentVisible";
 /** De quanto em quanto ler a saída de um shell que roda (o `get_task_output` do Claude: só leitura, sem turno). */
 export const OUTPUT_POLL_MS = 2_000;
 
+/** Duas leituras com o mesmo texto: o detalhe não precisa renderizar de novo (a leitura a cada 2 s quase sempre repete). */
+function sameOutput(a: TaskOutput, b: TaskOutput): boolean {
+  return a.output === b.output && a.total_bytes === b.total_bytes && a.truncated === b.truncated && a.source === b.source;
+}
+
 /** A saída de um shell do Claude: lida já, e de novo enquanto ele roda; uma última vez quando acaba. */
 function useShellOutput(task: BgTask, threadId: string | null): { output: TaskOutput | null; error: string | null } {
   const [output, setOutput] = useState<TaskOutput | null>(null);
@@ -22,7 +27,7 @@ function useShellOutput(task: BgTask, threadId: string | null): { output: TaskOu
   useEffect(() => {
     if (!readable || !threadId || !visible) return;
     let alive = true;
-    const read = () => chatTaskOutput(threadId, task.id).then((o) => { if (alive) { setOutput(o); setError(null); } }, (e) => { if (alive) setError(String(e)); });
+    const read = () => chatTaskOutput(threadId, task.id).then((o) => { if (alive) { setOutput((prev) => (prev && sameOutput(prev, o) ? prev : o)); setError(null); } }, (e) => { if (alive) setError(String(e)); });
     void read();
     if (!running) return () => { alive = false; };
     const id = setInterval(() => { void read(); }, OUTPUT_POLL_MS);
