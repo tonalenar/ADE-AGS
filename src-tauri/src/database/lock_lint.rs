@@ -31,7 +31,8 @@ fn collect_rs(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
 }
 
 fn command_lock_violations(path: &str, source: &str) -> Vec<String> {
-    let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+    let masked = without_test_items(source);
+    let production = masked.as_str();
     let mut found = Vec::new();
     let mut offset = 0;
     while let Some(attr) = production[offset..].find("#[tauri::command") {
@@ -57,6 +58,42 @@ fn command_lock_violations(path: &str, source: &str) -> Vec<String> {
         offset = body_end + 1;
     }
     found
+}
+
+const CFG_TEST: &str = "#[cfg(test)]";
+
+// Troca por espaços só os itens marcados com #[cfg(test)]; quebras de linha e posições ficam iguais.
+fn without_test_items(source: &str) -> String {
+    let mut masked = source.as_bytes().to_vec();
+    let mut offset = 0;
+    while let Some(found) = source[offset..].find(CFG_TEST) {
+        let start = offset + found;
+        let after_attr = start + CFG_TEST.len();
+        let end = test_item_end(source, after_attr).unwrap_or(after_attr);
+        for byte in &mut masked[start..end] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
+        }
+        offset = end;
+    }
+    String::from_utf8(masked).unwrap_or_else(|_| source.to_string())
+}
+
+// Fim do item que segue o atributo: o `;` ou o `}` que fecha o primeiro `{` fora de parênteses e colchetes.
+fn test_item_end(source: &str, from: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut depth = 0usize;
+    for index in from..bytes.len() {
+        match bytes[index] {
+            b'(' | b'[' => depth += 1,
+            b')' | b']' => depth = depth.saturating_sub(1),
+            b';' if depth == 0 => return Some(index + 1),
+            b'{' if depth == 0 => return matching_brace(source, index).map(|close| close + 1),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn matching_brace(source: &str, open: usize) -> Option<usize> {
@@ -94,6 +131,18 @@ mod test {
     fn nenhum_comando_sincrono_trava_o_banco() {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         assert!(violations(&src).is_empty(), "{:#?}", violations(&src));
+    }
+
+    #[test]
+    fn lint_nao_para_no_primeiro_cfg_test() {
+        let source = "#[cfg(test)]\nmod test { fn x() {} }\n#[tauri::command]\npub fn a() { db.lock().unwrap(); }";
+        assert_eq!(super::command_lock_violations("x.rs", source), vec!["x.rs:3".to_string()]);
+    }
+
+    #[test]
+    fn ignora_comando_marcado_com_cfg_test() {
+        let source = "#[cfg(test)]\n#[tauri::command]\npub fn a() { db.lock().unwrap(); }\n#[tauri::command]\npub fn b() { db.lock().unwrap(); }";
+        assert_eq!(super::command_lock_violations("x.rs", source), vec!["x.rs:4".to_string()]);
     }
 
     #[test]
