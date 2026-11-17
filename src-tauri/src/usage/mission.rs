@@ -102,7 +102,7 @@ pub(crate) fn read_transcript_priced(path: &Path, cwd: &str) -> Vec<(UsageRecord
     };
     let mut records = Vec::new();
     let mut seen = HashSet::new();
-    for value in &parsed.lines {
+    for value in parsed.lines.iter() {
         if value.get("cwd").and_then(|value| value.as_str()).is_some_and(|line_cwd| {
             super::terminal::path_key(line_cwd) != super::terminal::path_key(cwd)
         }) {

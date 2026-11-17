@@ -1,32 +1,66 @@
 use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs::{self, File, Metadata};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
 const MAX_CACHE_FILES: usize = 256;
+const MAX_CACHE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_CACHED_FILE_BYTES: u64 = 16 * 1024 * 1024;
+const PREFIX_TAIL: usize = 32;
 
 /// JSONs completos encontrados em um transcript JSONL.
 #[derive(Clone, Debug, Default)]
 pub struct Parsed {
-    pub lines: Vec<serde_json::Value>,
+    pub lines: Arc<Vec<serde_json::Value>>,
     pending: Vec<u8>,
     pending_parsed: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileId {
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+    #[cfg(windows)]
+    index: Option<u64>,
+    #[cfg(not(any(unix, windows)))]
+    _unused: (),
+}
+
+struct Limits {
+    max_files: usize,
+    max_bytes: u64,
+    max_file_bytes: u64,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_files: MAX_CACHE_FILES,
+            max_bytes: MAX_CACHE_BYTES,
+            max_file_bytes: MAX_CACHED_FILE_BYTES,
+        }
+    }
 }
 
 struct Entry {
     mtime: SystemTime,
     len: u64,
     offset: u64,
+    file_id: FileId,
+    prefix_tail: Vec<u8>,
     parsed: Arc<Parsed>,
     last_used: u64,
 }
 
-/// Cache local dos transcripts, limitado a 256 arquivos.
+/// Cache local dos transcripts, limitado a 256 arquivos e 64 MiB.
 pub struct TranscriptCache {
     entries: Mutex<HashMap<PathBuf, Entry>>,
     clock: std::sync::atomic::AtomicU64,
+    limits: Limits,
     #[cfg(test)]
     bytes_read: std::sync::atomic::AtomicU64,
 }
@@ -36,6 +70,7 @@ impl Default for TranscriptCache {
         Self {
             entries: Mutex::new(HashMap::new()),
             clock: std::sync::atomic::AtomicU64::new(0),
+            limits: Limits::default(),
             #[cfg(test)]
             bytes_read: std::sync::atomic::AtomicU64::new(0),
         }
@@ -47,16 +82,31 @@ impl TranscriptCache {
         Self::default()
     }
 
+    #[cfg(test)]
+    fn with_limits(max_files: usize, max_bytes: u64, max_file_bytes: u64) -> Self {
+        Self {
+            entries: Mutex::new(HashMap::new()),
+            clock: std::sync::atomic::AtomicU64::new(0),
+            limits: Limits {
+                max_files,
+                max_bytes,
+                max_file_bytes,
+            },
+            bytes_read: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
     pub fn read_incremental(&self, path: &Path) -> Result<Arc<Parsed>, String> {
         for _ in 0..3 {
             let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
             let mtime = metadata.modified().map_err(|e| e.to_string())?;
             let len = metadata.len();
+            let id = file_id(&metadata);
             let stamp = (mtime, len);
-            let (previous_stamp, offset, previous) = {
+            let (previous_stamp, offset, previous, previous_id, previous_tail) = {
                 let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(entry) = entries.get_mut(path) {
-                    if (entry.mtime, entry.len) == stamp {
+                    if (entry.mtime, entry.len) == stamp && entry.file_id == id {
                         entry.last_used = self
                             .clock
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -66,17 +116,25 @@ impl TranscriptCache {
                         Some((entry.mtime, entry.len)),
                         entry.offset,
                         Some(entry.parsed.clone()),
+                        Some(entry.file_id),
+                        Some(entry.prefix_tail.clone()),
                     )
                 } else {
-                    (None, 0, None)
+                    (None, 0, None, None, None)
                 }
             };
 
-            // Só um append comprovado pelo tamanho e pelo mtime pode continuar do offset anterior.
-            let append = previous_stamp
-                .is_some_and(|(old_mtime, old_len)| len > old_len && mtime != old_mtime);
-            let start = if append { offset } else { 0 };
             let mut file = File::open(path).map_err(|e| e.to_string())?;
+            let too_big = len > self.limits.max_file_bytes;
+            let size_mtime_append = previous_stamp
+                .is_some_and(|(old_mtime, old_len)| len > old_len && mtime != old_mtime);
+            let identity_ok = previous_id == Some(id);
+            let tail_ok = !too_big
+                && previous_tail.as_ref().is_some_and(|tail| {
+                    prefix_tail_matches(&mut file, offset, tail).unwrap_or(false)
+                });
+            let append = !too_big && size_mtime_append && identity_ok && tail_ok;
+            let start = if append { offset } else { 0 };
             file.seek(SeekFrom::Start(start))
                 .map_err(|e| e.to_string())?;
             let mut bytes = Vec::with_capacity(len.saturating_sub(start) as usize);
@@ -91,16 +149,34 @@ impl TranscriptCache {
                 .fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
 
             let after_read = fs::metadata(path).map_err(|e| e.to_string())?;
-            if after_read.len() != len || after_read.modified().map_err(|e| e.to_string())? != mtime
+            if after_read.len() != len
+                || after_read.modified().map_err(|e| e.to_string())? != mtime
+                || file_id(&after_read) != id
             {
                 continue;
             }
+
+            if len > self.limits.max_file_bytes {
+                let mut parsed = Parsed::default();
+                add_bytes(&mut parsed, &bytes);
+                let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+                entries.remove(path);
+                return Ok(Arc::new(parsed));
+            }
+
             let mut parsed = if append {
-                previous.map(|p| (*p).clone()).unwrap_or_default()
+                previous
+                    .map(|p| Parsed {
+                        lines: p.lines.clone(),
+                        pending: p.pending.clone(),
+                        pending_parsed: p.pending_parsed,
+                    })
+                    .unwrap_or_default()
             } else {
                 Parsed::default()
             };
             add_bytes(&mut parsed, &bytes);
+            let prefix_tail = new_prefix_tail(previous_tail.as_deref().unwrap_or(&[]), &bytes, append);
             let parsed = Arc::new(parsed);
             let tick = self
                 .clock
@@ -121,19 +197,13 @@ impl TranscriptCache {
                     mtime,
                     len,
                     offset: len,
+                    file_id: id,
+                    prefix_tail,
                     parsed: parsed.clone(),
                     last_used: tick,
                 },
             );
-            if entries.len() > MAX_CACHE_FILES {
-                if let Some(oldest) = entries
-                    .iter()
-                    .min_by_key(|(_, entry)| entry.last_used)
-                    .map(|(path, _)| path.clone())
-                {
-                    entries.remove(&oldest);
-                }
-            }
+            evict_until_within_limits(&mut entries, path, &self.limits);
             return Ok(parsed);
         }
         Err("O transcript mudou durante a leitura; tente novamente".into())
@@ -151,9 +221,58 @@ impl TranscriptCache {
     }
 }
 
+fn file_id(metadata: &Metadata) -> FileId {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        FileId {
+            dev: metadata.dev(),
+            ino: metadata.ino(),
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        FileId {
+            index: metadata.file_index(),
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = metadata;
+        FileId { _unused: () }
+    }
+}
+
+fn prefix_tail_matches(file: &mut File, offset: u64, expected: &[u8]) -> Result<bool, String> {
+    if expected.is_empty() {
+        return Ok(offset == 0);
+    }
+    if offset < expected.len() as u64 {
+        return Ok(false);
+    }
+    file.seek(SeekFrom::Start(offset - expected.len() as u64))
+        .map_err(|e| e.to_string())?;
+    let mut buf = vec![0u8; expected.len()];
+    file.read_exact(&mut buf).map_err(|e| e.to_string())?;
+    Ok(buf == expected)
+}
+
+fn new_prefix_tail(previous_tail: &[u8], new_bytes: &[u8], append: bool) -> Vec<u8> {
+    let mut combined = if append {
+        previous_tail.to_vec()
+    } else {
+        Vec::new()
+    };
+    combined.extend_from_slice(new_bytes);
+    let n = combined.len().min(PREFIX_TAIL);
+    combined[combined.len() - n..].to_vec()
+}
+
 fn add_bytes(parsed: &mut Parsed, bytes: &[u8]) {
+    let lines = Arc::make_mut(&mut parsed.lines);
     if parsed.pending_parsed {
-        parsed.lines.pop();
+        lines.pop();
         parsed.pending_parsed = false;
     }
     parsed.pending.extend_from_slice(bytes);
@@ -164,7 +283,7 @@ fn add_bytes(parsed: &mut Parsed, bytes: &[u8]) {
         }
         let line = &parsed.pending[complete..=index];
         if let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) {
-            parsed.lines.push(value);
+            lines.push(value);
         }
         complete = index + 1;
     }
@@ -173,18 +292,45 @@ fn add_bytes(parsed: &mut Parsed, bytes: &[u8]) {
     }
     if !parsed.pending.is_empty() {
         if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&parsed.pending) {
-            parsed.lines.push(value);
+            lines.push(value);
             parsed.pending_parsed = true;
         }
     }
 }
 
-/// Lê um transcript do cache global, que retém no máximo 256 arquivos.
+fn evict_until_within_limits(
+    entries: &mut HashMap<PathBuf, Entry>,
+    keep: &Path,
+    limits: &Limits,
+) {
+    loop {
+        let bytes: u64 = entries.values().map(|entry| entry.len).sum();
+        if entries.len() <= limits.max_files && bytes <= limits.max_bytes {
+            return;
+        }
+        let oldest = entries
+            .iter()
+            .filter(|(path, _)| path.as_path() != keep)
+            .min_by_key(|(_, entry)| entry.last_used)
+            .map(|(path, _)| path.clone());
+        match oldest {
+            Some(path) => {
+                entries.remove(&path);
+            }
+            None => return,
+        }
+    }
+}
+
+/// Lê um transcript do cache global, que retém no máximo 256 arquivos e 64 MiB.
 pub fn read_incremental(path: &Path) -> Result<Arc<Parsed>, String> {
     static CACHE: OnceLock<TranscriptCache> = OnceLock::new();
     CACHE
         .get_or_init(TranscriptCache::new)
         .read_incremental(path)
+        .inspect_err(|erro| {
+            eprintln!("[transcript-cache] falha ao ler incremental: {erro}");
+        })
 }
 
 #[cfg(test)]
@@ -247,6 +393,28 @@ mod tests {
     }
 
     #[test]
+    fn substituido_maior_com_conteudo_diferente_nao_append() {
+        let (_dir, path) = temp_file("substituido.jsonl", "{\"n\":1}\n");
+        let cache = TranscriptCache::new();
+        cache.read_incremental(&path).expect("leitura inicial");
+
+        let replacement = "{\"x\":0}\n{\"x\":1}\n{\"x\":2}\n";
+        fs::write(&path, replacement).expect("substitui por arquivo maior");
+        advance_mtime(&path);
+
+        let parsed = cache
+            .read_incremental(&path)
+            .expect("releitura após substituição");
+        assert_eq!(parsed.lines.len(), 3);
+        assert!(
+            parsed.lines.iter().all(|line| line.get("n").is_none()),
+            "linhas do arquivo antigo não podem sobreviver a uma substituição maior"
+        );
+        assert_eq!(parsed.lines[0]["x"], 0);
+        assert_eq!(parsed.lines[2]["x"], 2);
+    }
+
+    #[test]
     fn truncado_rele_tudo() {
         let (_dir, path) = temp_file("truncado.jsonl", "{\"n\":1}\n{\"n\":2}\n");
         let cache = TranscriptCache::new();
@@ -305,5 +473,31 @@ mod tests {
         }
         let entries = cache.entries.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(entries.len(), super::MAX_CACHE_FILES);
+    }
+
+    #[test]
+    fn arquivo_acima_do_teto_nao_entra_no_cache() {
+        let (_dir, path) = temp_file("grande.jsonl", "{\"n\":1}\n{\"n\":2}\n");
+        let cache = TranscriptCache::with_limits(8, 1024, 8);
+        let parsed = cache.read_incremental(&path).expect("lê direto");
+        assert_eq!(parsed.lines.len(), 2);
+        let entries = cache.entries.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn evict_lru_quando_passa_do_teto_de_bytes() {
+        let dir = TempDir::new();
+        let cache = TranscriptCache::with_limits(8, 10, 16);
+        let first = dir.0.join("a.jsonl");
+        let second = dir.0.join("b.jsonl");
+        fs::write(&first, "{\"n\":1}\n").unwrap();
+        fs::write(&second, "{\"n\":2}\n").unwrap();
+        cache.read_incremental(&first).expect("primeiro");
+        cache.read_incremental(&second).expect("segundo");
+        let entries = cache.entries.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(entries.len(), 1);
+        assert!(entries.contains_key(&second));
+        assert!(!entries.contains_key(&first));
     }
 }

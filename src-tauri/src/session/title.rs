@@ -168,7 +168,7 @@ pub(super) fn newest_where(
 
 pub(super) fn find_string_field(path: &Path, candidates: &[&str]) -> Option<String> {
     let parsed = crate::missions::transcript_cache::read_incremental(path).ok()?;
-    for v in &parsed.lines {
+    for v in parsed.lines.iter() {
         for c in candidates {
             if let Some(s) = v.get(*c).and_then(|x| x.as_str()) {
                 return Some(s.to_string());
@@ -646,7 +646,7 @@ pub(super) fn gemini_title(path: &Path, fallback: &str) -> SessionTitleResult {
     let mut first_user_msg: Option<String> = None;
     let mut user_msgs_seen = 0usize;
 
-    for v in &parsed.lines {
+    for v in parsed.lines.iter() {
         let summary = v.get("summary").and_then(|s| s.as_str())
             .or_else(|| v.get("$set").and_then(|s| s.get("summary")).and_then(|s| s.as_str()))
             .filter(|s| !echoes_ade_notice(s));
@@ -787,7 +787,7 @@ pub(super) fn codex_title(path: &Path, fallback: &str) -> SessionTitleResult {
     let Ok(parsed) = crate::missions::transcript_cache::read_incremental(path) else { return fallback_result(fallback) };
     let mut user_msgs_seen = 0usize;
 
-    for v in &parsed.lines {
+    for v in parsed.lines.iter() {
         if user_msgs_seen >= TITLE_SCAN_LIMIT {
             break;
         }
@@ -1692,7 +1692,7 @@ fn activity_of<'a>(messages: impl IntoIterator<Item = &'a str>) -> &'static str 
 fn first_user_texts(path: &Path, extract: fn(&Value) -> Option<String>) -> Option<Vec<String>> {
     let parsed = crate::missions::transcript_cache::read_incremental(path).ok()?;
     let mut texts = Vec::new();
-    for value in &parsed.lines {
+    for value in parsed.lines.iter() {
         if texts.len() >= TITLE_SCAN_LIMIT {
             break;
         }

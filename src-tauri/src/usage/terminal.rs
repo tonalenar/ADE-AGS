@@ -202,7 +202,7 @@ fn codex_records(path: &Path, cwd: &str) -> Vec<(UsageRecord, Option<String>)> {
     let mut matching = false;
     let mut previous = [0u64; 3];
     let mut out = vec![];
-    for v in &parsed.lines {
+    for v in parsed.lines.iter() {
         if v["type"] == "session_meta" {
             matching = v
                 .pointer("/payload/cwd")
