@@ -30,12 +30,20 @@ pub fn wal_needs_checkpoint(size: u64, ceiling: u64) -> bool {
 /// `true` si el `-wal` pasaba el techo y se pudo tomar la conexión para checkpointar.
 /// `try_lock`: no se queda esperando detrás de un guardado de la UI.
 pub fn checkpoint_wal(db: &DbConnection, db_file: &Path, ceiling: u64) -> bool {
+    checkpoint_wal_with(db, db_file, ceiling, || {})
+}
+
+/// Como `checkpoint_wal`. `antes_do_io` roda logo antes do `TRUNCATE`, com o mutex do banco solto
+/// (os testes usam para provar isso). O `TRUNCATE` espera os leitores até o `busy_timeout`, então
+/// roda numa conexão lateral: não retém o mutex do banco. `_db` fica pela assinatura do laço.
+pub(crate) fn checkpoint_wal_with(_db: &DbConnection, db_file: &Path, ceiling: u64, antes_do_io: impl FnOnce()) -> bool {
     let wal = wal_sidecar(db_file);
     let size = std::fs::metadata(&wal).map(|meta| meta.len()).unwrap_or(0);
     if !wal_needs_checkpoint(size, ceiling) {
         return false;
     }
-    let Ok(conn) = db.try_lock() else {
+    antes_do_io();
+    let Ok(conn) = crate::database::open_side_connection_at(db_file) else {
         return false;
     };
     let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
@@ -74,6 +82,35 @@ mod tests {
     use super::*;
     use rusqlite::Connection;
     use std::sync::{Arc, Mutex};
+
+    /// O checkpoint do WAL não pode rodar com o mutex do banco preso: a sonda confere, no instante
+    /// do `TRUNCATE`, que o mutex está solto.
+    #[test]
+    fn el_checkpoint_corre_sin_el_mutex_del_banco() {
+        let dir = std::env::temp_dir().join(format!("ags-wal-lock-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("base.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA wal_autocheckpoint=0;
+             CREATE TABLE t(b BLOB);",
+        )
+        .unwrap();
+        let blob = vec![0u8; 64 * 1024];
+        for _ in 0..80 {
+            conn.execute("INSERT INTO t VALUES (?1)", [&blob]).unwrap();
+        }
+        let db = Arc::new(Mutex::new(conn));
+        let probe = db.clone();
+        let mut chegou = false;
+        let fez = checkpoint_wal_with(&db, &path, 1024 * 1024, || {
+            assert!(probe.try_lock().is_ok(), "o checkpoint do WAL rodou com o mutex do banco preso");
+            chegou = true;
+        });
+        assert!(fez && chegou, "o checkpoint não foi feito");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn el_sidecar_es_el_archivo_con_sufijo_wal() {
