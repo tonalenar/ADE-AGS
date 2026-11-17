@@ -11,6 +11,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use serde_json::{json, Value};
 use tauri::AppHandle;
@@ -42,11 +44,57 @@ struct Portal {
     core: ICoreWebView2,
 }
 
+struct PendingPortal {
+    token: Arc<AtomicBool>,
+    host: Option<HWND>,
+}
+
 thread_local! {
     /// Só na thread da interface (os objetos COM do WebView2 não saem dela).
     static PORTALS: RefCell<HashMap<String, Portal>> = RefCell::new(HashMap::new());
+    /// Criações ainda sem controlador; callbacks tardios conferem este token antes de inserir o Portal.
+    static PENDING: RefCell<HashMap<String, PendingPortal>> = RefCell::new(HashMap::new());
     /// Um ambiente do WebView2 por perfil. Cada ambiente usa sua própria pasta de dados e cookies.
     static ENVIRONMENTS: RefCell<HashMap<PathBuf, ICoreWebView2Environment>> = RefCell::new(HashMap::new());
+}
+
+fn pending_is_current(id: &str, token: &Arc<AtomicBool>) -> bool {
+    !token.load(Ordering::Acquire) && PENDING.with(|pending| {
+        pending.borrow().get(id).is_some_and(|entry| Arc::ptr_eq(&entry.token, token))
+    })
+}
+
+fn set_pending_host(id: &str, token: &Arc<AtomicBool>, host: HWND) -> bool {
+    PENDING.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        let Some(entry) = pending.get_mut(id).filter(|entry| Arc::ptr_eq(&entry.token, token)) else { return false };
+        entry.host = Some(host);
+        true
+    })
+}
+
+fn complete_pending(id: &str, token: &Arc<AtomicBool>) {
+    PENDING.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        if pending.get(id).is_some_and(|entry| Arc::ptr_eq(&entry.token, token)) {
+            pending.remove(id);
+        }
+    });
+}
+
+fn cancel_pending(id: &str, token: &Arc<AtomicBool>) {
+    let removed = PENDING.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        if pending.get(id).is_some_and(|entry| Arc::ptr_eq(&entry.token, token)) {
+            pending.remove(id)
+        } else {
+            None
+        }
+    });
+    if let Some(pending) = removed {
+        pending.token.store(true, Ordering::Release);
+        if let Some(host) = pending.host { unsafe { let _ = DestroyWindow(host); } }
+    }
 }
 
 /// Roda `f` na thread da interface com o Portal `id`, e devolve o resultado.
@@ -91,9 +139,25 @@ fn options(args: &str) -> ICoreWebView2EnvironmentOptions {
 /// Abre o Portal `id`: a janela filha em `parent` (px físicos) e o WebView2 dentro, com os eventos ligados.
 pub async fn create(app: &AppHandle, parent: isize, id: &str, profile: std::path::PathBuf, args: String, bounds: [i32; 4]) -> Result<(), String> {
     let (done, wait) = oneshot::channel::<Result<(), String>>();
+    let timeout_id = id.to_string();
     let (app2, id) = (app.clone(), id.to_string());
+    let token = Arc::new(AtomicBool::new(false));
+    let main_token = token.clone();
     app.run_on_main_thread(move || {
+        if PORTALS.with(|portals| portals.borrow().contains_key(&id))
+            || PENDING.with(|pending| pending.borrow().contains_key(&id))
+        {
+            let _ = done.send(Err("O navegador deste Portal já está aberto ou preparando a página.".into()));
+            return;
+        }
+        PENDING.with(|pending| {
+            pending.borrow_mut().insert(id.clone(), PendingPortal { token: main_token.clone(), host: None });
+        });
+
+        let environment_id = id.clone();
+        let environment_token = main_token.clone();
         let start = move |env: ICoreWebView2Environment| {
+            if !pending_is_current(&id, &main_token) { return Ok(()); }
             let parent = HWND(parent as *mut _);
             let [x, y, w, h] = bounds;
             let host = match unsafe {
@@ -113,9 +177,24 @@ pub async fn create(app: &AppHandle, parent: isize, id: &str, profile: std::path
                 )
             } {
                 Ok(host) => host,
-                Err(e) => return Err(e.message()),
+                Err(e) => {
+                    cancel_pending(&id, &main_token);
+                    return Err(e.message());
+                }
             };
+            if !set_pending_host(&id, &main_token, host) {
+                unsafe { let _ = DestroyWindow(host); }
+                return Ok(());
+            }
+            let callback_id = id.clone();
+            let callback_token = main_token.clone();
             let handler = CreateCoreWebView2ControllerCompletedHandler::create(Box::new(move |result, controller| {
+                if !pending_is_current(&callback_id, &callback_token) {
+                    if let Some(controller) = controller { let _ = unsafe { controller.Close() }; }
+                    unsafe { let _ = DestroyWindow(host); }
+                    let _ = done.send(Err("A criação do navegador deste Portal foi cancelada.".into()));
+                    return Ok(());
+                }
                 let made = (|| -> windows::core::Result<()> {
                     result?;
                     let controller = controller.ok_or_else(|| windows::core::Error::from(windows::Win32::Foundation::E_POINTER))?;
@@ -124,17 +203,23 @@ pub async fn create(app: &AppHandle, parent: isize, id: &str, profile: std::path
                         controller.SetBounds(RECT { left: 0, top: 0, right: w.max(1), bottom: h.max(1) })?;
                         controller.SetIsVisible(true)?;
                     }
-                    watch(&core, &app2, &id);
-                    PORTALS.with(|p| p.borrow_mut().insert(id.clone(), Portal { host, controller, core }));
+                    watch(&core, &app2, &callback_id);
+                    PORTALS.with(|p| p.borrow_mut().insert(callback_id.clone(), Portal { host, controller, core }));
                     Ok(())
                 })();
                 if made.is_err() {
-                    let _ = unsafe { DestroyWindow(host) };
+                    cancel_pending(&callback_id, &callback_token);
+                } else {
+                    complete_pending(&callback_id, &callback_token);
                 }
                 let _ = done.send(made.map_err(|e| e.message()));
                 Ok(())
             }));
-            unsafe { env.CreateCoreWebView2Controller(host, &handler) }.map_err(|e| e.message())
+            if let Err(error) = unsafe { env.CreateCoreWebView2Controller(host, &handler) } {
+                cancel_pending(&id, &main_token);
+                return Err(error.message());
+            }
+            Ok(())
         };
         // `start` leva o `done`: se não chegar a rodar, o canal fecha e quem espera recebe o erro.
         let profile_key = profile.clone();
@@ -146,16 +231,26 @@ pub async fn create(app: &AppHandle, parent: isize, id: &str, profile: std::path
             if let (Ok(()), Some(env)) = (result, env) {
                 ENVIRONMENTS.with(|e| { e.borrow_mut().insert(profile_key.clone(), env.clone()); });
                 let _ = start(env);
+            } else {
+                cancel_pending(&environment_id, &environment_token);
             }
             Ok(())
         }));
-        let _ = unsafe { CreateCoreWebView2EnvironmentWithOptions(None, &HSTRING::from(profile.as_os_str()), &options(&args), &handler) };
+        if unsafe { CreateCoreWebView2EnvironmentWithOptions(None, &HSTRING::from(profile.as_os_str()), &options(&args), &handler) }.is_err() {
+            cancel_pending(&environment_id, &environment_token);
+        }
     })
     .map_err(|e| e.to_string())?;
-    tokio::time::timeout(std::time::Duration::from_secs(30), wait)
-        .await
-        .map_err(|_| "O navegador do Portal não abriu a tempo.".to_string())?
-        .map_err(|_| "O WebView2 não abriu o navegador do Portal.".to_string())?
+    match tokio::time::timeout(std::time::Duration::from_secs(30), wait).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err("O WebView2 não abriu o navegador do Portal.".into()),
+        Err(_) => {
+            let cleanup_id = timeout_id;
+            let cleanup_token = token.clone();
+            app.run_on_main_thread(move || cancel_pending(&cleanup_id, &cleanup_token)).map_err(|e| e.to_string())?;
+            Err("O navegador do Portal não abriu a tempo.".into())
+        }
+    }
 }
 
 /// Os eventos da página que o Portal acompanha: a URL (inclusive `pushState`), o título, o carregamento, o
@@ -345,6 +440,8 @@ pub async fn focus(app: &AppHandle, id: &str) -> Result<(), String> {
 pub fn close(app: &AppHandle, id: &str) {
     let id = id.to_string();
     let _ = app.run_on_main_thread(move || {
+        let pending_token = PENDING.with(|pending| pending.borrow().get(&id).map(|entry| entry.token.clone()));
+        if let Some(token) = pending_token { cancel_pending(&id, &token); }
         if let Some(portal) = PORTALS.with(|p| p.borrow_mut().remove(&id)) {
             unsafe {
                 let _ = portal.controller.Close();
