@@ -99,19 +99,22 @@ fn source_ownership_limits_and_read_only_review() {
     assert_eq!(dreams[0].created_at, 1000);
     assert_eq!(dreams[0].proposals.len(), 8);
     assert!(!dreams[0].markdown_diff.is_empty());
-    assert!(super::super::review::review_summary_workspace(&c, "w")
-        .unwrap()
-        .groups
-        .is_empty());
+    assert!(
+        super::super::review::review_summary_workspace(&c, "w")
+            .unwrap()
+            .groups
+            .is_empty()
+    );
     for item in &dreams[0].proposals {
         assert_eq!(item.item.priority, 3);
-        assert!(item
-            .item
-            .evidence
-            .reason
-            .as_deref()
-            .unwrap()
-            .contains(&source));
+        assert!(
+            item.item
+                .evidence
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains(&source)
+        );
     }
     let overrides = dreams[0]
         .proposals
@@ -147,9 +150,10 @@ fn migration_preserves_revisions_and_immutability() {
         1
     );
     assert!(c.execute("DELETE FROM memory_revisions", []).is_err());
-    assert!(c
-        .execute("UPDATE memory_revisions SET body='changed'", [])
-        .is_err());
+    assert!(
+        c.execute("UPDATE memory_revisions SET body='changed'", [])
+            .is_err()
+    );
 }
 
 #[test]
@@ -173,9 +177,9 @@ fn global_pending_limit_and_secret_proposal() {
                 expected_revision: None,
                 source_fact_id: None,
                 reason: None,
-            
+
                 acknowledge_secret: false,
-},
+            },
             super::super::ProposalActor {
                 kind: "user",
                 run_id: None,
@@ -206,9 +210,9 @@ fn v39_upgrade_preserves_data_indexes_and_delete_guard() {
             expected_revision: None,
             source_fact_id: None,
             reason: None,
-        
+
             acknowledge_secret: false,
-},
+        },
         super::super::ProposalActor {
             kind: "user",
             run_id: None,
@@ -261,9 +265,9 @@ fn v39_upgrade_preserves_data_indexes_and_delete_guard() {
         expected_revision: None,
         source_fact_id: None,
         reason: None,
-    
+
         acknowledge_secret: false,
-};
+    };
     let p = super::super::propose(
         &c,
         "workspace",
@@ -290,9 +294,10 @@ fn v39_upgrade_preserves_data_indexes_and_delete_guard() {
         "Preserved old evidence"
     );
     assert!(c.execute("DELETE FROM memory_revisions", []).is_err());
-    assert!(c
-        .execute("UPDATE memory_revisions SET body='changed'", [])
-        .is_err());
+    assert!(
+        c.execute("UPDATE memory_revisions SET body='changed'", [])
+            .is_err()
+    );
     let index: i64 = c
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE name='idx_memory_one_pending_revision'",

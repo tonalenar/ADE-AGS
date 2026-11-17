@@ -373,7 +373,7 @@ pub fn workspace_restore(
     workspace_id: String,
     db: tauri::State<crate::database::DbConnection>,
 ) -> Result<(), String> {
-    crate::database::db_restore_workspace(workspace_id, db)
+    crate::database::db_restore_workspace_now(workspace_id, db.inner())
 }
 
 pub fn deleted_workspaces(conn: &Connection) -> Result<Vec<Value>, String> {
