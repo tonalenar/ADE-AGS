@@ -11,13 +11,14 @@ import { sendToConversation } from "../chatActions";
 import { chatPermissionNotify } from "../ipc";
 import { useChatLive } from "../liveStore";
 import { unsnoozeConversation } from "../shelf";
-import { EMPTY_LIVE } from "../structured/model";
+import { EMPTY_LIVE, type ThreadLive } from "../structured/model";
+import type { ThreadRow } from "../structured/ipc";
 import { answerRequest, sendToThread, useStructured } from "../structured/store";
 import { teamVerdictForAsk } from "../team/teamPermissions";
 import { useTeamStore } from "../team/teamStore";
 import { fleetAsk, threadAsks, tuiAsk } from "./askSources";
 import { chatPermissionRuleAdd, chatPermissionRuleRemove, chatPermissionRuleUpdate, chatPermissionRules, ruleOf } from "./ipc";
-import { sortAsks, type AskFilter, type PendingAsk, type PermissionRule } from "./permissionModel";
+import { sortAsks, waitingAgents, type AskFilter, type PendingAsk, type PermissionRule } from "./permissionModel";
 
 /**
  * O store único dos pedidos de permissão (prancheta 14): o que cada fonte tem pendente vira um
@@ -122,12 +123,17 @@ export function answerAsk(ask: PendingAsk, decision: AskDecision, reply?: string
   const text = reply?.trim();
   const ref = ask.ref;
   if (ask.conversation) unsnoozeConversation(ask.conversation);
-  usePermissions.setState((s) => ({ answered: { ...s.answered, [ask.id]: true }, selected: s.selected === ask.id ? null : s.selected }));
+  const markAnswered = () => usePermissions.setState((s) => ({ answered: { ...s.answered, [ask.id]: true }, selected: s.selected === ask.id ? null : s.selected }));
   if (ref.source === "thread") {
-    answerRequest(ref.threadId, ref.requestId, decision);
-    if (text) sendToThread(ref.threadId, text);
+    // O pedido só sai da caixa quando o backend aceita a resposta; recusado, continua aqui com o erro da conversa.
+    void answerRequest(ref.threadId, ref.requestId, decision).then((accepted) => {
+      if (!accepted) return;
+      markAnswered();
+      if (text) void sendToThread(ref.threadId, text);
+    });
     return;
   }
+  markAnswered();
   if (ref.source === "tui") {
     const item = usePermissions.getState().tui.find((p) => p.tabId === ref.tabId && p.prompt.signature === ref.signature);
     const choices = item?.prompt.choices ?? [];
@@ -159,6 +165,43 @@ export function alwaysAllow(ask: PendingAsk, pattern: string): void {
  * Todos os pedidos pendentes, de todas as fontes, o mais antigo primeiro. As abas de shell não
  * pedem nada; os respondidos aqui somem na hora.
  */
+/** As fontes que compõem os pedidos pendentes (o que `usePendingAsks` e a contagem da barra leem). */
+type AskSources = {
+  threads: ThreadRow[];
+  live: Record<string, ThreadLive>;
+  tui: PermissionsState["tui"];
+  answered: PermissionsState["answered"];
+  tabs: ReturnType<typeof useTabsStore.getState>["tabs"];
+  detected: ReturnType<typeof useTabsStore.getState>["detectedAgents"];
+  turns: ReturnType<typeof useChatLive.getState>["turn"];
+  awaiting: ReturnType<typeof useChatLive.getState>["awaiting"];
+  approvals: ReturnType<typeof useRunsStore.getState>["approvals"];
+  tasks: ReturnType<typeof useRunsStore.getState>["tasks"];
+};
+
+/** Os pedidos pendentes de todas as fontes, o mais antigo primeiro. Pura sobre as fontes lidas. */
+export function pendingAsksOf(src: AskSources): PendingAsk[] {
+  const label = (id: string) => src.detected.find((a) => a.id === id)?.label ?? id;
+  const fromThreads = src.threads.filter((th) => th.state === "active").flatMap((th) => {
+    const l = src.live[th.id] ?? EMPTY_LIVE;
+    return threadAsks(th, l.requests, l.items, label);
+  });
+  const fromTui = src.tui.flatMap((item) => {
+    const tab = src.tabs.find((t) => t.id === item.tabId);
+    if (!tab || tab.agentId === SHELL_AGENT_ID) return [];
+    const tools = src.turns[tab.id]?.tools ?? [];
+    const pending = tools[tools.length - 1] ?? (src.awaiting[tab.id] ? { name: "", summary: src.awaiting[tab.id]! } : null);
+    return [tuiAsk({ id: tab.id, title: tab.title, cwd: tab.cwd, agentId: tab.agentId, agentLabel: tab.agentLabel }, item.prompt, item.atMs, pending)];
+  });
+  const fromFleet = src.approvals.map((a) => fleetAsk(a, src.tasks.find((t) => t.id === a.taskId), label));
+  return sortAsks([...fromThreads, ...fromTui, ...fromFleet].filter((a) => !src.answered[a.id]));
+}
+
+/**
+ * Todos os pedidos pendentes, de todas as fontes, o mais antigo primeiro. As abas de shell não
+ * pedem nada; os respondidos aqui somem na hora. Assina o `live` inteiro: quem mostra a lista (a caixa, o cartão)
+ * refaz a lista a cada pedaço de texto; quem só conta pedidos usa `usePendingAskCounts`.
+ */
 export function usePendingAsks(): PendingAsk[] {
   const threads = useStructured((s) => s.threads);
   const live = useStructured((s) => s.live);
@@ -170,22 +213,43 @@ export function usePendingAsks(): PendingAsk[] {
   const awaiting = useChatLive((s) => s.awaiting);
   const approvals = useRunsStore((s) => s.approvals);
   const tasks = useRunsStore((s) => s.tasks);
+  return useMemo(
+    () => pendingAsksOf({ threads, live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks }),
+    [threads, live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks],
+  );
+}
+
+/**
+ * Um texto curto com o que a contagem de pedidos lê dos registros: o id de cada conversa ativa, e os pedidos dela (id,
+ * tipo, estado e título). Muda só quando um pedido muda, nunca com o texto do streaming. Pura.
+ */
+function requestsSignature(live: Record<string, ThreadLive>, threads: ThreadRow[]): string {
+  return threads.filter((th) => th.state === "active").map((th) =>
+    `${th.id}[${(live[th.id]?.requests ?? []).map((r) => `${r.id}/${r.kind}/${r.state}/${r.title}`).join(";")}]`).join("|");
+}
+
+/**
+ * A contagem de pedidos por conversa e quantas conversas esperam a pessoa (a barra lateral). Assina só a assinatura dos
+ * pedidos, então o texto que chega numa conversa não re-renderiza quem só conta. Os arquivos das edições (que vêm dos
+ * itens) ficam para a lista; a contagem não depende deles.
+ */
+export function usePendingAskCounts(): { waiting: number; byConversation: Record<string, number> } {
+  const threads = useStructured((s) => s.threads);
+  const requests = useStructured((s) => requestsSignature(s.live, s.threads));
+  const tui = usePermissions((s) => s.tui);
+  const answered = usePermissions((s) => s.answered);
+  const tabs = useTabsStore((s) => s.tabs);
+  const detected = useTabsStore((s) => s.detectedAgents);
+  const turns = useChatLive((s) => s.turn);
+  const awaiting = useChatLive((s) => s.awaiting);
+  const approvals = useRunsStore((s) => s.approvals);
+  const tasks = useRunsStore((s) => s.tasks);
   return useMemo(() => {
-    const label = (id: string) => detected.find((a) => a.id === id)?.label ?? id;
-    const fromThreads = threads.filter((th) => th.state === "active").flatMap((th) => {
-      const l = live[th.id] ?? EMPTY_LIVE;
-      return threadAsks(th, l.requests, l.items, label);
-    });
-    const fromTui = tui.flatMap((item) => {
-      const tab = tabs.find((t) => t.id === item.tabId);
-      if (!tab || tab.agentId === SHELL_AGENT_ID) return [];
-      const tools = turns[tab.id]?.tools ?? [];
-      const pending = tools[tools.length - 1] ?? (awaiting[tab.id] ? { name: "", summary: awaiting[tab.id]! } : null);
-      return [tuiAsk({ id: tab.id, title: tab.title, cwd: tab.cwd, agentId: tab.agentId, agentLabel: tab.agentLabel }, item.prompt, item.atMs, pending)];
-    });
-    const fromFleet = approvals.map((a) => fleetAsk(a, tasks.find((t) => t.id === a.taskId), label));
-    return sortAsks([...fromThreads, ...fromTui, ...fromFleet].filter((a) => !answered[a.id]));
-  }, [threads, live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks]);
+    const asks = pendingAsksOf({ threads, live: useStructured.getState().live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks });
+    const byConversation: Record<string, number> = {};
+    for (const a of asks) if (a.conversation) byConversation[a.conversation] = (byConversation[a.conversation] ?? 0) + 1;
+    return { waiting: waitingAgents(asks), byConversation };
+  }, [threads, requests, tui, answered, tabs, detected, turns, awaiting, approvals, tasks]);
 }
 
 /** O aviso do sistema de um pedido novo (só aparece com o app sem foco; ver `notifier.rs`). */

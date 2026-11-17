@@ -156,10 +156,12 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
       // A pergunta nasce como cópia da conversa de origem (fork nativo). Sem fork, a primeira mensagem leva o recorte
       // do histórico e a tela avisa o motivo. A origem não é tocada em nenhum dos dois caminhos.
       const fork = await forkSideChat(id);
+      const sent = messageFor(threadKey(id), sideChatFirstMessage(fork.mode, items, question), attachments);
+      // A pergunta só troca o rascunho pela conversa depois de o backend aceitar a primeira mensagem; recusada, o texto fica na caixa.
+      const accepted = await sendToThread(id, sent.text, (message) => setError(message), undefined, sent.images);
+      if (!accepted) return false;
       setSelectedId(id);
       setDraft(null);
-      const sent = messageFor(threadKey(id), sideChatFirstMessage(fork.mode, items, question), attachments);
-      sendToThread(id, sent.text, (message) => setError(message), undefined, sent.images);
       return true;
     } catch (cause) {
       setError(String(cause));

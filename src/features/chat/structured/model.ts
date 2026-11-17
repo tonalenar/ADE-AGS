@@ -74,6 +74,21 @@ export interface ThreadLive {
 
 export const EMPTY_LIVE: ThreadLive = { items: [], requests: [], phase: "idle", drafts: [], error: null, providerCommands: [], providerConfig: null };
 
+/**
+ * Um texto curto com o que a barra e os avisos leem de cada conversa: o id, a fase, se há pedido pendente (aprovação e
+ * pergunta) e se houve falha. Muda só quando uma dessas coisas muda, e não a cada pedaço de texto. Quem assina esta
+ * assinatura, em vez do `live` inteiro, não re-renderiza por causa do texto de outra conversa. Pura.
+ */
+export function threadStatusSignature(live: Record<string, ThreadLive>, ids: readonly string[]): string {
+  return ids.map((id) => {
+    const thread = live[id];
+    if (!thread) return `${id}:-`;
+    const awaiting = thread.requests.some((r) => r.state === "pending" && r.kind !== "question") ? "a" : "";
+    const question = thread.requests.some((r) => r.state === "pending" && r.kind === "question") ? "q" : "";
+    return `${id}:${thread.phase === "working" ? "w" : "i"}${awaiting}${question}${thread.error !== null ? "!" : ""}`;
+  }).join(",");
+}
+
 /** Um evento `cc-chat-thread` (ver `conversa::codex`). */
 export type ThreadEvent =
   | { type: "item"; threadId: string; item: TimelineItem }

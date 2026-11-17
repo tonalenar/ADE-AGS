@@ -131,22 +131,42 @@ export function startStructured(): void {
 }
 
 /** Lê do banco a timeline e os pendentes de uma conversa (uma vez). */
+/** Quantas vezes a leitura de uma conversa por protocolo é tentada antes de desistir (A102). */
+const HYDRATE_ATTEMPTS = 3;
+
+function readThread(id: string) {
+  return Promise.all([chatThreadItems(id), chatThreadRequests(id), chatThreadStatus(id), chatThreadGoalGet(id), chatThreadProviderConfig(id)]);
+}
+
+/**
+ * Lê a conversa do banco. Tenta de novo algumas vezes; se todas falharem, a conversa deixa de ficar «carregando» para
+ * sempre: o erro vai para o aviso dela e a próxima abertura tenta de novo.
+ */
 export function hydrateThread(id: string): void {
   if (useStructured.getState().hydrated[id]) return;
   useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: true } }));
-  void Promise.all([chatThreadItems(id), chatThreadRequests(id), chatThreadStatus(id), chatThreadGoalGet(id), chatThreadProviderConfig(id)])
-    .then(([items, requests, status, goal, providerConfig]) => {
-      patchLive(id, (live) => ({
-        ...live,
-        // O que chegou por evento enquanto lia fica (é mais novo).
-        items: [...items.filter((i) => !live.items.some((x) => x.id === i.id)), ...live.items],
-        requests: requests.length > 0 ? requests : live.requests,
-        phase: status.working ? "working" : live.phase,
-        providerConfig: providerConfig ?? live.providerConfig,
-      }));
-      useStructured.setState((s) => ({ goals: { ...s.goals, [id]: Object.prototype.hasOwnProperty.call(s.goals, id) ? s.goals[id]! : goal } }));
-    })
-    .catch(() => useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: false } })));
+  void (async () => {
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < HYDRATE_ATTEMPTS; attempt++) {
+      try {
+        const [items, requests, status, goal, providerConfig] = await readThread(id);
+        patchLive(id, (live) => ({
+          ...live,
+          // O que chegou por evento enquanto lia fica (é mais novo).
+          items: [...items.filter((i) => !live.items.some((x) => x.id === i.id)), ...live.items],
+          requests: requests.length > 0 ? requests : live.requests,
+          phase: status.working ? "working" : live.phase,
+          providerConfig: providerConfig ?? live.providerConfig,
+        }));
+        useStructured.setState((s) => ({ goals: { ...s.goals, [id]: Object.prototype.hasOwnProperty.call(s.goals, id) ? s.goals[id]! : goal } }));
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: false } }));
+    patchLive(id, (live) => ({ ...live, error: String(lastError) }));
+  })();
 }
 
 /** Mostra uma conversa por protocolo. */
@@ -167,11 +187,15 @@ export interface NewThread {
   parentRef?: string | null;
 }
 
-/** Cria a conversa, mostra e manda a primeira mensagem. */
-export async function startThread(input: NewThread, text: string, images?: string[], background = false, fastMode?: boolean): Promise<string> {
+/**
+ * Cria a conversa e manda a primeira mensagem. A conversa só abre depois de o backend aceitar a mensagem: se ele recusar,
+ * devolve `null` (a conversa vazia fica na lista, sem apagar nada) e quem chamou mantém o texto na caixa.
+ */
+export async function startThread(input: NewThread, text: string, images?: string[], background = false, fastMode?: boolean, onError?: (message: string) => void): Promise<string | null> {
   const id = await createThread(input);
+  const accepted = await sendToThread(id, text, onError, undefined, images, fastMode);
+  if (!accepted) return null;
   if (!background) openThread(id);
-  sendToThread(id, text, undefined, undefined, images, fastMode);
   return id;
 }
 
@@ -196,27 +220,33 @@ export async function forkSideChat(id: string): Promise<SideChatForkOutcome> {
   return outcome;
 }
 
-/** Manda uma mensagem (começa um turno, ou entra no que está em andamento). */
-export function sendToThread(id: string, text: string, onError?: (message: string) => void, onSent?: () => void, images?: string[], fastMode?: boolean): void {
+/**
+ * Manda uma mensagem (começa um turno, ou entra no que está em andamento). Resolve `true` só quando o backend aceita;
+ * `false` quando recusa (o erro vai para `onError` e para o aviso da conversa). Quem precisa saber se a mensagem saiu
+ * espera este resultado antes de limpar a caixa.
+ */
+export function sendToThread(id: string, text: string, onError?: (message: string) => void, onSent?: () => void, images?: string[], fastMode?: boolean): Promise<boolean> {
   const row = useStructured.getState().threads.find((thread) => thread.id === id);
   const effectiveFastMode = fastMode ?? (row ? fastModeForThread(row) : false);
   if (text.trim() || images?.length) unsnoozeConversation(threadKey(id));
   patchLive(id, (live) => ({ ...live, phase: "working", error: null }));
-  const send = (outgoing: string) => {
+  const send = (outgoing: string): Promise<boolean> =>
     // `onSent` só depois de o backend aceitar a mensagem; `onError` só se ele a recusar.
-    chatThreadSend(id, outgoing, images, effectiveFastMode).then(() => onSent?.(), (e) => {
+    chatThreadSend(id, outgoing, images, effectiveFastMode).then(() => {
+      onSent?.();
+      return true;
+    }, (e) => {
       onError?.(String(e));
       patchLive(id, (live) => ({ ...live, phase: "idle", error: String(e) }));
+      return false;
     });
-  };
   // Claude e Cursor precisam receber `/nome`; no composer os dois usam a menção portátil `$nome`.
   if ((row?.agentId === "claude-code" || row?.agentId === "cursor") && text.includes("$")) {
-    void useAgentSkillsStore.getState().load(row.cwd, row.agentId, id)
+    return useAgentSkillsStore.getState().load(row.cwd, row.agentId, id)
       .catch(() => [])
       .then((skills) => send(dispatchSkillMentions(row.agentId, text, skills.map((skill) => skill.name))));
-    return;
   }
-  send(text);
+  return send(text);
 }
 
 export function interruptThread(id: string): void {
@@ -262,11 +292,24 @@ export async function runThreadGoalAction(id: string, action: "show" | "set" | "
   }
 }
 
-export function answerRequest(threadId: string, requestId: string, choice: string): void {
+/**
+ * Responde um pedido do agente. Resolve `true` quando o backend aceita: só então o pedido sai da tela. Se ele recusar
+ * (o agente fechou), o pedido continua na tela e o erro aparece na conversa.
+ */
+/** Pedidos com a resposta a caminho do backend: uma segunda resposta ao mesmo pedido, enquanto isso, não sai. */
+const answersInFlight = new Set<string>();
+
+export function answerRequest(threadId: string, requestId: string, choice: string): Promise<boolean> {
+  if (answersInFlight.has(requestId)) return Promise.resolve(false);
+  answersInFlight.add(requestId);
   unsnoozeConversation(threadKey(threadId));
-  // Some da tela na hora; se o backend recusar (o agente fechou), o erro aparece.
-  patchLive(threadId, (live) => ({ ...live, requests: live.requests.filter((r) => r.id !== requestId) }));
-  chatRequestAnswer(requestId, choice).catch((e) => patchLive(threadId, (live) => ({ ...live, error: String(e) })));
+  return chatRequestAnswer(requestId, choice).then(() => {
+    patchLive(threadId, (live) => ({ ...live, requests: live.requests.filter((r) => r.id !== requestId) }));
+    return true;
+  }, (e) => {
+    patchLive(threadId, (live) => ({ ...live, error: String(e) }));
+    return false;
+  }).finally(() => answersInFlight.delete(requestId));
 }
 
 export async function retuneThread(id: string, model: string | null, effort: string | null, access: ThreadAccess): Promise<boolean> {

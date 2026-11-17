@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 
 import type { TimelineItem } from "./types";
@@ -90,5 +91,7 @@ const EMPTY: PendingSend[] = [];
 export function usePending(key: string, items: TimelineItem[], working = false): PendingSend[] {
   const all = usePendingSends((s) => s.byKey[key]) ?? EMPTY;
   // Sem relógio no render: o TTL só vale no próximo redesenho (a timeline muda a cada mensagem).
-  return unreconciled(all, items, Date.now(), working);
+  // A lista só muda de identidade quando chega item novo ou a fase muda (A119): o `memo` da timeline não refaz o turno.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => unreconciled(all, items, Date.now(), working), [all, items.length, working]);
 }

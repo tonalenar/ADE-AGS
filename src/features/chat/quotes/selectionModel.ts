@@ -354,6 +354,13 @@ export function observeSelectionActions({
     else if (!pointerDown && getActionElement?.()) dismiss();
   };
   const onScroll = () => {
+    // A rolagem que o streaming faz sozinha não tira a seleção de quem ainda a vê: a pílula «Citar» fica.
+    const selection = doc.getSelection?.();
+    if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      const box = element.getBoundingClientRect();
+      if (rect.width + rect.height > 0 && rect.bottom > box.top && rect.top < box.bottom) return;
+    }
     cancelPending();
     if (!pointerDown) {
       pointer = null;

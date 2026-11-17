@@ -171,11 +171,9 @@ function CitationCommentPopover({
         if (decision.kind === "keep-open") {
           setUnavailableSourceAnchor(activeSourceAnchor);
         } else if (decision.kind === "commit") {
-          if (onSaveRef.current(decision.comment)) {
-            onCloseRef.current({ restoreFocus: false });
-          } else {
-            setUnavailableSourceAnchor(activeSourceAnchor);
-          }
+          // Sem ação da pessoa nunca se grava: a fonte saiu da conversa e o rascunho fica aberto para ela decidir
+          // (antes o editor gravava e fechava sozinho quando a fala era remontada, lote 1a).
+          setUnavailableSourceAnchor(activeSourceAnchor);
         } else {
           onCloseRef.current({ restoreFocus: false });
         }

@@ -180,6 +180,8 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   }), [streaming, mountedAt, agentId, agentLabel, headers, voices]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Função estável: o `SelectionComment` a tem nas dependências dos listeners (ver A111).
+  const scrollerOf = useCallback(() => scrollRef.current, []);
   const contentRef = useRef<HTMLDivElement>(null);
   const turnsHostRef = useRef<HTMLDivElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
@@ -278,10 +280,12 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   };
   holdTurnAnchorRef.current = holdTurnAnchor;
   const turnHeights = useRef(new Map<string, number>());
+  const turnCountRef = useRef(0);
   const visibleRangeRef = useRef({ start: 0, end: 20 });
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 20 });
   const [heightRevision, setHeightRevision] = useState(0);
   const virtualized = turns.length > VIRTUALIZE_AFTER_TURNS;
+  turnCountRef.current = turns.length;
   const turnPrefix = useMemo(() => {
     const prefix = [0];
     for (const turn of turns) prefix.push(prefix[prefix.length - 1]! + (turnHeights.current.get(turn.key) ?? ESTIMATED_TURN_HEIGHT));
@@ -325,7 +329,8 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     turnHeights.current.set(key, height);
     const scroller = scrollRef.current;
     if (scroller && index < visibleRangeRef.current.start && !stick.current) scroller.scrollTop += height - previous;
-    setHeightRevision((revision) => revision + 1);
+    // A altura só serve à lista virtualizada. Fora dela, medir cada token não redesenha a conversa inteira (A108).
+    if (turnCountRef.current > VIRTUALIZE_AFTER_TURNS) setHeightRevision((revision) => revision + 1);
   }, []);
   const scrollToTurn = useCallback((index: number) => {
     updateVisibleRange(index);
@@ -574,7 +579,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
       </div>
       </AnswerContext.Provider>
       </RevealContext.Provider>
-      {quoteKey && <SelectionComment container={() => scrollRef.current} quoteKey={quoteKey} />}
+      {quoteKey && <SelectionComment container={scrollerOf} quoteKey={quoteKey} />}
     </div>
   );
 });
@@ -609,23 +614,28 @@ function TurnView({ turn, thinking = false, working = false, waiting = false, wo
   const outcome = turn.end ? endOutcome(turn.end) : null;
   const cleanDone = turn.end !== null && !turn.end.superseded && outcome === "done";
   const userToggledRef = useRef(false);
-  const prevEndedRef = useRef(turn.end !== null);
   const [open, setOpen] = useState(() => (turn.end === null ? true : !cleanDone || containsSearchTarget));
   const [full, setFull] = useState(containsSearchTarget);
-  useEffect(() => {
-    const ended = turn.end !== null;
-    if (ended && !prevEndedRef.current && cleanDone && !userToggledRef.current && !containsSearchTarget) {
+  // O recolhimento do fim do turno acontece no mesmo render em que ele chega (ajuste de estado durante o render, não
+  // num efeito): sem um commit extra com o corpo ainda aberto, que era o segundo salto da resposta.
+  const ended = turn.end !== null;
+  const [seenEnded, setSeenEnded] = useState(ended);
+  if (ended !== seenEnded) {
+    setSeenEnded(ended);
+    if (ended && cleanDone && !userToggledRef.current && !containsSearchTarget) {
       setOpen(false);
       setFull(false);
     }
-    prevEndedRef.current = ended;
-  }, [cleanDone, containsSearchTarget, turn.end]);
+  }
   useEffect(() => { if (containsSearchTarget) { setOpen(true); setFull(true); } }, [containsSearchTarget]);
   const foldable = turn.end !== null && turn.body.length > 0;
   // No zen, um turno cujas ferramentas foram todas ocultas e que acabou bem não mostra o cabeçalho "Trabalhou por …".
   const quiet = quietWhenEmpty && turn.body.length === 0 && turn.end !== null && !turn.end.superseded && outcome === "done";
   const endAt = turn.end?.at ?? turn.final?.at;
   const turnClock = endAt !== undefined && Number.isFinite(endAt) ? formatClock(endAt, timeFormat, i18n.language) : null;
+  // A fala final (`turn.final`) é a última linha: fica fora do fold, mas no mesmo array e com a mesma key do corpo.
+  const shownBody = visibleTurnBody(turn, open, full);
+  const rows: BodyRow[] = turn.final ? [...shownBody, { type: "assistant", key: turn.final.id, item: turn.final }] : shownBody;
   return (
     <>
       {turn.user && <UserMessage item={turn.user} searchHit={turn.user.id === searchTargetId} composerTarget={composerTarget} />}
@@ -674,11 +684,12 @@ function TurnView({ turn, thinking = false, working = false, waiting = false, wo
           </div>
         </div>
       )}
-      {visibleTurnBody(turn, open, full).map((row) => (
+      {/* O corpo e a fala final vão no mesmo array, com a mesma key que a fala tinha enquanto era a última do corpo:
+          ao acabar o turno ela não muda de slot nem é remontada (era o salto da resposta, lote 1a). */}
+      {rows.map((row) => (
         <BodyRowView key={row.key} row={row} onOpenTerminal={onOpenTerminal} active={turn.end === null && row.key === turn.body[turn.body.length - 1]?.key} searchTargetId={searchTargetId} />
       ))}
       {thinking && <ThinkingRow />}
-      {turn.final && <AgentText item={turn.final} searchHit={turn.final.id === searchTargetId} />}
       {turn.end && <TurnEndNotice end={turn.end} />}
       {turn.end && turn.end.files.length > 0 && <div><ChangedFilesCard files={turn.end.files} /></div>}
     </>
@@ -731,10 +742,8 @@ function BodyRowView({ row, onOpenTerminal, active = false, searchTargetId }: { 
     case "reasoning":
       return <ReasoningRow item={row.item} />;
     case "work":
-      // Uma ferramenta só aparece como é; duas ou mais viram uma linha-resumo recolhida.
-      return row.tools.length === 1
-        ? <div className="flex flex-col"><ToolRow tool={row.tools[0]!} /></div>
-        : <WorkGroup tools={row.tools} active={active} />;
+      // Sempre o mesmo componente: uma ferramenta é a linha dela; a segunda vira o resumo no mesmo botão (sem remontar).
+      return <WorkGroup tools={row.tools} active={active} />;
     case "infra":
       return <InfraRow tools={row.tools} />;
     case "question":
@@ -841,77 +850,36 @@ const VERB: Record<ToolKind, string> = {
 function WorkGroup({ tools, active }: { tools: TimelineItem[]; active: boolean }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  // Uma ferramenta é a linha dela (o mesmo visual de sempre); duas ou mais viram o resumo recolhido. É sempre este
+  // componente, e o botão da linha é o mesmo nó quando chega a segunda: não há remontagem (era o piscar do lote 1a).
+  const single = tools.length === 1 ? tools[0]! : null;
   const summary = useMemo(() => summarizeTools(tools), [tools]);
-  const title = joinParts(summary.parts.map((p) => t(`chat.work.${p.kind}`, { count: p.count })));
-  const activity = active ? activityOf(summary.last) : "";
-  const Icon = TOOL_ICON[summary.parts[0]?.kind ?? "other"];
-  return (
-    <div className="flex flex-col">
-      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} title={activity || title}
-        className="flex min-w-0 items-center gap-1.5 min-h-6 rounded-md px-0.5 py-0.5 whitespace-nowrap text-left text-chat-ui leading-relaxed text-gray-600 dark:text-white/60 hover:text-gray-900 dark:hover:text-white/85 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/50">
-        <span className="w-6 shrink-0 flex items-center justify-center text-gray-400 dark:text-white/40">
-          <Icon className="w-4 h-4 shrink-0" />
-        </span>
-        <span className={`shrink-0 whitespace-nowrap ${active ? "cc-live-tool-shine" : ""}`}>{title}</span>
-        {summary.failed > 0 && <span className="shrink-0 whitespace-nowrap text-chat-caption text-red-600 dark:text-red-400">· {t("chat.work.failed", { count: summary.failed })}</span>}
-        {activity && <span className="min-w-0 flex-1 truncate font-mono text-chat-code text-gray-400 dark:text-white/35">{activity}</span>}
-        {!activity && <span className="flex-1" />}
-        <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
-      </button>
-      {open && <div className="ms-7 flex flex-col max-h-72 overflow-y-auto overflow-x-hidden rounded-md">{tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}</div>}
-    </div>
-  );
-}
-
-/** Os comandos `ags …` do time numa linha só, recolhida: bastidor, a conversa não os mostra um a um. */
-function InfraRow({ tools }: { tools: TimelineItem[] }) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="flex flex-col">
-      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
-        className="flex min-w-0 items-center gap-1.5 min-h-6 rounded-md px-0.5 py-0.5 whitespace-nowrap text-left text-chat-ui leading-relaxed text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/75 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/50">
-        <span className="w-6 shrink-0 flex items-center justify-center text-gray-400 dark:text-white/40">
-          <TerminalIcon className="w-4 h-4 shrink-0" />
-        </span>
-        <span>{t("chat.tool.infra", { count: tools.length })}</span>
-        <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
-      </button>
-      {open && <div className="ms-7 flex flex-col max-h-72 overflow-y-auto overflow-x-hidden rounded-md">{tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}</div>}
-    </div>
-  );
-}
-
-export function ToolRow({ tool }: { tool: TimelineItem }) {
-  const { t } = useTranslation();
-  const unknownOutcome = isUnknownOutcome(tool);
-  const [open, setOpen] = useState(false);
-  const kind = tool.tool ?? "other";
-  const Icon = TOOL_ICON[kind];
-  // O comando aparece sem o invólucro do shell e numa linha só (programa em destaque); o inteiro
-  // fica no tooltip e no conteúdo expandido.
-  const command = kind === "command" ? commandTitle(tool.label ?? "") : null;
-  const target = command ? "" : kind === "todo" ? t("chat.tool.todoCount", { count: Number(tool.label ?? 0) }) : tool.path ? fileName(tool.path) : tool.label ?? "";
+  const kind: ToolKind = single?.tool ?? "other";
+  const label = single?.label;
+  const isCommand = !!single && kind === "command";
+  // O comando sai sem o invólucro do shell e numa linha só; o inteiro fica no tooltip e no conteúdo expandido.
+  const command = useMemo(() => (isCommand ? commandTitle(label ?? "") : null), [isCommand, label]);
+  const app = useMemo(() => (single ? appResourceOf(single) : null), [single?.appResource, single?.output]);
+  const target = single ? (command ? "" : kind === "todo" ? t("chat.tool.todoCount", { count: Number(label ?? 0) }) : single.path ? fileName(single.path) : label ?? "") : "";
   const longCommand = !!command && (command.script || command.full.includes("\n") || command.full.length > 90);
-  const app = useMemo(() => appResourceOf(tool), [tool.appResource, tool.output]);
-  const canOpen = (!!tool.output && !app) || longCommand || unknownOutcome;
+  const unknownOutcome = !!single && isUnknownOutcome(single);
+  const canOpen = single ? (!!single.output && !app) || longCommand || unknownOutcome : true;
+  const title = single ? t(VERB[kind]) : joinParts(summary.parts.map((p) => t(`chat.work.${p.kind}`, { count: p.count })));
+  const activity = !single && active ? activityOf(summary.last) : "";
+  const shine = single ? single.status === "running" : active;
+  const Icon = TOOL_ICON[single ? kind : summary.parts[0]?.kind ?? "other"];
+  const iconTone = unknownOutcome
+    ? "text-amber-500 dark:text-amber-400"
+    : single && (single.status === "error" || single.status === "denied") ? "text-red-500 dark:text-red-400" : "text-gray-400 dark:text-white/40";
   return (
     <div className="flex flex-col">
-      <button type="button" onClick={() => canOpen && setOpen(!open)} aria-expanded={canOpen ? open : undefined}
-        title={command?.full || tool.path || tool.label}
-        className={`group flex min-w-0 items-center gap-1.5 min-h-6 rounded-md px-0.5 py-0.5 whitespace-nowrap text-left text-chat-ui leading-relaxed text-gray-600 dark:text-white/60 ${canOpen ? "cursor-pointer hover:text-gray-900 dark:hover:text-white/85" : "cursor-default"}`}>
-        <span className={`w-6 shrink-0 flex items-center justify-center ${
-          unknownOutcome
-            ? "text-amber-500 dark:text-amber-400"
-            : tool.status === "error" || tool.status === "denied"
-            ? "text-red-500 dark:text-red-400"
-            : "text-gray-400 dark:text-white/40"
-        }`}>
+      <button type="button" onClick={() => { if (canOpen) setOpen(!open); }} aria-expanded={canOpen ? open : undefined}
+        title={single ? command?.full || single.path || single.label : activity || title}
+        className={`group flex min-w-0 items-center gap-1.5 min-h-6 rounded-md px-0.5 py-0.5 whitespace-nowrap text-left text-chat-ui leading-relaxed text-gray-600 dark:text-white/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/50 ${canOpen ? "cursor-pointer hover:text-gray-900 dark:hover:text-white/85" : "cursor-default"}`}>
+        <span className={`w-6 shrink-0 flex items-center justify-center ${iconTone}`}>
           <Icon className="w-4 h-4 shrink-0" />
         </span>
-        <span className={`shrink-0 ${tool.status === "running" ? "cc-live-tool-shine" : ""}`} aria-label={tool.status === "running" ? t("chat.tool.running") : undefined}>
-          {t(VERB[kind])}
-        </span>
+        <span className={`shrink-0 whitespace-nowrap ${shine ? "cc-live-tool-shine" : ""}`} aria-label={single?.status === "running" ? t("chat.tool.running") : undefined}>{title}</span>
         {command && (
           <span className="min-w-0 flex-1 truncate whitespace-nowrap font-mono text-chat-code text-gray-500 dark:text-white/50">
             <span className="font-medium text-gray-800 dark:text-white/85">{command.program}</span>
@@ -919,25 +887,50 @@ export function ToolRow({ tool }: { tool: TimelineItem }) {
             {command.script && <span className="text-gray-400 dark:text-white/35"> · {t("chat.tool.script")}</span>}
           </span>
         )}
-        {target && <span className={`min-w-0 truncate ${tool.path ? "font-mono text-chat-code" : ""} text-gray-800 dark:text-white/80`}>{target}</span>}
-        {(tool.added ?? 0) + (tool.removed ?? 0) > 0 && (
+        {target && <span className={`min-w-0 truncate ${single?.path ? "font-mono text-chat-code" : ""} text-gray-800 dark:text-white/80`}>{target}</span>}
+        {single && (single.added ?? 0) + (single.removed ?? 0) > 0 && (
           <span className="shrink-0 font-mono text-chat-code">
-            <span className="text-emerald-600 dark:text-emerald-400">+{tool.added ?? 0}</span>{" "}
-            <span className="text-red-600 dark:text-red-400">−{tool.removed ?? 0}</span>
+            <span className="text-emerald-600 dark:text-emerald-400">+{single.added ?? 0}</span>{" "}
+            <span className="text-red-600 dark:text-red-400">−{single.removed ?? 0}</span>
           </span>
         )}
-        {unknownOutcome ? (
-          <span role="status" aria-label={t("chat.tool.outcomeUnknown")} className="shrink-0 text-chat-caption text-amber-600 dark:text-amber-400 font-medium">
-            {t("chat.tool.outcomeUnknown")}
-          </span>
+        {single ? (
+          unknownOutcome ? (
+            <span role="status" aria-label={t("chat.tool.outcomeUnknown")} className="shrink-0 text-chat-caption text-amber-600 dark:text-amber-400 font-medium">
+              {t("chat.tool.outcomeUnknown")}
+            </span>
+          ) : (
+            <>
+              {single.status === "error" && <span className="shrink-0 text-chat-caption text-red-600 dark:text-red-400">{t("chat.tool.failed")}</span>}
+              {single.status === "denied" && <span className="shrink-0 text-chat-caption text-red-600 dark:text-red-400">{t("chat.tool.denied")}</span>}
+            </>
+          )
         ) : (
-          <>
-            {tool.status === "error" && <span className="shrink-0 text-chat-caption text-red-600 dark:text-red-400">{t("chat.tool.failed")}</span>}
-            {tool.status === "denied" && <span className="shrink-0 text-chat-caption text-red-600 dark:text-red-400">{t("chat.tool.denied")}</span>}
-          </>
+          summary.failed > 0 && <span className="shrink-0 whitespace-nowrap text-chat-caption text-red-600 dark:text-red-400">· {t("chat.work.failed", { count: summary.failed })}</span>
         )}
+        {activity && <span className="min-w-0 flex-1 truncate font-mono text-chat-code text-gray-400 dark:text-white/35">{activity}</span>}
+        {!activity && !single && <span className="flex-1" />}
         {canOpen && <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />}
       </button>
+      {single
+        ? <ToolDetails tool={single} command={command} longCommand={longCommand} unknownOutcome={unknownOutcome} app={app} open={open} />
+        : open && <div className="ms-7 flex flex-col max-h-72 overflow-y-auto overflow-x-hidden rounded-md">{tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}</div>}
+    </div>
+  );
+}
+
+/** O que se abre de uma ferramenta só: o comando inteiro, o desfecho desconhecido, o app MCP e a saída. */
+function ToolDetails({ tool, command, longCommand, unknownOutcome, app, open }: {
+  tool: TimelineItem;
+  command: ReturnType<typeof commandTitle> | null;
+  longCommand: boolean;
+  unknownOutcome: boolean;
+  app: ReturnType<typeof appResourceOf>;
+  open: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
       {open && command && longCommand && (
         <pre className="m-0 ms-7 mt-1 max-h-48 overflow-auto cc-no-bar rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
           bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08] text-gray-800 dark:text-white/80">
@@ -968,8 +961,32 @@ export function ToolRow({ tool }: { tool: TimelineItem }) {
         <ChatMarkdownImageStrip content={tool.output} className="ms-7" />
         </>
       )}
+    </>
+  );
+}
+
+/** Os comandos `ags …` do time numa linha só, recolhida: bastidor, a conversa não os mostra um a um. */
+function InfraRow({ tools }: { tools: TimelineItem[] }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex flex-col">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+        className="flex min-w-0 items-center gap-1.5 min-h-6 rounded-md px-0.5 py-0.5 whitespace-nowrap text-left text-chat-ui leading-relaxed text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/75 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/50">
+        <span className="w-6 shrink-0 flex items-center justify-center text-gray-400 dark:text-white/40">
+          <TerminalIcon className="w-4 h-4 shrink-0" />
+        </span>
+        <span>{t("chat.tool.infra", { count: tools.length })}</span>
+        <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && <div className="ms-7 flex flex-col max-h-72 overflow-y-auto overflow-x-hidden rounded-md">{tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}</div>}
     </div>
   );
+}
+
+/** Uma ferramenta numa linha só (as de dentro do resumo e do bastidor). É o mesmo `WorkGroup`, com uma ferramenta. */
+export function ToolRow({ tool }: { tool: TimelineItem }) {
+  return <WorkGroup tools={[tool]} active={false} />;
 }
 
 function ChangedFilesCard({ files }: { files: ChangedFile[] }) {

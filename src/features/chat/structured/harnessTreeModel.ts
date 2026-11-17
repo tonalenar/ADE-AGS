@@ -113,8 +113,27 @@ export interface GraphState {
   cursor: number | null;
 }
 
+/**
+ * Igualdade estrutural de dois valores vindos do JSON, sem serializar cada nó a cada sincronização (A124). Campo
+ * ausente e `undefined` contam como iguais, como no `JSON.stringify` que esta função substitui.
+ */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, index) => sameValue(item, b[index]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+    if (!sameValue(left[key], right[key])) return false;
+  }
+  return true;
+}
+
 function sameNode(a: HarnessExecutionNode, b: HarnessExecutionNode): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return sameValue(a, b);
 }
 
 /**

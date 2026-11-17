@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Markdown, type CodeBlockRenderer, type MarkdownTone } from "@/shared/ui/Markdown";
 import { htmlImagesToMarkdown } from "@/shared/ui/htmlImages";
@@ -76,17 +76,23 @@ function useConversationMarkdownImages(content: string | string[]) {
   }, [gallery, owner, viewer]);
 
   const bySource = useMemo(() => new Map(images.map((image) => [image.source, image])), [images]);
+  // `load` e `open` têm identidade fixa. O `Markdown` os usa nas dependências do mapa de componentes: se mudassem
+  // quando chega uma imagem nova na resposta, o texto inteiro seria remontado (a lacuna do lote 1c). Eles leem a
+  // lista e o visualizador da última renderização, pelo ref.
+  const latest = useRef({ bySource, viewer });
+  useLayoutEffect(() => { latest.current = { bySource, viewer }; }, [bySource, viewer]);
   const load = useCallback(async (source: string) => {
-    const image = bySource.get(source);
+    const image = latest.current.bySource.get(source);
     if (!image) throw new Error("Imagem remota ou fora da pasta da conversa não carregada");
     if (image.preview) return image.preview;
     const preview = await loadImage(image.path);
     if (!preview) throw new Error("Imagem indisponível");
     return preview;
-  }, [bySource]);
+  }, []);
   const open = useCallback((source: string) => {
-    const image = bySource.get(source);
-    if (image) viewer?.open(image.path);
-  }, [bySource, viewer]);
+    const { bySource: current, viewer: api } = latest.current;
+    const image = current.get(source);
+    if (image) api?.open(image.path);
+  }, []);
   return { gallery, load, open };
 }

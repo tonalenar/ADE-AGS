@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { snapshotActivity, turnLive, type Activity } from "./activityModel";
 import { useChatLive } from "./liveStore";
 import { usePermissions } from "./permissions/permissionsStore";
-import { threadIdOf } from "./structured/model";
+import { threadIdOf, type ThreadLive } from "./structured/model";
 import { useStructured } from "./structured/store";
 import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
@@ -33,23 +33,28 @@ export interface LiveSummary {
  * que chegam pelo evento do agente. Aba (TUI): o estado do canal (fase, começo do turno e a
  * ferramenta pendente), sem ler a timeline de cada aba.
  */
+/** O resumo de uma conversa por protocolo, a partir dos registros dela. Pura. */
+function threadSummaryOf(thread: ThreadLive | undefined): LiveSummary {
+  const waiting = (thread?.requests.length ?? 0) > 0;
+  const working = thread?.phase === "working" || waiting;
+  const live = turnLive(thread?.items ?? [], waiting);
+  return { working, waiting, startedAt: live.startedAt, activity: live.activity };
+}
+
 export function useLiveSummary(key: string): LiveSummary {
   const threadId = threadIdOf(key);
-  const thread = useStructured((s) => (threadId ? s.live[threadId] : undefined));
+  // Por conversa, a linha assina só a assinatura do resumo: o texto que chega numa conversa não a re-renderiza.
+  // O resumo é lido do registro quando a assinatura muda.
+  const threadSignature = useStructured((s) => (threadId ? JSON.stringify(threadSummaryOf(s.live[threadId])) : ""));
   const phase = useChatLive((s) => s.phase[key]);
   const turn = useChatLive((s) => s.turn[key]);
   const question = useChatLive((s) => !!s.question[key]);
   const awaiting = useChatLive((s) => key in s.awaiting);
   const prompt = usePermissions((s) => s.tui.some((p) => p.tabId === key));
   return useMemo(() => {
-    if (threadId) {
-      const waiting = (thread?.requests.length ?? 0) > 0;
-      const working = thread?.phase === "working" || waiting;
-      const live = turnLive(thread?.items ?? [], waiting);
-      return { working, waiting, startedAt: live.startedAt, activity: live.activity };
-    }
+    if (threadId) return threadSummaryOf(useStructured.getState().live[threadId]);
     const waiting = question || awaiting || prompt;
     const working = phase === "working" || waiting;
     return { working, waiting, startedAt: turn?.startedAt ?? null, activity: snapshotActivity(turn?.tools ?? [], waiting) };
-  }, [threadId, thread, phase, turn, question, awaiting, prompt]);
+  }, [threadId, threadSignature, phase, turn, question, awaiting, prompt]);
 }

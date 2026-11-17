@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { MAX_PENDING_CAPTURES, rememberPendingCapture } from "@/features/chat/attachments/pendingCaptures";
@@ -15,6 +15,20 @@ const PERMISSION_MARKER = "SCREEN_CAPTURE_PERMISSION_REQUIRED:";
 const IPHONE_MIRROR_MARKER = "IPHONE_MIRROR_REQUIRED:";
 
 const composerTargetsByRecording = new Map<string, string | null | undefined>();
+
+/**
+ * Para a gravação `id` e anexa o vídeo ao rascunho do destino dela. Fica fora do componente: a gravação pode seguir
+ * depois de o botão sair da tela, e o aviso que fica (ver `ScreenRecordButton`) para por aqui.
+ */
+async function stopRecordingAndAttach(id: string, fallbackTarget: string | null, t: (key: string, options?: Record<string, unknown>) => string): Promise<void> {
+  const path = await screenRecordingStop(id);
+  const destination = composerTargetsByRecording.has(id) ? composerTargetsByRecording.get(id) : fallbackTarget;
+  const { dropped } = rememberPendingCapture({ path, target: destination, kind: "recording" });
+  attachToComposer([path], destination);
+  if (dropped) void AlertaToast(t("screenRecording.title"), t("screenRecording.pendingDropped", { max: MAX_PENDING_CAPTURES }), "warning", 6000);
+  composerTargetsByRecording.delete(id);
+  void AlertaToast(t("screenRecording.title"), t("screenRecording.attached"), "success", 3000);
+}
 
 /** Um botão compartilhado entre os painéis de dispositivo e a tela principal do Mac. */
 export function ScreenRecordButton({ kind, target, label, composerTarget, disabled = false, className = "" }: {
@@ -37,19 +51,33 @@ export function ScreenRecordButton({ kind, target, label, composerTarget, disabl
     return () => { mounted = false; };
   }, [id]);
 
+  // A gravação segue quando o botão sai da tela (a conversa trocou, o painel fechou). Sem um aviso ela seria esquecida:
+  // o aviso que fica traz o botão de parar e anexar, que usa o mesmo caminho do botão.
+  const latest = useRef({ recording, id, composerTarget, t });
+  latest.current = { recording, id, composerTarget, t };
+  useEffect(() => () => {
+    const { recording: running, id: current, composerTarget: target, t: translate } = latest.current;
+    if (!running) return;
+    showBotToast({
+      title: translate("screenRecording.title"),
+      text: translate("screenRecording.stillRunning"),
+      tone: "warning",
+      ms: 0,
+      sticky: true,
+      actionLabel: translate("screenRecording.stopAndAttach"),
+      onAction: () => {
+        void stopRecordingAndAttach(current, target ?? null, translate).catch((error) => AlertaToast(translate("screenRecording.title"), String(error), "error", 6000));
+      },
+    });
+  }, []);
+
   const toggle = async () => {
     if (busy || disabled) return;
     setBusy(true);
     try {
       if (recording) {
-        const path = await screenRecordingStop(id);
-        const destination = composerTargetsByRecording.has(id) ? composerTargetsByRecording.get(id) : composerTarget;
-        const { dropped } = rememberPendingCapture({ path, target: destination, kind: "recording" });
-        attachToComposer([path], destination);
-        if (dropped) void AlertaToast(t("screenRecording.title"), t("screenRecording.pendingDropped", { max: MAX_PENDING_CAPTURES }), "warning", 6000);
-        composerTargetsByRecording.delete(id);
+        await stopRecordingAndAttach(id, composerTarget ?? null, t);
         setRecording(false);
-        void AlertaToast(t("screenRecording.title"), t("screenRecording.attached"), "success", 3000);
       } else {
         composerTargetsByRecording.set(id, composerTarget);
         await screenRecordingStart(kind, target);

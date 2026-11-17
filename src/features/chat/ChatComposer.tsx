@@ -80,10 +80,10 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   addon?: (ctx: ComposerAddonContext) => React.ReactNode;
   /** Entre o espaço vazio e o botão de enviar. Pode ler o rascunho sem duplicar seu estado. */
   controls?: React.ReactNode | ((context: ComposerControlsContext) => React.ReactNode);
-  /** `false` (ou erro) = não foi: o texto e os anexos continuam na caixa. */
-  onSubmit: (text: string, attachments: Attachment[]) => boolean | void | Promise<boolean | void>;
+  /** `true` só quando o envio foi aceito (o backend confirmou). Qualquer outro resultado = não foi: o texto e os anexos continuam na caixa. */
+  onSubmit: (text: string, attachments: Attachment[]) => Promise<boolean>;
   /** Inicia uma nova conversa sem selecioná-la e mantém o composer limpo para outro rascunho. */
-  onBackgroundSubmit?: ((text: string, attachments: Attachment[]) => boolean | void | Promise<boolean | void>) | null;
+  onBackgroundSubmit?: ((text: string, attachments: Attachment[]) => Promise<boolean>) | null;
   /** Inicia outro rascunho local depois que o envio ao fio atual for aceito. */
   onSendAndNewThread?: (() => void) | null;
   /** O agente está trabalhando: o botão vira Parar (com a caixa vazia). */
@@ -220,14 +220,16 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   const stashes = usePromptStash((s) => s.items);
   const stashLoaded = usePromptStash((s) => s.loaded);
   const hasStashContent = text.trim().length > 0 || attachments.list.length > 0 || quotes.length > 0;
-  const stashContentRef = useRef("");
-  stashContentRef.current = JSON.stringify({
+  // O rascunho do cofre só é serializado quando é comparado (ao guardar ou ao restaurar), e não a cada render (A122).
+  const stashInputRef = useRef<Record<string, unknown>>({});
+  stashInputRef.current = {
     text,
     attachmentPaths: attachments.list.map((attachment) => attachment.path),
     quotes: quotes.map(({ text: quoteText, comment, originItemId }) => ({ text: quoteText, comment, originItemId })),
     quoteKey,
     cwd,
-  });
+  };
+  const stashContentOf = () => JSON.stringify(stashInputRef.current);
   const quoteCards = quotes.map((quote) => ({
     ...quote,
     originItemId: quote.originItemId && quoteSourceIds?.has(quote.originItemId) ? quote.originItemId : undefined,
@@ -257,7 +259,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     try {
       await savePromptStash(input);
       // Se o conteúdo mudou enquanto o chaveiro gravava, preservamos a edição nova no composer.
-      if (stashContentRef.current === savedSnapshot) {
+      if (stashContentOf() === savedSnapshot) {
         historyDraft.current = null;
         setHistoryIndex(null);
         setText("");
@@ -347,7 +349,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
       return;
     }
     setStashStatus("");
-    const startingContent = stashContentRef.current;
+    const startingContent = stashContentOf();
     setStashBusy(true);
     try {
       const stash = await getPromptStash(id);
@@ -355,7 +357,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
         setStashStatus(t("chat.stash.restoreFailed"));
         return;
       }
-      if (stashContentRef.current !== startingContent || (ref.current?.value ?? text) !== text) {
+      if (stashContentOf() !== startingContent || (ref.current?.value ?? text) !== text) {
         setStashStatus(t("chat.stash.composerChanged"));
         return;
       }
@@ -561,7 +563,8 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     try {
       // As citações vão depois do texto (o `@agente` do começo continua valendo) e antes dos anexos.
       const send = background && onBackgroundSubmit ? onBackgroundSubmit : onSubmit;
-      if ((await send(withQuotes(text, quotes), attachments.list)) === false) return false;
+      // O texto só sai da caixa depois de o envio ser aceito: se o backend recusar, ele continua aqui para tentar de novo.
+      if ((await send(withQuotes(text, quotes), attachments.list)) !== true) return false;
       historyDraft.current = null;
       setHistoryIndex(null);
       setText("");

@@ -103,7 +103,7 @@ describe("Citar: botão flutuante pílula (T3 Code) e fechamento", () => {
           {includeUserBubble && <PersonBubble text="mensagem do usuário" itemId="msg-user-1" />}
         </div>
         <SelectionComment container={() => document.querySelector("[data-testid=timeline]")} quoteKey="conv-1" />
-        <ChatComposer placeholder="p" quoteKey="conv-1" onSubmit={() => true} />
+        <ChatComposer placeholder="p" quoteKey="conv-1" onSubmit={async () => true} />
       </>
     );
   }
@@ -275,7 +275,7 @@ describe("Citar: botão flutuante pílula (T3 Code) e fechamento", () => {
 describe("o composer leva as citações como chip estilo T3, com comentário opcional e remoção", () => {
   let submitted: [string, number][] = [];
   const mount = (key: string | null = "conv-1") =>
-    act(async () => { root.render(<ChatComposer placeholder="p" quoteKey={key} onSubmit={(text, atts) => { submitted.push([text, atts.length]); }} />); });
+    act(async () => { root.render(<ChatComposer placeholder="p" quoteKey={key} onSubmit={async (text, atts) => { submitted.push([text, atts.length]); return true; }} />); });
   const chips = () => [...document.querySelectorAll("ul[aria-label='chat.quote.list'] > li")];
 
   beforeEach(() => { submitted = []; });
@@ -359,7 +359,7 @@ describe("o composer leva as citações como chip estilo T3, com comentário opc
 
   it("se o envio falha, as citações ficam", async () => {
     addQuoteFor("conv-1", { text: "trecho" });
-    await act(async () => { root.render(<ChatComposer placeholder="p" quoteKey="conv-1" onSubmit={() => false} />); });
+    await act(async () => { root.render(<ChatComposer placeholder="p" quoteKey="conv-1" onSubmit={async () => false} />); });
     await act(async () => { (document.querySelector("button[type=submit]") as HTMLElement).click(); });
     expect(chips()).toHaveLength(1);
   });

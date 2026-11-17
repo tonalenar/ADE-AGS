@@ -4203,6 +4203,8 @@
   "screenRecording.groupWindowsNoPermission": "Janelas: só os nomes dos apps. O preflight do macOS não detectou Gravação de Tela. Se ADE AGS já estiver habilitada, remova-a da lista em Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela e Áudio do Sistema e adicione-a novamente para renovar a autorização após a troca da assinatura.",
   "screenRecording.noWindows": "Nenhuma janela visível",
   "screenRecording.targetsLoading": "Carregando telas e janelas…",
+  "screenRecording.stillRunning": "A gravação de tela continua. Pare-a para anexar o vídeo à conversa.",
+  "screenRecording.stopAndAttach": "Parar e anexar",
   "screenRecording.listFailed": "Não consegui listar telas e janelas agora",
   "screenRecording.blockedPermission": "sem permissão de Gravação de Tela",
   "screenRecording.blockedNumbering": "indisponível com três ou mais telas",
