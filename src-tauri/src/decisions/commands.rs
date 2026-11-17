@@ -170,14 +170,19 @@ pub fn decision_settings_set(
     Ok(dto(&stored))
 }
 
+/// O keyring pode abrir um prompt do SO: sai da thread principal.
 #[tauri::command]
-pub fn decision_key_set(key: String, slot: Option<String>) -> Result<(), String> {
-    config::save_key_in(config::KeySlot::parse(slot.as_deref()), &key)
+pub async fn decision_key_set(key: String, slot: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || config::save_key_in(config::KeySlot::parse(slot.as_deref()), &key))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn decision_key_clear(slot: Option<String>) -> Result<(), String> {
-    config::clear_key_in(config::KeySlot::parse(slot.as_deref()))
+pub async fn decision_key_clear(slot: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || config::clear_key_in(config::KeySlot::parse(slot.as_deref())))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Comando síncrono roda na thread principal do Tauri: a chamada de rede (até o timeout, que
