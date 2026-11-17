@@ -535,14 +535,16 @@ struct Claim<'a> {
 }
 
 /// Depois disto um dono sem resposta é considerado morto (um processo que caiu não trava a fila).
-const OWNER_STALE: Duration = Duration::from_secs(35 * 60);
+fn owner_stale() -> Duration {
+    test_timeout() + Duration::from_secs(5 * 60)
+}
 /// De quanto em quanto a espera confere se o verde já apareceu ou o dono terminou.
 const WAIT_STEP: Duration = Duration::from_secs(1);
 
 impl<'a> Claim<'a> {
     /// A vez é nossa se ninguém mais tem a mesma (repositório, hash, suíte, comando). `None` se tem dono.
     fn try_new(conn: &'a Connection, ids: [String; 4], owner: String, now: i64) -> Result<Option<Self>, String> {
-        let stale_before = now - OWNER_STALE.as_millis() as i64;
+        let stale_before = now - owner_stale().as_millis() as i64;
         conn.execute(
             "DELETE FROM test_inflight WHERE repository=?1 AND tree_hash=?2 AND suite=?3 AND command_key=?4 AND started_at<?5",
             params![ids[0], ids[1], ids[2], ids[3], stale_before],
@@ -1148,5 +1150,10 @@ mod tests {
         let _ = git(&root, &["worktree", "remove", "--force", &wt_arg]);
         let _ = std::fs::remove_dir_all(&wt);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn lock_stale_e_timeout_mais_cinco_minutos() {
+        assert_eq!(owner_stale(), test_timeout() + Duration::from_secs(5 * 60));
     }
 }
