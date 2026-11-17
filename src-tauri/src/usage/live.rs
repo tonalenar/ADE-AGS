@@ -174,7 +174,7 @@ pub(super) fn capture(
     let result = loop {
         if let Ok(chunk) = rx.recv_timeout(Duration::from_millis(200)) {
             raw.extend_from_slice(&chunk);
-            text = String::from_utf8_lossy(&raw).into_owned();
+            text = capture_text(&raw);
             last_data = Instant::now();
         }
 
@@ -229,6 +229,10 @@ pub(super) fn capture(
 
     probe.release();
     result
+}
+
+pub(super) fn capture_text(raw: &[u8]) -> String {
+    String::from_utf8_lossy(raw).into_owned()
 }
 
 /// El hijo de `/usage` y todo lo que haya alcanzado a lanzar.

@@ -9,6 +9,17 @@ fn parsea_el_timestamp_de_un_transcript_real() {
 }
 
 #[test]
+fn captura_de_usage_preserva_utf8_partido_entre_chunks() {
+    let bytes = "sessão: ação".as_bytes();
+    let corte = bytes.iter().position(|b| *b == 0xC3).unwrap() + 1;
+    let mut raw = Vec::new();
+    for chunk in [&bytes[..corte], &bytes[corte..]] {
+        raw.extend_from_slice(chunk);
+    }
+    assert_eq!(super::live::capture_text(&raw), "sessão: ação");
+}
+
+#[test]
 fn el_epoch_es_el_epoch() {
     assert_eq!(parse_ts("1970-01-01T00:00:00.000Z"), Some(0));
 }
