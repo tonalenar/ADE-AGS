@@ -152,6 +152,29 @@ fn dos_maquinas_se_pasan_skills_y_configuracion_por_el_repo() {
     crate::scm::with_longer_local_git(std::time::Duration::from_secs(60), || dos_maquinas_body());
 }
 
+#[cfg(unix)]
+#[test]
+fn commit_interno_ignora_hooks_mas_el_commit_del_usuario_los_ejecuta() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join(format!("cc-sync-hooks-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    git(&dir, &["init", "-q", "-b", "main"]);
+    git(&dir, &["config", "user.name", "Teste"]);
+    git(&dir, &["config", "user.email", "teste@example.invalid"]);
+    let hook = dir.join(".git/hooks/prepare-commit-msg");
+    std::fs::write(&hook, "#!/bin/sh\nexit 23\n").unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(dir.join("sync.json"), "sync").unwrap();
+
+    assert!(repo::commit_all(&dir, "sync interno").unwrap().is_some());
+
+    std::fs::write(dir.join("user.txt"), "alteração do usuário").unwrap();
+    git(&dir, &["add", "-A"]);
+    assert!(crate::scm::run_local(&dir.to_string_lossy(), &["commit", "-m", "commit do painel"]).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn dos_maquinas_body() {
     let root = std::env::temp_dir().join(format!("cc-sync-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);

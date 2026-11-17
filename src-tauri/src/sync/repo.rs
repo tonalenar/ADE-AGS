@@ -123,7 +123,10 @@ pub(super) fn commit_all(dir: &Path, message: &str) -> Result<Option<String>, St
         return Ok(None);
     }
     let mut args: Vec<&str> = IDENTITY.to_vec();
-    args.extend(["commit", "-q", "--no-verify", "-m", message]);
+    // O repo é privado da ADE; hooks que vieram no sync não devem executar aqui. Isso
+    // também cobre `prepare-commit-msg`, que `--no-verify` não desliga. O override fica
+    // neste único commit; commits do usuário pelo painel continuam usando a config normal.
+    args.extend(["-c", "core.hooksPath=/dev/null", "commit", "-q", "--no-verify", "-m", message]);
     local(dir, &args)?;
     Ok(Some(local(dir, &["rev-parse", "HEAD"])?.trim().to_string()))
 }
