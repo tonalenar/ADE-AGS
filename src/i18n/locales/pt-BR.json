@@ -365,7 +365,7 @@
   "settings.browser.recording.title": "Gravação",
   "settings.browser.recording.description": "Limite a taxa máxima de quadros para equilibrar fluidez, CPU e espaço.",
   "settings.browser.recording.fps": "FPS máximo",
-  "settings.browser.recording.fpsHint": "30 fps economiza recursos; 60 fps é mais fluido.",
+  "settings.browser.recording.fpsHint": "30 fps é o máximo: a gravação não passa disso, para poupar recursos.",
   "settings.browser.advanced": "Avançado",
   "settings.browser.advancedHint": "O navegador mantém os viewports responsivos, incluindo 1920 × 1080, e o modo Toque disponíveis na barra.",
   "settings.browserSearch.title": "Busca e links do navegador",

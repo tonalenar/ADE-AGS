@@ -21,11 +21,19 @@ describe("preferências do navegador", () => {
   it("persiste o auto-show e limita o máximo de gravação aos valores aceitos", () => {
     const storage = memoryStorage();
     vi.stubGlobal("localStorage", storage);
-    saveBrowserPreferences({ autoShowFloatingPreview: false, maxRecordingFps: 60 });
-    expect(storage.getItem(BROWSER_PREFERENCES_KEY)).toBe('{"autoShowFloatingPreview":false,"maxRecordingFps":60}');
-    expect(readBrowserPreferences()).toEqual({ autoShowFloatingPreview: false, maxRecordingFps: 60 });
+    saveBrowserPreferences({ autoShowFloatingPreview: false, maxRecordingFps: 30 });
+    expect(storage.getItem(BROWSER_PREFERENCES_KEY)).toBe('{"autoShowFloatingPreview":false,"maxRecordingFps":30}');
+    expect(readBrowserPreferences()).toEqual({ autoShowFloatingPreview: false, maxRecordingFps: 30 });
     storage.setItem(BROWSER_PREFERENCES_KEY, '{"autoShowFloatingPreview":true,"maxRecordingFps":120}');
     expect(readBrowserPreferences().maxRecordingFps).toBe(30);
+  });
+
+  it("o máximo de gravação é 30 fps: quem salvou 60 antes passa a 30, e a UI não oferece mais 60", () => {
+    // A gravação grava a 30 de qualquer forma (ver `effectiveRecordingFps`): a preferência não pode dizer 60 em silêncio.
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    storage.setItem(BROWSER_PREFERENCES_KEY, '{"autoShowFloatingPreview":false,"maxRecordingFps":60}');
+    expect(readBrowserPreferences()).toEqual({ autoShowFloatingPreview: false, maxRecordingFps: 30 });
   });
 
   it("tolera JSON corrompido e falhas de armazenamento", () => {
