@@ -60,13 +60,25 @@ export type SubmitBlock = "blocked-waiting-user" | "blocked-busy";
  */
 export interface SubmitPolicy {
   gate: () => SubmitBlock | null;
-  onBlocked?: (block: SubmitBlock) => void;
+  /**
+   * A conferência barrou. `pasted`: o texto já estava na caixa de entrada. Quem recebe um bloqueio com `pasted`
+   * não pode colar de novo (duplicaria o texto); o chamador trata como "não confirmado".
+   */
+  onBlocked?: (block: SubmitBlock, pasted: boolean) => void;
+  /** O primeiro Enter saiu. O envio ainda não está confirmado: a caixa é conferida depois. */
   onSubmitted?: () => void;
+  /** A caixa já não segura o texto: o envio está confirmado. */
+  onConfirmed?: () => void;
+  /** Os reenvios acabaram e a caixa ainda segura o texto: não dá para confirmar. */
+  onUnconfirmed?: () => void;
 }
 
 /** Avisos de tiempo de un mensaje con `sendWhenReady`, para el cronómetro de la misión. */
 export interface SendTimings {
-  /** El mensaje se pegó (la TUI ya había arrancado). */
+  /**
+   * O envio saiu: o Enter foi dado (ou, num rascunho sem Enter, o texto foi colado). Com política, só vale quando o
+   * Enter sai; a confirmação de que a TUI recebeu é `SubmitPolicy.onConfirmed`.
+   */
   onSent?: (at: number) => void;
   /** El agente terminó de contestar: dejó de escribir. `at` es su última salida. */
   onTurnEnd?: (at: number) => void;
@@ -150,7 +162,7 @@ function watchStart(tabId: string, term: Terminal, timings: SendTimings): void {
   });
   window.setTimeout(() => {
     if (worked || terminals.get(tabId) !== term) return;
-    if (!pressEnter(term, timings.policy, false)) return;
+    if (!pressEnter(term, timings.policy)) return;
     timings.onRetry?.(Date.now());
   }, EARLY_NUDGE_MS);
   // El Enter ya fue a los `EARLY_NUDGE_MS`: acá solo se avisa que no arrancó.
@@ -162,26 +174,27 @@ function watchStart(tabId: string, term: Terminal, timings: SendTimings): void {
 }
 
 /**
- * O `gate` da política, com falha fechada (se lança, conta como bloqueado). Devolve o bloqueio, se houve. `avisa`:
- * se o bloqueio deve ser comunicado (`onBlocked`). Um reenvio cancelado depois do Enter já enviado não avisa.
+ * O `gate` da política, com falha fechada (se lança, conta como bloqueado). Devolve o bloqueio, se houve. `pasted`:
+ * o texto já está na caixa. `avisa`: se o bloqueio deve ser comunicado (`onBlocked`).
  */
-function gateOf(policy: SubmitPolicy, avisa = true): SubmitBlock | null {
+function gateOf(policy: SubmitPolicy, pasted: boolean, avisa = true): SubmitBlock | null {
   let block: SubmitBlock | null;
   try {
     block = policy.gate();
   } catch {
     block = "blocked-busy";
   }
-  if (block && avisa) policy.onBlocked?.(block);
+  if (block && avisa) policy.onBlocked?.(block, pasted);
   return block;
 }
 
 /**
  * O único Enter que sai do registro. Com `policy`, a conferência roda antes; sem ela, é ação da pessoa (chat,
- * "Rodar", resposta a um menu) e segue como antes. Devolve se o Enter saiu.
+ * "Rodar", resposta a um menu) e segue como antes. Devolve se o Enter saiu. Um bloqueio aqui é sempre depois de
+ * colar: o texto já está na caixa.
  */
-function pressEnter(term: Terminal, policy?: SubmitPolicy, avisa = true): boolean {
-  if (policy && gateOf(policy, avisa)) return false;
+function pressEnter(term: Terminal, policy?: SubmitPolicy): boolean {
+  if (policy && gateOf(policy, true)) return false;
   term.input("\r");
   return true;
 }
@@ -195,7 +208,81 @@ function safeGuard(guard: () => boolean): boolean {
   }
 }
 
-/** Espera a que la TUI termine de arrancar y le manda `text`. */
+/** Quantas vezes o envio é reagendado enquanto a TUI está trabalhando ou numa pergunta, antes de desistir (I6). */
+export const GATE_RETRY_TRIES = 12;
+/** Intervalo entre essas tentativas. */
+export const GATE_RETRY_MS = 5_000;
+
+/** Esquece a mensagem da fila desta aba (já saiu, ou desistiu). */
+function forgetQueued(tabId: string): void {
+  queued.delete(tabId);
+  queuedTimings.delete(tabId);
+}
+
+/**
+ * O envio depois que a TUI está quieta: confere a guarda (I6 reagenda o que está barrado antes de colar, sem o ciclo de
+ * silêncio, porque uma TUI livre não produz saída) e então cola e manda o Enter. `tentativa` conta os reagendamentos.
+ */
+function sendQueued(tabId: string, term: Terminal, text: string, timings: SendTimings | undefined, tentativa: number): void {
+  if (terminals.get(tabId) !== term) return;
+  if (timings?.guard && !safeGuard(timings.guard)) {
+    forgetQueued(tabId);
+    timings.onSkipped?.();
+    return;
+  }
+  const policy = timings?.policy;
+  if (policy) {
+    const block = gateOf(policy, false, false);
+    if (block) {
+      // Ainda não colou: a TUI está trabalhando ou numa pergunta. Reagenda sem descartar, até o limite.
+      if (tentativa + 1 < GATE_RETRY_TRIES) {
+        window.setTimeout(() => {
+          // Outra mensagem tomou a vez da fila: esta deixa de existir.
+          if (queued.get(tabId) !== text) return;
+          sendQueued(tabId, term, text, timings, tentativa + 1);
+        }, GATE_RETRY_MS);
+        return;
+      }
+      forgetQueued(tabId);
+      policy.onBlocked?.(block, false);
+      timings?.onSkipped?.();
+      return;
+    }
+  }
+  forgetQueued(tabId);
+  const started = () => {
+    timings?.onSent?.(Date.now());
+    if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
+    if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);
+  };
+  if (!policy) {
+    pasteIntoTab(tabId, text, !timings?.draft, timings?.onRetry);
+    started();
+    return;
+  }
+  if (timings?.draft) {
+    pasteIntoTab(tabId, text, false);
+    started();
+    return;
+  }
+  pasteIntoTab(tabId, text, true, timings?.onRetry, {
+    gate: policy.gate,
+    onBlocked: (block, pasted) => {
+      // Antes de colar, nada entrou: o briefing conta como pulado. Depois de colar, o texto está na caixa e não
+      // pode ser colado de novo: fica para quem chama decidir.
+      if (!pasted) timings?.onSkipped?.();
+      policy.onBlocked?.(block, pasted);
+    },
+    onSubmitted: () => {
+      policy.onSubmitted?.();
+      started();
+    },
+    onConfirmed: policy.onConfirmed,
+    onUnconfirmed: policy.onUnconfirmed,
+  });
+}
+
+/** Espera a que la TUI termine de arrancar y le manda `text` (o reagenda, se a guarda barra antes de colar). */
 function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
   let timer: number | undefined;
   let sawOutput = false;
@@ -204,48 +291,7 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
     sub.dispose();
     window.clearTimeout(timer);
     window.clearTimeout(giveUp);
-    if (terminals.get(tabId) !== term) return;
-    queued.delete(tabId);
-    queuedTimings.delete(tabId);
-    if (timings?.guard && !safeGuard(timings.guard)) {
-      timings.onSkipped?.();
-      return;
-    }
-    const started = () => {
-      timings?.onSent?.(Date.now());
-      if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
-      if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);
-    };
-    const policy = timings?.policy;
-    if (!policy) {
-      pasteIntoTab(tabId, text, !timings?.draft, timings?.onRetry);
-      started();
-      return;
-    }
-    // Com política, a conferência roda antes de colar. `onSent` só vale quando o Enter sai (no rascunho, quando colou).
-    if (gateOf(policy)) {
-      timings?.onSkipped?.();
-      return;
-    }
-    if (timings?.draft) {
-      pasteIntoTab(tabId, text, false);
-      started();
-      return;
-    }
-    let submitted = false;
-    pasteIntoTab(tabId, text, true, timings?.onRetry, {
-      gate: policy.gate,
-      onBlocked: (block) => {
-        // Bloqueado antes do Enter: a mensagem não saiu, e quem chama a conta como pulada.
-        if (!submitted) timings?.onSkipped?.();
-        policy.onBlocked?.(block);
-      },
-      onSubmitted: () => {
-        submitted = true;
-        policy.onSubmitted?.();
-        started();
-      },
-    });
+    sendQueued(tabId, term, text, timings, 0);
   };
   const sub = term.onWriteParsed(() => {
     sawOutput = true;
@@ -256,7 +302,7 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
   // terminal vivo e quieto). Antes a mensagem era descartada em silêncio, sem reenvio nem aviso.
   // Agora é enviada assim mesmo e o aviso de "não mostrou atividade" continua pelo watchStart.
   const giveUp = window.setTimeout(() => {
-    if (terminals.get(tabId) !== term) { sub.dispose(); queued.delete(tabId); queuedTimings.delete(tabId); return; }
+    if (terminals.get(tabId) !== term) { sub.dispose(); forgetQueued(tabId); return; }
     if (!sawOutput) timings?.onStalled?.();
     send();
   }, GIVE_UP_MS);
@@ -340,7 +386,7 @@ export function runInTerminal(tabId: string, text: string): boolean {
 }
 
 /** Pega `text` en la terminal de la tab y, con `submit`, lo manda. `false` si la tab no
- *  tiene una terminal viva. */
+ *  tiene una terminal viva, o se la política barra antes de colar. */
 export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRetry?: (at: number) => void, policy?: SubmitPolicy): boolean {
   const term = terminals.get(tabId);
   if (!term) return false;
@@ -348,37 +394,48 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRet
     requestPtyLaunch(tabId);
     return false;
   }
+  // A política confere antes de colar (I7): com bloqueio, a caixa não recebe nada.
+  if (policy && gateOf(policy, false)) return false;
   term.paste(text);
   if (submit) lastPaste.set(tabId, { text, at: Date.now() });
+  if (!submit) return true;
   // El Enter va aparte y un momento después: algunas TUIs todavía están procesando el
   // pegado cuando llega, y lo toman como parte de él en vez de como "enviar".
-  if (submit) {
-    let stopped = false;
-    // Um Enter só sai se a política deixa. Bloqueado antes do primeiro Enter, nenhum reenvio desta mensagem sai.
-    const enter = (avisa: boolean): boolean => {
-      if (stopped) return false;
-      if (pressEnter(term, policy, avisa)) return true;
-      stopped = true;
-      return false;
-    };
+  let stopped = false;
+  let confirmed = false;
+  // Um Enter só sai se a política deixa. Bloqueado, nenhum reenvio desta mensagem sai (e o texto não é colado de novo).
+  const enter = (): boolean => {
+    if (stopped) return false;
+    if (pressEnter(term, policy)) return true;
+    stopped = true;
+    return false;
+  };
+  setTimeout(() => {
+    if (enter()) policy?.onSubmitted?.();
+  }, 80);
+  // Un pegado grande (Codex: "[Pasted Content 3904 chars]") puede tragarse ese Enter y dejar el
+  // briefing escrito sin enviar: el agente nunca arranca. Se mira la pantalla y se reintenta. O Hermes e o
+  // OpenCode não trocam o colado por um marcador: o texto fica inteiro na caixa, com o cursor no fim dele
+  // (`typedTextPending`). Ainda "starting agent…", eles também engolem o Enter.
+  SUBMIT_RETRY_MS.forEach((delay, i) =>
     setTimeout(() => {
-      if (enter(true)) policy?.onSubmitted?.();
-    }, 80);
-    // Un pegado grande (Codex: "[Pasted Content 3904 chars]") puede tragarse ese Enter y dejar el
-    // briefing escrito sin enviar: el agente nunca arranca. Se mira la pantalla y se reintenta. O Hermes e o
-    // OpenCode não trocam o colado por um marcador: o texto fica inteiro na caixa, com o cursor no fim dele
-    // (`typedTextPending`). Ainda "starting agent…", eles também engolem o Enter.
-    SUBMIT_RETRY_MS.forEach((delay) =>
-      setTimeout(() => {
-        if (terminals.get(tabId) !== term || stopped) return;
-        const screen = screenOf(tabId, null, 12);
-        if ((screen && pasteStillPending(screen.lines)) || typedTextPending(beforeCursor(term), text)) {
-          // Reenvio depois do Enter que já saiu: se a tela virou pergunta, cancela sem avisar (a mensagem já foi enviada).
-          if (enter(false)) onRetry?.(Date.now());
+      if (terminals.get(tabId) !== term || stopped) return;
+      const screen = screenOf(tabId, null, 12);
+      const pending = (screen && pasteStillPending(screen.lines)) || typedTextPending(beforeCursor(term), text);
+      if (!pending) {
+        // A caixa já não segura o texto: confirmado (uma vez). Os checks seguintes continuam, porque um marcador de
+        // colado que demora a aparecer pode ser o Enter engolido; só reenvia se o texto ainda está na caixa.
+        if (!confirmed) {
+          confirmed = true;
+          policy?.onConfirmed?.();
         }
-      }, delay),
-    );
-  }
+        return;
+      }
+      if (!enter()) return;
+      onRetry?.(Date.now());
+      if (i === SUBMIT_RETRY_MS.length - 1 && !confirmed) policy?.onUnconfirmed?.();
+    }, delay),
+  );
   return true;
 }
 

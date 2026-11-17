@@ -6387,5 +6387,10 @@
   "providers.method.unavailable.cursor": "Rode cursor-agent login num terminal: a ADE não isola contas do Cursor.",
   "terminal.write.blockedTitle": "Mensagem não enviada",
   "terminal.write.blockedWaiting": "{{name}} está esperando a sua resposta num diálogo. Nada foi enviado a ele.",
-  "terminal.write.blockedBusy": "{{name}} está trabalhando. Não enviei agora; tente de novo quando ele parar."
+  "terminal.write.blockedBusy": "{{name}} está trabalhando. Não enviei agora.",
+  "terminal.write.noTerminal": "{{name}} não tem terminal aberto. Não enviei nada.",
+  "terminal.write.unconfirmed": "{{name}} não confirmou o envio. A mensagem pode estar parada na caixa de entrada, sem envio.",
+  "terminal.write.retryAuto": "Tento de novo sozinho.",
+  "terminal.write.retryManual": "Reenvie quando ele parar.",
+  "agents.update.restartFailed": "A atualização de {{label}} ficou pronta, mas a app não reiniciou: {{cause}}. As abas foram reabertas."
 }

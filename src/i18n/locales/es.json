@@ -6387,5 +6387,10 @@
   "providers.method.unavailable.cursor": "Ejecuta cursor-agent login en una terminal: ADE no aísla cuentas de Cursor.",
   "terminal.write.blockedTitle": "Mensaje no enviado",
   "terminal.write.blockedWaiting": "{{name}} está esperando tu respuesta en un diálogo. No se le envió nada.",
-  "terminal.write.blockedBusy": "{{name}} está trabajando. No lo envié ahora; intenta de nuevo cuando se detenga."
+  "terminal.write.blockedBusy": "{{name}} está trabajando. No lo envié ahora.",
+  "terminal.write.noTerminal": "{{name}} no tiene una terminal abierta. No se envió nada.",
+  "terminal.write.unconfirmed": "{{name}} no confirmó el envío. El mensaje puede haber quedado en la caja de entrada, sin enviar.",
+  "terminal.write.retryAuto": "Lo intento de nuevo por mi cuenta.",
+  "terminal.write.retryManual": "Reenvíalo cuando se detenga.",
+  "agents.update.restartFailed": "{{label}} se actualizó, pero la app no se reinició: {{cause}}. Las pestañas se reabrieron."
 }

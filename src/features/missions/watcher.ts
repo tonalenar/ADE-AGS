@@ -185,7 +185,7 @@ export function useMissionWatcher(): void {
         void writeToAgent(s.leadTabId, leadStallMessage(titleOf(s.memberTabId), s), { submit: true, source: "stalled" })
           .then((result) => {
             mostraResultado(s.leadTabId, "stalled", result);
-            if (result !== "sent") return;
+            if (result !== "sent" && result !== "unconfirmed") return;
             if (ask) record(s.memberTabId, leadStallSpan(ask, now, "alerted", titleOf(s.memberTabId), titleOf(s.leadTabId)));
             asks = markLeadAlerted(asks, [s]);
           })
@@ -238,7 +238,8 @@ export function useMissionWatcher(): void {
         void writeToAgent(s.fromTabId, stallMessage(name, s), { submit: true, source: "stalled" })
           .then((result) => {
             mostraResultado(s.fromTabId, "stalled", result);
-            if (result === "sent") pending = markAlerted(pending, [s]);
+            // "unconfirmed": o texto já está na caixa; não se reenvia (duplicaria). Fica avisado.
+            if (result === "sent" || result === "unconfirmed") pending = markAlerted(pending, [s]);
           })
           .catch((error: unknown) => console.error("[aviso de parado] falha ao enviar ao orquestrador", error))
           .finally(() => alertInFlight.delete(s.tabId));
