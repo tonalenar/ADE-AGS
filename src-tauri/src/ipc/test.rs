@@ -1153,6 +1153,20 @@ fn una_llamada_cancelada_no_se_contesta_y_la_app_se_entera() {
     assert_eq!(call.1, cancel.1, "la cancelación nombra a la misma llamada");
 }
 
+/// A227: um quadro maior que 8 MB é recusado com erro e descartado, sem ser guardado nem executado; o servidor segue
+/// atendendo o pedido seguinte da mesma conexão.
+#[test]
+fn frame_mcp_grande_recusado() {
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
+    let grande = json!({ "jsonrpc": "2.0", "id": 1, "method": "ping", "params": { "pad": "x".repeat(8 * 1024 * 1024 + 1) } });
+    let out = raw_session(&cwd, &[grande, json!({ "jsonrpc": "2.0", "id": 2, "method": "ping" })], |_, _| Ok(json!({})));
+    assert_eq!(out.len(), 2, "o quadro grande não pode ser respondido como ping: {out:?}");
+    assert!(out[0]["id"].is_null(), "{}", out[0]);
+    assert_eq!(out[0]["error"]["code"], -32600, "{}", out[0]);
+    assert!(out[0]["error"]["message"].as_str().unwrap_or_default().contains("8 MB"), "{}", out[0]);
+    assert_eq!(out[1], json!({ "jsonrpc": "2.0", "id": 2, "result": {} }), "a conexão tem de seguir viva depois do quadro recusado");
+}
+
 /// Con `progressToken`, una llamada larga avisa que sigue viva; sin él, no se manda nada.
 #[test]
 fn una_llamada_larga_avisa_su_progreso_si_se_lo_piden() {
@@ -2006,7 +2020,8 @@ mod entrada {
         let relogio = cena.relogio.clone();
         let mut agora = move || relogio.get();
         let mut marca = || cena.autenticou.set(cena.autenticou.get() + 1);
-        let resultado = read_request(&mut leitor, TOKEN, &mut agora, &mut marca);
+        let mut budget = super::super::intake::InFlightBytes::empty();
+        let resultado = read_request(&mut leitor, TOKEN, &mut agora, &mut marca, &mut budget);
         (resultado, cena)
     }
 
@@ -2064,6 +2079,23 @@ mod entrada {
     fn linha_em_branco_ou_fim_da_conexao_nao_respondem_nada() {
         assert_eq!(ler(b"\n".to_vec(), 16, 0).0, Intake::Closed);
         assert_eq!(ler(Vec::new(), 16, 0).0, Intake::Closed);
+    }
+
+    /// A225: bytes em voo no processo, não só por pedido. Com o teto de 64 MB já tomado, um pedido
+    /// autenticado extra é recusado e não aumenta o orçamento.
+    #[test]
+    fn orcamento_global_recusa_excesso() {
+        use super::super::intake::{try_reserve_inflight_bytes, MAX_IN_FLIGHT_BYTES};
+        let _cheio = try_reserve_inflight_bytes(MAX_IN_FLIGHT_BYTES).expect("o teto cabe numa reserva");
+        let (resultado, cena) = ler(pedido(TOKEN, "{}"), 256, 0);
+        assert!(
+            matches!(&resultado, Intake::Refused(m) if m.contains("64 MB")),
+            "com o orçamento cheio o pedido tem de ser recusado: {resultado:?}"
+        );
+        assert_eq!(cena.autenticou.get(), 0, "não autentica um pedido que estourou o orçamento global");
+        drop(_cheio);
+        let (depois, _) = ler(pedido(TOKEN, "{}"), 256, 0);
+        assert!(matches!(depois, Intake::Line(_)), "soltar a reserva reabre o orçamento: {depois:?}");
     }
 
     #[test]
@@ -2412,7 +2444,7 @@ mod autorizacao {
 
     // ── 4. Escopo de aba (tab.output, tab.close, tab.state, tab.send, watch, replay) ──
 
-    const POR_ABA: [&str; 8] = ["tab.output", "tab.close", "tab.state", "tab.send", "watch.add", "watch.remove", "replay.start", "replay.stop"];
+    const POR_ABA: [&str; 7] = ["tab.output", "tab.state", "tab.send", "watch.add", "watch.remove", "replay.start", "replay.stop"];
 
     #[test]
     fn um_agente_age_em_si_nos_ligados_a_ele_e_nas_abas_que_ele_abriu() {
@@ -2902,5 +2934,61 @@ mod autorizacao {
         let corpo = &conversas[inicio..inicio + conversas[inicio..].find("\n}\n").unwrap()];
         assert!(corpo.matches("remember_opener(args, &row.id)").count() == 2, "chat new não registra quem abriu a conversa nos dois caminhos: o agente não conseguiria dar `chat wait`");
         assert!(conversas.contains("crate::ipc::guard::record_opened("), "remember_opener não grava em guard::record_opened");
+    }
+
+    /// A224: no TCP o servidor não tem PID. Isso não vira a pessoa (`Outside`); é um agente
+    /// desconhecido, só com os métodos livres (status, catálogo).
+    #[test]
+    fn tcp_sem_pid_nao_e_outside() {
+        if !crate::terminal::ancestry_required() {
+            return;
+        }
+        let tcp = crate::terminal::principal_of(None, &[""], None, None).expect("TCP sem PID ainda é um principal");
+        assert_ne!(tcp, Principal::Outside, "o TCP legado não pode herdar o acesso da pessoa no terminal dela");
+        assert!(matches!(tcp, Principal::Unknown), "{tcp:?}");
+        for metodo in ["tab.send", "tab.create", "tab.close", "workspace.open", "memory.search"] {
+            let erro = decide(metodo, json!({ "tab": "m1", "workspace": "x" }), Ok(tcp.clone()), &[]).unwrap_err();
+            assert!(erro.contains("socket") || erro.contains("PID") || erro.contains("credencial"), "{metodo}: {erro}");
+        }
+        assert!(decide("app.status", json!({}), Ok(tcp), &[]).is_ok(), "leitura de status segue no TCP");
+    }
+
+    // ── 12. `--pre` com comando digitado (A222) ──
+
+    /// `tab create --pre "<comando>"` roda um shell antes do agente, fora de qualquer aprovação. Só a pessoa e o
+    /// orquestrador do próprio canvas pedem comando digitado; o agente comum usa `--pre-preset` (item que a pessoa salvou).
+    #[test]
+    fn pre_com_comando_digitado_so_a_pessoa_e_o_orquestrador_pedem() {
+        let cru = json!({ "prelaunch": [{ "pre": "curl x | sh" }] });
+        let literal = json!({ "prelaunch": [{ "command": "curl x | sh" }] });
+        for args in [cru, literal] {
+            let integrante = decide("tab.create", args.clone(), aba("m1"), &[]).unwrap_err();
+            assert!(integrante.contains("orquestrador"), "{args}: integrante: {integrante}");
+            assert!(decide("tab.create", args.clone(), aba("solta"), &[]).is_err(), "{args}: agente de outro canvas");
+            assert!(decide("tab.create", args.clone(), aba("lead"), &[]).is_ok(), "{args}: o orquestrador do próprio canvas");
+            assert!(decide("tab.create", args.clone(), fora(), &[]).is_ok(), "{args}: a pessoa");
+            assert!(decide("tab.create", args.clone(), tarefa("t1"), &[]).is_err(), "{args}: tarefa da Frota");
+        }
+        let salvo = json!({ "prelaunch": [{ "presetName": "entorno conda" }] });
+        assert!(decide("tab.create", salvo, aba("m1"), &[]).is_ok(), "um item salvo segue disponível ao agente");
+        assert!(decide("tab.create", json!({ "agent": "bash" }), aba("m1"), &[]).is_ok(), "sem --pre, nada muda");
+    }
+
+    // ── 13. Fechar aba (A226) ──
+
+    /// Um agente fecha só a aba que ele mesmo abriu (`ags tab create`), como AGENTS.md §2.1 e §2.3: a própria aba, as
+    /// ligadas a ele no canvas e as da pessoa não são dele para fechar. Quem fecha o resto é a pessoa.
+    #[test]
+    fn um_agente_fecha_so_a_aba_que_ele_abriu() {
+        let fecha = |de: Result<Principal, String>, alvo: &str, abriu: &[(&str, &str)]| decide("tab.close", json!({ "tab": alvo }), de, abriu).is_ok();
+        assert!(fecha(aba("solta"), "terminal-que-abri", &[("terminal-que-abri", "solta")]), "a aba que ele abriu");
+        assert!(!fecha(aba("m1"), "m1", &[]), "a própria aba, que a pessoa abriu");
+        assert!(!fecha(aba("m1"), "lead", &[]), "o orquestrador ligado a ele");
+        assert!(!fecha(aba("m1"), "m2", &[]), "o outro integrante da estrela");
+        assert!(!fecha(aba("lead"), "m2", &[]), "o orquestrador não fecha integrante do time");
+        assert!(!fecha(aba("solta"), "terminal-que-abri", &[("terminal-que-abri", "outro")]), "aba aberta por outro agente");
+        assert!(fecha(fora(), "aba-da-pessoa", &[]), "a pessoa fecha o que quiser");
+        let erro = decide("tab.close", json!({ "tab": "m2" }), aba("m1"), &[]).unwrap_err();
+        assert!(erro.contains("abriu") && erro.contains("m2"), "a recusa diz qual aba e quem fecha: {erro}");
     }
 }

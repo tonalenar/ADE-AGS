@@ -344,6 +344,13 @@ chamador não prova nenhuma. Rode o `ags` no shell da aba ou da conversa."
     )
 }
 
+fn tcp_unknown(command: &str) -> String {
+    format!(
+        "`{command}` exige o processo de quem chama (PID no socket local). Este pedido veio pelo TCP legado, sem credencial. \
+Use o `ags` desta versão, que fala pelo socket Unix ou named pipe, não por uma CLI antiga nem por um cliente TCP direto."
+    )
+}
+
 fn only_person(command: &str) -> String {
     format!(
         "`{command}` apaga disco, gasta orçamento ou muda a configuração da pessoa, e nenhum agente o faz pelo IPC: peça à pessoa \
@@ -431,6 +438,7 @@ pub(crate) fn authorize(
             }
             Principal::Task(_) => Err(task_refusal(command)),
             Principal::Outside => Err(screen_only(command, "Quem roda fora do app não prova papel nenhum.")),
+            Principal::Unknown => Err(tcp_unknown(command)),
         },
         Class::Scope(target) => scope(command, args, target, who()?, boards, opened_by),
     }
@@ -450,6 +458,7 @@ fn scope(
         (Target::Outside, _) => Err(only_person(command)),
         (Target::Tab(_) | Target::Thread { .. } | Target::Fleet | Target::Mission { .. } | Target::CallerOrOutside, Principal::Outside) => Ok(args.clone()),
         (Target::Caller | Target::Task, Principal::Outside) => Err(not_in_ade(command)),
+        (_, Principal::Unknown) => Err(tcp_unknown(command)),
 
         // A tarefa da Frota.
         (Target::Fleet | Target::Task, Principal::Task(task)) => {
@@ -476,7 +485,16 @@ fn scope(
         (Target::Tab(arg), Principal::Tab(me)) => {
             claims_match(args, &me)?;
             let Some(tab) = text(args, arg) else { return Err(format!("`{command}` precisa do alvo (--{arg}).")) };
-            if crate::ipc::guard::in_reach(&boards(), &me, tab, opened_by(tab).as_deref()) {
+            if command == "tab.close" {
+                if opened_by(tab).as_deref() == Some(me.as_str()) {
+                    Ok(args.clone())
+                } else {
+                    Err(format!(
+                        "A aba `{tab}` não é uma que você abriu: `{command}` só fecha a aba que você criou (`ags tab create`). \
+Peça à pessoa para fechar o resto."
+                    ))
+                }
+            } else if crate::ipc::guard::in_reach(&boards(), &me, tab, opened_by(tab).as_deref()) {
                 Ok(args.clone())
             } else {
                 Err(out_of_reach(command, "aba", tab))
@@ -516,14 +534,14 @@ fn scope(
         }
         (Target::CallerOrOutside, Principal::Tab(me)) => {
             claims_match(args, &me)?;
-            extra_rule(command, args, &me)?;
+            extra_rule(command, args, &me, &boards())?;
             Ok(with_key(args, "from", &me))
         }
     }
 }
 
 /// Regras que dependem do argumento, e não só do método.
-fn extra_rule(command: &str, args: &Value, me: &str) -> Result<(), String> {
+fn extra_rule(command: &str, args: &Value, me: &str, boards: &Boards) -> Result<(), String> {
     match command {
         // Fechar o workspace atual mata os terminais da pessoa (AGENTS.md §2.1): só ela.
         "workspace.open" if truthy(args, "closeCurrent") => Err(
@@ -536,6 +554,28 @@ fn extra_rule(command: &str, args: &Value, me: &str) -> Result<(), String> {
             )),
             _ => Ok(()),
         },
+        // `--pre` / `command` digitado roda shell cru antes do agente. Só a pessoa e o orquestrador do próprio canvas.
+        "tab.create" if typed_prelaunch(args) => {
+            if crate::canvas::is_orchestrator(boards, me) {
+                Ok(())
+            } else {
+                Err(
+                    "Um comando de pré-lançamento digitado (`--pre` / `--json-args` com `command`) só a pessoa ou o orquestrador do canvas pedem. \
+Use `--pre-preset` com um item que a pessoa salvou, ou peça ao orquestrador."
+                        .into(),
+                )
+            }
+        }
         _ => Ok(()),
     }
+}
+
+/// Há um passo de pré-lançamento com comando cru (não um item salvo pelo nome).
+fn typed_prelaunch(args: &Value) -> bool {
+    args.get("prelaunch").and_then(Value::as_array).is_some_and(|steps| {
+        steps.iter().any(|step| {
+            step.get("command").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty())
+                || step.get("pre").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty())
+        })
+    })
 }
