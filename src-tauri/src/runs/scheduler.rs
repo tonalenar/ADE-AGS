@@ -377,6 +377,30 @@ pub fn on_task_finished(app: &AppHandle, task_id: &str) {
     wake_waiting(app, &run_id);
 }
 
+#[cfg(test)]
+mod runtime_tests {
+    #[test]
+    fn reroute_dispara_o_tick_em_thread_de_trabalho() {
+        let source = include_str!("mod.rs");
+        let reroute = source
+            .split("pub async fn reroute(")
+            .nth(1)
+            .expect("reroute precisa existir")
+            .split("/// Lo mismo con la asignación")
+            .next()
+            .expect("o corpo de reroute precisa terminar antes de reroute_to");
+
+        assert!(
+            reroute.contains("spawn_blocking(move || scheduler::tick"),
+            "reroute precisa despachar scheduler::tick fora da thread do runtime"
+        );
+        assert!(
+            !reroute.contains("scheduler::tick(app,"),
+            "reroute não pode travar a thread do runtime em scheduler::tick"
+        );
+    }
+}
+
 /// La cuenta de una tarea falló: queda fuera del ruteo (hasta que se reinicie su ventana o
 /// se la verifique) y, si la eligió el ruteo, la tarea pasa a otra con el trabajo hecho.
 fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: super::failure::FailureKind) {

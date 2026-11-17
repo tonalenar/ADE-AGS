@@ -25,6 +25,35 @@ struct Applied {
     entry_id: String,
     revisions: Vec<i64>,
     bodies: Vec<String>,
+    restore_rows: Vec<RevisionRow>,
+    entry_state: Option<EntryState>,
+    event_paths: Vec<String>,
+}
+
+#[derive(Clone)]
+struct RevisionRow {
+    revision: i64,
+    status: String,
+    operation: String,
+    kind: String,
+    priority: i64,
+    body: String,
+    content_hash: String,
+    actor_kind: String,
+    source_run_id: Option<String>,
+    source_task_id: Option<String>,
+    source_fact_id: Option<String>,
+    reason: Option<String>,
+    expected_revision: Option<i64>,
+    created_at: i64,
+    decided_at: Option<i64>,
+}
+
+#[derive(Clone)]
+struct EntryState {
+    status: String,
+    current_revision: Option<i64>,
+    updated_at: i64,
 }
 
 pub fn main_database_file(conn: &Connection) -> Option<PathBuf> {
@@ -44,8 +73,8 @@ pub fn revisions(conn: &Connection, entry_id: &str, revision: Option<i64>, scope
 }
 
 /// Produção. Nada disto segura o mutex do banco durante I/O: o banco é lido e solto, o disco
-/// (NDJSON, repositório, backups) é tocado sem ele, o `VACUUM` roda numa conexão lateral, e a
-/// gravação final confere que o conjunto de revisões não mudou. O git não corre com o mutex: a
+/// gravação SQL é condicional sob lock; depois, o disco (NDJSON, repositório, backups) é tocado
+/// sem ele, e o `VACUUM` roda numa conexão lateral. O git não corre com o mutex: a
 /// pausa precisa que o worker termine o render, e `run_git` recusa a thread que ainda segura o
 /// lock de exportação. `resume_workspace` roda no `Drop`, inclusive quando a pausa ou a
 /// reescrita falha.
@@ -73,23 +102,26 @@ pub(crate) fn revisions_coordinated_with(
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
         plan_purge(&conn, entry_id, revision, scope.events_root.is_some())?
     };
-    antes_do_io();
-    // Antes de tocar em qualquer arquivo, confere com o mutex que a memória ainda é a lida no
-    // plano: se mudou, recusa sem alterar NDJSON.
+    // A sonda fica entre o plano e o commit; se a memória mudar, o commit condicional recusa.
+    // A confirmação final e a gravação SQL ocorrem juntas antes de qualquer arquivo ser tocado.
     {
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
         confirm_unchanged(&conn, &plan, revision)?;
     }
-    // NDJSON antes do commit: se a redação falhar, a revisão continua no banco e a tentativa
-    // seguinte ainda tem o texto.
-    scrub_event_paths(&plan.event_paths, scope.events_root.as_deref(), &plan.bodies())?;
+    antes_do_io();
     let applied = {
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
         commit_purge(&conn, plan, revision)?
     };
     let _resume = PauseGuard { sync, workspace: applied.workspace.clone() };
     if let Err(error) = sync.pause_workspace(&applied.workspace) {
-        return Err(format!("A memória foi removida do banco, mas a exportação em andamento não pôde ser pausada ({error}). Repita o apagamento para concluir."));
+        restore_purge(db, &applied).map_err(|restore| format!("A exportação em andamento não pôde ser pausada ({error}) e a revisão não pôde ser restaurada ({restore})."))?;
+        return Err(format!("A exportação em andamento não pôde ser pausada ({error}); a revisão foi restaurada no banco."));
+    }
+    if let Err(error) = scrub_event_paths(&applied.event_paths, scope.events_root.as_deref(), &applied.bodies) {
+        // Mantém a regra anterior: se o NDJSON falhar, restaura a revisão para permitir nova tentativa.
+        restore_purge(db, &applied).map_err(|restore| format!("A redação do NDJSON falhou ({error}) e a revisão não pôde ser restaurada ({restore})."))?;
+        return Err(format!("A redação do NDJSON falhou; a revisão continua no banco para nova tentativa ({error})."));
     }
     sync.forget_discarded_pending(&applied.workspace);
     if let Err(error) = scrub_coordinated_with(db, scope, &applied, antes_do_io) {
@@ -115,6 +147,9 @@ struct Plan {
     entry_id: String,
     /// Revisões a apagar, com o corpo lido agora. Vazio quando a revisão já foi só auditada.
     rows: Vec<(i64, String)>,
+    /// Linhas completas para desfazer o commit se a redação do NDJSON falhar.
+    restore_rows: Vec<RevisionRow>,
+    entry_state: Option<EntryState>,
     /// Ids das revisões só auditadas (sem linha a apagar).
     audited_ids: Vec<i64>,
     /// NDJSON das tasks do workspace que podem conter o texto. Redigidos sem o mutex.
@@ -141,11 +176,17 @@ fn plan_purge(conn: &Connection, entry_id: &str, revision: Option<i64>, with_eve
             return Err("memory revision is unavailable".into());
         }
         let audited_ids = audited_revisions(conn, entry_id, revision)?;
-        return Ok(Plan { workspace, entry_id: entry_id.to_string(), rows, audited_ids, event_paths: Vec::new() });
+        return Ok(Plan { workspace, entry_id: entry_id.to_string(), rows, restore_rows: Vec::new(), entry_state: None, audited_ids, event_paths: Vec::new() });
     }
+    let restore_rows = revision_rows(conn, entry_id, revision)?;
+    let entry_state = conn.query_row(
+        "SELECT status,current_revision,updated_at FROM memory_entries WHERE id=?1",
+        [entry_id],
+        |row| Ok(EntryState { status: row.get(0)?, current_revision: row.get(1)?, updated_at: row.get(2)? }),
+    ).map_err(|_| "could not verify purge revision")?;
     let bodies: Vec<String> = rows.iter().map(|(_, body)| body.clone()).collect();
     let event_paths = if with_events { event_log_paths(conn, &workspace, &bodies)? } else { Vec::new() };
-    Ok(Plan { workspace, entry_id: entry_id.to_string(), rows, audited_ids: Vec::new(), event_paths })
+    Ok(Plan { workspace, entry_id: entry_id.to_string(), rows, restore_rows, entry_state: Some(entry_state), audited_ids: Vec::new(), event_paths })
 }
 
 /// Confere que as revisões são as mesmas que foram lidas no plano. Se a memória mudou enquanto
@@ -168,13 +209,38 @@ fn commit_purge(conn: &Connection, plan: Plan, revision: Option<i64>) -> Result<
             entry_id: plan.entry_id,
             revisions: plan.audited_ids,
             bodies: Vec::new(),
+            restore_rows: Vec::new(),
+            entry_state: None,
+            event_paths: Vec::new(),
         });
     }
-    confirm_unchanged(conn, &plan, revision)?;
     let revisions: Vec<i64> = plan.rows.iter().map(|(id, _)| *id).collect();
     let bodies = plan.bodies();
-    delete_revisions(conn, &plan.workspace, &plan.entry_id, &revisions, &bodies)?;
-    Ok(Applied { workspace: plan.workspace, entry_id: plan.entry_id, revisions, bodies })
+    delete_revisions(conn, &plan, revision, &revisions, &bodies)?;
+    Ok(Applied { workspace: plan.workspace, entry_id: plan.entry_id, revisions, bodies, restore_rows: plan.restore_rows, entry_state: plan.entry_state, event_paths: plan.event_paths })
+}
+
+/// Restaura a linha quando a redação do NDJSON falha após o commit SQL.
+fn restore_purge(db: &crate::database::DbConnection, applied: &Applied) -> Result<(), String> {
+    if applied.restore_rows.is_empty() { return Ok(()); }
+    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+    let tx = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+    for row in &applied.restore_rows {
+        tx.execute(
+            "INSERT OR IGNORE INTO memory_revisions (entry_id,revision,status,operation,kind,priority,body,content_hash,actor_kind,source_run_id,source_task_id,source_fact_id,reason,expected_revision,created_at,decided_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+            params![applied.entry_id, row.revision, row.status, row.operation, row.kind, row.priority, row.body, row.content_hash, row.actor_kind, row.source_run_id, row.source_task_id, row.source_fact_id, row.reason, row.expected_revision, row.created_at, row.decided_at],
+        ).map_err(|e| format!("could not restore memory revision: {e}"))?;
+        tx.execute("DELETE FROM memory_purge_audit WHERE entry_id=?1 AND revision=?2", params![applied.entry_id, row.revision]).map_err(|e| e.to_string())?;
+    }
+    if let Some(state) = &applied.entry_state {
+        // A memória pode ter recebido outra revisão enquanto o NDJSON era redigido. Só revive
+        // o estado anterior se ele ainda estiver no estado deixado por este purge.
+        tx.execute(
+            "UPDATE memory_entries SET status=?2,current_revision=?3,updated_at=?4 WHERE id=?1 AND status='deleted' AND current_revision IS NULL",
+            params![applied.entry_id, state.status, state.current_revision, state.updated_at],
+        ).map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())
 }
 
 /// Só para teste: plano, redação e commit numa conexão só, como a versão anterior.
@@ -285,6 +351,16 @@ fn revision_bodies(conn: &Connection, entry_id: &str, revision: Option<i64>) -> 
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|_| "could not verify purge revision".into())
 }
 
+fn revision_rows(conn: &Connection, entry_id: &str, revision: Option<i64>) -> Result<Vec<RevisionRow>, String> {
+    let mut stmt = conn.prepare("SELECT revision,status,operation,kind,priority,body,content_hash,actor_kind,source_run_id,source_task_id,source_fact_id,reason,expected_revision,created_at,decided_at FROM memory_revisions WHERE entry_id=?1 AND (?2 IS NULL OR revision=?2) ORDER BY revision").map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![entry_id, revision], |row| Ok(RevisionRow {
+        revision: row.get(0)?, status: row.get(1)?, operation: row.get(2)?, kind: row.get(3)?, priority: row.get(4)?, body: row.get(5)?,
+        content_hash: row.get(6)?, actor_kind: row.get(7)?, source_run_id: row.get(8)?, source_task_id: row.get(9)?, source_fact_id: row.get(10)?,
+        reason: row.get(11)?, expected_revision: row.get(12)?, created_at: row.get(13)?, decided_at: row.get(14)?,
+    })).map_err(|e| e.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
+}
+
 fn audited(conn: &Connection, entry_id: &str, revision: Option<i64>) -> Result<bool, String> {
     conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM memory_purge_audit WHERE entry_id=?1 AND (?2 IS NULL OR revision=?2))",
@@ -304,28 +380,31 @@ fn audited_revisions(conn: &Connection, entry_id: &str, revision: Option<i64>) -
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|_| "could not verify purge revision".into())
 }
 
-fn delete_revisions(conn: &Connection, workspace: &str, entry_id: &str, revisions: &[i64], bodies: &[String]) -> Result<(), String> {
+fn delete_revisions(conn: &Connection, plan: &Plan, revision: Option<i64>, revisions: &[i64], bodies: &[String]) -> Result<(), String> {
     let _ = conn.pragma_update(None, "secure_delete", "ON");
     let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate).map_err(|_| "could not begin purge")?;
-    scrub_sqlite_copies(&tx, workspace, bodies)?;
+    // A condição e as deleções ficam na mesma transação imediata: nenhum escritor pode mudar a
+    // revisão entre a conferência e o commit SQL.
+    confirm_unchanged(&tx, plan, revision)?;
+    scrub_sqlite_copies(&tx, &plan.workspace, bodies)?;
     for revision in revisions {
-        tx.execute("INSERT INTO memory_purge_guard(entry_id,revision) VALUES(?1,?2)", params![entry_id, revision]).map_err(|_| "could not authorize purge")?;
+        tx.execute("INSERT INTO memory_purge_guard(entry_id,revision) VALUES(?1,?2)", params![plan.entry_id, revision]).map_err(|_| "could not authorize purge")?;
         tx.execute(
             "INSERT INTO memory_purge_audit(entry_id,revision,actor_kind,created_at) VALUES(?1,?2,'user',?3)",
-            params![entry_id, revision, super::now()],
+            params![plan.entry_id, revision, super::now()],
         )
         .map_err(|_| "could not audit purge")?;
-        tx.execute("DELETE FROM run_memory_snapshot WHERE entry_id=?1 AND revision=?2", params![entry_id, revision]).map_err(|_| "could not purge snapshot copies")?;
+        tx.execute("DELETE FROM run_memory_snapshot WHERE entry_id=?1 AND revision=?2", params![plan.entry_id, revision]).map_err(|_| "could not purge snapshot copies")?;
         if table_exists(&tx, "memory_secret_overrides") {
-            tx.execute("DELETE FROM memory_secret_overrides WHERE entry_id=?1 AND revision=?2", params![entry_id, revision]).map_err(|e| e.to_string())?;
+            tx.execute("DELETE FROM memory_secret_overrides WHERE entry_id=?1 AND revision=?2", params![plan.entry_id, revision]).map_err(|e| e.to_string())?;
         }
         tx.execute(
             "UPDATE memory_entries SET current_revision=NULL,status='deleted',updated_at=?3 WHERE id=?1 AND current_revision=?2",
-            params![entry_id, revision, super::now()],
+            params![plan.entry_id, revision, super::now()],
         )
         .map_err(|_| "could not clear purged memory")?;
-        tx.execute("DELETE FROM memory_revisions WHERE entry_id=?1 AND revision=?2", params![entry_id, revision]).map_err(|_| "could not purge memory")?;
-        tx.execute("DELETE FROM memory_purge_guard WHERE entry_id=?1 AND revision=?2", params![entry_id, revision]).map_err(|_| "could not close purge authorization")?;
+        tx.execute("DELETE FROM memory_revisions WHERE entry_id=?1 AND revision=?2", params![plan.entry_id, revision]).map_err(|_| "could not purge memory")?;
+        tx.execute("DELETE FROM memory_purge_guard WHERE entry_id=?1 AND revision=?2", params![plan.entry_id, revision]).map_err(|_| "could not close purge authorization")?;
     }
     tx.commit().map_err(|_| "could not finish purge".into())
 }

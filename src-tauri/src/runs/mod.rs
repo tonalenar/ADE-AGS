@@ -1161,7 +1161,11 @@ pub async fn reroute(
     let out = tauri::async_runtime::spawn_blocking(move || reroute_to(&worker_app, &worker_task, assignment, &worker_reason))
         .await
         .map_err(|e| e.to_string())??;
-    scheduler::tick(app, &out.0.run_id);
+    let tick_app = app.clone();
+    let run_id = out.0.run_id.clone();
+    tauri::async_runtime::spawn_blocking(move || scheduler::tick(&tick_app, &run_id))
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(out)
 }
 

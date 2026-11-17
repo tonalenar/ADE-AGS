@@ -1656,6 +1656,7 @@ mod tests {
         std::fs::create_dir_all(&events).unwrap();
         let log = events.join("task.ndjson");
         std::fs::write(&log, "{\"text\":\"PURGE_TARGET_BODY\"}\n").unwrap();
+        let bytes_before = std::fs::read(&log).unwrap();
         {
             let conn = db.lock().unwrap();
             conn.execute("INSERT INTO runs (id, workspace_id, objective, cwd, created_at) VALUES ('r1', 'w', 'o', '/tmp', 0)", []).unwrap();
@@ -1699,8 +1700,8 @@ mod tests {
             }
         });
         assert!(result.is_err(), "o purge deveria recusar: a memória mudou durante o apagamento");
-        let texto = std::fs::read_to_string(&log).unwrap();
-        assert!(texto.contains("PURGE_TARGET_BODY"), "o NDJSON foi redigido antes de o purge recusar: {texto}");
+        let bytes_after = std::fs::read(&log).unwrap();
+        assert_eq!(bytes_before, bytes_after, "o NDJSON mudou antes de o purge recusar");
     }
 
     /// Se a redação do NDJSON falha, a revisão tem que continuar no banco: o texto ainda está
