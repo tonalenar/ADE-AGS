@@ -106,6 +106,34 @@ pub fn mission_repo_key(conn: &Connection, mission_id: &str) -> Option<String> {
     repo_key(Path::new(&mission_cwd(conn, mission_id)?))
 }
 
+fn task_repo_cwd(conn: &Connection, task_id: &str) -> Result<String, String> {
+    let task = crate::runs::store::task_by_id(conn, task_id)?
+        .ok_or("caller Task is unavailable")?;
+    let run = crate::runs::store::run_by_id(conn, &task.run_id)?
+        .ok_or("caller Run is unavailable")?;
+    Ok(run.mission_id
+        .as_deref()
+        .and_then(|mission| mission_cwd(conn, mission))
+        .unwrap_or(task.cwd))
+}
+
+/// Resolve a tarefa quando o chamador já tem a conexão aberta.
+pub fn task_repo_key(conn: &Connection, task_id: &str) -> Result<Option<String>, String> {
+    Ok(repo_key(Path::new(&task_repo_cwd(conn, task_id)?)))
+}
+
+/// Lê Task/Run/Mission sob o mutex e o `.git` depois de soltá-lo.
+pub fn task_repo_key_unlocked(
+    db: &DbConnection,
+    task_id: &str,
+) -> Result<Option<String>, String> {
+    let cwd = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        task_repo_cwd(&conn, task_id)?
+    };
+    Ok(repo_key(Path::new(&cwd)))
+}
+
 /// Predicado SQL: falha fechada só com missão sem chave.
 pub fn sql_match(placeholder: &str, fail_closed: bool) -> String {
     if fail_closed {

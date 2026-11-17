@@ -284,12 +284,19 @@ pub fn handle(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
         }
         "memory.list" | "memory.get" | "memory.searchApproved" | "memory.propose" | "memory.update" | "memory.delete"
         | "memory.promoteFact" | "memory.workspaceHistory" => {
-            let conn = db.lock().map_err(|e| e.to_string())?;
             let task_id = payload
                 .get("taskId")
                 .and_then(Value::as_str)
                 .ok_or("As ferramentas MCP de Memória Compartilhada exigem uma tarefa Lead ou Worker da frota. Num terminal use ags memory search, ags memory index ou ags memory open <chave>")?;
-            let result=crate::memory::task_tool(&conn, task_id, command, args(payload).clone());
+            let repo_key = crate::memory::repo_scope::task_repo_key_unlocked(&db, task_id)?;
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let result = crate::memory::task_tool_with_repo(
+                &conn,
+                task_id,
+                command,
+                args(payload).clone(),
+                repo_key.as_deref(),
+            );
             drop(conn);
             if result.is_ok() && !matches!(command,"memory.list"|"memory.get"|"memory.searchApproved"|"memory.workspaceHistory") {crate::memory::notify_changed(app);}
             result

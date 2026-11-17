@@ -2262,3 +2262,49 @@ fn missao_sem_git_nao_ve_memoria_com_repo_key_de_outro_projeto() {
     assert!(docs.iter().any(|d| d.key == "unscoped"));
     let _ = std::fs::remove_dir_all(&no_git);
 }
+
+#[test]
+fn tarefa_sem_missao_filtra_memoria_pelo_cwd_e_falha_fechado_sem_repo() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    let mine = git_repo_with_origin("https://github.com/acme/fleet.git");
+    seed_run(&conn, "r-fleet", "w1", None);
+    seed_task(&conn, "lead-fleet", "r-fleet", Some("lead"));
+    conn.execute("UPDATE tasks SET cwd=?1 WHERE id='lead-fleet'", [mine.to_string_lossy().as_ref()]).unwrap();
+    seed_run(&conn, "r-plain", "w1", None);
+    seed_task(&conn, "lead-plain-no-repo", "r-plain", Some("lead"));
+
+    let own = activate(&conn, "workspace", None, "fleet-own", "fleet probe memory");
+    let foreign = activate(&conn, "workspace", None, "fleet-other", "fleet probe memory");
+    activate(&conn, "workspace", None, "fleet-shared", "fleet probe memory");
+    conn.execute("UPDATE memory_entries SET repo_key='github.com/acme/fleet' WHERE id=?1", [&own.entry_id]).unwrap();
+    conn.execute("UPDATE memory_entries SET repo_key='github.com/acme/other' WHERE id=?1", [&foreign.entry_id]).unwrap();
+
+    let listed = task_tool(&conn, "lead-fleet", "memory.list", json!({"scope":"workspace"})).unwrap();
+    let page: MemoryPage = serde_json::from_str(agent_json(&listed)).unwrap();
+    let keys: Vec<_> = page.items.iter().map(|entry| entry.key.as_str()).collect();
+    assert!(keys.contains(&"fleet-own") && keys.contains(&"fleet-shared"), "{keys:?}");
+    assert!(!keys.contains(&"fleet-other"), "{keys:?}");
+    assert!(task_tool(&conn, "lead-fleet", "memory.get", json!({"entry_id": foreign.entry_id})).is_err());
+    let search = task_tool(&conn, "lead-fleet", "memory.searchApproved", json!({"query":"fleet probe"})).unwrap();
+    assert!(search["text"].as_str().unwrap().contains("fleet-own"));
+    assert!(!search["text"].as_str().unwrap().contains("fleet-other"));
+
+    let listed = task_tool(&conn, "lead-plain-no-repo", "memory.list", json!({"scope":"workspace"})).unwrap();
+    let page: MemoryPage = serde_json::from_str(agent_json(&listed)).unwrap();
+    let keys: Vec<_> = page.items.iter().map(|entry| entry.key.as_str()).collect();
+    assert!(keys.contains(&"fleet-shared"), "{keys:?}");
+    assert!(!keys.contains(&"fleet-own") && !keys.contains(&"fleet-other"), "{keys:?}");
+    let _ = std::fs::remove_dir_all(&mine);
+}
+
+#[test]
+fn tarefa_nao_recebe_workspace_history_sem_filtro_de_repo() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_run(&conn, "r1", "w1", None);
+    seed_task(&conn, "lead", "r1", Some("lead"));
+    activate(&conn, "workspace", None, "unscoped", "approved shared memory");
+
+    assert!(task_tool(&conn, "lead", "memory.workspaceHistory", json!({})).is_err());
+}

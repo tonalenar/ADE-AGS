@@ -807,7 +807,8 @@ pub fn detail_for_owner(
     };
     validate_owner(conn, scope, workspace_id, mission_id)?;
     let repo = mission_id.and_then(|m| repo_scope::mission_repo_key(conn, m));
-    detail_with_repo(conn, entry_id, workspace_id, mission_id, scope, repo)
+    let fail_closed = mission_id.is_some() && repo.is_none();
+    detail_with_repo(conn, entry_id, workspace_id, mission_id, scope, repo, fail_closed)
 }
 
 fn detail_with_repo(
@@ -817,9 +818,10 @@ fn detail_with_repo(
     mission_id: Option<&str>,
     scope: &str,
     repo: Option<String>,
+    fail_closed: bool,
 ) -> Result<MemoryDetail, String> {
     let sql = format!(
-        "{ENTRY_SELECT} WHERE e.id=?1 AND e.workspace_id=?2 AND e.scope=?3 AND (?4 IS NULL OR e.mission_id=?4) AND {}", repo_scope::sql_match("?5", mission_id.is_some() && repo.is_none())
+        "{ENTRY_SELECT} WHERE e.id=?1 AND e.workspace_id=?2 AND e.scope=?3 AND (?4 IS NULL OR e.mission_id=?4) AND {}", repo_scope::sql_match("?5", fail_closed)
     );
     let entry = conn
         .query_row(
@@ -1253,16 +1255,16 @@ fn task_authorized_entry(
     conn: &Connection,
     task_id: &str,
     entry_id: &str,
+    repo: Option<&str>,
 ) -> Result<(String, Option<String>, String, String, String), String> {
     let (workspace_id, mission_id, actor, run_id) = task_memory_owner(conn, task_id)?;
     if actor == "dreamer" {
-        let owner: Option<(String,Option<String>)>=conn.query_row("SELECT scope,mission_id FROM memory_entries WHERE id=?1 AND workspace_id=?2",params![entry_id,workspace_id],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(|_|"could not authorize dream entry")?;
+        let owner: Option<(String,Option<String>)>=conn.query_row("SELECT scope,mission_id FROM memory_entries WHERE id=?1 AND workspace_id=?2 AND (repo_key IS NULL OR repo_key=?3)",params![entry_id,workspace_id,repo],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(|_|"could not authorize dream entry")?;
         let (scope,mission)=owner.ok_or("memory entry is outside the dream workspace")?;
         return Ok((workspace_id,mission,actor,run_id,scope));
     }
-    let repo = mission_id.as_deref().and_then(|m| repo_scope::mission_repo_key(conn, m));
     let scope:Option<String>=conn.query_row(
-        &format!("SELECT scope FROM memory_entries WHERE id=?1 AND workspace_id=?2 AND ((scope='workspace' AND mission_id IS NULL) OR (scope='mission' AND ?3 IS NOT NULL AND mission_id=?3)) AND {}", repo_scope::sql_match_bare("?4", mission_id.is_some() && repo.is_none())),
+        &format!("SELECT scope FROM memory_entries WHERE id=?1 AND workspace_id=?2 AND ((scope='workspace' AND mission_id IS NULL) OR (scope='mission' AND ?3 IS NOT NULL AND mission_id=?3)) AND {}", repo_scope::sql_match_bare("?4", true)),
         params![entry_id,workspace_id,mission_id,repo],|r|r.get(0),
     ).optional().map_err(|_|"could not authorize memory entry".to_string())?;
     let scope = scope.ok_or("memory entry is outside the caller's Run")?;
@@ -1290,13 +1292,27 @@ fn untrusted_memory_response(body: &str) -> String {
 
 /// MCP entry point. All ownership is derived through Task → Run → Mission → Workspace;
 /// external arguments never contain workspace_id or mission_id.
+#[cfg(test)]
 pub fn task_tool(
     conn: &Connection,
     task_id: &str,
     command: &str,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    let repo = repo_scope::task_repo_key(conn, task_id)?;
+    task_tool_with_repo(conn, task_id, command, args, repo.as_deref())
+}
+
+/// MCP de memória com `repo_key` resolvida antes de adquirir o mutex do banco.
+pub fn task_tool_with_repo(
+    conn: &Connection,
+    task_id: &str,
+    command: &str,
+    args: serde_json::Value,
+    repo_key: Option<&str>,
+) -> Result<serde_json::Value, String> {
     let (workspace_id, mission_id, actor, run_id) = task_memory_owner(conn, task_id)?;
+    let repo_key = repo_key.map(str::to_owned);
     let encode = |value: &serde_json::Value| -> Result<String, String> {
         let body = serde_json::to_string(value)
             .map_err(|_| "could not encode memory response".to_string())?;
@@ -1311,20 +1327,13 @@ pub fn task_tool(
             #[serde(deny_unknown_fields)]
             struct Input { query: String, limit: Option<usize> }
             let input: Input = serde_json::from_value(args).map_err(|_| "invalid memory.search arguments")?;
-            let hits = search::search(conn, &workspace_id, mission_id.as_deref(), &input.query, input.limit.unwrap_or(5))?;
+            let hits = search::search_with_repo(conn, &workspace_id, mission_id.as_deref(), repo_key.as_deref(), true, &input.query, input.limit.unwrap_or(5))?;
             let keys: Vec<String> = hits.iter().map(|hit| hit.key.clone()).collect();
             usage::record(conn, &usage::UsageRow { ts: usage::now(), workspace_id: &workspace_id, mission_id: mission_id.as_deref(), tab_id: Some(task_id), action: "search", query: Some(input.query.as_str()), hits: hits.len() as u32, entry_keys: &keys });
             encode(&serde_json::to_value(hits).map_err(|_| "could not encode memory search")?)?
         }
         "memory.workspaceHistory" => {
-            #[derive(Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct Input { #[serde(default="dream_history_limit")] limit: usize }
-            fn dream_history_limit()->usize {dream::HISTORY_MISSIONS}
-            let input:Input=serde_json::from_value(args).map_err(|_|"invalid history arguments")?;
-            let value=dream::history(conn,&workspace_id,input.limit)?;
-            // History has a separate 48 KiB limit, with the same data envelope.
-            return Ok(serde_json::json!({"text":untrusted_memory_response(&value.to_string())}));
+            return Err("workspace history is available only in the user's memory panel; use scoped memory.list or memory.searchApproved".into());
         }
         "memory.list" => {
             #[derive(Deserialize)]
@@ -1346,7 +1355,8 @@ pub fn task_tool(
                 _ => return Err("scope must be workspace or mission".into()),
             };
             let mut filter = MemoryFilter::default();
-            apply_repo_filter(&mut filter, mission_id.as_deref(), conn);
+            filter.repo_key = repo_key.clone();
+            filter.repo_fail_closed = true;
             let mut page = list_filtered(
                 conn,
                 &workspace_id,
@@ -1377,8 +1387,7 @@ pub fn task_tool(
             let input: Input = serde_json::from_value(args)
                 .map_err(|_| "invalid memory.get arguments".to_string())?;
             let (owner, mission, _, _, scope) =
-                task_authorized_entry(conn, task_id, &input.entry_id)?;
-            let repo = mission.as_deref().and_then(|m| repo_scope::mission_repo_key(conn, m));
+                task_authorized_entry(conn, task_id, &input.entry_id, repo_key.as_deref())?;
             let detail = detail_with_repo(
                 conn,
                 &input.entry_id,
@@ -1389,7 +1398,8 @@ pub fn task_tool(
                     None
                 },
                 &scope,
-                repo,
+                repo_key.clone(),
+                true,
             )?;
             let read_key = vec![detail.entry.key.clone()];
             usage::record(conn, &usage::UsageRow { ts: usage::now(), workspace_id: &workspace_id, mission_id: mission_id.as_deref(), tab_id: Some(task_id), action: "open", query: None, hits: 1, entry_keys: &read_key });
@@ -1463,8 +1473,8 @@ pub fn task_tool(
             let input: TaskUpdateProposal = serde_json::from_value(args)
                 .map_err(|_| "invalid memory.update arguments".to_string())?;
             let (owner, mission, actor, run_id, scope) =
-                task_authorized_entry(conn, task_id, &input.entry_id)?;
-            let detail = detail_for_owner(
+                task_authorized_entry(conn, task_id, &input.entry_id, repo_key.as_deref())?;
+            let detail = detail_with_repo(
                 conn,
                 &input.entry_id,
                 &owner,
@@ -1473,6 +1483,9 @@ pub fn task_tool(
                 } else {
                     None
                 },
+                &scope,
+                repo_key.clone(),
+                true,
             )?;
             let proposal = ProposalInput {
                 scope,
@@ -1511,8 +1524,8 @@ pub fn task_tool(
             let input: TaskDeleteProposal = serde_json::from_value(args)
                 .map_err(|_| "invalid memory.delete arguments".to_string())?;
             let (owner, mission, actor, run_id, scope) =
-                task_authorized_entry(conn, task_id, &input.entry_id)?;
-            let detail = detail_for_owner(
+                task_authorized_entry(conn, task_id, &input.entry_id, repo_key.as_deref())?;
+            let detail = detail_with_repo(
                 conn,
                 &input.entry_id,
                 &owner,
@@ -1521,6 +1534,9 @@ pub fn task_tool(
                 } else {
                     None
                 },
+                &scope,
+                repo_key.clone(),
+                true,
             )?;
             let entry = detail.entry;
             let proposal = ProposalInput {
@@ -1675,7 +1691,8 @@ pub async fn memory_get(
             "workspace"
         };
         validate_owner(&conn, scope, &workspace_id, mission_id.as_deref())?;
-        detail_with_repo(&conn, &entry_id, &workspace_id, mission_id.as_deref(), scope, repo)
+        let fail_closed = mission_id.is_some() && repo.is_none();
+        detail_with_repo(&conn, &entry_id, &workspace_id, mission_id.as_deref(), scope, repo, fail_closed)
     })
     .await
     .map_err(|e| e.to_string())?

@@ -222,6 +222,17 @@ fn snippet_of(body: &str) -> (String, bool) {
 /// não recebe as regras de cargo e Tauri do ADE-AGS.
 pub fn load_docs(conn: &Connection, workspace_id: &str, mission_id: Option<&str>) -> Result<Vec<Doc>, String> {
     let repo = mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m));
+    load_docs_with_repo(conn, workspace_id, mission_id, repo.as_deref(), mission_id.is_some() && repo.is_none())
+}
+
+/// Carrega documentos usando a chave já resolvida pelo chamador, sem tocar no filesystem.
+pub fn load_docs_with_repo(
+    conn: &Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    repo: Option<&str>,
+    fail_closed: bool,
+) -> Result<Vec<Doc>, String> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT e.id, e.scope, e.key, r.kind, e.priority, r.body
@@ -230,7 +241,7 @@ pub fn load_docs(conn: &Connection, workspace_id: &str, mission_id: Option<&str>
               WHERE e.status = 'active' AND r.status='approved' AND e.workspace_id = ?1
                 AND (e.scope = 'workspace' OR (e.scope = 'mission' AND e.mission_id = ?2))
                 AND {}",
-            super::repo_scope::sql_match("?3", mission_id.is_some() && repo.is_none())
+            super::repo_scope::sql_match("?3", fail_closed)
         ))
         .map_err(|_| "não foi possível ler as memórias".to_string())?;
     let rows = stmt
@@ -306,6 +317,19 @@ pub(crate) fn legacy_load_docs_at(
 
 /// A busca completa. A pergunta é validada (vazia ou enorme não faz sentido).
 pub fn search(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, query: &str, limit: usize) -> Result<Vec<Hit>, String> {
+    let repo = mission_id.and_then(|mission| super::repo_scope::mission_repo_key(conn, mission));
+    search_with_repo(conn, workspace_id, mission_id, repo.as_deref(), mission_id.is_some() && repo.is_none(), query, limit)
+}
+
+pub fn search_with_repo(
+    conn: &Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    repo: Option<&str>,
+    fail_closed: bool,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<Hit>, String> {
     let query = query.trim();
     if query.is_empty() {
         return Err("A busca precisa de um texto.".into());
@@ -313,7 +337,7 @@ pub fn search(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, q
     if query.chars().count() > MAX_QUERY_CHARS {
         return Err(format!("A busca tem até {MAX_QUERY_CHARS} caracteres."));
     }
-    Ok(rank(&load_docs(conn, workspace_id, mission_id)?, query, limit))
+    Ok(rank(&load_docs_with_repo(conn, workspace_id, mission_id, repo, fail_closed)?, query, limit))
 }
 
 /// Search only the memory versions valid at one Unix timestamp. `search` remains the
