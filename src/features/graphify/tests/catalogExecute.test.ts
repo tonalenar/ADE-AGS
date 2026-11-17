@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { executeRenderedCommand, previewIsCurrent } from "../catalogExecute";
+import { executeRenderedCommand, previewIsCurrent, renderCurrentLine } from "../catalogExecute";
 import type { GraphifyChoice } from "../ipc";
 
 const choice: GraphifyChoice = { flags: [], args: { backend: "kuzu" } };
@@ -18,6 +18,14 @@ describe("executeRenderedCommand", () => {
     expect(run).toHaveBeenCalledWith(current);
     expect(run).not.toHaveBeenCalledWith(stalePreview);
     expect(result.output).toBe(current);
+  });
+});
+
+describe("renderCurrentLine", () => {
+  it("pede o render atual, não a linha antiga do preview", async () => {
+    const render = vi.fn(async () => "graphify extract --backend kuzu");
+    await expect(renderCurrentLine(render, "extract", choice)).resolves.toBe("graphify extract --backend kuzu");
+    expect(render).toHaveBeenCalledWith("extract", choice);
   });
 });
 

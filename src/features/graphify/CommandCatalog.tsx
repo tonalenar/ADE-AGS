@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { AnimateSpin, Button, Input } from "neogestify-ui-components";
 
 import { uiErrorText } from "@/shared/uiErrorText";
-import { executeRenderedCommand, previewIsCurrent } from "./catalogExecute";
+import { executeRenderedCommand, previewIsCurrent, renderCurrentLine } from "./catalogExecute";
 import {
   graphifyCommands, graphifyRender, type GraphifyChoice, type GraphifyCommand, type GraphifyRun,
 } from "./ipc";
@@ -134,19 +134,28 @@ export function CommandCatalog({ cwd, onRun }: {
     }
   };
 
-  const toTerminal = (command: GraphifyCommand) => {
-    const line = preview[command.id];
-    if (!line) return;
-    runInTerminal(line, cwd || ".", `graphify ${command.id}`);
-    setNote(t("settings.graphify.sentToTerminal"));
+  const toTerminal = async (command: GraphifyCommand) => {
+    try {
+      const line = await renderCurrentLine(graphifyRender, command.id, choiceOf(command.id));
+      if (!line) return;
+      runInTerminal(line, cwd || ".", `graphify ${command.id}`);
+      setNote(t("settings.graphify.sentToTerminal"));
+    } catch (e) {
+      setNote(uiErrorText(e));
+    }
   };
 
-  const toAgent = (command: GraphifyCommand) => {
-    const line = preview[command.id];
-    if (!line || !agentId) return;
-    setNote(sendToAgent(agentId, line)
-      ? t("settings.graphify.sentToAgent")
-      : t("settings.graphify.agentNotReady"));
+  const toAgent = async (command: GraphifyCommand) => {
+    if (!agentId) return;
+    try {
+      const line = await renderCurrentLine(graphifyRender, command.id, choiceOf(command.id));
+      if (!line) return;
+      setNote(sendToAgent(agentId, line)
+        ? t("settings.graphify.sentToAgent")
+        : t("settings.graphify.agentNotReady"));
+    } catch (e) {
+      setNote(uiErrorText(e));
+    }
   };
 
   const grouped = useMemo(() => {

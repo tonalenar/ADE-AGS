@@ -9,6 +9,9 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const mocks = vi.hoisted(() => ({
   graphifyCommands: vi.fn(),
   graphifyRender: vi.fn(),
+  runInTerminal: vi.fn(),
+  sendToAgent: vi.fn(() => true),
+  agentTabs: vi.fn(() => [] as { id: string; title: string }[]),
 }));
 
 vi.mock("../ipc", () => ({
@@ -16,9 +19,9 @@ vi.mock("../ipc", () => ({
   graphifyRender: mocks.graphifyRender,
 }));
 vi.mock("../send", () => ({
-  agentTabs: () => [],
-  runInTerminal: vi.fn(),
-  sendToAgent: vi.fn(),
+  agentTabs: mocks.agentTabs,
+  runInTerminal: mocks.runInTerminal,
+  sendToAgent: mocks.sendToAgent,
 }));
 const t = vi.hoisted(() => (key: string) => key);
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
@@ -43,6 +46,12 @@ const command = {
   longRunning: false,
 };
 
+const skillCommand = {
+  ...command,
+  id: "skill-extract",
+  kind: "skill" as const,
+};
+
 let host: HTMLDivElement;
 let root: Root;
 
@@ -52,6 +61,8 @@ async function flush(times = 8) {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  mocks.sendToAgent.mockReturnValue(true);
+  mocks.agentTabs.mockReturnValue([]);
   mocks.graphifyCommands.mockResolvedValue([command]);
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -104,5 +115,69 @@ describe("CommandCatalog: Executar", () => {
     await act(async () => { root.render(<CommandCatalog cwd="/tmp" onRun={onRun} />); });
     await flush();
     expect(host.textContent).toContain("catálogo indisponível");
+  });
+});
+
+function hangFirstKuzuPreview() {
+  let hungKuzuPreview = false;
+  mocks.graphifyRender.mockImplementation(async (_id: string, choice: { args: Record<string, string> }) => {
+    const backend = choice.args.backend ?? "neo4j";
+    const line = `graphify extract --backend ${backend}`;
+    if (backend === "kuzu" && !hungKuzuPreview) {
+      hungKuzuPreview = true;
+      return new Promise<string>(() => { /* preview antigo ainda em voo */ });
+    }
+    return line;
+  });
+}
+
+async function openAndPickKuzu() {
+  await act(async () => { host.querySelector("button")!.click(); });
+  await flush();
+  const select = host.querySelector("select")!;
+  await act(async () => {
+    select.value = "kuzu";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await flush();
+}
+
+describe("CommandCatalog: Enviar ao terminal / Enviar ao agente", () => {
+  it("depois de trocar o argumento, Enviar ao terminal manda a linha nova", async () => {
+    hangFirstKuzuPreview();
+    await act(async () => { root.render(<CommandCatalog cwd="/tmp" onRun={vi.fn()} />); });
+    await flush();
+    await openAndPickKuzu();
+
+    const send = [...host.querySelectorAll("button")].find((b) => b.textContent === "settings.graphify.toTerminal")!;
+    await act(async () => { send.click(); });
+    await flush();
+
+    expect(mocks.runInTerminal).toHaveBeenCalledWith(
+      "graphify extract --backend kuzu",
+      "/tmp",
+      "graphify extract",
+    );
+    expect(mocks.runInTerminal).not.toHaveBeenCalledWith(
+      "graphify extract --backend neo4j",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("depois de trocar o argumento, Enviar ao agente manda a linha nova", async () => {
+    hangFirstKuzuPreview();
+    mocks.graphifyCommands.mockResolvedValue([skillCommand]);
+    mocks.agentTabs.mockReturnValue([{ id: "tab-1", title: "Claude" }]);
+    await act(async () => { root.render(<CommandCatalog cwd="/tmp" onRun={vi.fn()} />); });
+    await flush();
+    await openAndPickKuzu();
+
+    const send = [...host.querySelectorAll("button")].find((b) => b.textContent === "settings.graphify.toAgent")!;
+    await act(async () => { send.click(); });
+    await flush();
+
+    expect(mocks.sendToAgent).toHaveBeenCalledWith("tab-1", "graphify extract --backend kuzu");
+    expect(mocks.sendToAgent).not.toHaveBeenCalledWith("tab-1", "graphify extract --backend neo4j");
   });
 });
