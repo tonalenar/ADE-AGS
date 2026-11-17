@@ -84,8 +84,6 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
   const answer = [...answerItems].reverse().find((item) => item.kind === "assistant" && item.text?.trim())?.text?.trim() ?? "";
   // Só a fase da conversa selecionada: o texto que chega nas outras não re-renderiza o painel.
   const selectedWorking = useStructured((s) => (selectedId ? s.live[selectedId]?.phase === "working" : false));
-  // A fase de cada pergunta da lista, para desabilitar o apagar: lida na renderização (a lista re-renderiza com as conversas).
-  const rowWorking = (id: string) => useStructured.getState().live[id]?.phase === "working";
   // O histórico da origem, limitado, é o mesmo que a timeline do chat principal mostra: a pergunta lateral o herda na tela.
   const history = useMemo(() => sideChatHistory(items), [items]);
   const sideView = useMemo(() => ({ history: history.items, truncated: history.truncated }), [history]);
@@ -238,11 +236,7 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
               (selectedId === row.id ? "bg-gray-100 dark:bg-white/[0.08] text-gray-900 dark:text-white" : "text-gray-500 dark:text-white/50")}>
               <button type="button" onClick={() => { if (row.state === "settled") settleThread(row.id, false); setSelectedId(row.id); setDraft(null); }}
                 className="min-w-0 h-full px-2 truncate" title={row.title}>{row.title || t("chat.sideChat.title")}</button>
-              <button type="button" onClick={() => void remove(row)} disabled={rowWorking(row.id)}
-                aria-label={t("chat.sideChat.delete")} title={t("chat.sideChat.delete")}
-                className="w-5 h-full grid place-items-center text-gray-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40">
-                <XIcon className="w-3 h-3" />
-              </button>
+              <SideChatRowDelete id={row.id} label={t("chat.sideChat.delete")} onDelete={() => void remove(row)} />
             </div>
           ))}
         </nav>
@@ -260,5 +254,20 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
           agents={agents} draft={draftValue} originAccess={originAccess} busy={loading} onDraftChange={setDraft} onSubmit={create} />
       )}
     </div>
+  );
+}
+
+/**
+ * O Apagar de uma pergunta da lista. Assina só a fase dela (igualdade rasa): a linha desabilita quando a própria
+ * conversa trabalha, mesmo que outra conversa seja a selecionada e mude de fase.
+ */
+function SideChatRowDelete({ id, label, onDelete }: { id: string; label: string; onDelete: () => void }) {
+  const working = useStructured((s) => s.live[id]?.phase === "working");
+  return (
+    <button type="button" onClick={onDelete} disabled={working}
+      aria-label={label} title={label}
+      className="w-5 h-full grid place-items-center text-gray-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40">
+      <XIcon className="w-3 h-3" />
+    </button>
   );
 }
