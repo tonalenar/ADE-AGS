@@ -49,6 +49,13 @@ fn spawn_auto(app: AppHandle, tab_id: String, cwd: String, message: String, auth
         return;
     }
     std::thread::spawn(move || {
+        struct InFlightGuard(String);
+        impl Drop for InFlightGuard {
+            fn drop(&mut self) {
+                in_flight().lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+            }
+        }
+        let _guard = InFlightGuard(tab_id.clone());
         let result = db_of(&app).and_then(|db| {
             if !auto_enabled(&db) {
                 return Ok(None);
@@ -56,7 +63,6 @@ fn spawn_auto(app: AppHandle, tab_id: String, cwd: String, message: String, auth
             let req = Request { tab_id: &tab_id, cwd: Path::new(&cwd), kind: kind::MESSAGE, author: &author, message: &message, force: false };
             service::capture(&db, &req).map(Some)
         });
-        in_flight().lock().unwrap_or_else(|e| e.into_inner()).remove(&tab_id);
         match result {
             Ok(Some(Capture::Created { .. })) => notify(&app, &tab_id),
             Ok(_) => {}
