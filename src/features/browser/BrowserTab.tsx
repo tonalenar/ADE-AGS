@@ -45,6 +45,7 @@ import { clearRecentBrowserPages, readRecentBrowserPages, rememberRecentBrowserP
 import { previewDetectServers, previewResolve, previewSaveCapture, previewSetRecording, type PreviewTarget } from "./ipc";
 import { PageChannel, type LoadState } from "./pageChannel";
 import { askPersonAboutDialog } from "./dialogPolicy";
+import { captureUnlessDisposed, effectiveRecordingFps } from "./recordingStart";
 import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
 import { deviceAction, runDeviceAction, type PhoneActions } from "./deviceActions";
@@ -941,18 +942,23 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     if ((!target && !real) || !column.current || (!real && !iframe.current)) return;
     try {
       if (typeof MediaRecorder === "undefined") throw new Error("MediaRecorder indisponível neste sistema.");
-      const initial = real
-        ? (await realBrowserShot(view.id)).canvas
-        : (await freezePage(iframe.current!, column.current)).canvas;
-      // A aba pode ter sido desmontada durante a captura (o cleanup já rodou e não viu gravador): não se cria nada.
-      if (recordingDisposedRef.current) return;
+      // A aba pode ter sido desmontada durante a foto inicial (o cleanup já rodou e não viu gravador): não se cria nada (A187).
+      // As referências saem para constantes: dentro da closure o TypeScript não mantém o estreitamento de `column.current`.
+      const frame = iframe.current;
+      const pageColumn = column.current;
+      const initial = await captureUnlessDisposed(
+        async () => (real ? (await realBrowserShot(view.id)).canvas : (await freezePage(frame!, pageColumn!)).canvas),
+        () => recordingDisposedRef.current,
+      );
+      if (!initial) return;
       const canvas = document.createElement("canvas");
       canvas.width = initial.width;
       canvas.height = initial.height;
       const context = canvas.getContext("2d");
       if (!context || typeof canvas.captureStream !== "function") throw new Error("Captura de vídeo indisponível neste sistema.");
       context.drawImage(initial, 0, 0);
-      const fps = readBrowserPreferences().maxRecordingFps;
+      // O fps tem teto (ver `recordingStart.ts`, A204): a preferência de 60 não chega ao custo de rasterizar a página.
+      const fps = effectiveRecordingFps(readBrowserPreferences().maxRecordingFps);
       const stream = canvas.captureStream(fps);
       recordingStreamRef.current = stream;
       const mimeType = ["video/webm;codecs=vp9", "video/webm", "video/mp4"]

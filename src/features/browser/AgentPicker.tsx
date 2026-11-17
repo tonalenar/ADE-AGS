@@ -24,8 +24,23 @@ export function AgentPicker({ agents, value, onChange, compact }: {
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  // Onde está o botão, medido AO ABRIR (no clique), não no render: cada render forçava layout, mesmo fechado (A191).
+  const [rect, setRect] = useState<DOMRect | null>(null);
   const box = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const chosen = agents.find((a) => a.id === value) ?? null;
+
+  // A lista é `fixed` com a posição do momento em que abriu: se a página rola com ela aberta, ela fica solta do botão.
+  // Então fecha. A rolagem de dentro da própria lista não conta.
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = (event: Event) => {
+      if (list.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    window.addEventListener("scroll", onScroll, true);
+    return () => window.removeEventListener("scroll", onScroll, true);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -49,13 +64,16 @@ export function AgentPicker({ agents, value, onChange, compact }: {
     if (!open && value) highlightAgent(value);
   }, [open, value]);
 
-  const rect = box.current?.getBoundingClientRect();
+  const toggle = () => {
+    if (!open) setRect(box.current?.getBoundingClientRect() ?? null);
+    setOpen(!open);
+  };
 
   return (
     <div ref={box} className="relative min-w-0">
       <Button
         variant="custom"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         aria-haspopup="listbox"
         aria-expanded={open}
         title={t("browser.sendTo")}
@@ -76,6 +94,7 @@ export function AgentPicker({ agents, value, onChange, compact }: {
         // `fixed`: el panel del mensaje scrollea y es bajito; una lista `absolute` quedaría
         // recortada adentro.
         <div
+          ref={list}
           role="listbox"
           className="fixed z-50 py-1 rounded-xl shadow-lg overflow-auto
             bg-white dark:bg-surface-overlay border border-gray-200 dark:border-white/10"
