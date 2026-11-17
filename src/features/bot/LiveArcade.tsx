@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
 import { beamY } from "./liveArcadeScene";
@@ -23,6 +23,13 @@ import { ARCADE_H, ARCADE_W, BOLT_MS, FRAME_MS, TOWER_DROP_X, bossFoot, boltAt, 
 
 const WALK_SPEED = 50;
 const RUN_SPEED = 110;
+/** Relógios do laço: o tempo ativo anda a cada 1 s, as abas em esforço são relidas a cada 125 ms (1 s com menos movimento) e a memória pendente a cada 5 s. */
+const ACTIVE_MS = 1000;
+const TABS_MS = 125;
+const TABS_REDUCED_MS = 1000;
+const MEMORY_MS = 5000;
+/** Passo máximo por quadro: uma aba que volta de longe não faz o relógio dar um salto. */
+const MAX_STEP_MS = 250;
 
 function taskForArcade(task: Task): ArcadeTask {
   return {
@@ -42,54 +49,76 @@ function taskForArcade(task: Task): ArcadeTask {
 /**
  * Tempo ativo "ao vivo": a leitura do app chega a cada tanto; entre elas o relógio avança 1 s por
  * segundo enquanto a missão roda e algum herói trabalha (o mesmo critério do contador real). Nunca
- * volta atrás ao chegar uma leitura nova: o valor mostrado só sobe.
+ * volta atrás ao chegar uma leitura nova: o valor mostrado só sobe. O laço de quadro chama `tick`.
  */
-function useLiveActiveMs(baseMs: number | null, running: boolean, working: boolean): number | null {
+function useLiveActiveMs(baseMs: number | null): { activeMs: number | null; tick: (working: boolean) => void } {
   const [, setTick] = useState(0);
   const extra = useRef(0);
   const shown = useRef<number | null>(null);
   useEffect(() => { extra.current = 0; }, [baseMs]);
-  useEffect(() => {
-    if (!running) return;
-    const timer = window.setInterval(() => {
-      if (working) extra.current += 1000;
-      setTick((n) => n + 1);
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [running, working]);
-  if (baseMs === null && extra.current === 0) return null;
+  const tick = useCallback((working: boolean) => {
+    if (working) extra.current += 1000;
+    setTick((n) => n + 1);
+  }, []);
+  if (baseMs === null && extra.current === 0) return { activeMs: null, tick };
   const value = (baseMs ?? 0) + extra.current;
   shown.current = shown.current === null ? value : Math.max(shown.current, value);
-  return shown.current;
+  return { activeMs: shown.current, tick };
 }
 
-function useSustainedTabs() {
+function useSustainedTabs(): { ids: string[]; refresh: () => void } {
   const [ids, setIds] = useState<string[]>(() => sustainedTabIds());
+  const refresh = useCallback(() => {
+    const next = sustainedTabIds();
+    setIds((current) => current.length === next.length && current.every((id, i) => id === next[i]) ? current : next);
+  }, []);
+  return { ids, refresh };
+}
+
+/**
+ * O laço de quadro do Ao vivo: um único rAF avança os relógios pelo tempo decorrido e chama o
+ * desenho. Pausa com a aba oculta ou com o canvas fora da vista; ao voltar, `resume` relê o que o
+ * laço não vê sozinho (as abas em esforço).
+ */
+function useArcadeLoop(canvasRef: RefObject<HTMLCanvasElement | null>, step: (dt: number, now: number) => void, resume: () => void) {
+  const stepRef = useRef(step);
+  stepRef.current = step;
+  const resumeRef = useRef(resume);
+  resumeRef.current = resume;
   useEffect(() => {
-    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    let timer: number | undefined;
-    const refresh = () => {
-      if (document.visibilityState !== "visible") return;
-      const next = sustainedTabIds();
-      setIds((current) => current.length === next.length && current.every((id, i) => id === next[i]) ? current : next);
+    const canvas = canvasRef.current;
+    let raf: number | undefined;
+    let last: number | null = null;
+    let inView = true;
+    const tick = (ts: number) => {
+      raf = requestAnimationFrame(tick);
+      const dt = last === null ? 0 : Math.min(ts - last, MAX_STEP_MS);
+      last = ts;
+      stepRef.current(dt, ts);
+    };
+    const stop = () => {
+      if (raf !== undefined) cancelAnimationFrame(raf);
+      raf = undefined;
     };
     const start = () => {
-      if (timer !== undefined) window.clearInterval(timer);
-      timer = undefined;
-      if (document.visibilityState !== "visible") return;
-      refresh();
-      timer = window.setInterval(refresh, motion.matches ? 1000 : 125);
+      stop();
+      last = null;
+      if (document.visibilityState !== "visible" || !inView) return;
+      resumeRef.current();
+      raf = requestAnimationFrame(tick);
     };
+    const observer = canvas && typeof IntersectionObserver !== "undefined"
+      ? new IntersectionObserver(([entry]) => { inView = entry?.isIntersecting ?? true; start(); })
+      : null;
+    if (canvas) observer?.observe(canvas);
     document.addEventListener("visibilitychange", start);
-    motion.addEventListener("change", start);
     start();
     return () => {
-      if (timer !== undefined) window.clearInterval(timer);
+      stop();
+      observer?.disconnect();
       document.removeEventListener("visibilitychange", start);
-      motion.removeEventListener("change", start);
     };
-  }, []);
-  return ids;
+  }, [canvasRef]);
 }
 
 export function LiveArcade({
@@ -115,25 +144,32 @@ export function LiveArcade({
   const boltsRef = useRef<Array<{ id: string; from: { x: number; y: number }; at: number; color: string }>>([]);
   const lastShotRef = useRef(new Map<string, number>());
   const hitUntilRef = useRef(0);
+  /** O desenho do quadro atual, montado pelo efeito do canvas; o laço chama pelo ref. */
+  const drawRef = useRef<(dt: number, now: number) => void>(() => undefined);
+  /** Quanto tempo cada relógio já andou desde a última vez que disparou. */
+  const clock = useRef({ active: 0, tabs: 0, memory: 0, draw: 0 });
   const [reducedMotion, setReducedMotion] = useState(() =>
     typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
   const tabs = useTabsStore((state) => state.tabs);
   const runtimeTasks = useRunsStore((state) => state.tasks);
   const missionIndex = useMissionIndex();
-  const activeTabs = useSustainedTabs();
+  const { ids: activeTabs, refresh: refreshTabs } = useSustainedTabs();
   const approvals = useRunsStore((state) => state.approvals);
   const workspaceId = useTabsStore((state) => state.workspaceId);
   const [pendingMemories, setPendingMemories] = useState<number | null>(null);
-  useEffect(() => {
+  const pendingScope = useRef("");
+  const readPending = useCallback(() => {
     if (!workspaceId) return;
-    let alive = true;
-    const read = () => getPendingCounts(workspaceId)
-      .then((counts) => alive && setPendingMemories(counts.byMission[mission.id] ?? 0)).catch(() => undefined);
-    read();
-    const timer = window.setInterval(() => { if (document.visibilityState === "visible") read(); }, 5000);
-    return () => { alive = false; window.clearInterval(timer); };
+    const scope = workspaceId + "/" + mission.id;
+    getPendingCounts(workspaceId)
+      .then((counts) => { if (pendingScope.current === scope) setPendingMemories(counts.byMission[mission.id] ?? 0); })
+      .catch(() => undefined);
   }, [workspaceId, mission.id]);
+  useEffect(() => {
+    pendingScope.current = workspaceId ? workspaceId + "/" + mission.id : "";
+    readPending();
+  }, [readPending, workspaceId, mission.id]);
   const missionTasks = useMemo(() => {
     const activeRunTasks = mission.activeRunId
       ? runtimeTasks.filter((task) => task.runId === mission.activeRunId)
@@ -216,8 +252,10 @@ export function LiveArcade({
     const targets = heroTargets(heroes, slots);
     const motions = motionRef.current;
     for (const id of [...motions.keys()]) if (!heroes.some((hero) => hero.tabId === id)) motions.delete(id);
-    let raf: number | undefined;
-    let last: number | null = null;
+    // Buffers do quadro: o mapa de carregadores, o vetor de heróis e o de tiros são reaproveitados.
+    const carrier = new Map<string, string>();
+    const placed: Placed[] = [];
+    const flying: Array<{ x: number; y: number; color: string }> = [];
     let frame = 0;
     const draw = (dt: number, now: number) => {
       const bounds = canvas.getBoundingClientRect();
@@ -232,8 +270,10 @@ export function LiveArcade({
       context.setTransform(scale * ratio, 0, 0, scale * ratio, 0, 0);
       const carrying = carryRef.current;
       const rolling = placeBarrels(barrels, slots, now, !reducedMotion);
-      const carrier = new Map([...carrying].map(([taskId, tabId]) => [tabId, taskId]));
-      const placed: Placed[] = heroes.map((hero, index) => {
+      carrier.clear();
+      for (const [taskId, tabId] of carrying) carrier.set(tabId, taskId);
+      placed.length = 0;
+      heroes.forEach((hero, index) => {
         const carried = carrier.get(hero.tabId);
         const target = carried ? { x: TOWER_DROP_X, level: 0 } : targets.get(hero.tabId) ?? { x: 190, level: 0 };
         // Sem animação (prefers-reduced-motion) a posição já é a final.
@@ -255,32 +295,37 @@ export function LiveArcade({
         const breath = !reducedMotion && hero.state === "sleeping" && atTarget ? (Math.sin(now / 500 + index) > 0 ? 1 : 0) : 0;
         const cheer = !reducedMotion && boss.defeated && atTarget && !climbing ? Math.round(Math.abs(Math.sin(now / 220 + index)) * 10) : 0;
         const drawnX = next.x + (patrol ? patrolOffset(now, index) : 0) + shake;
-        return { hero, x: drawnX, level: next.level, pose, lift: reducedMotion ? 0 : heroLift(next.level, drawnX, rolling) + cheer - breath, carrying: carryRole };
+        placed.push({ hero, x: drawnX, level: next.level, pose, lift: reducedMotion ? 0 : heroLift(next.level, drawnX, rolling) + cheer - breath, carrying: carryRole });
       });
       // Quem corre atira no GLITCH: o tiro sai do herói, voa em arco e, ao chegar, o inimigo pisca.
       const foot = bossFoot(now, boss.defeated);
       const target = { x: foot.x, y: foot.y - 22 };
       if (!reducedMotion && !boss.defeated) {
-        for (const [index, item] of placed.entries()) {
+        for (let index = 0; index < placed.length; index += 1) {
+          const item = placed[index];
           if (item.hero.state !== "running") continue;
           if (!shotDue(lastShotRef.current.get(item.hero.tabId), now, index)) continue;
           lastShotRef.current.set(item.hero.tabId, now);
           boltsRef.current.push({ id: item.hero.tabId + ":" + Math.round(now), from: { x: item.x, y: beamY(item.level, item.x) - item.lift - 22 }, at: now, color: ROLE_COLOR[item.hero.role] });
         }
       }
-      const flying: Array<{ x: number; y: number; color: string }> = [];
-      boltsRef.current = boltsRef.current.filter((bolt) => {
+      flying.length = 0;
+      let kept = 0;
+      for (const bolt of boltsRef.current) {
         const progress = (now - bolt.at) / BOLT_MS;
-        if (progress >= 1) { hitUntilRef.current = now + 160; return false; }
+        if (progress >= 1) { hitUntilRef.current = now + 160; continue; }
         flying.push({ ...boltAt(bolt.from, target, progress), color: bolt.color });
-        return true;
-      });
+        boltsRef.current[kept] = bolt;
+        kept += 1;
+      }
+      boltsRef.current.length = kept;
       const loreLine = loreLines[Math.floor(now / 7000) % loreLines.length];
       // Carregadores que sumiram (terminal fechado) não deixam o bloco preso no caminho.
       for (const [taskId, tabId] of carrying) if (!heroes.some((hero) => hero.tabId === tabId)) carrying.delete(taskId);
       const tower = deriveTower({ scene, trophy, carrying: new Set(carrying.keys()), deliveries });
       drawArcade(context, {
         scene,
+        slots,
         title: mission.title,
         labels: {
           arcade: t("botPanel.live.arcadeTitle"),
@@ -303,33 +348,13 @@ export function LiveArcade({
       });
       frame += 1;
     };
-    const tick = (ts: number) => {
-      raf = requestAnimationFrame(tick);
-      if (last !== null && ts - last < FRAME_MS) return;
-      const dt = last === null ? 0 : Math.min(ts - last, 250);
-      last = ts;
-      draw(dt, ts);
-    };
-    const stop = () => {
-      if (raf !== undefined) cancelAnimationFrame(raf);
-      raf = undefined;
-    };
-    const start = () => {
-      stop();
-      if (document.visibilityState !== "visible") return;
-      last = null;
-      draw(0, performance.now());
-      // Parado para quem prefere menos movimento; sem heróis também não há o que animar.
-      if (!reducedMotion && heroes.length > 0) raf = requestAnimationFrame(tick);
-    };
+    drawRef.current = draw;
     const observer = new ResizeObserver(() => { if (document.visibilityState === "visible") draw(0, performance.now()); });
     observer.observe(canvas);
-    document.addEventListener("visibilitychange", start);
-    start();
+    if (document.visibilityState === "visible") draw(0, performance.now());
     return () => {
-      stop();
       observer.disconnect();
-      document.removeEventListener("visibilitychange", start);
+      drawRef.current = () => undefined;
     };
   }, [scene, heroes, mission.title, reducedMotion, t, barrels, trophy, deliveries, boss, loreLines]);
 
@@ -347,7 +372,39 @@ export function LiveArcade({
     : null;
   // Fonte unificada (Etapa 14): a mesma da lista e de `ags mission efficiency`; sem dado, cinza.
   const baseActiveMs = timings?.active.ms ?? (mission.activeSeconds === null ? null : mission.activeSeconds * 1000);
-  const activeMs = useLiveActiveMs(baseActiveMs, mission.status === "running", heroes.some((hero) => hero.state === "running"));
+  const { activeMs, tick: tickActive } = useLiveActiveMs(baseActiveMs);
+  const animate = !reducedMotion && heroes.length > 0;
+  useArcadeLoop(canvasRef, (dt, now) => {
+    const c = clock.current;
+    if (mission.status === "running") {
+      c.active += dt;
+      while (c.active >= ACTIVE_MS) {
+        c.active -= ACTIVE_MS;
+        tickActive(heroes.some((hero) => hero.state === "running"));
+      }
+    } else {
+      c.active = 0;
+    }
+    c.tabs += dt;
+    const tabsMs = reducedMotion ? TABS_REDUCED_MS : TABS_MS;
+    if (c.tabs >= tabsMs) {
+      c.tabs %= tabsMs;
+      refreshTabs();
+    }
+    c.memory += dt;
+    if (c.memory >= MEMORY_MS) {
+      c.memory %= MEMORY_MS;
+      readPending();
+    }
+    if (animate) {
+      c.draw += dt;
+      if (c.draw >= FRAME_MS) {
+        const elapsed = c.draw;
+        c.draw = 0;
+        drawRef.current(elapsed, now);
+      }
+    }
+  }, refreshTabs);
   const activeSource = timings?.active.source ?? mission.activeSource ?? null;
   const activeValue = formatActive(activeMs);
   const activeKey = activeSourceKey(activeSource);

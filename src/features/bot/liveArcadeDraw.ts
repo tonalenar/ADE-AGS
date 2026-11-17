@@ -1,6 +1,6 @@
 import type { AgentKind, ArcadeBarrel, ArcadeBoss, ArcadeHero, ArcadeScene, ArcadeStageId, ArcadeTower, ArcadeTrophy, HeroRole } from "./liveArcadeModel";
-import type { PlacedBarrel } from "./liveArcadeScene";
-import { ARCADE_H, ARCADE_W, BEAM_LEFT, BEAM_RIGHT, LEVEL_BASE_Y, TOWER_LEFT, TOWER_WIDTH, beamY, ladderX, levelOfStage, taskSlots } from "./liveArcadeScene";
+import type { PlacedBarrel, SceneSlot } from "./liveArcadeScene";
+import { ARCADE_H, ARCADE_W, BEAM_LEFT, BEAM_RIGHT, LEVEL_BASE_Y, TOWER_LEFT, TOWER_WIDTH, beamY, ladderX, levelOfStage } from "./liveArcadeScene";
 
 const DIM = "#77799b";
 const FONT = (px: number) => `${px}px "Press Start 2P", monospace`;
@@ -220,13 +220,13 @@ export interface DrawLabels {
   status: (status: string) => string;
 }
 export interface DrawInput {
-  scene: ArcadeScene; title: string; labels: DrawLabels;
+  scene: ArcadeScene; slots: Map<string, SceneSlot>; title: string; labels: DrawLabels;
   boss: DrawBoss; bolts: Array<{ x: number; y: number; color: string }>;
   heroes: Placed[]; barrels: Array<PlacedBarrel<ArcadeBarrel>>; trophy: ArcadeTrophy; tower: ArcadeTower; frame: number;
 }
 
 export function drawArcade(ctx: CanvasRenderingContext2D, input: DrawInput) {
-  const { scene, labels, frame } = input;
+  const { scene, slots, labels, frame } = input;
   ctx.clearRect(0, 0, ARCADE_W, ARCADE_H);
   ctx.fillStyle = "#100d24";
   ctx.fillRect(0, 0, ARCADE_W, ARCADE_H);
@@ -245,7 +245,6 @@ export function drawArcade(ctx: CanvasRenderingContext2D, input: DrawInput) {
   ctx.fillStyle = "#ffbc62";
   ctx.fillText(input.boss.lore, 24, 72, 640);
 
-  const slots = taskSlots(scene);
   for (let lower = 0; lower < 5; lower += 1) drawLadder(ctx, ladderX(lower), lower, lower === 0 ? "#6c5a8c" : "#8a77ad");
   for (const stage of STAGE_ORDER) {
     const level = levelOfStage(stage);
@@ -317,8 +316,8 @@ export function drawArcade(ctx: CanvasRenderingContext2D, input: DrawInput) {
 
   ctx.fillStyle = "#9799b9";
   ctx.fillText(labels.team, 18, ARCADE_H - 10);
-  // Mais ao fundo primeiro: quem sobe (nível alto) fica atrás de quem está no chão.
-  for (const placed of [...input.heroes].sort((a, b) => b.level - a.level)) {
+  // Mais ao fundo primeiro: quem sobe (nível alto) fica atrás de quem está no chão. Ordena no lugar: o vetor é do chamador e é reaproveitado.
+  for (const placed of input.heroes.sort((a, b) => b.level - a.level)) {
     const y = beamY(placed.level, placed.x) - placed.lift;
     drawHero(ctx, placed.hero, placed.x, y, placed.pose, placed.hero.name, placed.carrying, frame);
   }
