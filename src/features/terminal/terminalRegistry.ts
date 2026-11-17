@@ -1,7 +1,7 @@
 import type { Terminal } from "@xterm/xterm";
 
 import { useTabsStore } from "@/features/tabs/store";
-import { ptyWrite } from "@/features/terminal/ipc";
+import { ptyWrite, ptyWriteComposto } from "@/features/terminal/ipc";
 
 import { markInput } from "./activity";
 import { requestPtyLaunch } from "./ptyLaunch";
@@ -338,12 +338,20 @@ export function sendPasteToPty(
   if (id == null) return Promise.reject(new Error("a aba não tem terminal vivo"));
   markInput(tabId);
   if (submit) lastPaste.set(tabId, { text, at: Date.now() });
-  const colada = ptyWrite(id, pasteEnvelope(text, term.modes.bracketedPasteMode));
-  if (!submit) return colada;
-  scheduleSubmitRetries(tabId, term, text, onRetry);
-  return colada
-    .then(() => new Promise<void>((resolve) => window.setTimeout(resolve, ENTER_PAUSE_MS)))
-    .then(() => ptyWrite(id, "\r"));
+  const colada = pasteEnvelope(text, term.modes.bracketedPasteMode);
+  if (!submit) return ptyWrite(id, colada);
+  // A colagem, a pausa e o Enter vão como um pedido só: entram juntos, ou nenhum entra (A074). A pausa roda na thread de
+  // escrita, e a promessa só resolve quando o Enter é aceito.
+  const envio = ptyWriteComposto(id, [
+    { tipo: "texto", dados: colada },
+    { tipo: "pausa", ms: ENTER_PAUSE_MS },
+    { tipo: "texto", dados: "\r" },
+  ]);
+  // Os retries também pela fila do PTY, e não por `term.input`, para não misturar os dois canais de entrada.
+  scheduleSubmitRetries(tabId, term, text, onRetry, () => {
+    ptyWrite(id, "\r").catch(() => undefined);
+  });
+  return envio;
 }
 
 /**
@@ -352,13 +360,19 @@ export function sendPasteToPty(
  * entero en la caja, con el cursor al final (`typedTextPending`). Si todavía dice "starting agent…", también se
  * tragan el Enter.
  */
-function scheduleSubmitRetries(tabId: string, term: Terminal, text: string, onRetry?: (at: number) => void): void {
+function scheduleSubmitRetries(
+  tabId: string,
+  term: Terminal,
+  text: string,
+  onRetry: ((at: number) => void) | undefined,
+  enviarEnter: () => void,
+): void {
   SUBMIT_RETRY_MS.forEach((delay) =>
     setTimeout(() => {
       if (terminals.get(tabId) !== term) return;
       const screen = screenOf(tabId, null, 12);
       if ((screen && pasteStillPending(screen.lines)) || typedTextPending(beforeCursor(term), text)) {
-        term.input("\r");
+        enviarEnter();
         onRetry?.(Date.now());
       }
     }, delay),
@@ -378,7 +392,7 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRet
   // pegado cuando llega, y lo toman como parte de él en vez de como "enviar".
   if (submit) {
     setTimeout(() => term.input("\r"), ENTER_PAUSE_MS);
-    scheduleSubmitRetries(tabId, term, text, onRetry);
+    scheduleSubmitRetries(tabId, term, text, onRetry, () => term.input("\r"));
   }
   return true;
 }
