@@ -145,3 +145,19 @@ impl CreationState {
     pub fn generation(&self) -> u64 { self.generation }
     pub fn accepts_callback(&self, generation: u64) -> bool { !self.cancelled && self.generation == generation }
 }
+
+/// O estado de visibilidade de uma vista: quadros seguidos sem recorte, e se ela está escondida agora.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ClipState {
+    pub empty_count: u8,
+    pub hidden: bool,
+}
+
+/// A mudança de visibilidade que um `place` pede: `Some(true)` esconde, `Some(false)` mostra, `None` não muda nada.
+/// Só a transição importa: quem chama (NSView, janela do Windows) mexe na vista apenas quando há mudança. Vale para
+/// as duas plataformas, com a mesma histerese de `empty_clip_visibility`.
+pub(super) fn visibility_change(state: &mut ClipState, empty: bool, explicitly_hidden: bool) -> Option<bool> {
+    let before = state.hidden;
+    let hidden = empty_clip_visibility(&mut state.empty_count, &mut state.hidden, empty, explicitly_hidden);
+    (hidden != before).then_some(hidden)
+}

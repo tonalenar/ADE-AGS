@@ -1,7 +1,7 @@
 //! Testes da superfície nativa do navegador (o Portal): o contrato do `Place` que chega do front e a lógica pura
 //! que decide o que mudou, o que a máscara desenha e quando a vista é escondida.
 
-use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, outline, rounded_parts, CreationState, PathStep, PlaceChanges, PlaceState};
+use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, outline, rounded_parts, visibility_change, ClipState, CreationState, PathStep, PlaceChanges, PlaceState};
 use super::{Place, Rect};
 use serde_json::json;
 
@@ -114,4 +114,17 @@ fn timeout_nao_desfaz_criacao_ja_pronta() {
     assert!(creation.mark_ready(3));
     assert!(!creation.cancel_if_pending(3));
     assert!(creation.accepts_callback(3));
+}
+
+#[test]
+fn visibilidade_so_muda_na_transicao() {
+    // A mesma regra vale no macOS (setHidden) e no Windows (ShowWindow): só a transição pede uma mudança na vista.
+    let mut state = ClipState::default();
+    assert_eq!(visibility_change(&mut state, false, false), None);
+    assert_eq!(visibility_change(&mut state, true, false), None, "um quadro vazio não esconde");
+    assert_eq!(visibility_change(&mut state, true, false), Some(true), "o segundo quadro vazio esconde");
+    assert_eq!(visibility_change(&mut state, true, false), None, "já escondida: nada a fazer");
+    assert_eq!(visibility_change(&mut state, false, false), Some(false), "volta a ter recorte: mostra");
+    assert_eq!(visibility_change(&mut state, false, true), Some(true), "desmontagem: esconde na hora");
+    assert_eq!(visibility_change(&mut state, false, true), None);
 }

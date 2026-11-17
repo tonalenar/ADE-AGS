@@ -29,7 +29,7 @@ use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 use tokio::sync::oneshot;
 
-use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, outline, rounded_parts, CreationState, PathStep, PlaceState, RoundedPart};
+use super::surface::{diff_place, effective_zoom, visibility_change, ClipState, keeps_pumping, outline, rounded_parts, CreationState, PathStep, PlaceState, RoundedPart};
 use super::{emit, on_binding};
 
 const CEF_FRAMEWORK_BUNDLE: &str = "Chromium Embedded Framework.framework";
@@ -140,9 +140,8 @@ struct Portal {
     ready: Option<oneshot::Sender<()>>,
     /// O último `place` recebido: o que já foi aplicado à vista e ao navegador, para não refazer o que não mudou.
     last_place: Option<PlaceState>,
-    /// Quadros seguidos sem recorte à vista, e se a vista está escondida (ver `empty_clip_visibility`).
-    empty_clips: u8,
-    hidden: bool,
+    /// Visibilidade da vista: quadros seguidos sem recorte, e se ela está escondida (ver `visibility_change`).
+    clip: ClipState,
     /// A criação deste Portal: um timeout a cancela enquanto ela não ficou pronta.
     creation: CreationState,
 }
@@ -656,7 +655,7 @@ fn prepare_popup(opener: &str, url: &str) -> Option<(String, Retained<ADEPortalH
     PORTALS.with(|portals| {
         portals.borrow_mut().insert(popup.clone(), Portal {
             host_view: host.clone(), browser: None, _observer: None, _registration: None,
-            pending: Arc::new(Mutex::new(HashMap::new())), ready: None, last_place: None, empty_clips: 0, hidden: true, creation: CreationState::new(generation),
+            pending: Arc::new(Mutex::new(HashMap::new())), ready: None, last_place: None, clip: ClipState { empty_count: 0, hidden: true }, creation: CreationState::new(generation),
         });
     });
     Some((popup, host, app, generation))
@@ -891,7 +890,7 @@ fn create_on_main(app: &AppHandle, parent: *mut AnyObject, id: &str, profile: Pa
     let generation = NEXT_PORTAL_GENERATION.fetch_add(1, Ordering::SeqCst);
     PORTAL_APPS.with(|apps| { apps.borrow_mut().insert(id.to_string(), app.clone()); });
     PORTALS.with(|portals| {
-        portals.borrow_mut().insert(id.to_string(), Portal { host_view: host.clone(), browser: None, _observer: None, _registration: None, pending: pending.clone(), ready: Some(ready), last_place: None, empty_clips: 0, hidden: false, creation: CreationState::new(generation) });
+        portals.borrow_mut().insert(id.to_string(), Portal { host_view: host.clone(), browser: None, _observer: None, _registration: None, pending: pending.clone(), ready: Some(ready), last_place: None, clip: ClipState::default(), creation: CreationState::new(generation) });
     });
 
     let mut client = ADEClient::new(id.to_string(), app.clone(), generation);
@@ -971,9 +970,7 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
                 }
                 // Só a transição de escondido para visível (ou o contrário) mexe na vista: um recorte vazio de um
                 // quadro não a esconde, e a desmontagem (`visible: false`) esconde na hora.
-                let was_hidden = portal.hidden;
-                let hidden = empty_clip_visibility(&mut portal.empty_clips, &mut portal.hidden, parts.is_empty(), !visible);
-                if hidden != was_hidden {
+                if let Some(hidden) = visibility_change(&mut portal.clip, parts.is_empty(), !visible) {
                     portal.host_view.setHidden(hidden);
                 }
                 *portal.host_view.ivars().parts.borrow_mut() = parts.iter().map(|[l, t, r, b]| [*l as f64, *t as f64, *r as f64, *b as f64]).collect();

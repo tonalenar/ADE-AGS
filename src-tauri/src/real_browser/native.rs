@@ -8,7 +8,7 @@
 //!
 //! Tudo o que toca o WebView2 roda na thread da interface (`run_on_main_thread`), onde ficam os Portais.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,10 +31,11 @@ use windows::core::{BOOL, HSTRING, PWSTR};
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, RGN_AND, RGN_OR};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, SetWindowPos, HWND_TOP, SWP_NOACTIVATE, WINDOW_EX_STYLE, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
-    WS_VISIBLE,
+    CreateWindowExW, DestroyWindow, SetWindowPos, ShowWindow, HWND_TOP, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, WINDOW_EX_STYLE,
+    WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_VISIBLE,
 };
 
+use super::surface::{visibility_change, ClipState};
 use super::{emit, on_binding};
 
 /// Um Portal aberto: a janela filha que o recorta e o WebView2 dentro dela.
@@ -42,6 +43,9 @@ struct Portal {
     host: HWND,
     controller: ICoreWebView2Controller,
     core: ICoreWebView2,
+    /// Visibilidade da janela: a mesma histerese do macOS (`visibility_change`), para um recorte vazio de um quadro
+    /// não esconder a página.
+    clip: Cell<ClipState>,
 }
 
 struct PendingPortal {
@@ -204,7 +208,7 @@ pub async fn create(app: &AppHandle, parent: isize, id: &str, profile: std::path
                         controller.SetIsVisible(true)?;
                     }
                     watch(&core, &app2, &callback_id);
-                    PORTALS.with(|p| p.borrow_mut().insert(callback_id.clone(), Portal { host, controller, core }));
+                    PORTALS.with(|p| p.borrow_mut().insert(callback_id.clone(), Portal { host, controller, core, clip: Cell::new(ClipState::default()) }));
                     Ok(())
                 })();
                 if made.is_err() {
@@ -385,13 +389,24 @@ pub async fn add_script(app: &AppHandle, id: &str, source: String) -> Result<(),
 
 /// Onde a janela do Portal fica (px físicos, relativos à janela do app), o zoom da página e o que dela aparece
 /// (retângulos em px físicos, relativos ao Portal; vazio = nada aparece, mas a página continua desenhando).
-pub fn place(app: &AppHandle, id: &str, bounds: [i32; 4], zoom: f64, parts: Vec<[i32; 4]>, corner_radius: f64, _click_to_expand: bool, _visible: bool) {
+pub fn place(app: &AppHandle, id: &str, bounds: [i32; 4], zoom: f64, parts: Vec<[i32; 4]>, corner_radius: f64, _click_to_expand: bool, visible: bool) {
     with_portal_now(app, id, move |portal| unsafe {
         let [x, y, w, h] = bounds;
         let _ = SetWindowPos(portal.host, Some(HWND_TOP), x, y, w.max(1), h.max(1), SWP_NOACTIVATE);
         let _ = portal.controller.SetBounds(RECT { left: 0, top: 0, right: w.max(1), bottom: h.max(1) });
         if zoom > 0.0 {
             let _ = portal.controller.SetZoomFactor(zoom);
+        }
+        // Mesma regra do macOS: só a transição mexe na janela. Um quadro sem recorte não esconde; `visible: false` esconde na hora.
+        let mut clip = portal.clip.get();
+        let change = visibility_change(&mut clip, parts.is_empty(), !visible);
+        portal.clip.set(clip);
+        if let Some(hidden) = change {
+            let _ = ShowWindow(portal.host, if hidden { SW_HIDE } else { SW_SHOWNOACTIVATE });
+        }
+        // Sem recorte, a região fica como estava: a página segue na última forma até a janela esconder.
+        if parts.is_empty() {
+            return;
         }
         let region = CreateRectRgn(0, 0, 0, 0);
         for [x1, y1, x2, y2] in parts {
