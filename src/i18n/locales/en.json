@@ -849,6 +849,7 @@
   "marketplace.add.phase.saving": "Saving…",
   "marketplace.add.phase.done": "Done",
   "marketplace.add.phase.error": "Could not resolve the repository",
+  "marketplace.add.partialWarning": "Some skills could not be loaded: {{detail}}",
   "settings.prelaunch": "Pre-launch",
   "settings.prelaunch.desc": "Commands that run before an agent starts, to put it in the right environment.",
   "settings.prelaunch.hint": "These are just saved here. Which ones to use, and in what order, is chosen per tab under Advanced options.",

@@ -849,6 +849,7 @@
   "marketplace.add.phase.saving": "Salvando…",
   "marketplace.add.phase.done": "Concluído",
   "marketplace.add.phase.error": "Não foi possível resolver o repositório",
+  "marketplace.add.partialWarning": "Algumas habilidades não foram carregadas: {{detail}}",
   "settings.prelaunch": "Pré-lançamento",
   "settings.prelaunch.desc": "Comandos executados antes de um agente ser iniciado, para colocá-lo no ambiente certo.",
   "settings.prelaunch.hint": "Estes são salvos aqui. Quais usar e em que ordem são escolhidos por guia em Opções avançadas.",

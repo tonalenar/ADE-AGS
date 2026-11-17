@@ -189,7 +189,7 @@ pub(super) async fn fetch_github_registry(
     registry_name: &str,
     location: &str,
     progress: &ProgressReporter,
-) -> Result<Vec<MarketplaceSkillEntry>, String> {
+) -> Result<(Vec<MarketplaceSkillEntry>, Option<String>), String> {
     let (owner, repo, branch_opt, subpath) = parse_github_location(location)?;
     let client = gh_client()?;
 
@@ -256,7 +256,7 @@ pub(super) async fn fetch_github_registry(
                 installs: None,
             });
         }
-        return Ok(out);
+        return Ok((out, None));
     }
 
     // Sin manifest: cada SKILL.md del árbol (bajo el subpath, si hay uno) define una
@@ -303,10 +303,8 @@ pub(super) async fn fetch_github_registry(
             Err(e) => errors.push(format!("{skill_md}: {e}")),
         }
     }
-    if let Some(aviso) = skill_scan_errors(out.len(), &errors)? {
-        progress.emit("error", out.len() as u32, Some(total), Some(aviso));
-    }
-    Ok(out)
+    let warning = skill_scan_errors(out.len(), &errors)?;
+    Ok((out, warning))
 }
 
 /// Descarga todos los archivos de una skill remota a una carpeta temporal (preservando

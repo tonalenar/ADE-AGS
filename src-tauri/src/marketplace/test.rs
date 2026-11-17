@@ -396,6 +396,22 @@ fn teto_http_e_falha_parcial_de_skill() {
 }
 
 #[test]
+fn aviso_de_falha_parcial_sobrevive_ao_resultado_final() {
+    let aviso = "2 skills lidas; falhas: b/SKILL.md: timeout";
+    assert_eq!(super::registries::summary_error(None, Some(aviso)), Some(aviso.to_string()));
+    let db = crate::database::test_db();
+    db.execute(
+        "INSERT INTO registries (id, name, source_type, location, priority, enabled, created_at) VALUES ('r1','repo','github','o/r',0,1,0)",
+        [],
+    ).unwrap();
+    super::registries::cache_success(&db, "r1", &[], Some(aviso), 42).unwrap();
+    let cached: String = db.query_row("SELECT cache_error FROM registries WHERE id='r1'", [], |row| row.get(0)).unwrap();
+    assert_eq!(cached, aviso);
+    let done = super::types::RegistryProgress::done("r1", 2, Some(aviso.to_string()));
+    assert_eq!((done.phase.as_str(), done.detail.as_deref()), ("done", Some(aviso)));
+}
+
+#[test]
 fn registry_local_recusa_path_absoluto_e_parent() {
     assert!(super::local::relative_skill_path_ok("skills/foo"));
     assert!(!super::local::relative_skill_path_ok("../fora"));

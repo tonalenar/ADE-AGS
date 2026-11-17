@@ -64,6 +64,18 @@ pub struct RegistryProgress {
     pub detail: Option<String>,
 }
 
+impl RegistryProgress {
+    pub(super) fn done(registry_id: &str, current: u32, detail: Option<String>) -> Self {
+        Self {
+            registry_id: registry_id.to_string(),
+            phase: "done".to_string(),
+            current,
+            total: Some(current),
+            detail,
+        }
+    }
+}
+
 /// Emisor de progreso atado a un registry. Se pasa por las funciones de resolución para
 /// que no tengan que conocer ni el nombre del evento ni el `AppHandle`.
 pub(super) struct ProgressReporter {
@@ -95,6 +107,14 @@ impl ProgressReporter {
     /// Fase sin porcentaje posible todavía (resolver la branch, pedir el árbol del repo).
     pub(super) fn phase(&self, phase: &str) {
         self.emit(phase, 0, None, None);
+    }
+
+    pub(super) fn done(&self, current: u32, detail: Option<String>) {
+        use tauri::Emitter;
+        let _ = self.app.emit(
+            "cc-registry-progress",
+            RegistryProgress::done(&self.registry_id, current, detail),
+        );
     }
 }
 
