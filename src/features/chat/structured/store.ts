@@ -73,6 +73,16 @@ export function reloadThreads(): Promise<void> {
   return chatThreads().then((threads) => useStructured.setState({ threads })).catch(() => undefined);
 }
 
+/** Remove do estado local uma conversa lateral excluída no backend e os avisos dos seus pedidos. */
+export function removeDeletedSideChat(id: string): void {
+  useStructured.setState((state) => ({
+    threads: state.threads.filter((row) => row.id !== id),
+    live: Object.fromEntries(Object.entries(state.live).filter(([threadId]) => threadId !== id)),
+    hydrated: Object.fromEntries(Object.entries(state.hydrated).filter(([threadId]) => threadId !== id)),
+    answerErrors: forgetGoneAnswerErrors(state.live[id] ?? EMPTY_LIVE, EMPTY_LIVE, state.answerErrors),
+  }));
+}
+
 type DeltaEvent = Extract<ThreadEvent, { type: "delta" }>;
 
 /** Agenda no próximo quadro (fora da janela, num tique curto). */
@@ -138,16 +148,18 @@ export function startStructured(): void {
 }
 
 /** Lê do banco a timeline e os pendentes de uma conversa (uma vez). */
-export function hydrateThread(id: string): void {
-  if (useStructured.getState().hydrated[id]) return;
+export function hydrateThread(id: string): Promise<void> {
+  if (useStructured.getState().hydrated[id]) return Promise.resolve();
   useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: true } }));
-  void Promise.all([chatThreadItems(id), chatThreadRequests(id), chatThreadStatus(id), chatThreadGoalGet(id), chatThreadProviderConfig(id)])
+  const requestsReadAt = Date.now();
+  return Promise.all([chatThreadItems(id), chatThreadRequests(id), chatThreadStatus(id), chatThreadGoalGet(id), chatThreadProviderConfig(id)])
     .then(([items, requests, status, goal, providerConfig]) => {
       patchLive(id, (live) => ({
         ...live,
         // O que chegou por evento enquanto lia fica (é mais novo).
         items: [...items.filter((i) => !live.items.some((x) => x.id === i.id)), ...live.items],
-        requests: requests.length > 0 ? requests : live.requests,
+        // Uma caixa vazia confirma a resolução dos pedidos anteriores à leitura; eventos mais novos ainda prevalecem.
+        requests: requests.length > 0 ? requests : live.requests.filter((request) => request.createdAt > requestsReadAt),
         phase: status.working ? "working" : live.phase,
         providerConfig: providerConfig ?? live.providerConfig,
       }));
