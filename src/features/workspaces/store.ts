@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import i18n from "i18next";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { useTabsStore } from "@/features/tabs/store";
 import { useSkillsStore } from "@/features/skills/store";
@@ -82,7 +83,12 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
     // Best-effort: no bloquea la apertura del workspace si el check falla.
     useSkillsStore.getState().checkHealth(id).then((issues) => {
       if (issues.length > 0) {
-        AlertaToast("Skills", `${issues.length} skill symlink(s) need attention`, "warning", 6000);
+        AlertaToast(
+          i18n.t("workspaces.skillsHealthTitle"),
+          i18n.t("workspaces.skillsHealth", { count: issues.length }),
+          "warning",
+          6000,
+        );
       }
     }).catch(() => {});
   },

@@ -22,7 +22,7 @@ function formatRelative(unixSeconds: number, t: (key: string, opts?: Record<stri
     value = Math.floor(value / size);
     unit = label;
   }
-  return t("home.recent.lastActive", { time: `${value}${unit}` });
+  return t("home.recent.lastActive", { time: t(`time.compact.${unit}`, { n: value }) });
 }
 
 export function WorkspacesPage() {
