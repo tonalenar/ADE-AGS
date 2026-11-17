@@ -30,7 +30,7 @@ pub fn thread_env(thread_id: &str) -> Vec<(String, OsString)> {
 /// `sim act` e o computer use por esta conversa (`terminal::authorize_actor`).
 pub fn register_process(thread_id: &str, pid: Option<u32>) {
     if let Some(pid) = pid {
-        crate::terminal::register_conversation(&format!("{THREAD_PREFIX}{thread_id}"), pid);
+        let _ = crate::terminal::register_conversation(&format!("{THREAD_PREFIX}{thread_id}"), pid);
     }
 }
 

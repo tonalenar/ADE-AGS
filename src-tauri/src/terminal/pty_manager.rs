@@ -1233,7 +1233,7 @@ pub async fn pty_create(
         if let (Some(tab), Some(token), Some(pid)) =
             (tab_id.as_deref(), session_token.as_deref(), root_pid)
         {
-            super::publish_token(tab, token, pid);
+            super::publish_token(tab, token, pid)?;
         }
         reg.insert(
             id,
