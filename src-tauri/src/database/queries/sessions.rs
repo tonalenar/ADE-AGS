@@ -447,15 +447,30 @@ pub(crate) fn dedupe_session_history_once(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
+fn same_session() -> &'static str {
+    "h2.workspace_id = session_history.workspace_id
+                          AND h2.agent_id = session_history.agent_id
+                          AND h2.cwd = session_history.cwd
+                          AND COALESCE(h2.session_id, '') = COALESCE(session_history.session_id, '')"
+}
+
 pub(crate) fn dedupe_session_history(conn: &Connection) -> SqlResult<()> {
     // El opened_at se normaliza ANTES de borrar: después ya no habría de dónde sacarlo.
     conn.execute(
-        "UPDATE session_history SET
-           opened_at = (SELECT MIN(h2.opened_at) FROM session_history h2
-                        WHERE h2.workspace_id = session_history.workspace_id
-                          AND h2.agent_id = session_history.agent_id
-                          AND h2.cwd = session_history.cwd
-                          AND COALESCE(h2.session_id, '') = COALESCE(session_history.session_id, ''))",
+        &format!(
+            "UPDATE session_history SET
+           opened_at = (SELECT MIN(h2.opened_at) FROM session_history h2 WHERE {same}),
+           pinned = (SELECT MAX(COALESCE(h2.pinned, 0)) FROM session_history h2 WHERE {same}),
+           hidden = (SELECT MIN(COALESCE(h2.hidden, 0)) FROM session_history h2 WHERE {same}),
+           custom_title = COALESCE(NULLIF(custom_title, ''),
+             (SELECT h2.custom_title FROM session_history h2 WHERE {same} AND h2.custom_title IS NOT NULL AND h2.custom_title != '' ORDER BY h2.closed_at DESC LIMIT 1)),
+           account_id = COALESCE(account_id,
+             (SELECT h2.account_id FROM session_history h2 WHERE {same} AND h2.account_id IS NOT NULL AND h2.account_id != '' ORDER BY h2.closed_at DESC LIMIT 1)),
+           skills = CASE WHEN skills IS NULL OR skills IN ('', '[]') THEN
+             (SELECT h2.skills FROM session_history h2 WHERE {same} ORDER BY length(h2.skills) DESC LIMIT 1)
+             ELSE skills END",
+            same = same_session()
+        ),
         [],
     )?;
 
