@@ -361,7 +361,7 @@ function TerminalImpl({
     const attachListeners = async (ptyId: number, withReplay = false) => {
       const replay = withReplay ? createPtyReplay((data) => term.write(data)) : null;
       // ── 3. Escuchar stdout del PTY ──────────────────────
-      unlistenData = await listen<{ data: string; end?: number }>(
+      const soltarData = await listen<{ data: string; end?: number }>(
         `pty-data-${ptyId}`,
         (event) => {
           if (replay) replay.push(event.payload);
@@ -369,9 +369,15 @@ function TerminalImpl({
           markOutput(tabId, agentId);
         }
       );
+      // A aba pode ter fechado enquanto o listen registrava: o cleanup já passou e não veria este listener.
+      if (cancelled) {
+        soltarData();
+        return;
+      }
+      unlistenData = soltarData;
 
       // ── 4. Escuchar salida del proceso ──────────────────
-      unlistenExit = await listen<{ code: number }>(
+      const soltarExit = await listen<{ code: number }>(
         `pty-exit-${ptyId}`,
         (event) => {
           setStatus("exited");
@@ -381,6 +387,11 @@ function TerminalImpl({
           onExit?.(event.payload.code);
         }
       );
+      if (cancelled) {
+        soltarExit();
+        return;
+      }
+      unlistenExit = soltarExit;
       if (replay) {
         try {
           replay.ready(await ptySnapshot(ptyId));

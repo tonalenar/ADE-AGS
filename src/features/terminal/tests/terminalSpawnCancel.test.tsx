@@ -11,6 +11,11 @@ const mocks = vi.hoisted(() => {
   const estado = {
     liberarCriacao: null as ((id: number) => void) | null,
     escutas: [] as string[],
+    /** Nomes dos listeners que foram soltos (a função devolvida por `listen` foi chamada). */
+    soltos: [] as string[],
+    /** Quando true, o `listen` só responde depois que o teste chama `resolverListen`. */
+    segurarListen: false,
+    resolverListen: null as (() => void) | null,
   };
   return {
     estado,
@@ -27,9 +32,15 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: async (nome: string) => {
+  listen: (nome: string) => {
     mocks.estado.escutas.push(nome);
-    return () => {};
+    const soltar = () => {
+      mocks.estado.soltos.push(nome);
+    };
+    if (!mocks.estado.segurarListen) return Promise.resolve(soltar);
+    return new Promise<() => void>((resolve) => {
+      mocks.estado.resolverListen = () => resolve(soltar);
+    });
   },
 }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: async () => {} }));
@@ -132,7 +143,10 @@ describe("spawn do terminal", () => {
   beforeEach(() => {
     mocks.invoke.mockClear();
     mocks.estado.escutas.length = 0;
+    mocks.estado.soltos.length = 0;
     mocks.estado.liberarCriacao = null;
+    mocks.estado.segurarListen = false;
+    mocks.estado.resolverListen = null;
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -157,6 +171,28 @@ describe("spawn do terminal", () => {
     // O PTY que nasceu depois do fechamento é morto, e nenhum listener dele fica registrado.
     expect(chamadas("pty_kill")).toEqual([["pty_kill", { id: 7 }]]);
     expect(escutasDePty()).toEqual([]);
+  });
+
+  it("fechar_durante_o_listen_solta_o_listener", async () => {
+    // O PTY nasce normalmente, mas o registro do listener de saída fica pendente.
+    mocks.estado.segurarListen = true;
+    act(() => {
+      root.render(<Terminal tabId="aba" cwd="/tmp" command="claude" isVisible isActive />);
+    });
+    await descarregar();
+    mocks.estado.liberarCriacao?.(9);
+    await descarregar();
+    expect(mocks.estado.resolverListen).not.toBeNull();
+
+    // A aba fecha enquanto o `listen` ainda não respondeu: o cleanup já passou e não viu o listener.
+    act(() => root.unmount());
+    mocks.estado.resolverListen?.();
+    await descarregar();
+
+    // O listener que chegou depois do fechamento é solto na hora, e nenhum outro é registrado.
+    expect(mocks.estado.soltos).toEqual(["pty-data-9"]);
+    expect(escutasDePty()).toEqual(["pty-data-9"]);
+    expect(chamadas("pty_kill")).toEqual([["pty_kill", { id: 9 }]]);
   });
 
   it("spawn_sem_fechar_segue_e_escuta_a_saida", async () => {
