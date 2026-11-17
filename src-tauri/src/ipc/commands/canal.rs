@@ -425,7 +425,9 @@ pub(super) fn peer_answer(app: &AppHandle, args: &Value) -> Result<Value, String
     }
     if args.get("enter").and_then(Value::as_bool).unwrap_or(false) && keys != "\r" {
         // Teclas, pausa e Enter como um pedido só: a pausa roda na thread de escrita, fora do IPC, e o Enter não fica
-        // para trás se a fila encher no meio (achado 3).
+        // para trás se a fila encher no meio (achado 3). A pausa de 150 ms é por desenho: a TUI precisa de tempo para
+        // tratar as teclas antes do Enter. Por isso a digitação desta sessão espera essa pausa, já que a fila é uma só
+        // por terminal.
         crate::terminal::write_passos_to_pty(
             pty,
             vec![

@@ -457,3 +457,25 @@ mod launch {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
+/// Um filho lançado pelo app não herda a disposição de `SIGINT` de quem o lançou. Se o processo que lança ignora
+/// `SIGINT`, o filho precisa morrer com ele mesmo assim, como qualquer programa. Sem isso, um `sleep` lançado por um
+/// job em segundo plano não respondia ao Ctrl+C, e a gravação de tela quebrava (ver `sinais_padrao_no_filho`).
+#[cfg(unix)]
+#[test]
+fn filho_lancado_pelo_app_morre_com_sigint_mesmo_com_o_pai_ignorando() {
+    use std::os::unix::process::ExitStatusExt;
+    // O processo de teste ignora SIGINT pelo tempo do teste. A disposição anterior volta ao final.
+    // SAFETY: `signal` com SIG_IGN, e a disposição anterior é guardada para restaurar.
+    let anterior = unsafe { libc::signal(libc::SIGINT, libc::SIG_IGN) };
+    let status = super::spawn::hidden_command("/bin/sh")
+        .args(["-c", "kill -INT $$; echo vivo"])
+        .stdout(std::process::Stdio::piped())
+        .output()
+        .map(|saida| (saida.status, String::from_utf8_lossy(&saida.stdout).into_owned()));
+    // SAFETY: restaura a disposição que estava antes do teste.
+    unsafe { libc::signal(libc::SIGINT, anterior) };
+    let (status, stdout) = status.expect("sh abre");
+    assert_eq!(status.signal(), Some(libc::SIGINT), "o filho ignorou SIGINT herdado: {stdout:?}");
+    assert!(!stdout.contains("vivo"));
+}

@@ -293,6 +293,12 @@ fn submit_line(pty_id: u32, text: &str) -> Result<(), String> {
     crate::terminal::write_line_to_pty(pty_id, text)
 }
 
+/// Erro de um envio cujo texto já entrou na caixa da TUI, mas cujo Enter não foi confirmado. O chamador precisa saber
+/// que o texto pode estar lá sem o Enter, e não tratar a mensagem como enviada.
+fn sem_enter(erro: String) -> String {
+    format!("O texto entrou na caixa da TUI, mas o Enter não foi confirmado: {erro}")
+}
+
 /// Os terminais do chat que este processo já entregou a um agente. A aba nova só chega ao banco depois do debounce
 /// da gravação; um `tab send` logo em seguida ainda a reconhece como shell.
 fn chat_shells() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
@@ -522,15 +528,17 @@ pub(super) fn submit_prompt_seen(pty_id: u32, text: &str, author: &str) -> Resul
         if text_on_screen(pty_id, text) {
             break;
         }
-        drop(envio);
-        envio = crate::terminal::write_reserved_to_pty(pty_id, text)?;
+        // O envio novo é reservado antes de o antigo sair: se não couber, o antigo continua reservado e o erro sai
+        // como não confirmado (o texto já está na caixa).
+        let novo = crate::terminal::write_reserved_to_pty(pty_id, text).map_err(sem_enter)?;
+        envio = novo;
         wait_until_quiet(pty_id, ECHO_QUIET, ECHO_MAX, false);
     }
     // O rodapé de trabalho só vale se apareceu DEPOIS do Enter: nos últimos KB da saída ainda estão os quadros do
     // spinner do turno anterior, e um Enter engolido logo depois de um turno curto era dado por enviado (achado
     // pelo replay, fixture `claude-ocioso`).
     let enter_at = crate::terminal::output_total(pty_id).unwrap_or(0);
-    envio.enter().map_err(|e| e.to_string())?;
+    envio.enter().map_err(|e| sem_enter(e.to_string()))?;
     // Um pegado grande vira "[Pasted Content 3904 chars]" e pode engolir o Enter: a mensagem
     // fica escrita e ninguém a recebe. O Hermes e o OpenCode não usam o marcador: o texto fica
     // inteiro na caixa (e, ainda "starting agent…", eles engolem o Enter). Enquanto a TUI não mostra

@@ -1047,6 +1047,70 @@ fn texto_aceito_leva_a_vaga_do_enter_reservada() {
     assert_eq!(escrito, esperado);
 }
 
+/// O envio composto que o front manda chega como passos na ordem certa, com a pausa em milissegundos.
+#[test]
+fn passos_do_front_viram_passos_da_fila_na_mesma_ordem() {
+    use super::pty_manager::{passos_do_front, PassoDeEscrita};
+    use super::write_queue::Passo;
+    use std::time::Duration;
+
+    let json = r#"[{"tipo":"texto","dados":"oi"},{"tipo":"pausa","ms":80},{"tipo":"texto","dados":"\r"}]"#;
+    let passos: Vec<PassoDeEscrita> = serde_json::from_str(json).expect("o formato do front é aceito");
+    let convertidos = passos_do_front(passos);
+    assert_eq!(
+        convertidos,
+        vec![Passo::Escreve(b"oi".to_vec()), Passo::Pausa(Duration::from_millis(80)), Passo::Escreve(b"\r".to_vec())]
+    );
+}
+
+/// Uma fila ociosa (a thread parada em `recv`) sai ao ser encerrada, sem esperar o limite inteiro.
+#[test]
+fn fila_ociosa_termina_ao_encerrar_sem_esperar_o_limite() {
+    use super::write_queue::WriteQueue;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    let (_portao_tx, portao_rx) = mpsc::channel();
+    let (escrito_tx, _escrito_rx) = mpsc::channel();
+    let saida = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let escritor = EscritorTravado { portao: portao_rx, escrito: escrito_tx, saida };
+    let mut fila = WriteQueue::new(Box::new(escritor), Box::new(|| {}), Box::new(|_| {})).unwrap();
+    let inicio = Instant::now();
+    assert!(fila.encerrar_e_esperar(Duration::from_secs(10)), "a thread ociosa não saiu");
+    // A espera não pode ter ido até o limite: sair ocioso é imediato. (Sem relógio de parede: só uma cota.)
+    assert!(inicio.elapsed() < Duration::from_secs(5), "esperou o limite inteiro");
+}
+
+/// Um envio reservado que sai sem o Enter fica registrado como não confirmado, e devolve a vaga à fila.
+#[test]
+fn envio_reservado_solto_sem_enter_fica_registrado_e_libera_a_vaga() {
+    use super::write_queue::WriteQueue;
+    use std::sync::{mpsc, Arc, Mutex};
+
+    let (portao_tx, portao_rx) = mpsc::channel();
+    let (escrito_tx, escrito_rx) = mpsc::channel();
+    let saida = Arc::new(Mutex::new(Vec::new()));
+    let escritor = EscritorTravado { portao: portao_rx, escrito: escrito_tx, saida: saida.clone() };
+    let fila = WriteQueue::new(Box::new(escritor), Box::new(|| {}), Box::new(|_| {})).unwrap();
+
+    // Reserva o texto e o Enter (2 vagas) e solta o envio sem mandar o Enter.
+    let envio = fila.reservar_envio(b"ls").expect("o texto e o Enter cabem");
+    drop(envio);
+    assert_eq!(fila.nao_confirmados(), 1, "o envio sem Enter precisa ficar registrado");
+
+    // As vagas voltaram: uma nova reserva inteira cabe, e o Enter dela é aceito.
+    let novo = fila.reservar_envio(b"x").expect("as vagas do envio solto voltaram");
+    assert_eq!(novo.enter(), Ok(()));
+    for _ in 0..3 {
+        portao_tx.send(()).unwrap();
+    }
+    for _ in 0..3 {
+        escrito_rx.recv().unwrap();
+    }
+    // O texto do envio solto saiu (sem Enter), e depois o texto e o Enter do envio novo.
+    assert_eq!(String::from_utf8(saida.lock().unwrap().clone()).unwrap(), "lsx\r");
+}
+
 /// Espera o descritor deixar de aceitar bytes (buffer cheio): sinal de que a escrita da fila já começou e está presa.
 #[cfg(unix)]
 fn fd_cheio(fd: std::os::fd::RawFd) -> bool {

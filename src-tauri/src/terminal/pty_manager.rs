@@ -1711,6 +1711,32 @@ pub fn write_passos_to_pty(id: u32, passos: Vec<Passo>) -> Result<(), String> {
     sessao.queue.enqueue_composto(passos).map_err(|e| e.to_string())
 }
 
+/// Um passo que o front manda num envio composto: texto para o processo, ou uma pausa.
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "tipo", rename_all = "lowercase")]
+pub enum PassoDeEscrita {
+    Texto { dados: String },
+    Pausa { ms: u64 },
+}
+
+/// Envia os passos (texto, pausa, texto) como um pedido só, pela fila do PTY: a colagem e o Enter entram juntos, ou
+/// nenhum dos dois entra (A074). A pausa roda na thread de escrita.
+#[tauri::command]
+pub async fn pty_write_composto(id: u32, passos: Vec<PassoDeEscrita>) -> Result<(), String> {
+    write_passos_to_pty(id, passos_do_front(passos))
+}
+
+/// Converte os passos do front nos passos da fila, na mesma ordem.
+pub(crate) fn passos_do_front(passos: Vec<PassoDeEscrita>) -> Vec<Passo> {
+    passos
+        .into_iter()
+        .map(|passo| match passo {
+            PassoDeEscrita::Texto { dados } => Passo::Escreve(dados.into_bytes()),
+            PassoDeEscrita::Pausa { ms } => Passo::Pausa(Duration::from_millis(ms)),
+        })
+        .collect()
+}
+
 /// Reserva o texto junto com a vaga do Enter: quem chama manda o Enter depois, com `enter`, e ele não é recusado por
 /// falta de espaço (achado 3, submit_prompt).
 pub fn write_reserved_to_pty(id: u32, text: &str) -> Result<EnvioReservado, String> {
@@ -1807,7 +1833,10 @@ fn stop_session(mut session: PtySession) -> Result<(), String> {
     let killed = session.killer.kill();
     // A escrita presa, se houver, volta com erro ao encerrar a fila. Esperar a thread sair garante que o mestre não é
     // solto enquanto ela ainda escreve.
-    session.queue.encerrar_e_esperar(KILL_WAIT);
+    // A thread de escrita sai antes de o mestre ser solto. Se não sair no prazo, o processo já foi morto: só registra.
+    if !session.queue.encerrar_e_esperar(KILL_WAIT) {
+        eprintln!("[ade-ags] a escrita do terminal não terminou ao encerrar; o processo já foi morto");
+    }
     // Se reclama el status para que el hijo no quede zombie, mas com prazo: um processo que
     // não sai não pode travar quem chamou (o "Atualizar" ficava parado em 8%).
     let deadline = std::time::Instant::now() + KILL_WAIT;

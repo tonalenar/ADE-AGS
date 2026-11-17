@@ -11,8 +11,10 @@
 //!   pedido é aceito ou recusado por inteiro.
 //! - `reservar_envio` reserva a vaga do Enter junto com o texto: se o texto entrou, o Enter depois não é recusado por
 //!   falta de espaço.
-//! - Remover a fila (soltá-la, ou `encerrar_e_esperar`) fecha o lado mestre pelo `fechar`. Assim um `write_all` preso
-//!   volta com erro e a thread termina, mesmo que outro processo segure o escravo.
+//! - Remover a fila (soltá-la, ou `encerrar_e_esperar`) chama o `fechar`. No Unix, o `fechar` do PTY escreve no pipe de
+//!   cancelamento do escritor (`pty_io`), que acorda o `poll` de um `write` preso, e mata o processo. Assim a thread
+//!   termina mesmo que outro processo segure o escravo. Um escritor que bloqueia sem esse cancelamento só volta quando o
+//!   descritor ficar pronto.
 
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -70,6 +72,8 @@ struct Compartilhado {
     estado: Mutex<Estado>,
     /// Pedidos aceitos e ainda não escritos, mais as vagas reservadas. Limita a fila a `CAPACIDADE`.
     pendentes: AtomicUsize,
+    /// Envios reservados que saíram sem o Enter (o texto pode ter ficado na caixa da TUI).
+    nao_confirmados: AtomicUsize,
 }
 
 /// Fila de escrita de uma sessão. Soltá-la fecha o lado mestre (pelo `fechar`) e faz a thread terminar.
@@ -100,7 +104,11 @@ impl WriteQueue {
         avisar: Box<dyn FnOnce(FalhaEscrita) + Send>,
     ) -> std::io::Result<Self> {
         let (tx, rx) = sync_channel::<Vec<Passo>>(CAPACIDADE);
-        let compartilhado = Arc::new(Compartilhado { estado: Mutex::new(Estado::Aberta), pendentes: AtomicUsize::new(0) });
+        let compartilhado = Arc::new(Compartilhado {
+            estado: Mutex::new(Estado::Aberta),
+            pendentes: AtomicUsize::new(0),
+            nao_confirmados: AtomicUsize::new(0),
+        });
         let cancelada = Arc::new(AtomicBool::new(false));
         let (feita_tx, feita_rx) = channel::<()>();
         let (c, k) = (compartilhado.clone(), cancelada.clone());
@@ -108,8 +116,12 @@ impl WriteQueue {
         std::thread::Builder::new().name("pty-escrita".into()).spawn(move || {
             let _feita = feita_tx;
             while let Ok(pedido) = rx.recv() {
+                // Um pedido vazio é o despertar do `encerrar`: a thread parada em `recv` sai sem esperar outro pedido.
                 if k.load(Ordering::Acquire) {
                     break;
+                }
+                if pedido.is_empty() {
+                    continue;
                 }
                 let resultado = executar(writer.as_mut(), &pedido);
                 c.pendentes.fetch_sub(1, Ordering::AcqRel);
@@ -181,9 +193,19 @@ impl WriteQueue {
 
     fn encerrar(&mut self) {
         self.cancelada.store(true, Ordering::Release);
+        // Acorda a thread se ela estiver parada em `recv`. Se o canal estiver cheio, a thread já está ocupada e vê o
+        // cancelamento ao pegar o próximo pedido.
+        let _ = self.tx.try_send(Vec::new());
         if let Some(fechar) = self.fechar.take() {
             fechar();
         }
+    }
+
+    /// Quantos envios reservados saíram sem o Enter desde a criação da fila. Só os testes leem isso: em produção, o
+    /// erro já sai para quem chamou (`sem_enter`).
+    #[cfg(test)]
+    pub fn nao_confirmados(&self) -> usize {
+        self.compartilhado.nao_confirmados.load(Ordering::Acquire)
     }
 
     fn aceita(&self, pedido: Vec<Passo>) -> Result<(), PtyWriteError> {
@@ -219,19 +241,20 @@ impl EnvioReservado {
                 self.reservado = false;
                 Ok(())
             }
-            Err(erro) => Err(match erro {
-                TrySendError::Full(_) => PtyWriteError::Full,
-                TrySendError::Disconnected(_) => PtyWriteError::Closed,
-            }),
+            // A vaga reservada garante espaço no canal: `Full` não acontece aqui. Se acontecesse, é uma fila que não
+            // aceita mais nada, e isso é tratado como encerrado.
+            Err(_) => Err(PtyWriteError::Closed),
         }
     }
 }
 
 impl Drop for EnvioReservado {
     fn drop(&mut self) {
-        // Sem o Enter, a vaga reservada volta para a fila.
+        // Sem o Enter, a vaga reservada volta para a fila, e o envio fica registrado como não confirmado: o texto pode
+        // ter ficado na caixa da TUI.
         if self.reservado {
             self.compartilhado.pendentes.fetch_sub(1, Ordering::AcqRel);
+            self.compartilhado.nao_confirmados.fetch_add(1, Ordering::AcqRel);
         }
     }
 }
