@@ -271,17 +271,13 @@ impl RepoSync {
     }
 
     pub fn status(&self, workspace: &str) -> RepoSyncStatus {
-        if let Some(error) = self.falha_do_worker() {
-            return RepoSyncStatus {
-                workspace_id: workspace.to_string(),
-                phase: "failed".into(),
-                error: Some(format!("A sincronização de memória está desligada: {error}")),
-                commit: None,
-                pending: 0,
-                warnings: Vec::new(),
-            };
+        let falha = self.falha_do_worker();
+        let mut status = snapshot(&self.lock_state(), workspace);
+        if let Some(error) = falha {
+            status.phase = "failed".into();
+            status.error = Some(format!("A sincronização de memória está desligada: {error}"));
         }
-        snapshot(&self.lock_state(), workspace)
+        status
     }
 
     /// Pausa o workspace para o purge reescrever o repositório. Ver o contrato no módulo.
@@ -1596,6 +1592,19 @@ mod tests {
         let status = sync.status("w");
         assert_eq!(status.phase, "failed", "{status:?}");
         assert!(status.error.as_deref().unwrap_or_default().contains("sem recurso"), "{status:?}");
+    }
+
+    /// Com o worker caído, o status mostra o erro e mantém a fila real: a pendência não some da tela.
+    #[test]
+    fn falha_do_worker_mantem_a_pendencia_real() {
+        let sync = RepoSync::new(fixture(), std::env::temp_dir().join(format!("ade-sync-{}", uuid::Uuid::new_v4())));
+        sync.enqueue("w", None);
+        sync.enqueue("w", None);
+        sync.spawn_com(|_| Err(std::io::Error::other("sem recurso"))).unwrap_err();
+        let status = sync.status("w");
+        assert_eq!(status.phase, "failed", "{status:?}");
+        assert!(status.error.as_deref().unwrap_or_default().contains("sem recurso"), "{status:?}");
+        assert_eq!(status.pending, 2, "a pendência real sumiu do status: {status:?}");
     }
 
     /// `retry` tenta subir o worker de novo; quando ele sobe, a falha sai do status.
