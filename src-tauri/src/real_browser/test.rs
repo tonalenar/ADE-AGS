@@ -1,7 +1,7 @@
 //! Testes da superfície nativa do navegador (o Portal): o contrato do `Place` que chega do front e a lógica pura
 //! que decide o que mudou, o que a máscara desenha e quando a vista é escondida.
 
-use super::surface::{outline, rounded_parts, PathStep};
+use super::surface::{diff_place, outline, rounded_parts, PathStep, PlaceChanges, PlaceState};
 use super::{Place, Rect};
 use serde_json::json;
 
@@ -45,4 +45,25 @@ fn path_da_mascara_tem_cantos_arredondados_com_partes() {
         })
         .collect();
     assert_eq!(arcs, vec![[0.0, 120.0], [0.0, 0.0], [200.0, 0.0], [200.0, 120.0]]);
+}
+
+#[test]
+fn place_igual_nao_reaplica() {
+    let place = PlaceState { frame: [10, 20, 320, 240], parts: vec![[0, 0, 320, 240]], radius: 16.0, zoom: 0.8 };
+
+    // Igual ao último aplicado: nada a reaplicar (nem frame, nem máscara, nem zoom, nem repintura do CEF).
+    assert_eq!(diff_place(Some(&place), &place), PlaceChanges::default());
+
+    // Só o raio mudou: a máscara muda, o resto não.
+    let mut rounded = place.clone();
+    rounded.radius = 24.0;
+    assert_eq!(diff_place(Some(&place), &rounded), PlaceChanges { mask: true, ..PlaceChanges::default() });
+
+    // Só a posição mudou: move a vista, sem máscara nem repintura.
+    let mut moved = place.clone();
+    moved.frame[0] = 99;
+    assert_eq!(diff_place(Some(&place), &moved), PlaceChanges { frame: true, ..PlaceChanges::default() });
+
+    // Sem último aplicado, tudo é aplicado.
+    assert_eq!(diff_place(None, &place), PlaceChanges { frame: true, mask: true, zoom: true, resized: true });
 }

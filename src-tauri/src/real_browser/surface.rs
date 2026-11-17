@@ -1,4 +1,5 @@
-//! Decisões puras para desenhar a superfície nativa do navegador, sem AppKit: a máscara e o contorno dela.
+//! Decisões puras para desenhar a superfície nativa do navegador, sem AppKit: o que mudou desde o último `place`, a
+//! máscara e o contorno dela.
 
 /// Uma parte visível da vista, com os cantos que devem ser arredondados.
 #[derive(Debug, PartialEq)]
@@ -54,4 +55,36 @@ pub(super) fn outline(part: &RoundedPart) -> Vec<PathStep> {
     if top_left { steps.push(PathStep::Arc { corner: [x, y], end: [x + r, y], radius: r }); }
     steps.push(PathStep::Close);
     steps
+}
+
+/// O que foi aplicado ao Portal no último `place`, para não refazer o que não mudou.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct PlaceState {
+    pub frame: [i32; 4],
+    pub parts: Vec<[i32; 4]>,
+    pub radius: f64,
+    pub zoom: f64,
+}
+
+/// O que um `place` precisa reaplicar ao Portal e ao navegador.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct PlaceChanges {
+    pub frame: bool,
+    pub mask: bool,
+    pub zoom: bool,
+    pub resized: bool,
+}
+
+/// Compara o lugar novo com o último aplicado. Sem último, tudo é aplicado.
+pub(super) fn diff_place(last: Option<&PlaceState>, next: &PlaceState) -> PlaceChanges {
+    let Some(last) = last else {
+        return PlaceChanges { frame: true, mask: true, zoom: true, resized: true };
+    };
+    let size_changed = last.frame[2..] != next.frame[2..];
+    PlaceChanges {
+        frame: last.frame != next.frame,
+        mask: size_changed || last.parts != next.parts || last.radius != next.radius,
+        zoom: last.zoom != next.zoom,
+        resized: size_changed,
+    }
 }

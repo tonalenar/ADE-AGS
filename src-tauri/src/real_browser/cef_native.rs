@@ -29,7 +29,7 @@ use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 use tokio::sync::oneshot;
 
-use super::surface::{outline, rounded_parts, PathStep, RoundedPart};
+use super::surface::{diff_place, outline, rounded_parts, PathStep, PlaceState, RoundedPart};
 use super::{emit, on_binding};
 
 const CEF_FRAMEWORK_BUNDLE: &str = "Chromium Embedded Framework.framework";
@@ -136,6 +136,8 @@ struct Portal {
     /// Avisa `create` quando o CEF entrega o browser (a criação é assíncrona: o perfil do runtime
     /// Chrome só fica pronto depois).
     ready: Option<oneshot::Sender<()>>,
+    /// O último `place` recebido: o que já foi aplicado à vista e ao navegador, para não refazer o que não mudou.
+    last_place: Option<PlaceState>,
 }
 
 #[derive(Default)]
@@ -547,6 +549,14 @@ wrap_life_span_handler! {
             PORTALS.with(|portals| {
                 if let Some(portal) = portals.borrow_mut().get_mut(&self.id) {
                     portal.browser = Some(browser.clone());
+                    // O `place` que chegou antes da criação ficou só registrado: aplica agora o zoom e a medida
+                    // dele, senão a página segue com o zoom padrão até o próximo movimento.
+                    if let Some(state) = portal.last_place.as_ref() {
+                        if let Some(host) = browser.host() {
+                            host.set_zoom_level(chrome_zoom_level(state.zoom));
+                            host.was_resized();
+                        }
+                    }
                     if let Some(ready) = portal.ready.take() { let _ = ready.send(()); }
                     if let Some(host) = browser.host() {
                         let mut observer = ADEDevToolsObserver::new(self.id.clone(), app_handle_for_portal(&self.id), portal.pending.clone());
@@ -620,7 +630,7 @@ fn prepare_popup(opener: &str, url: &str) -> Option<(String, Retained<ADEPortalH
     PORTALS.with(|portals| {
         portals.borrow_mut().insert(popup.clone(), Portal {
             host_view: host.clone(), browser: None, _observer: None, _registration: None,
-            pending: Arc::new(Mutex::new(HashMap::new())), ready: None,
+            pending: Arc::new(Mutex::new(HashMap::new())), ready: None, last_place: None,
         });
     });
     Some((popup, host, app))
@@ -827,7 +837,7 @@ fn create_on_main(app: &AppHandle, parent: *mut AnyObject, id: &str, profile: Pa
     let pending = Arc::new(Mutex::new(HashMap::new()));
     PORTAL_APPS.with(|apps| { apps.borrow_mut().insert(id.to_string(), app.clone()); });
     PORTALS.with(|portals| {
-        portals.borrow_mut().insert(id.to_string(), Portal { host_view: host.clone(), browser: None, _observer: None, _registration: None, pending: pending.clone(), ready: Some(ready) });
+        portals.borrow_mut().insert(id.to_string(), Portal { host_view: host.clone(), browser: None, _observer: None, _registration: None, pending: pending.clone(), ready: Some(ready), last_place: None });
     });
 
     let mut client = ADEClient::new(id.to_string(), app.clone());
@@ -893,18 +903,39 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
         let _ = MainThreadMarker::new();
         PORTALS.with(|portals| {
             if let Some(portal) = portals.borrow_mut().get_mut(&id) {
+                // Só o que mudou desde o último `place` é reaplicado: a posição, a máscara, o zoom e a repintura do CEF.
                 let parent = unsafe { portal.host_view.superview() };
-                portal.host_view.setFrame(parent.as_deref().map(|parent| frame_in_parent(parent, rect)).unwrap_or_else(|| view_frame(rect)));
-                apply_rect_mask(&portal.host_view, rect[2], rect[3], &parts, corner_radius);
+                let next = PlaceState { frame: rect, parts: parts.clone(), radius: corner_radius, zoom };
+                let changes = diff_place(portal.last_place.as_ref(), &next);
+                if changes.frame {
+                    portal.host_view.setFrame(parent.as_deref().map(|parent| frame_in_parent(parent, rect)).unwrap_or_else(|| view_frame(rect)));
+                }
+                if changes.mask {
+                    apply_rect_mask(&portal.host_view, rect[2], rect[3], &parts, corner_radius);
+                }
                 *portal.host_view.ivars().parts.borrow_mut() = parts.iter().map(|[l, t, r, b]| [*l as f64, *t as f64, *r as f64, *b as f64]).collect();
                 portal.host_view.ivars().mini.set(click_to_expand);
                 if let Some(host) = portal.browser.as_ref().and_then(Browser::host) {
-                    host.set_zoom_level(if zoom > 0.0 { zoom.ln() / 1.2_f64.ln() } else { 0.0 });
-                    host.was_resized();
+                    if changes.resized {
+                        let child = host.window_handle() as *mut AnyObject;
+                        if !child.is_null() {
+                            let view: &NSView = unsafe { &*child.cast() };
+                            view.setFrame(view_frame([0, 0, rect[2], rect[3]]));
+                        }
+                    }
+                    if changes.zoom { host.set_zoom_level(chrome_zoom_level(zoom)); }
+                    if changes.resized { host.was_resized(); }
                 }
+                portal.last_place = Some(next);
             }
         });
     });
+}
+
+/// O nível de zoom do CEF para um fator: o fator é 1,2 elevado ao nível, então o nível é o log de base 1,2 do fator.
+/// Zero (vista sem largura) volta a 100%; quem chama decide se zero deve ser aplicado.
+fn chrome_zoom_level(zoom: f64) -> f64 {
+    if zoom > 0.0 { zoom.ln() / 1.2_f64.ln() } else { 0.0 }
 }
 
 /// Uma única `CAShapeLayer` recorta as partes e arredonda só os cantos externos da vista (tela do celular, miniatura).
