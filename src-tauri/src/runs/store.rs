@@ -173,7 +173,8 @@ pub fn create_run_with_memory_snapshot(
 ) -> Result<Run, String> {
     let repository_commit = crate::memory::repo::current_commit(conn, workspace_id);
     create_run_with_memory_snapshot_and_commit(
-        conn, workspace_id, mission_id, objective, cwd, max_parallel, budget_usd, repository_commit,
+        conn, workspace_id, mission_id, objective, cwd, max_parallel, budget_usd,
+        repository_commit, None,
     )
 }
 
@@ -181,6 +182,7 @@ pub fn create_run_with_memory_snapshot(
 pub fn create_run_with_memory_snapshot_and_commit(
     conn: &Connection, workspace_id: &str, mission_id: Option<&str>, objective: &str,
     cwd: &str, max_parallel: i64, budget_usd: Option<f64>, repository_commit: Option<String>,
+    repository_key: Option<String>,
 ) -> Result<Run, String> {
     // A standalone SAVEPOINT starts a deferred transaction. Reserve the writer
     // before reading memory; caller-owned transactions retain their own lifetime.
@@ -193,7 +195,14 @@ pub fn create_run_with_memory_snapshot_and_commit(
         conn.execute("INSERT INTO runs(id,workspace_id,mission_id,objective,cwd,status,max_parallel,budget_usd,created_at)
             VALUES(?1,?2,?3,?4,?5,'running',?6,?7,?8)",
             rusqlite::params![id,workspace_id,mission_id,objective,cwd,max_parallel,budget_usd,now_ts()]).map_err(|e| e.to_string())?;
-        crate::memory::snapshot_run_with_commit(conn, &id, workspace_id, mission_id, repository_commit)?;
+        crate::memory::snapshot_run_with_commit(
+            conn,
+            &id,
+            workspace_id,
+            mission_id,
+            repository_key,
+            repository_commit,
+        )?;
         run_by_id(conn, &id)?.ok_or_else(|| "Run was not saved".to_string())
     })();
     match result {

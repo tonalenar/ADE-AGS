@@ -2299,12 +2299,72 @@ fn tarefa_sem_missao_filtra_memoria_pelo_cwd_e_falha_fechado_sem_repo() {
 }
 
 #[test]
-fn tarefa_nao_recebe_workspace_history_sem_filtro_de_repo() {
+fn tarefa_dreamer_recebe_workspace_history_apenas_do_repo_proprio() {
     let conn = db();
     seed_workspace(&conn, "w1");
-    seed_run(&conn, "r1", "w1", None);
+    let mine = git_repo_with_origin("https://github.com/acme/app.git");
+    let other = git_repo_with_origin("https://github.com/acme/other.git");
+    let no_git = std::env::temp_dir().join(format!("ags-mem-nogit-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&no_git).unwrap();
+    conn.execute("INSERT INTO missions(id,workspace_id,title,objective,cwd,status,max_parallel,auto_account,created_at,updated_at) VALUES('m1','w1','M1','o',?1,'draft',2,1,0,0)", [mine.to_string_lossy().as_ref()]).unwrap();
+    conn.execute("INSERT INTO missions(id,workspace_id,title,objective,cwd,status,max_parallel,auto_account,created_at,updated_at) VALUES('m2','w1','M2','o',?1,'draft',2,1,0,0)", [other.to_string_lossy().as_ref()]).unwrap();
+    conn.execute("INSERT INTO missions(id,workspace_id,title,objective,cwd,status,max_parallel,auto_account,created_at,updated_at) VALUES('m3','w1','M3','o',?1,'draft',2,1,0,0)", [no_git.to_string_lossy().as_ref()]).unwrap();
+    seed_run(&conn, "r1", "w1", Some("m1"));
+    seed_run(&conn, "r2", "w1", Some("m2"));
+    seed_run(&conn, "r3", "w1", Some("m3"));
     seed_task(&conn, "lead", "r1", Some("lead"));
-    activate(&conn, "workspace", None, "unscoped", "approved shared memory");
+    seed_task(&conn, "lead-plain", "r3", Some("lead"));
+    let ours = activate(&conn, "workspace", None, "ours", "approved memory from this repo");
+    let theirs = activate(&conn, "workspace", None, "theirs", "approved memory from another repo");
+    activate(&conn, "workspace", None, "shared", "approved memory without repo");
+    conn.execute("UPDATE memory_entries SET repo_key='github.com/acme/app' WHERE id=?1", [&ours.entry_id]).unwrap();
+    conn.execute("UPDATE memory_entries SET repo_key='github.com/acme/other' WHERE id=?1", [&theirs.entry_id]).unwrap();
+    crate::runs::store::add_fact(&conn, "r1", None, "finding", "fact from this repo").unwrap();
+    crate::runs::store::add_fact(&conn, "r2", None, "finding", "fact from another repo").unwrap();
+    crate::runs::store::add_fact(&conn, "r3", None, "finding", "fact without repo").unwrap();
 
-    assert!(task_tool(&conn, "lead", "memory.workspaceHistory", json!({})).is_err());
+    let db = crate::database::DbConnection::new(std::sync::Mutex::new(conn));
+    let scope = repo_scope::task_history_scope_unlocked(&db, "lead").unwrap();
+    let conn = db.lock().unwrap();
+    let response = task_tool_with_history_scope(
+        &conn,
+        "lead",
+        "memory.workspaceHistory",
+        json!({}),
+        scope.repo_key.as_deref(),
+        Some(&scope),
+    ).unwrap();
+    let history: serde_json::Value = serde_json::from_str(agent_json(&response)).unwrap();
+    let memories = history["approvedMemory"].as_array().unwrap();
+    let keys: Vec<_> = memories.iter().filter_map(|item| item["key"].as_str()).collect();
+    assert!(keys.contains(&"ours") && keys.contains(&"shared"), "{keys:?}");
+    assert!(!keys.contains(&"theirs"), "{keys:?}");
+    let facts = history["facts"].as_array().unwrap();
+    assert!(facts.iter().any(|item| item["body"] == "fact from this repo"));
+    assert!(!facts.iter().any(|item| item["body"] == "fact from another repo"));
+    assert!(!history["memoryMarkdown"].as_str().unwrap().contains("theirs"));
+    drop(conn);
+
+    let plain_scope = repo_scope::task_history_scope_unlocked(&db, "lead-plain").unwrap();
+    assert!(plain_scope.repo_key.is_none());
+    let conn = db.lock().unwrap();
+    let response = task_tool_with_history_scope(
+        &conn,
+        "lead-plain",
+        "memory.workspaceHistory",
+        json!({}),
+        plain_scope.repo_key.as_deref(),
+        Some(&plain_scope),
+    ).unwrap();
+    let history: serde_json::Value = serde_json::from_str(agent_json(&response)).unwrap();
+    let memories = history["approvedMemory"].as_array().unwrap();
+    let keys: Vec<_> = memories.iter().filter_map(|item| item["key"].as_str()).collect();
+    assert_eq!(keys, ["shared"]);
+    let facts = history["facts"].as_array().unwrap();
+    assert!(facts.iter().any(|item| item["body"] == "fact without repo"));
+    assert!(!facts.iter().any(|item| item["body"] == "fact from this repo"));
+    assert!(!history["memoryMarkdown"].as_str().unwrap().contains("ours"));
+    let _ = std::fs::remove_dir_all(no_git);
+    let _ = std::fs::remove_dir_all(mine);
+    let _ = std::fs::remove_dir_all(other);
 }

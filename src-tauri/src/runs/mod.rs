@@ -459,6 +459,10 @@ pub(crate) fn start_orchestration(
     let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
     let max_parallel = spec.max_parallel.clamp(1, 6);
     let repository_commit = crate::memory::repo::current_commit_for_db(db, spec.workspace_id);
+    let repository_key = match spec.mission_id {
+        Some(mission_id) => crate::memory::repo_scope::mission_repo_key_unlocked(db, Some(mission_id))?,
+        None => crate::memory::repo_scope::repo_key(std::path::Path::new(spec.cwd)),
+    };
 
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -474,6 +478,7 @@ pub(crate) fn start_orchestration(
             max_parallel,
             spec.budget_usd,
             repository_commit,
+            repository_key,
         )?;
         if let Some(squad) = spec.squad {
             store::set_run_squad_snapshot(&tx, &run.id, squad)?;
@@ -1532,6 +1537,16 @@ pub async fn start_memory_dream(
         return Err("Sonhar requer Claude Code com ferramentas de escrita bloqueadas.".into());
     }
     let _guard = crate::agents::updates::activity_guard()?;
+    let cwd: String = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
+            "SELECT cwd FROM runs WHERE workspace_id=?1 AND cwd<>'' ORDER BY created_at DESC LIMIT 1",
+            [workspace],
+            |r| r.get(0),
+        )
+        .map_err(|_| "Workspace sem pasta no histórico.".to_string())?
+    };
+    let repository_key = crate::memory::repo_scope::repo_key(std::path::Path::new(&cwd));
     let repository_commit = crate::memory::repo::current_commit_for_db(db, workspace);
     let (task, dream_id) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -1539,7 +1554,6 @@ pub async fn start_memory_dream(
             rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
                 .map_err(|e| e.to_string())?;
         let input = crate::memory::dream::validate_start(&tx, workspace)?;
-        let cwd:String=tx.query_row("SELECT cwd FROM runs WHERE workspace_id=?1 AND cwd<>'' ORDER BY created_at DESC LIMIT 1",[workspace],|r|r.get(0)).map_err(|_|"Workspace sem pasta no histórico.".to_string())?;
         let run = store::create_run_with_memory_snapshot_and_commit(
             &tx,
             workspace,
@@ -1549,6 +1563,7 @@ pub async fn start_memory_dream(
             1,
             None,
             repository_commit,
+            repository_key,
         )?;
         let prompt = format!(
             "Leia os dados e proponha somente melhorias justificadas.\nUNTRUSTED DATA BEGIN\n{}\nUNTRUSTED DATA END",

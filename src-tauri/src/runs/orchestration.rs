@@ -288,14 +288,23 @@ pub fn handle(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
                 .get("taskId")
                 .and_then(Value::as_str)
                 .ok_or("As ferramentas MCP de Memória Compartilhada exigem uma tarefa Lead ou Worker da frota. Num terminal use ags memory search, ags memory index ou ags memory open <chave>")?;
-            let repo_key = crate::memory::repo_scope::task_repo_key_unlocked(&db, task_id)?;
+            let history_scope = if command == "memory.workspaceHistory" {
+                Some(crate::memory::repo_scope::task_history_scope_unlocked(&db, task_id)?)
+            } else {
+                None
+            };
+            let repo_key = match &history_scope {
+                Some(scope) => scope.repo_key.clone(),
+                None => crate::memory::repo_scope::task_repo_key_unlocked(&db, task_id)?,
+            };
             let conn = db.lock().map_err(|e| e.to_string())?;
-            let result = crate::memory::task_tool_with_repo(
+            let result = crate::memory::task_tool_with_history_scope(
                 &conn,
                 task_id,
                 command,
                 args(payload).clone(),
                 repo_key.as_deref(),
+                history_scope.as_ref(),
             );
             drop(conn);
             if result.is_ok() && !matches!(command,"memory.list"|"memory.get"|"memory.searchApproved"|"memory.workspaceHistory") {crate::memory::notify_changed(app);}
@@ -817,6 +826,14 @@ fn plan_tasks_watched(
     } else {
         None
     };
+    let repository_key = if existing_run.is_none() {
+        match caller.mission_id.as_deref() {
+            Some(mission_id) => crate::memory::repo_scope::mission_repo_key_unlocked(db, Some(mission_id))?,
+            None => crate::memory::repo_scope::repo_key(std::path::Path::new(&caller.cwd)),
+        }
+    } else {
+        None
+    };
 
     let run_id = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -860,6 +877,7 @@ fn plan_tasks_watched(
                 max_parallel.unwrap_or(2),
                 budget,
                 repository_commit,
+                repository_key,
             )?,
         };
         let linked_at = crate::util::now_ts_ms();

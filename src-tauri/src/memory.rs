@@ -868,7 +868,8 @@ pub fn snapshot_run(
     mission_id: Option<&str>,
 ) -> Result<(), String> {
     let repository_commit = repo::current_commit(conn, workspace_id);
-    snapshot_run_with_commit(conn, run_id, workspace_id, mission_id, repository_commit)
+    let repo_key = mission_id.and_then(|mission| repo_scope::mission_repo_key(conn, mission));
+    snapshot_run_with_commit(conn, run_id, workspace_id, mission_id, repo_key, repository_commit)
 }
 
 pub fn snapshot_run_with_commit(
@@ -876,6 +877,7 @@ pub fn snapshot_run_with_commit(
     run_id: &str,
     workspace_id: &str,
     mission_id: Option<&str>,
+    repository_key: Option<String>,
     repository_commit: Option<String>,
 ) -> Result<(), String> {
     validate_owner(conn, "workspace", workspace_id, None)?;
@@ -897,9 +899,8 @@ pub fn snapshot_run_with_commit(
     {
         return Err("Run memory scope does not match the Run owner".into());
     }
-    let repo = mission_id.and_then(|m| repo_scope::mission_repo_key(conn, m));
-    let fail_closed = mission_id.is_some() && repo.is_none();
-    let mut stmt=conn.prepare(&format!("SELECT e.id,r.revision,e.scope,e.key,r.kind,r.body,e.priority,r.content_hash FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id AND r.revision=e.current_revision AND r.status='approved' WHERE e.workspace_id=?1 AND e.status='active' AND e.current_revision IS NOT NULL AND (e.scope='workspace' OR (?2 IS NOT NULL AND e.scope='mission' AND e.mission_id=?2)) AND {} ORDER BY e.priority DESC,CASE WHEN e.scope='mission' THEN 0 ELSE 1 END,e.key COLLATE BINARY,e.id", repo_scope::sql_match("?3", fail_closed))).map_err(|_|"could not select run memory".to_string())?;
+    let repo = repository_key;
+    let mut stmt=conn.prepare(&format!("SELECT e.id,r.revision,e.scope,e.key,r.kind,r.body,e.priority,r.content_hash FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id AND r.revision=e.current_revision AND r.status='approved' WHERE e.workspace_id=?1 AND e.status='active' AND e.current_revision IS NOT NULL AND (e.scope='workspace' OR (?2 IS NOT NULL AND e.scope='mission' AND e.mission_id=?2)) AND {} ORDER BY e.priority DESC,CASE WHEN e.scope='mission' THEN 0 ELSE 1 END,e.key COLLATE BINARY,e.id", repo_scope::sql_match("?3", true))).map_err(|_|"could not select run memory".to_string())?;
     let candidates = stmt
         .query_map(params![workspace_id, mission_id, repo], |r| {
             Ok((
@@ -918,7 +919,7 @@ pub fn snapshot_run_with_commit(
         .map_err(|_| "could not select run memory".to_string())?;
     let baseline = select_snapshot(run_id, candidates.clone(), SNAPSHOT_LIMIT, SnapshotMeta::default());
     let objective: String = conn.query_row("SELECT objective FROM runs WHERE id=?1", [run_id], |r| r.get(0)).map_err(|_| "could not read Run objective")?;
-    let docs = search::load_docs(conn, workspace_id, mission_id)?;
+    let docs = search::load_docs_with_repo(conn, workspace_id, mission_id, repo.as_deref(), true)?;
     let ranked = search::rank(&docs, &objective, RELEVANT_LIMIT);
     let mut index = if candidates.is_empty() { String::new() } else { "# MEMORY.md\nApproved project data; open entries with memory_open.\n".to_string() };
     for row in candidates.iter().take(36) {
@@ -1311,6 +1312,17 @@ pub fn task_tool_with_repo(
     args: serde_json::Value,
     repo_key: Option<&str>,
 ) -> Result<serde_json::Value, String> {
+    task_tool_with_history_scope(conn, task_id, command, args, repo_key, None)
+}
+
+pub fn task_tool_with_history_scope(
+    conn: &Connection,
+    task_id: &str,
+    command: &str,
+    args: serde_json::Value,
+    repo_key: Option<&str>,
+    history_scope: Option<&repo_scope::TaskHistoryScope>,
+) -> Result<serde_json::Value, String> {
     let (workspace_id, mission_id, actor, run_id) = task_memory_owner(conn, task_id)?;
     let repo_key = repo_key.map(str::to_owned);
     let encode = |value: &serde_json::Value| -> Result<String, String> {
@@ -1333,7 +1345,23 @@ pub fn task_tool_with_repo(
             encode(&serde_json::to_value(hits).map_err(|_| "could not encode memory search")?)?
         }
         "memory.workspaceHistory" => {
-            return Err("workspace history is available only in the user's memory panel; use scoped memory.list or memory.searchApproved".into());
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Input { #[serde(default = "dream_history_limit")] limit: usize }
+            fn dream_history_limit() -> usize { dream::HISTORY_MISSIONS }
+            let input: Input = serde_json::from_value(args)
+                .map_err(|_| "invalid history arguments")?;
+            let value = dream::history_with_repo(
+                conn,
+                &workspace_id,
+                input.limit,
+                repo_key.as_deref(),
+                true,
+                history_scope,
+            )?;
+            return Ok(serde_json::json!({
+                "text": untrusted_memory_response(&value.to_string())
+            }));
         }
         "memory.list" => {
             #[derive(Deserialize)]

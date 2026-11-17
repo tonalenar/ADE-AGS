@@ -377,22 +377,27 @@ pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, Stri
         None => None,
     };
     let db = db(app)?;
+    let repo_key = crate::memory::repo_scope::mission_repo_key_unlocked(&db, Some(&id))?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mission = crate::missions::store::get(&conn, &id)?
         .ok_or_else(|| format!("não há nenhuma missão {id}"))?;
     let hits = match at {
-        Some(at) => crate::memory::search::search_at(
+        Some(at) => crate::memory::search::search_at_with_repo(
             &conn,
             &mission.workspace_id,
             Some(&mission.id),
+            repo_key.as_deref(),
+            true,
             &query,
             limit,
             at,
         )?,
-        None => crate::memory::search::search(
+        None => crate::memory::search::search_with_repo(
             &conn,
             &mission.workspace_id,
             Some(&mission.id),
+            repo_key.as_deref(),
+            true,
             &query,
             limit,
         )?,

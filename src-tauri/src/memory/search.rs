@@ -256,7 +256,18 @@ pub fn load_docs_with_repo(
 /// includes entries that have since been deleted because their earlier intervals may apply.
 pub fn load_docs_at(conn:&Connection,workspace_id:&str,mission_id:Option<&str>,at:i64)->Result<Vec<Doc>,String> {
     let repo = mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m));
-    let mut stmt=conn.prepare(&docs_at_sql(mission_id.is_some() && repo.is_none())).map_err(|_|"could not read historical memory")?;
+    load_docs_at_with_repo(conn, workspace_id, mission_id, repo.as_deref(), mission_id.is_some() && repo.is_none(), at)
+}
+
+pub fn load_docs_at_with_repo(
+    conn: &Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    repo: Option<&str>,
+    fail_closed: bool,
+    at: i64,
+) -> Result<Vec<Doc>, String> {
+    let mut stmt=conn.prepare(&docs_at_sql(fail_closed)).map_err(|_|"could not read historical memory")?;
     stmt.query_map(params![workspace_id,mission_id,at,repo],|r|Ok(Doc{entry_id:r.get(0)?,scope:r.get(1)?,key:r.get(2)?,kind:r.get(3)?,priority:r.get(4)?,body:r.get(5)?})).map_err(|_|"could not read historical memory")?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_|"could not read historical memory".into())
 }
 
@@ -350,6 +361,30 @@ pub fn search_at(
     limit: usize,
     at: i64,
 ) -> Result<Vec<Hit>, String> {
+    let repo = mission_id.and_then(|mission| super::repo_scope::mission_repo_key(conn, mission));
+    search_at_with_repo(
+        conn,
+        workspace_id,
+        mission_id,
+        repo.as_deref(),
+        mission_id.is_some() && repo.is_none(),
+        query,
+        limit,
+        at,
+    )
+}
+
+/// Busca histórico usando a chave do repositório resolvida antes de adquirir o lock do banco.
+pub fn search_at_with_repo(
+    conn: &Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    repo: Option<&str>,
+    fail_closed: bool,
+    query: &str,
+    limit: usize,
+    at: i64,
+) -> Result<Vec<Hit>, String> {
     let query = query.trim();
     if query.is_empty() {
         return Err("A busca precisa de um texto.".into());
@@ -358,7 +393,7 @@ pub fn search_at(
         return Err(format!("A busca tem até {MAX_QUERY_CHARS} caracteres."));
     }
     Ok(rank(
-        &load_docs_at(conn, workspace_id, mission_id, at)?,
+        &load_docs_at_with_repo(conn, workspace_id, mission_id, repo, fail_closed, at)?,
         query,
         limit,
     ))

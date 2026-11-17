@@ -115,6 +115,18 @@ pub fn check_input(text: &str) -> Result<(), String> {
 }
 
 pub fn history(conn: &Connection, workspace: &str, n: usize) -> Result<Value, String> {
+    history_with_repo(conn, workspace, n, None, false, None)
+}
+
+/// Histórico do Dreamer, limitado ao repositório da Task. Sem chave, só entram memórias sem chave.
+pub fn history_with_repo(
+    conn: &Connection,
+    workspace: &str,
+    n: usize,
+    repo_key: Option<&str>,
+    repo_fail_closed: bool,
+    history_scope: Option<&super::repo_scope::TaskHistoryScope>,
+) -> Result<Value, String> {
     let n = n.clamp(1, HISTORY_MISSIONS) as i64;
     let exists: bool = conn
         .query_row(
@@ -128,9 +140,9 @@ pub fn history(conn: &Connection, workspace: &str, n: usize) -> Result<Value, St
     }
     let mut sources = Vec::<String>::new();
     let mut approved = Vec::<Value>::new();
-    let mut stmt=conn.prepare("SELECT e.id,e.key,e.scope,e.mission_id,r.revision,r.kind,r.body,r.source_run_id,r.source_task_id,e.source_mission FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id AND r.revision=e.current_revision AND r.status='approved' WHERE e.workspace_id=?1 AND e.status='active' AND (e.scope='workspace' OR e.mission_id IN (SELECT id FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT ?2)) ORDER BY e.priority DESC,e.id LIMIT 96").map_err(|e|e.to_string())?;
+    let mut stmt=conn.prepare(&format!("SELECT e.id,e.key,e.scope,e.mission_id,r.revision,r.kind,r.body,r.source_run_id,r.source_task_id,e.source_mission FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id AND r.revision=e.current_revision AND r.status='approved' WHERE e.workspace_id=?1 AND e.status='active' AND (e.scope='workspace' OR e.mission_id IN (SELECT id FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT ?2)) AND {} ORDER BY e.priority DESC,e.id LIMIT 96", super::repo_scope::sql_match("?3", repo_fail_closed))).map_err(|e|e.to_string())?;
     for row in stmt
-        .query_map(params![workspace, n], |r| {
+        .query_map(params![workspace, n, repo_key], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
@@ -165,9 +177,11 @@ pub fn history(conn: &Connection, workspace: &str, n: usize) -> Result<Value, St
         approved.push(json!({"entryId":id,"key":key,"scope":scope,"missionId":mission,"revision":revision,"kind":kind,"body":body,"source":source}));
     }
     let mut facts = Vec::<Value>::new();
-    let mut stmt=conn.prepare("SELECT f.id,f.run_id,f.task_id,f.kind,f.body FROM run_facts f JOIN runs r ON r.id=f.run_id WHERE r.workspace_id=?1 AND (r.mission_id IS NULL OR r.mission_id IN (SELECT id FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT ?2)) ORDER BY f.created_at DESC,f.id LIMIT 64").map_err(|e|e.to_string())?;
+    let run_scope = history_scope.map(|scope| serde_json::to_string(&scope.run_ids.iter().collect::<Vec<_>>())).transpose().map_err(|e|e.to_string())?;
+    let run_filter = "AND (?3 IS NULL OR r.id IN (SELECT value FROM json_each(?3)))";
+    let mut stmt=conn.prepare(&format!("SELECT f.id,f.run_id,f.task_id,f.kind,f.body FROM run_facts f JOIN runs r ON r.id=f.run_id WHERE r.workspace_id=?1 AND (r.mission_id IS NULL OR r.mission_id IN (SELECT id FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT ?2)) {run_filter} ORDER BY f.created_at DESC,f.id LIMIT 64")).map_err(|e|e.to_string())?;
     for row in stmt
-        .query_map(params![workspace, n], |r| {
+        .query_map(params![workspace, n, run_scope], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
@@ -187,9 +201,9 @@ pub fn history(conn: &Connection, workspace: &str, n: usize) -> Result<Value, St
         );
     }
     let mut handoffs = Vec::<Value>::new();
-    let mut stmt=conn.prepare("SELECT t.id,t.run_id,COALESCE(t.structured_handoff,t.handoff,t.result) FROM tasks t JOIN runs r ON r.id=t.run_id WHERE r.workspace_id=?1 AND t.status='done' AND COALESCE(t.structured_handoff,t.handoff,t.result) IS NOT NULL AND t.role IS NOT 'dreamer' AND (r.mission_id IS NULL OR r.mission_id IN (SELECT id FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT ?2)) ORDER BY t.created_at DESC,t.id LIMIT 32").map_err(|e|e.to_string())?;
+    let mut stmt=conn.prepare(&format!("SELECT t.id,t.run_id,COALESCE(t.structured_handoff,t.handoff,t.result) FROM tasks t JOIN runs r ON r.id=t.run_id WHERE r.workspace_id=?1 AND t.status='done' AND COALESCE(t.structured_handoff,t.handoff,t.result) IS NOT NULL AND t.role IS NOT 'dreamer' AND (r.mission_id IS NULL OR r.mission_id IN (SELECT id FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT ?2)) {run_filter} ORDER BY t.created_at DESC,t.id LIMIT 32")).map_err(|e|e.to_string())?;
     for row in stmt
-        .query_map(params![workspace, n], |r| {
+        .query_map(params![workspace, n, run_scope], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
@@ -214,9 +228,11 @@ pub fn history(conn: &Connection, workspace: &str, n: usize) -> Result<Value, St
         )
         .is_ok()
     {
-        let mut stmt=conn.prepare("SELECT h.id,h.mission_id,h.from_name,h.payload FROM mission_handoffs h WHERE h.mission_id IN (SELECT id FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT ?2) ORDER BY h.at_ms DESC,h.id LIMIT 32").map_err(|e|e.to_string())?;
+        let mission_scope = history_scope.map(|scope| serde_json::to_string(&scope.mission_ids.iter().collect::<Vec<_>>())).transpose().map_err(|e|e.to_string())?;
+        let mission_filter = "AND (?3 IS NULL OR h.mission_id IN (SELECT value FROM json_each(?3)))";
+        let mut stmt=conn.prepare(&format!("SELECT h.id,h.mission_id,h.from_name,h.payload FROM mission_handoffs h WHERE h.mission_id IN (SELECT id FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT ?2) {mission_filter} ORDER BY h.at_ms DESC,h.id LIMIT 32")).map_err(|e|e.to_string())?;
         for row in stmt
-            .query_map(params![workspace, n], |r| {
+            .query_map(params![workspace, n, mission_scope], |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
                     r.get::<_, String>(1)?,
@@ -236,10 +252,17 @@ pub fn history(conn: &Connection, workspace: &str, n: usize) -> Result<Value, St
         }
     }
     let mut rejected = Vec::<Value>::new();
-    let mut stmt=conn.prepare("SELECT r.entry_id,r.revision,r.operation,r.kind,r.decided_at FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.workspace_id=?1 AND r.status='rejected' ORDER BY r.decided_at DESC LIMIT 32").map_err(|e|e.to_string())?;
-    for row in stmt.query_map([workspace],|r|Ok(json!({"entryId":r.get::<_,String>(0)?,"revision":r.get::<_,i64>(1)?,"operation":r.get::<_,String>(2)?,"kind":r.get::<_,String>(3)?,"decidedAt":r.get::<_,Option<i64>>(4)?}))).map_err(|e|e.to_string())? {rejected.push(row.map_err(|e|e.to_string())?);}
-    let projection = super::repo::render(conn, workspace, &[])?;
-    let index = projection.get("MEMORY.md").cloned().unwrap_or_default();
+    let mut stmt=conn.prepare(&format!("SELECT r.entry_id,r.revision,r.operation,r.kind,r.decided_at FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.workspace_id=?1 AND r.status='rejected' AND {} ORDER BY r.decided_at DESC LIMIT 32", super::repo_scope::sql_match("?2", repo_fail_closed))).map_err(|e|e.to_string())?;
+    for row in stmt.query_map(params![workspace, repo_key],|r|Ok(json!({"entryId":r.get::<_,String>(0)?,"revision":r.get::<_,i64>(1)?,"operation":r.get::<_,String>(2)?,"kind":r.get::<_,String>(3)?,"decidedAt":r.get::<_,Option<i64>>(4)?}))).map_err(|e|e.to_string())? {rejected.push(row.map_err(|e|e.to_string())?);}
+    let index = if repo_fail_closed {
+        let mut index = String::from("# Approved memory for this repository\n\n");
+        for item in &approved {
+            index.push_str(&format!("- [{}] {}\n", item["scope"].as_str().unwrap_or("workspace"), item["key"].as_str().unwrap_or("")));
+        }
+        index
+    } else {
+        super::repo::render(conn, workspace, &[])?.get("MEMORY.md").cloned().unwrap_or_default()
+    };
     check_input(&index)?;
     sources.sort();
     sources.dedup();

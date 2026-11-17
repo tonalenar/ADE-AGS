@@ -11,6 +11,7 @@
 //! cada briefing e na migração.
 
 use std::path::{Path, PathBuf};
+use std::collections::HashSet;
 
 use rusqlite::{params, Connection};
 
@@ -132,6 +133,56 @@ pub fn task_repo_key_unlocked(
         task_repo_cwd(&conn, task_id)?
     };
     Ok(repo_key(Path::new(&cwd)))
+}
+
+#[derive(Default)]
+pub struct TaskHistoryScope {
+    pub repo_key: Option<String>,
+    pub run_ids: HashSet<String>,
+    pub mission_ids: HashSet<String>,
+}
+
+/// Reúne os IDs de evidência do próprio repositório; só consulta o filesystem depois de soltar o lock.
+pub fn task_history_scope_unlocked(
+    db: &DbConnection,
+    task_id: &str,
+) -> Result<TaskHistoryScope, String> {
+    let (task_cwd, runs, missions) = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        let cwd = task_repo_cwd(&conn, task_id)?;
+        let workspace: String = conn.query_row(
+            "SELECT r.workspace_id FROM tasks t JOIN runs r ON r.id=t.run_id WHERE t.id=?1",
+            [task_id],
+            |row| row.get(0),
+        ).map_err(|_| "caller Task is unavailable".to_string())?;
+        let runs = {
+            let mut statement = conn.prepare(
+                "SELECT r.id,COALESCE(m.cwd,r.cwd) FROM runs r LEFT JOIN missions m ON m.id=r.mission_id WHERE r.workspace_id=?1 ORDER BY r.created_at DESC,r.id LIMIT 128",
+            ).map_err(|e| e.to_string())?;
+            statement.query_map([&workspace], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .map_err(|e| e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
+        };
+        let missions = {
+            let mut statement = conn.prepare(
+                "SELECT id,cwd FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT 128",
+            ).map_err(|e| e.to_string())?;
+            statement.query_map([&workspace], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .map_err(|e| e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
+        };
+        (cwd, runs, missions)
+    };
+    let target = repo_key(Path::new(&task_cwd));
+    let matches = |candidate: Option<&str>| match target.as_deref() {
+        Some(key) => candidate.is_none_or(|value| value == key),
+        None => candidate.is_none(),
+    };
+    let run_ids = runs.into_iter().filter_map(|(id, cwd)| {
+        matches(repo_key(Path::new(&cwd)).as_deref()).then_some(id)
+    }).collect();
+    let mission_ids = missions.into_iter().filter_map(|(id, cwd)| {
+        matches(repo_key(Path::new(&cwd)).as_deref()).then_some(id)
+    }).collect();
+    Ok(TaskHistoryScope { repo_key: target, run_ids, mission_ids })
 }
 
 /// Predicado SQL: falha fechada só com missão sem chave.
