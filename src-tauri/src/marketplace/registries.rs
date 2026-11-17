@@ -102,8 +102,8 @@ pub async fn add_registry(
     let id = id
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| Uuid::new_v4().to_string());
-    {
-        let conn = db.lock().map_err(|e| e.to_string())?;
+    let insert_id = id.clone();
+    crate::database::blocking_db(&db, move |conn| {
         let next_priority: i32 = conn
             .query_row(
                 "SELECT COALESCE(MAX(priority), -1) + 1 FROM registries",
@@ -114,10 +114,12 @@ pub async fn add_registry(
         conn.execute(
             "INSERT INTO registries (id, name, source_type, location, priority, enabled, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)",
-            params![id, name, source_type, location, next_priority, now_ts()],
+            params![insert_id, name, source_type, location, next_priority, now_ts()],
         )
         .map_err(|e| e.to_string())?;
-    }
+        Ok(())
+    })
+    .await?;
     refresh_registry_internal(&id, &db, app).await
 }
 
@@ -375,8 +377,8 @@ pub async fn install_marketplace_skill(
     skill_id: String,
     db: tauri::State<'_, DbConnection>,
 ) -> Result<SkillInfo, String> {
-    let (source_type, location, registry_name, entries) = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
+    let lookup_id = registry_id.clone();
+    let (source_type, location, registry_name, entries) = crate::database::blocking_db(&db, move |conn| {
         let (source_type, location, registry_name, cache_json): (
             String,
             String,
@@ -385,15 +387,16 @@ pub async fn install_marketplace_skill(
         ) = conn
             .query_row(
                 "SELECT source_type, location, name, cache_json FROM registries WHERE id = ?1",
-                [&registry_id],
+                [&lookup_id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .map_err(|_| "Registry no encontrado".to_string())?;
         let entries: Vec<MarketplaceSkillEntry> = cache_json
             .and_then(|j| serde_json::from_str(&j).ok())
             .unwrap_or_default();
-        (source_type, location, registry_name, entries)
-    };
+        Ok((source_type, location, registry_name, entries))
+    })
+    .await?;
 
     let entry = entries
         .into_iter()
@@ -467,20 +470,21 @@ pub async fn marketplace_skill_readme(
     skill_id: String,
     db: tauri::State<'_, DbConnection>,
 ) -> Result<String, String> {
-    let (source_type, location, entries) = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
+    let lookup_id = registry_id.clone();
+    let (source_type, location, entries) = crate::database::blocking_db(&db, move |conn| {
         let (source_type, location, cache_json): (String, String, Option<String>) = conn
             .query_row(
                 "SELECT source_type, location, cache_json FROM registries WHERE id = ?1",
-                [&registry_id],
+                [&lookup_id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .map_err(|_| "Registry no encontrado".to_string())?;
         let entries: Vec<MarketplaceSkillEntry> = cache_json
             .and_then(|j| serde_json::from_str(&j).ok())
             .unwrap_or_default();
-        (source_type, location, entries)
-    };
+        Ok((source_type, location, entries))
+    })
+    .await?;
 
     let entry = entries
         .into_iter()
