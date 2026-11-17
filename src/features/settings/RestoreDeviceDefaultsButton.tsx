@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, useTheme } from "neogestify-ui-components";
 
@@ -12,6 +12,8 @@ import {
   type DeviceDefault,
 } from "@/features/settings/deviceDefaultsModel";
 import { restoreDefaultsDisabled } from "@/features/settings/restoreDefaultsControl";
+import { shouldToastRestoreRead } from "@/features/settings/restoreReadToast";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 /** Os eventos que mudam um ajuste do aparelho sem passar pelo botão: o botão relê o que está fora do padrão. */
 const REFRESH_EVENTS = ["storage", "focus", "ade-appearance-mode-changed", "cc-custom-theme-changed"] as const;
@@ -25,17 +27,23 @@ export function RestoreDeviceDefaultsButton() {
   const { setTheme } = useTheme();
   const [changed, setChanged] = useState<readonly DeviceDefault[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const loadFailedRef = useRef(false);
 
   const refresh = useCallback(() => {
     void changedDeviceDefaults(DEVICE_DEFAULTS)
       .then((rows) => {
+        loadFailedRef.current = false;
         setChanged(rows);
         setLoadFailed(false);
       })
       .catch(() => {
+        const notify = shouldToastRestoreRead("refresh", loadFailedRef.current);
+        loadFailedRef.current = true;
         setChanged([]);
         setLoadFailed(true);
-        void AlertaToast(t("settings.restoreDefaults"), t("settings.restoreDefaults.readError"), "error", 6000);
+        if (notify) {
+          void AlertaToast(t("settings.restoreDefaults"), t("settings.restoreDefaults.readError"), "error", 6000);
+        }
       });
   }, [t]);
 
@@ -51,6 +59,7 @@ export function RestoreDeviceDefaultsButton() {
     try {
       // Relê antes de confirmar: a lista do cabeçalho pode estar velha.
       const current = await changedDeviceDefaults(DEVICE_DEFAULTS);
+      loadFailedRef.current = false;
       setChanged(current);
       setLoadFailed(false);
       if (current.length === 0) {
@@ -77,8 +86,11 @@ export function RestoreDeviceDefaultsButton() {
         void AlertaToast(t("settings.restoreDefaults"), t("settings.restoreDefaults.done"), "success", 3000);
       }
     } catch (error) {
+      loadFailedRef.current = true;
       setLoadFailed(true);
-      void AlertaToast(t("settings.restoreDefaults"), String(error), "error", 6000);
+      if (shouldToastRestoreRead("restore", true)) {
+        void AlertaToast(t("settings.restoreDefaults"), uiErrorText(error), "error", 6000);
+      }
     }
   };
 

@@ -189,6 +189,11 @@ export interface ShadowSummary {
  * (`foto_enviada=true superficie=ios rotulos=23`). Comparar isso com a decisão dá sempre "discorda": com o computer use
  * em uso, a concordância do cartão caía para 1% sem nada errado no Jev.
  */
+/** Se o formulário está sujo, o modelo novo não recarrega os campos. */
+export function applyDecisionModelUpdate(dirty: boolean): "keep" | "reload" {
+  return dirty ? "keep" : "reload";
+}
+
 export const NO_HEURISTIC = new Set(["browser_step", "browser_vision"]);
 
 /** O resumo do relatório do modo sombra (o cartão da direita no chat). Pura. */

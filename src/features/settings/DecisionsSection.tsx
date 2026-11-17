@@ -6,7 +6,7 @@ import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
 import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, jevModels, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
 import { NO_HEURISTIC, POINT_MODE, shadowSummary, type PointMode } from "@/features/settings/decisionsModel";
-import { defaultDecisionSettings, isDirty, modelAfterProviderChange, modelOptions, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
+import { applyDecisionModelUpdate, defaultDecisionSettings, isDirty, modelAfterProviderChange, modelOptions, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
 
 const PROVIDERS: DecisionProviderId[] = ["none", "laya_local", "laya_studio", "jev"];
 const POINT_LABEL: Record<string, string> = {
@@ -189,7 +189,7 @@ export function DecisionsSection() {
     let off: Promise<() => void> = Promise.resolve(() => {});
     try {
       off = listen<string>("decisions-model-updated", (event) => {
-        if (dirtyRef.current) {
+        if (applyDecisionModelUpdate(dirtyRef.current) === "keep") {
           setStatus(t("settings.decisions.autoUpdatedKeepEdits", { model: event.payload }));
           jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
           return;

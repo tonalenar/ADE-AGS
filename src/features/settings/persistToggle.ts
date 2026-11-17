@@ -1,4 +1,5 @@
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 /** Liga o switch na hora e desfaz se a gravação falhar. */
 export async function persistToggle(
@@ -18,5 +19,5 @@ export async function persistToggle(
 }
 
 export function toastToggleError(title: string, error: unknown): void {
-  void AlertaToast(title, String(error), "error", 6000);
+  void AlertaToast(title, uiErrorText(error), "error", 6000);
 }

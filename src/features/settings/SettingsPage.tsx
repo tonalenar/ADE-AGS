@@ -8,6 +8,7 @@ import { SettingsSidebar } from "@/features/settings/SettingsSidebar";
 import { SettingsPageBody } from "@/features/settings/SettingsPages";
 import { RestoreDeviceDefaultsButton } from "@/features/settings/RestoreDeviceDefaultsButton";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 import { SETTINGS_PAGE_LABEL_KEYS, settingsPageDescKey, type SettingsPageId } from "@/features/settings/settingsNav";
 import { useSettingsTargetStore } from "@/features/settings/settingsTarget";
 
@@ -75,7 +76,7 @@ export function SettingsPage() {
       console.error(error);
     });
     loadCustomAgents().catch((error) => {
-      void AlertaToast(t("settings.agents"), String(error), "error", 6000);
+      void AlertaToast(t("settings.agents"), uiErrorText(error), "error", 6000);
     });
   }, [loadSkillsDir, loadCustomAgents, t]);
 
