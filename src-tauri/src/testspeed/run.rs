@@ -535,7 +535,7 @@ struct Claim<'a> {
 }
 
 /// Depois disto um dono sem resposta é considerado morto (um processo que caiu não trava a fila).
-const OWNER_STALE: Duration = Duration::from_secs(20 * 60);
+const OWNER_STALE: Duration = Duration::from_secs(35 * 60);
 /// De quanto em quanto a espera confere se o verde já apareceu ou o dono terminou.
 const WAIT_STEP: Duration = Duration::from_secs(1);
 
