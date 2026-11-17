@@ -7,7 +7,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, Once, OnceLock, mpsc};
 use tauri::Emitter;
 
@@ -93,29 +93,68 @@ const PERSIST_ATTEMPTS: i64 = 3;
 const REPLAY_BATCH: i64 = 200;
 
 /// Canal da gravação, em trabalhos que esperam o gravador. Cheio, o produtor não espera: o trabalho vai para o
-/// excedente (estado) ou é contado (baixa prioridade).
+/// excedente (estado) ou é contado (baixa prioridade e transição).
 pub(crate) const CANAL_CAP: usize = 4_096;
-/// Quantos trabalhos de baixa prioridade o excedente aceita. Passou disso, o próximo é contado como omitido.
+/// Quantas atualizações de baixa prioridade o excedente aceita. Passou disso, o próximo é contado como omitido.
 pub(crate) const EXCEDENTE_BAIXA: usize = 1_024;
 
-/// Prioridade de um trabalho da fila: baixa para atualizações substituíveis; estado para o resto.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Prioridade {
-    Estado,
+/// O destino de um trabalho quando o canal não o aceita.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Destino {
+    /// Atualização substituível (um `item` do chat): cabe no excedente até `EXCEDENTE_BAIXA`; o resto é contado.
     Baixa,
+    /// Estado com entidade (a fase de uma conversa, um pedido, uma tarefa): só a atualização mais recente da chave
+    /// fica no excedente, e o estado final sai ao destravar.
+    Sobrepoe(String),
+    /// Transição que precisa de todas (ex.: um pedido resolvido): não cabe no excedente. Quando não cabe no canal, é
+    /// contada pelo tipo e sai no resumo.
+    Transicao(&'static str),
+}
+
+/// O que a fila omitiu desde o último resumo.
+pub(crate) struct Resumo {
+    /// Atualizações de baixa prioridade omitidas.
+    pub omitidos: u64,
+    /// As transições omitidas, por tipo.
+    pub transicoes: Vec<(&'static str, u64)>,
+}
+
+struct Entrada<T> {
+    /// A chave de estado da entrada (`None` para baixa prioridade).
+    chave: Option<String>,
+    trabalho: T,
 }
 
 struct Estado<T> {
-    /// O que não coube no canal, na ordem de chegada. Depois do canal, sempre: a ordem é a do excedente enquanto ele
-    /// tem trabalho.
-    excedente: VecDeque<T>,
-    /// Quantos trabalhos de baixa prioridade foram omitidos desde o último resumo.
+    /// O excedente, na ordem de chegada (a sequência é a chave). Cada chave de estado aparece no máximo uma vez.
+    excedente: BTreeMap<u64, Entrada<T>>,
+    /// Chave de estado → a sequência da entrada mais recente dela.
+    chaves: HashMap<String, u64>,
+    /// Quantas entradas de baixa prioridade estão no excedente.
+    baixa: usize,
+    sequencia: u64,
     omitidos: u64,
-    /// O último trabalho omitido: dele saem a conversa e o aplicativo do resumo.
-    ultimo_omitido: Option<T>,
+    transicoes: BTreeMap<&'static str, u64>,
+    /// O último trabalho descartado: é dele que saem a conversa e o aplicativo do resumo.
+    ultimo: Option<T>,
 }
 
-/// O lado que enfileira. Não bloqueia: com a fila cheia, o trabalho vai para o excedente ou é contado.
+impl<T> Estado<T> {
+    fn inserir(&mut self, chave: Option<String>, trabalho: T) {
+        self.sequencia += 1;
+        let seq = self.sequencia;
+        if let Some(chave) = &chave {
+            self.chaves.insert(chave.clone(), seq);
+        }
+        self.excedente.insert(seq, Entrada { chave, trabalho });
+    }
+
+    fn tem_resumo(&self) -> bool {
+        self.omitidos > 0 || !self.transicoes.is_empty()
+    }
+}
+
+/// O lado que enfileira. Não bloqueia: com a fila cheia, o trabalho vai para o excedente, é sobreposto ou é contado.
 pub(crate) struct Fila<T> {
     canal: mpsc::SyncSender<T>,
     estado: Arc<Mutex<Estado<T>>>,
@@ -134,11 +173,16 @@ fn trancar<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 pub(crate) fn fila_com<T>(canal: usize, excedente_baixa: usize) -> (Fila<T>, Gravador<T>) {
     let (envio, recebe) = mpsc::sync_channel(canal);
-    let estado = Arc::new(Mutex::new(Estado { excedente: VecDeque::new(), omitidos: 0, ultimo_omitido: None }));
-    (
-        Fila { canal: envio, estado: estado.clone(), excedente_baixa },
-        Gravador { recebe, estado },
-    )
+    let estado = Arc::new(Mutex::new(Estado {
+        excedente: BTreeMap::new(),
+        chaves: HashMap::new(),
+        baixa: 0,
+        sequencia: 0,
+        omitidos: 0,
+        transicoes: BTreeMap::new(),
+        ultimo: None,
+    }));
+    (Fila { canal: envio, estado: estado.clone(), excedente_baixa }, Gravador { recebe, estado })
 }
 
 pub(crate) fn fila<T>() -> (Fila<T>, Gravador<T>) {
@@ -147,7 +191,7 @@ pub(crate) fn fila<T>() -> (Fila<T>, Gravador<T>) {
 
 impl<T> Fila<T> {
     /// Põe um trabalho na fila sem esperar. Devolve o trabalho se o gravador já caiu (quem chama grava por conta própria).
-    pub(crate) fn enviar(&self, trabalho: T, prioridade: Prioridade) -> Result<(), T> {
+    pub(crate) fn enviar(&self, trabalho: T, destino: Destino) -> Result<(), T> {
         let mut estado = trancar(&self.estado);
         // Com excedente, o canal fica de fora: a ordem de chegada é a do excedente.
         let trabalho = if estado.excedente.is_empty() {
@@ -159,39 +203,74 @@ impl<T> Fila<T> {
         } else {
             trabalho
         };
-        match prioridade {
-            Prioridade::Baixa if estado.excedente.len() >= self.excedente_baixa => {
+        match destino {
+            Destino::Baixa if estado.baixa >= self.excedente_baixa => {
                 estado.omitidos += 1;
-                estado.ultimo_omitido = Some(trabalho);
+                estado.ultimo = Some(trabalho);
             }
-            Prioridade::Baixa | Prioridade::Estado => estado.excedente.push_back(trabalho),
+            Destino::Baixa => {
+                estado.baixa += 1;
+                estado.inserir(None, trabalho);
+            }
+            Destino::Sobrepoe(chave) => {
+                // A atualização nova substitui a anterior da mesma chave: fica com a sequência de agora.
+                if let Some(antiga) = estado.chaves.remove(&chave) {
+                    estado.excedente.remove(&antiga);
+                }
+                estado.inserir(Some(chave), trabalho);
+            }
+            Destino::Transicao(tipo) => {
+                *estado.transicoes.entry(tipo).or_insert(0) += 1;
+                estado.ultimo = Some(trabalho);
+            }
         }
         Ok(())
+    }
+
+    /// Quantas entradas o excedente tem agora (para o teste de limite).
+    #[cfg(test)]
+    pub(crate) fn excedente_len(&self) -> usize {
+        trancar(&self.estado).excedente.len()
     }
 }
 
 impl<T> Gravador<T> {
-    /// O próximo trabalho, na ordem de chegada. Quando a fila esvazia com omitidos pendentes, devolve antes o resumo
-    /// que `resumo` monta a partir do último omitido. `None` quando não há mais nada e o produtor já caiu.
-    pub(crate) fn proximo(&self, resumo: impl FnOnce(T, u64) -> Option<T>) -> Option<T> {
+    /// O próximo trabalho, na ordem de chegada. Quando a fila esvazia com resumo pendente, devolve antes o resumo que
+    /// `resumo` monta a partir do último descartado. `None` quando não há mais nada e o produtor já caiu.
+    ///
+    /// `resumo` roda sem o lock da fila: ele pode gravar no banco, e quem emite pode estar com o banco preso.
+    pub(crate) fn proximo(&self, resumo: impl FnOnce(T, Resumo) -> Option<T>) -> Option<T> {
         match self.recebe.try_recv() {
             Ok(trabalho) => Some(trabalho),
             Err(vazio) => {
                 // Só o resultado desta chamada: tentar de novo aqui poderia tirar um trabalho que chegou agora.
                 let caiu = matches!(vazio, mpsc::TryRecvError::Disconnected);
-                {
+                let pendente = {
                     let mut estado = trancar(&self.estado);
-                    if let Some(trabalho) = estado.excedente.pop_front() {
-                        return Some(trabalho);
-                    }
-                    if estado.omitidos > 0 {
-                        let omitidos = std::mem::take(&mut estado.omitidos);
-                        if let Some(ultimo) = estado.ultimo_omitido.take()
-                            && let Some(trabalho) = resumo(ultimo, omitidos)
-                        {
-                            return Some(trabalho);
+                    if let Some((seq, entrada)) = estado.excedente.pop_first() {
+                        if let Some(chave) = entrada.chave {
+                            if estado.chaves.get(&chave) == Some(&seq) {
+                                estado.chaves.remove(&chave);
+                            }
+                        } else {
+                            estado.baixa -= 1;
                         }
+                        return Some(entrada.trabalho);
                     }
+                    if estado.tem_resumo() {
+                        let resumo_dados = Resumo {
+                            omitidos: std::mem::take(&mut estado.omitidos),
+                            transicoes: std::mem::take(&mut estado.transicoes).into_iter().collect(),
+                        };
+                        estado.ultimo.take().map(|ultimo| (ultimo, resumo_dados))
+                    } else {
+                        None
+                    }
+                };
+                if let Some((ultimo, dados)) = pendente
+                    && let Some(trabalho) = resumo(ultimo, dados)
+                {
+                    return Some(trabalho);
                 }
                 if caiu { None } else { self.recebe.recv().ok() }
             }
@@ -215,33 +294,89 @@ fn writer() -> &'static Fila<QueuedEvent> {
     })
 }
 
-/// O resumo de trabalhos de baixa prioridade omitidos: um evento do chat, na conversa do último omitido.
-fn resumo_de_omitidos(ultimo: QueuedEvent, omitidos: u64) -> Option<QueuedEvent> {
+/// O resumo do que a fila omitiu. Num chat, é a entrada `logOmitted` da conversa do último descartado. Numa tarefa da
+/// Frota (que não tem conversa própria), é uma falha de gravação registrada, com o mesmo conteúdo.
+fn resumo_de_omitidos(ultimo: QueuedEvent, dados: Resumo) -> Option<QueuedEvent> {
+    let transicoes: serde_json::Map<String, Value> = dados.transicoes.iter().map(|(tipo, n)| (tipo.to_string(), json!(n))).collect();
+    let total: u64 = dados.transicoes.iter().map(|(_, n)| n).sum();
+    let texto = match (dados.omitidos, total) {
+        (0, _) => format!("{total} transições omitidas"),
+        (n, 0) => format!("{n} atualizações omitidas"),
+        (n, t) => format!("{n} atualizações e {t} transições omitidas"),
+    };
+    let payload = json!({ "omitidos": dados.omitidos, "transicoes": transicoes, "texto": texto });
     match ultimo {
         QueuedEvent::Chat { app, db, thread_id, .. } => Some(QueuedEvent::Chat {
             app,
             db,
             thread_id,
             event_type: "logOmitted".into(),
-            payload: json!({ "omitidos": omitidos }),
+            payload,
             ui: None,
         }),
-        _ => None,
+        QueuedEvent::Fleet { app, db, task_id, attempt_id, .. } => {
+            let now = crate::util::now_ts_ms();
+            fail_write(
+                &db,
+                &FailedWrite {
+                    scope: "fleet",
+                    thread_id: None,
+                    task_id: Some(&task_id),
+                    attempt_id: Some(&attempt_id),
+                    event_kind: "logOmitted",
+                    payload_json: Some(&payload.to_string()),
+                    error: &texto,
+                    attempts: 0,
+                },
+                now,
+                &mut AppSink(&app),
+            );
+            None
+        }
+        QueuedEvent::Replay { .. } => None,
     }
 }
 
-/// A prioridade de um trabalho: `item` e `taskItem` do chat são atualizações substituíveis; o resto é estado.
-fn prioridade_de(job: &QueuedEvent) -> Prioridade {
+/// O destino de um trabalho quando o canal não o aceita (ver `Destino`).
+fn destino_de(job: &QueuedEvent) -> Destino {
     match job {
-        QueuedEvent::Chat { event_type, .. } if matches!(event_type.as_str(), "item" | "taskItem") => Prioridade::Baixa,
-        _ => Prioridade::Estado,
+        QueuedEvent::Chat { thread_id, event_type, payload, .. } => {
+            let id_de = |campo: &str| {
+                let item = payload.get(campo).unwrap_or(payload);
+                value_str(item, "id").map(str::to_string)
+            };
+            match event_type.as_str() {
+                "item" | "taskItem" => Destino::Baixa,
+                "phase" => Destino::Sobrepoe(format!("chat:{thread_id}:phase")),
+                "closed" => Destino::Sobrepoe(format!("chat:{thread_id}:closed")),
+                "goal" => Destino::Sobrepoe(format!("chat:{thread_id}:goal")),
+                "task" => match id_de("task") {
+                    Some(id) => Destino::Sobrepoe(format!("chat:{thread_id}:task:{id}")),
+                    None => Destino::Transicao("task"),
+                },
+                "request" => match id_de("request") {
+                    Some(id) => Destino::Sobrepoe(format!("chat:{thread_id}:request:{id}")),
+                    None => Destino::Transicao("request"),
+                },
+                "requestResolved" => Destino::Transicao("requestResolved"),
+                "created" => Destino::Transicao("created"),
+                "error" => Destino::Transicao("error"),
+                _ => Destino::Transicao("chat"),
+            }
+        }
+        QueuedEvent::Fleet { task_id, attempt_id, event, .. } => match event {
+            super::types::AgentEvent::Started { .. } => Destino::Sobrepoe(format!("fleet:{task_id}:{attempt_id}:started")),
+            _ => Destino::Transicao("fleet"),
+        },
+        // O replay é um trabalho só por processo: a última versão dele basta.
+        QueuedEvent::Replay { .. } => Destino::Sobrepoe("replay".into()),
     }
 }
 
 /// Põe um trabalho na fila da gravação sem esperar. Devolve o trabalho se a gravação já caiu.
 fn send_to_writer(job: QueuedEvent) -> Result<(), QueuedEvent> {
-    let prioridade = prioridade_de(&job);
-    writer().enviar(job, prioridade)
+    let destino = destino_de(&job);
+    writer().enviar(job, destino)
 }
 
 /// Executa um trabalho da fila: tenta gravar (com repetição), registra a falha se houver, e só então entrega à janela

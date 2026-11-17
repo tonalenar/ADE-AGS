@@ -222,10 +222,14 @@ fn o_replay_nao_repete_falha_da_frota_que_nao_tem_payload() {
 
 // ── Fila da gravação: teto sem bloquear o produtor ──────────
 
-use super::execution_log::Prioridade;
+use super::execution_log::{Destino, Resumo};
 
-fn resumo_texto(ultimo: String, omitidos: u64) -> Option<String> {
-    Some(format!("{omitidos} omitidos (último: {ultimo})"))
+fn resumo_texto(ultimo: String, dados: Resumo) -> Option<String> {
+    match (dados.omitidos, dados.transicoes.as_slice()) {
+        (n, []) => Some(format!("{n} omitidos (último: {ultimo})")),
+        (0, transicoes) => Some(format!("transições: {transicoes:?}")),
+        (n, transicoes) => Some(format!("{n} omitidos e transições {transicoes:?} (último: {ultimo})")),
+    }
 }
 
 /// Canal de 2 e excedente de baixa prioridade de 2: 4 trabalhos seguem, os outros 6 de baixa prioridade são contados.
@@ -235,7 +239,7 @@ fn resumo_texto(ultimo: String, omitidos: u64) -> Option<String> {
 fn fila_cheia_nao_bloqueia_o_produtor_e_o_resumo_aparece() {
     let (fila, gravador) = execution_log::fila_com::<String>(2, 2);
     for i in 0..10 {
-        assert!(fila.enviar(format!("item-{i}"), Prioridade::Baixa).is_ok());
+        assert!(fila.enviar(format!("item-{i}"), Destino::Baixa).is_ok());
     }
     drop(fila);
     let entregues: Vec<String> = (0..4).filter_map(|_| gravador.proximo(resumo_texto)).collect();
@@ -243,24 +247,57 @@ fn fila_cheia_nao_bloqueia_o_produtor_e_o_resumo_aparece() {
     assert_eq!(gravador.proximo(resumo_texto).as_deref(), Some("6 omitidos (último: item-9)"));
 }
 
-/// Trabalho de estado nunca se perde nem sai de ordem, mesmo com o canal e o excedente de baixa prioridade cheios.
+/// Estado com chave nunca se perde nem sai de ordem; a baixa prioridade cabe até o teto do excedente.
 #[test]
 fn trabalho_de_estado_nunca_se_perde_nem_sai_de_ordem() {
     let (fila, gravador) = execution_log::fila_com::<String>(2, 1);
     let envios = [
-        ("e0", Prioridade::Estado),
-        ("b1", Prioridade::Baixa),
-        ("e2", Prioridade::Estado),
-        ("e3", Prioridade::Estado),
-        ("b4", Prioridade::Baixa),
-        ("b5", Prioridade::Baixa),
+        ("e0", Destino::Sobrepoe("a".into())),
+        ("b1", Destino::Baixa),
+        ("e2", Destino::Sobrepoe("b".into())),
+        ("e3", Destino::Sobrepoe("c".into())),
+        ("b4", Destino::Baixa),
+        ("b5", Destino::Baixa),
     ];
-    for (texto, prioridade) in envios {
-        assert!(fila.enviar(texto.to_string(), prioridade).is_ok());
+    for (texto, destino) in envios {
+        assert!(fila.enviar(texto.to_string(), destino).is_ok());
     }
     drop(fila);
     let saida: Vec<String> = (0..5).filter_map(|_| gravador.proximo(resumo_texto)).collect();
-    assert_eq!(saida, ["e0", "b1", "e2", "e3", "2 omitidos (último: b5)"]);
+    assert_eq!(saida, ["e0", "b1", "e2", "e3", "b4"]);
+    assert_eq!(gravador.proximo(resumo_texto).as_deref(), Some("1 omitidos (último: b5)"));
+}
+
+/// 10 000 atualizações da mesma tarefa com a gravação parada: o excedente fica com uma só, a mais recente, e o estado
+/// final sai ao destravar.
+#[test]
+fn dez_mil_atualizacoes_da_mesma_tarefa_deixam_so_o_estado_final() {
+    let (fila, gravador) = execution_log::fila_com::<u32>(2, 2);
+    for i in 0..10_000u32 {
+        assert!(fila.enviar(i, Destino::Sobrepoe("tarefa-1".into())).is_ok());
+    }
+    assert_eq!(fila.excedente_len(), 1, "uma entrada por chave, com a gravação parada");
+    drop(fila);
+    let saida: Vec<u32> = (0..3).filter_map(|_| gravador.proximo(|_, _| None)).collect();
+    assert_eq!(saida, [0, 1, 9_999], "os dois primeiros foram ao canal; o estado final sai por último");
+}
+
+/// Transições que não cabem no canal são contadas pelo tipo e saem no resumo; nenhuma entra no excedente.
+#[test]
+fn transicoes_que_nao_cabem_sao_contadas_pelo_tipo() {
+    let (fila, gravador) = execution_log::fila_com::<String>(1, 1);
+    assert!(fila.enviar("primeiro".into(), Destino::Sobrepoe("x".into())).is_ok());
+    for _ in 0..3 {
+        assert!(fila.enviar("pedido".into(), Destino::Transicao("request")).is_ok());
+    }
+    assert!(fila.enviar("resolvido".into(), Destino::Transicao("requestResolved")).is_ok());
+    assert_eq!(fila.excedente_len(), 0, "transição nunca entra no excedente");
+    drop(fila);
+    assert_eq!(gravador.proximo(resumo_texto).as_deref(), Some("primeiro"));
+    assert_eq!(
+        gravador.proximo(resumo_texto).as_deref(),
+        Some("transições: [(\"request\", 3), (\"requestResolved\", 1)]")
+    );
 }
 
 /// O resumo da fila vira uma entrada do log (`log.omitted`) na conversa a que pertencia o último omitido.
