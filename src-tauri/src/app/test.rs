@@ -109,6 +109,16 @@ fn nenhum_thread_nasce_antes_das_chamadas_que_mexem_no_ambiente() {
     }
 }
 
+#[test]
+fn falha_na_recuperacao_do_sync_de_memoria_nao_bloqueia_o_setup() {
+    let run = include_str!("run.rs");
+    assert!(run.contains("crate::memory::repo_sync::install(app)"), "o setup precisa instalar a sincronização de memória");
+    assert!(
+        !run.contains("crate::memory::repo_sync::install(app).map_err(|error| std::io::Error::other(error))?"),
+        "a falha de recuperação no boot não pode impedir a abertura do app"
+    );
+}
+
 /// Vídeos anexados no chat usam `convertFileSrc` (`asset://` / `http://asset.localhost`). Sem a feature
 /// `protocol-asset`, o escopo liberado (inclusive pastas com ponto como `~/.t3`) e a CSP, o `<video>` falha.
 #[test]

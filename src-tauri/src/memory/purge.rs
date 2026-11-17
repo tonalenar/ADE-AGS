@@ -8,6 +8,7 @@
 //! the export ban, is not updated and is not reattached.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
@@ -57,7 +58,7 @@ struct EntryState {
     updated_at: i64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct PendingRestore {
     entry_id: String,
     restore_rows: Vec<RevisionRow>,
@@ -65,6 +66,12 @@ struct PendingRestore {
 }
 
 const PENDING_RESTORE_PREFIX: &str = "memory.purge.pending_restore.";
+
+static VOLATILE_PENDING_RESTORES: OnceLock<Mutex<std::collections::BTreeMap<(usize, String), PendingRestore>>> = OnceLock::new();
+
+fn volatile_pending_restores() -> &'static Mutex<std::collections::BTreeMap<(usize, String), PendingRestore>> {
+    VOLATILE_PENDING_RESTORES.get_or_init(|| Mutex::new(std::collections::BTreeMap::new()))
+}
 
 pub fn main_database_file(conn: &Connection) -> Option<PathBuf> {
     conn.query_row("SELECT file FROM pragma_database_list WHERE name='main'", [], |row| row.get::<_, String>(0))
@@ -143,6 +150,26 @@ pub(crate) fn revisions_coordinated_failing_restore_at(
     })
 }
 
+#[cfg(test)]
+pub(crate) fn revisions_coordinated_failing_restore_and_persist_at(
+    db: &crate::database::DbConnection,
+    sync: &super::repo_sync::RepoSync,
+    entry_id: &str,
+    revision: Option<i64>,
+    scope: &Scope,
+    io_stage: &'static str,
+    attempts: &std::sync::atomic::AtomicUsize,
+    before_persist: &dyn Fn(),
+) -> Result<(), String> {
+    revisions_coordinated_impl(db, sync, entry_id, revision, scope, &|| {}, &|current| {
+        if current == io_stage { Err(format!("falha de teste na etapa {io_stage}")) } else { Ok(()) }
+    }, &|attempt| {
+        attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if attempt == 2 { before_persist(); }
+        Err("falha injetada ao restaurar a revisão".into())
+    })
+}
+
 fn revisions_coordinated_impl(
     db: &crate::database::DbConnection,
     sync: &super::repo_sync::RepoSync,
@@ -171,17 +198,17 @@ fn revisions_coordinated_impl(
     };
     let _resume = PauseGuard { sync, workspace: applied.workspace.clone() };
     if let Err(error) = sync.pause_workspace(&applied.workspace) {
-        restore_purge_with_retry(db, &applied, falha_na_restauracao).map_err(|restore| format!("A exportação em andamento não pôde ser pausada ({error}). {restore}"))?;
+        restore_purge_with_retry(db, sync, &applied, falha_na_restauracao).map_err(|restore| format!("A exportação em andamento não pôde ser pausada ({error}). {restore}"))?;
         return Err(format!("A exportação em andamento não pôde ser pausada ({error}); a revisão foi restaurada no banco."));
     }
     if let Err(error) = scrub_event_paths(&applied.event_paths, scope.events_root.as_deref(), &applied.bodies) {
         // Mantém a regra anterior: se o NDJSON falhar, restaura a revisão para permitir nova tentativa.
-        restore_purge_with_retry(db, &applied, falha_na_restauracao).map_err(|restore| format!("A redação do NDJSON falhou ({error}). {restore}"))?;
+        restore_purge_with_retry(db, sync, &applied, falha_na_restauracao).map_err(|restore| format!("A redação do NDJSON falhou ({error}). {restore}"))?;
         return Err(format!("A redação do NDJSON falhou; a revisão continua no banco para nova tentativa ({error})."));
     }
     sync.forget_discarded_pending(&applied.workspace);
     if let Err(error) = scrub_coordinated_with(db, scope, &applied, antes_do_io, falha_no_io) {
-        return Err(match restore_purge_with_retry(db, &applied, falha_na_restauracao) {
+        return Err(match restore_purge_with_retry(db, sync, &applied, falha_na_restauracao) {
             Ok(()) => format!("A limpeza dos arquivos locais falhou ({error}); a revisão foi restaurada no banco. Os arquivos podem ter sido parcialmente limpos; repita o apagamento para concluir."),
             Err(restore) => format!("A limpeza dos arquivos locais falhou ({error}). {restore}"),
         });
@@ -310,6 +337,7 @@ fn restore_pending(
 
 fn restore_purge_with_retry(
     db: &crate::database::DbConnection,
+    sync: &super::repo_sync::RepoSync,
     applied: &Applied,
     falha_injetada: &dyn Fn(u8) -> Result<(), String>,
 ) -> Result<(), String> {
@@ -325,10 +353,22 @@ fn restore_purge_with_retry(
             Err(error) => last_error = error,
         }
     }
-    match persist_pending_restore(db, &pending) {
+    let result = match persist_pending_restore(db, &pending) {
         Ok(()) => Err(format!("A restauração falhou após duas tentativas ({last_error}); será refeita no próximo boot.")),
-        Err(error) => Err(format!("A restauração falhou após duas tentativas ({last_error}) e não foi possível registrar a pendência ({error}).")),
+        Err(error) => {
+            volatile_pending_restores()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert((std::sync::Arc::as_ptr(db) as usize, pending.entry_id.clone()), pending);
+            Err(format!(
+                "A memória ficou em estado parcial: a restauração falhou após duas tentativas ({last_error}) e não foi possível gravar a pendência em settings ({error}). A pendência foi mantida na memória do processo; a próxima operação de memória tentará gravá-la de novo. Repita o purge/restaure para concluir."
+            ))
+        }
+    };
+    if let Err(error) = &result {
+        sync.mark_recovery_failed(error);
     }
+    result
 }
 
 fn persist_pending_restore(
@@ -351,6 +391,26 @@ fn persist_pending_restore(
 
 /// Reaplica restaurações de purge pendentes antes do sincronizador ou de outra operação de memória.
 pub(crate) fn recover_pending_restores(db: &crate::database::DbConnection) -> Result<(), String> {
+    let db_key = std::sync::Arc::as_ptr(db) as usize;
+    let volatile = volatile_pending_restores()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .iter()
+        .filter(|((key, _), _)| *key == db_key)
+        .map(|(_, item)| item.clone())
+        .collect::<Vec<_>>();
+    for item in volatile {
+        if let Err(error) = persist_pending_restore(db, &item) {
+            return Err(format!(
+                "A memória ficou em estado parcial: não foi possível gravar em settings a restauração pendente de {} ({error}). A pendência continua na memória do processo; a próxima operação de memória tentará novamente. Repita o purge/restaure para concluir.",
+                item.entry_id
+            ));
+        }
+        volatile_pending_restores()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&(db_key, item.entry_id.clone()));
+    }
     let pending = {
         let conn = db.lock().map_err(|error| error.to_string())?;
         let mut stmt = conn.prepare("SELECT key,value FROM settings WHERE substr(key,1,length(?1))=?1 ORDER BY key")
@@ -366,7 +426,10 @@ pub(crate) fn recover_pending_restores(db: &crate::database::DbConnection) -> Re
         if key != expected_key {
             return Err(format!("a chave da restauração pendente não corresponde à memória ({key})"));
         }
-        restore_pending(db, &item, Some(&key)).map_err(|error| format!("não foi possível reaplicar a restauração pendente de {}: {error}", item.entry_id))?;
+        restore_pending(db, &item, Some(&key)).map_err(|error| format!(
+            "A memória ficou em estado parcial: não foi possível reaplicar a restauração pendente de {} ({error}). A pendência continua gravada; tente novamente ou repita o purge/restaure para concluir.",
+            item.entry_id
+        ))?;
     }
     Ok(())
 }

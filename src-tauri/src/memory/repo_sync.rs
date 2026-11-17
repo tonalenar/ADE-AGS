@@ -130,6 +130,8 @@ struct Inner {
     stop: AtomicBool,
     running: AtomicBool,
     notify: Mutex<Option<Arc<dyn Fn(&RepoSyncStatus) + Send + Sync>>>,
+    /// Recuperação pendente impede toda exportação até o banco voltar a aceitar a restauração.
+    recovery_error: Mutex<Option<String>>,
     /// Só em teste: quanto o worker fica parado, COM a trava do estado, entre conferir `stop` e dormir sem prazo. Imita a
     /// thread perdendo a CPU nessa janela, que é onde o aviso do `Drop` se perdia num runner de CI carregado.
     #[cfg(test)]
@@ -165,6 +167,7 @@ impl RepoSync {
                 before_idle_wait_ms: std::sync::atomic::AtomicU64::new(0),
                 running: AtomicBool::new(false),
                 notify: Mutex::new(None),
+                recovery_error: Mutex::new(None),
             }),
             worker: Mutex::new(None),
         }
@@ -221,6 +224,19 @@ impl RepoSync {
     }
 
     pub fn retry(&self, workspace: &str) -> RepoSyncStatus {
+        let recovery_error = self.inner.recovery_error.lock().unwrap_or_else(|error| error.into_inner()).clone();
+        if recovery_error.is_some() {
+            match super::purge::recover_pending_restores(&self.inner.db) {
+                Ok(()) => {
+                    *self.inner.recovery_error.lock().unwrap_or_else(|error| error.into_inner()) = None;
+                    self.inner.wake.notify_all();
+                    self.spawn();
+                    self.reconcile_pending();
+                }
+                Err(error) => self.mark_recovery_failed(&error),
+            }
+            return self.status(workspace);
+        }
         let status = {
             let mut state = self.lock_state();
             if let Some(slot) = state.slots.get_mut(workspace) {
@@ -236,7 +252,31 @@ impl RepoSync {
     }
 
     pub fn status(&self, workspace: &str) -> RepoSyncStatus {
+        if let Some(error) = self.inner.recovery_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone() {
+            return RepoSyncStatus {
+                workspace_id: workspace.to_string(),
+                phase: "failed".into(),
+                error: Some(error),
+                commit: None,
+                pending: 0,
+                warnings: Vec::new(),
+            };
+        }
         snapshot(&self.lock_state(), workspace)
+    }
+
+    pub(super) fn mark_recovery_failed(&self, error: &str) {
+        *self.inner.recovery_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(error.to_string());
+        self.inner.wake.notify_all();
+        let status = RepoSyncStatus {
+            workspace_id: "*".into(),
+            phase: "failed".into(),
+            error: Some(error.to_string()),
+            commit: None,
+            pending: 0,
+            warnings: Vec::new(),
+        };
+        self.emit(&status);
     }
 
     /// Pausa o workspace para o purge reescrever o repositório. Ver o contrato no módulo.
@@ -411,7 +451,20 @@ impl RepoSync {
     fn emit(&self, status: &RepoSyncStatus) {
         let notify = self.inner.notify.lock().unwrap_or_else(|err| err.into_inner()).clone();
         if let Some(notify) = notify {
-            notify(status);
+            let recovery_error = self.inner.recovery_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+            if let Some(error) = recovery_error {
+                let failed = RepoSyncStatus {
+                    workspace_id: status.workspace_id.clone(),
+                    phase: "failed".into(),
+                    error: Some(error),
+                    commit: None,
+                    pending: 0,
+                    warnings: Vec::new(),
+                };
+                notify(&failed);
+            } else {
+                notify(status);
+            }
         }
     }
 }
@@ -536,6 +589,10 @@ fn worker_loop(inner: Arc<Inner>) {
     loop {
         if inner.stop.load(Ordering::SeqCst) {
             break;
+        }
+        if inner.recovery_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_some() {
+            state = inner.wake.wait(state).unwrap_or_else(|error| error.into_inner());
+            continue;
         }
         let now = Instant::now();
         if let Some(job) = next_job(&state, now) {
@@ -763,15 +820,20 @@ fn dirty_workspaces(conn: &rusqlite::Connection) -> Result<Vec<String>, String> 
 
 pub fn install(app: &tauri::App) -> Result<(), String> {
     let db = app.state::<DbConnection>().inner().clone();
-    super::purge::recover_pending_restores(&db)?;
+    let restore_error = super::purge::recover_pending_restores(&db).err();
     let root = repo::default_root().expect("home unavailable");
     let sync = RepoSync::new(db, root);
     let handle = app.handle().clone();
     sync.set_notifier(Arc::new(move |status: &RepoSyncStatus| {
         let _ = handle.emit(SYNC_EVENT, status);
     }));
-    sync.spawn();
-    sync.reconcile_pending();
+    if let Some(error) = restore_error {
+        sync.mark_recovery_failed(&error);
+        eprintln!("[memory] sincronização desativada porque a recuperação pendente falhou: {error}");
+    } else {
+        sync.spawn();
+        sync.reconcile_pending();
+    }
     app.manage(sync);
     Ok(())
 }
@@ -1615,12 +1677,76 @@ mod tests {
         assert!(error.contains("será refeita"), "a mensagem precisa dizer que a restauração será refeita: {error}");
         assert_revision_absent(&db, &target.entry_id, target.revision);
 
-        crate::memory::purge::recover_pending_restores(&db).unwrap();
+        {
+            let conn = db.lock().unwrap();
+            conn.execute_batch("PRAGMA query_only=ON;").unwrap();
+        }
+        let sqlite_error = crate::memory::purge::recover_pending_restores(&db).unwrap_err();
+        assert!(sqlite_error.contains("readonly") || sqlite_error.contains("read-only"), "a recuperação precisa falhar no SQLite real: {sqlite_error}");
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let observed = emitted.clone();
+        sync.set_notifier(Arc::new(move |status| observed.lock().unwrap().push(status.clone())));
+        sync.mark_recovery_failed(&sqlite_error);
+        sync.resume_workspace("w");
+        let latest = emitted.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(latest.workspace_id, "w");
+        assert_eq!(latest.phase, "failed", "retomar o workspace não pode esconder o aviso de recuperação");
+        assert_eq!(sync.status("w").phase, "failed", "a falha precisa aparecer pelo status de sync consumido pela UI");
+        assert!(!sync.inner.running.load(Ordering::SeqCst), "o sync precisa ficar parado até a restauração passar");
+        assert_eq!(sync.retry("w").phase, "failed", "uma nova falha SQLite não pode liberar o sync");
+        assert_revision_absent(&db, &target.entry_id, target.revision);
+        let conn = db.lock().unwrap();
+        let still_pending: i64 = conn.query_row("SELECT COUNT(*) FROM settings WHERE key=?1", [&pending_key], |row| row.get(0)).unwrap();
+        assert_eq!(still_pending, 1, "a falha SQLite precisa preservar a pendência durável");
+        conn.execute_batch("PRAGMA query_only=OFF;").unwrap();
+        drop(conn);
+
+        assert_ne!(sync.retry("w").phase, "failed", "o retry deve reabrir o sync depois da restauração");
 
         assert_revision_restored(&db, &target.entry_id, target.revision, "recuperação no boot");
         let conn = db.lock().unwrap();
         let pending_count: i64 = conn.query_row("SELECT COUNT(*) FROM settings WHERE key=?1", [&pending_key], |row| row.get(0)).unwrap();
         assert_eq!(pending_count, 0, "a pendência só deve ser removida depois da restauração");
+    }
+
+    #[test]
+    fn purge_guarda_restauracao_em_memoria_se_settings_recusa_gravar() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _) = approved_pair(&db, &sync);
+        let scope = crate::memory::purge::Scope { memory_root: root.path().to_path_buf(), database_file: None, events_root: None };
+        let restore_attempts = AtomicUsize::new(0);
+
+        let error = crate::memory::purge::revisions_coordinated_failing_restore_and_persist_at(
+            &db,
+            &sync,
+            &target.entry_id,
+            Some(target.revision),
+            &scope,
+            "repositório",
+            &restore_attempts,
+            &|| db.lock().unwrap().execute_batch("PRAGMA query_only=ON;").unwrap(),
+        ).unwrap_err();
+
+        assert_eq!(restore_attempts.load(Ordering::SeqCst), 2);
+        assert!(error.contains("estado parcial") && error.contains("Repita"), "a mensagem precisa explicar a recuperação pendente: {error}");
+        assert_revision_absent(&db, &target.entry_id, target.revision);
+        {
+            let conn = db.lock().unwrap();
+            let pending_count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM settings WHERE key LIKE 'memory.purge.pending_restore.%'",
+                [],
+                |row| row.get(0),
+            ).unwrap();
+            assert_eq!(pending_count, 0, "o teste precisa cobrir a falha ao gravar settings");
+            conn.execute_batch("PRAGMA query_only=OFF;").unwrap();
+        }
+
+        // A próxima operação de memória tenta tornar durável a pendência volátil e restaurá-la.
+        crate::memory::purge::recover_pending_restores(&db).unwrap();
+        assert_revision_restored(&db, &target.entry_id, target.revision, "retry da pendência em memória");
     }
 
     #[cfg(unix)]
