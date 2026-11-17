@@ -68,7 +68,7 @@ beforeEach(() => {
   document.body.appendChild(host);
   root = createRoot(host);
 });
-afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); document.body.querySelectorAll("[role=dialog]").forEach((n) => n.remove()); });
+afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); document.body.querySelectorAll("[role=dialog]").forEach((n) => n.remove()); vi.restoreAllMocks(); });
 
 describe("o Resumo do painel", () => {
   it("o ambiente: computador, pasta com o pai na home, branch e modelo", async () => {

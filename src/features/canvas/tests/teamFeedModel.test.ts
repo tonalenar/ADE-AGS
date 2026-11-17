@@ -108,8 +108,8 @@ describe("filtros, continuação e texto longo", () => {
 
 describe("formatação do texto das mensagens", () => {
   it("põe caminhos, branches e arquivos em fonte de código, sem mexer no que já é código", () => {
-    expect(codeAddresses("Worktree: C:\\Users\\tonz1n\\.ags\\worktrees\\67cb84ad, branch cc/mission-a2d1-67cb84ad.")).toBe(
-      "Worktree: `C:\\Users\\tonz1n\\.ags\\worktrees\\67cb84ad`, branch `cc/mission-a2d1-67cb84ad`.",
+    expect(codeAddresses("Worktree: C:\\Users\\qa\\.ags\\worktrees\\67cb84ad, branch cc/mission-a2d1-67cb84ad.")).toBe(
+      "Worktree: `C:\\Users\\qa\\.ags\\worktrees\\67cb84ad`, branch `cc/mission-a2d1-67cb84ad`.",
     );
     expect(codeAddresses("Veja docs/ade-ags/TEST_CACHE.md: e AUDITORIA_MEMORIA.md.")).toBe("Veja `docs/ade-ags/TEST_CACHE.md`: e `AUDITORIA_MEMORIA.md`.");
     expect(codeAddresses("já é `src/a.ts` e\n```\nsrc/b.ts\n```")).toBe("já é `src/a.ts` e\n```\nsrc/b.ts\n```");

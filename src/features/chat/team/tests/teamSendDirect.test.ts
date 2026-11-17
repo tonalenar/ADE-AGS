@@ -105,6 +105,9 @@ describe("o vigia do chat (avisos ao orquestrador)", () => {
   it("os bloqueios nascem ligados e «sem progresso» desligado; cada interruptor mostra já e pede ao backend", () => {
     useTeamStore.setState({ teams: [team] });
     expect(useTeamStore.getState().teams[0]!.watch).toBeUndefined();
+    // A UI trata `undefined` como ligado (`checked={team.watch !== false}`).
+    expect((team as { watch?: boolean }).watch !== false).toBe(true);
+    expect((team as { watchStall?: boolean }).watchStall === true).toBe(false);
     setWatch("t1", false);
     expect(useTeamStore.getState().teams[0]!.watch).toBe(false);
     expect(backend.calls[backend.calls.length - 1]).toEqual(["chat_team_watch", { teamId: "t1", enabled: false }]);

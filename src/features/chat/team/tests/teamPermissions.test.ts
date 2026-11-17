@@ -46,7 +46,7 @@ describe("as chaves de i18n do time", () => {
   it("toda chave fixa que o time usa existe no catálogo", () => {
     const dir = join(__dirname, "..");
     const source = readdirSync(dir).filter((f) => /\.tsx?$/.test(f)).map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
-    const used = [...source.matchAll(/(?:t\(|i18nKey=)"(chat\.(?:team|panel)\.[\w.]+)"/g)].map((m) => m[1]!);
+    const used = [...source.matchAll(/(?:t\(|i18nKey=)"((?:chat\.(?:team|panel)|role|canvas)\.[\w.]+)"/g)].map((m) => m[1]!);
     const catalog = ptBR as Record<string, string>;
     const missing = [...new Set(used)].filter((k) => !(k in catalog) && !(`${k}_one` in catalog));
     expect(used.length).toBeGreaterThan(20);

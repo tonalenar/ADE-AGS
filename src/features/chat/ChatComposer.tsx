@@ -37,6 +37,18 @@ export function appendMention(prev: string, mention: string): string {
   return prev && !/\s$/.test(prev) ? `${prev} ${mention} ` : `${prev}${mention} `;
 }
 
+/** Insere a transcrição no intervalo do cursor, com espaço só se faltar. Pura. */
+export function insertAtCaret(text: string, start: number, end: number, transcript: string): { text: string; caret: number } | null {
+  const before = text.slice(0, start);
+  const after = text.slice(end);
+  const phrase = transcript.trim();
+  if (!phrase) return null;
+  const leadingSpace = before.length > 0 && !/\s$/.test(before) ? " " : "";
+  const trailingSpace = after.length > 0 && !/^\s/.test(after) ? " " : "";
+  const insertion = `${leadingSpace}${phrase}${trailingSpace}`;
+  return { text: `${before}${insertion}${after}`, caret: before.length + insertion.length };
+}
+
 /** O que o `addon` do composer recebe: o texto, o cursor e como trocar os dois. */
 export interface ComposerAddonContext {
   text: string;
@@ -177,14 +189,9 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     const el = ref.current;
     const start = el?.selectionStart ?? caret;
     const end = el?.selectionEnd ?? start;
-    const before = text.slice(0, start);
-    const after = text.slice(end);
-    const phrase = transcript.trim();
-    if (!phrase) return;
-    const leadingSpace = before.length > 0 && !/\s$/.test(before) ? " " : "";
-    const trailingSpace = after.length > 0 && !/^\s/.test(after) ? " " : "";
-    const insertion = `${leadingSpace}${phrase}${trailingSpace}`;
-    apply(`${before}${insertion}${after}`, before.length + insertion.length);
+    const next = insertAtCaret(text, start, end, transcript);
+    if (!next) return;
+    apply(next.text, next.caret);
   };
   const browseHistory = (direction: -1 | 1) => {
     if (promptHistory.length === 0) return false;

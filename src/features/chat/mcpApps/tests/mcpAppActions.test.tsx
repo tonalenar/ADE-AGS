@@ -303,11 +303,13 @@ describe("aprovação humana no quadro", () => {
     const postToComposer = vi.fn();
     await mount({ postToComposer });
     await fromApp(messageRequest(1, "a"));
+    expect(dialog()).not.toBeNull();
     await act(async () => {
       root?.unmount();
     });
     root = createRoot(host);
     expect(postToComposer).not.toHaveBeenCalled();
+    expect(dialog()).toBeNull();
   });
 
   it("sem toolHost, tools/call segue recusado com -32601 e sem diálogo", async () => {

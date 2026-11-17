@@ -168,11 +168,14 @@ describe("a conversa segue o fim enquanto a pessoa está nele", () => {
     content = 30_000;
     await render(longHistory);
     await runAnimation();
-    expect(host.querySelectorAll("[data-virtual-turn]").length).toBeGreaterThan(0);
+    const before = [...host.querySelectorAll("[data-virtual-turn]")].map((el) => el.getAttribute("data-virtual-turn"));
+    expect(before.length).toBeGreaterThan(0);
 
     const shorter = longHistory.slice(0, 180); // 60 turnos: ainda virtualizada, com o intervalo antigo no fim.
     await render(shorter);
-    expect(host.querySelectorAll("[data-virtual-turn]").length).toBeGreaterThan(0);
+    const after = [...host.querySelectorAll("[data-virtual-turn]")].map((el) => el.getAttribute("data-virtual-turn"));
+    expect(after.length).toBeGreaterThan(0);
+    expect(after).not.toEqual(before);
     expect(host.querySelector('[data-virtual-turn="virtual-u-59"]')).not.toBeNull();
   });
 

@@ -51,7 +51,7 @@ beforeEach(() => {
   document.body.appendChild(host);
   root = createRoot(host);
 });
-afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); });
+afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); vi.restoreAllMocks(); });
 
 describe("auditoria: cada botão da barra do modo chat", () => {
   it("recolher chama o handler", async () => {
@@ -183,7 +183,11 @@ describe("as funções da barra (Fixadas, renomear, lida, menu, teclado)", () =>
     await key(cardEl("Primeira"), "F2");
     const input = host.querySelector("input[aria-label='chat.sidebar.renameLabel']") as HTMLInputElement;
     expect(input).toBeTruthy();
-    await act(async () => { input.value = "  Novo   nome "; });
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "  Novo   nome ");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
     await key(input, "Enter");
     expect(rename).toHaveBeenCalledWith("a", "Novo nome");
     expect(host.querySelector("input[aria-label='chat.sidebar.renameLabel']")).toBeNull();
@@ -244,7 +248,7 @@ describe("a hierarquia da barra do Claude Code (uma linha, filhas, menus restaur
     expect(host.querySelector("[data-session-id='b']")).toBeNull();
     expect(host.querySelector("[role=group]")?.textContent).toContain("Segunda conversa");
     const row = host.querySelector("[data-session-id='a']") as HTMLElement;
-    expect(row.textContent).toContain("1");
+    expect(row.querySelector("[title='chat.sidebar.team:1']")?.textContent).toContain("1");
     await click(row.querySelector("button[aria-label='chat.sidebar.kids']"));
     expect(host.querySelector("[role=group]")).toBeNull();
   });
