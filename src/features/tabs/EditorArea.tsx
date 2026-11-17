@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { Button, AddIcon, CloseIcon } from "neogestify-ui-components";
 
 import { GlobeIcon, SplitDownIcon, SplitRightIcon } from "@/app/icons";
+import { PanelBoundary } from "@/app/PanelBoundary";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { focusTab } from "@/features/terminal/terminalRegistry";
 import { GroupTabStrip } from "@/features/tabs/GroupTabStrip";
@@ -121,27 +122,33 @@ export function EditorArea() {
           tela, sem mudar de tamanho (como as terminais ocultas do `TerminalPanel`). */}
       {boardCanvas && (
         <div className="absolute inset-0" style={chat ? { visibility: "hidden", transform: "translateX(-300vw)" } : undefined}>
-          <Suspense fallback={<div className="absolute inset-0" aria-busy="true" />}>
-            <CanvasView />
-          </Suspense>
+          <PanelBoundary name="canvas">
+            <Suspense fallback={<div className="absolute inset-0" aria-busy="true" />}>
+              <CanvasView />
+            </Suspense>
+          </PanelBoundary>
         </div>
       )}
-      {/* TerminalPanel siempre montado para preservar PTYs */}
+      {/* TerminalPanel siempre montado para preservar PTYs. Sem PanelBoundary de propósito: um boundary que
+          troca os filhos desmonta as terminais, e desmontar uma terminal mata o PTY. */}
       <TerminalPanel />
-      {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. */}
-      <ViewTabsHost />
-      {!chat && !canvas && grid && <MissionGrid ids={grid} />}
+      {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. Boundary só nos filhos que
+          não são terminal: um erro aqui fica aqui, e não sobe até a raiz. */}
+      <PanelBoundary name="views"><ViewTabsHost /></PanelBoundary>
+      {!chat && !canvas && grid && <PanelBoundary name="mission-grid"><MissionGrid ids={grid} /></PanelBoundary>}
       {!chat && !canvas && !grid && (
         <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
           {layout ? (
-            <NodeView node={layout.root} focused={layout.focused} divided={groups.length > 1} />
+            <PanelBoundary name="layout">
+              <NodeView node={layout.root} focused={layout.focused} divided={groups.length > 1} />
+            </PanelBoundary>
           ) : (
             <div data-slot="" className="h-full" />
           )}
         </div>
       )}
-      {!chat && !canvas && !grid && <TabDragOverlay />}
-      {!chat && !canvas && <SelectedProtocolPane />}
+      {!chat && !canvas && !grid && <PanelBoundary name="tab-drag"><TabDragOverlay /></PanelBoundary>}
+      {!chat && !canvas && <PanelBoundary name="protocol-pane"><SelectedProtocolPane /></PanelBoundary>}
     </div>
   );
 }

@@ -76,7 +76,9 @@ function PanelErrorView({ detail, onRetry, page = false }: { detail: string; onR
     <div
       role="alert"
       // Página inteira: fundo sólido, porque cobre o conteúdo. Painel: transparente, para se misturar à casca.
-      className={`flex h-full min-h-24 w-full flex-col items-center justify-center gap-3 p-6 text-center${page ? " bg-white dark:bg-surface-deep" : ""}`}
+      // `pointer-events-auto`: o aviso pode cair dentro de um contêiner que deixa o clique passar (a grade de
+      // painéis do EditorArea); sem isto o botão "Tentar de novo" ficaria inclicável.
+      className={`pointer-events-auto flex h-full min-h-24 w-full flex-col items-center justify-center gap-3 p-6 text-center${page ? " bg-white dark:bg-surface-deep" : ""}`}
     >
       <h2 className="text-[15px] font-semibold text-gray-900 dark:text-[#f5f5f7]">{t("app.panelError.title")}</h2>
       <code className="max-w-md truncate rounded-md bg-black/[0.05] px-2.5 py-1 font-mono text-[11px] text-gray-600 dark:bg-white/[0.07] dark:text-white/60" title={detail}>{detail}</code>
