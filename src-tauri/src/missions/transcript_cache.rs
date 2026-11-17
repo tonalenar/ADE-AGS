@@ -27,10 +27,6 @@ struct FileId {
     dev: u64,
     #[cfg(unix)]
     ino: u64,
-    #[cfg(windows)]
-    index: u64,
-    #[cfg(not(any(unix, windows)))]
-    _unused: (),
 }
 
 struct Limits {
@@ -136,8 +132,8 @@ impl TranscriptCache {
             let too_big = len > self.limits.max_file_bytes;
             let size_mtime_append = previous_stamp
                 .is_some_and(|(old_mtime, old_len)| len > old_len && mtime != old_mtime);
-            // Sem FileId (file_index None no Windows, injeção nos testes, ou
-            // qualquer None) não há como provar que é o mesmo inode: relê tudo.
+            // Sem FileId (Windows, plataformas não-Unix ou injeção nos testes)
+            // não há como provar que é o mesmo inode: relê tudo.
             let identity_ok = match (previous_id, id) {
                 (Some(previous), Some(current)) => previous == current,
                 _ => false,
@@ -302,13 +298,12 @@ fn file_id(metadata: &Metadata) -> Option<FileId> {
             ino: metadata.ino(),
         })
     }
-    #[cfg(windows)]
+    #[cfg(not(unix))]
     {
-        use std::os::windows::fs::MetadataExt;
-        metadata.file_index().map(|index| FileId { index })
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
+        // No Windows, `Metadata::file_index()` exige a feature instável
+        // `windows_by_handle` (E0658 no Rust estável). Sem dependências extras,
+        // retornamos `None` (identidade desconhecida) para que o cache releia o
+        // arquivo inteiro em vez de fazer append sem garantia de mesmo arquivo.
         let _ = metadata;
         None
     }
@@ -441,6 +436,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn append_le_so_o_novo() {
         let (_dir, path) = temp_file("append.jsonl", "{\"n\":1}\n");
         let cache = TranscriptCache::new();
@@ -572,6 +568,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn append_sem_leitor_nao_clona_o_arc_das_linhas() {
         let (_dir, path) = temp_file("unico.jsonl", "{\"n\":1}\n");
         let cache = TranscriptCache::new();
