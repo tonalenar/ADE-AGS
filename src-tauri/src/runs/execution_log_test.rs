@@ -225,21 +225,17 @@ fn o_replay_nao_repete_falha_da_frota_que_nao_tem_payload() {
 use super::execution_log::{Destino, Resumo};
 
 fn resumo_texto(ultimo: String, dados: Resumo) -> Option<String> {
-    match (dados.omitidos, dados.transicoes.as_slice()) {
-        (n, []) => Some(format!("{n} omitidos (último: {ultimo})")),
-        (0, transicoes) => Some(format!("transições: {transicoes:?}")),
-        (n, transicoes) => Some(format!("{n} omitidos e transições {transicoes:?} (último: {ultimo})")),
-    }
+    Some(format!("{} omitidos (último: {ultimo})", dados.omitidos))
 }
 
-/// Canal de 2 e excedente de baixa prioridade de 2: 4 trabalhos seguem, os outros 6 de baixa prioridade são contados.
-/// O produtor volta de cada envio (com a fila cheia, bloquear travaria o teste); sem produtor, a fila esvazia e o
-/// resumo sai antes de qualquer outro trabalho.
+/// Canal de 2 e excedente de atualizações de 2: 4 trabalhos seguem, os outros 6 (chaves novas) são contados. O produtor
+/// volta de cada envio (com a fila cheia, bloquear travaria o teste); sem produtor, a fila esvazia e o resumo sai antes
+/// de qualquer outro trabalho.
 #[test]
 fn fila_cheia_nao_bloqueia_o_produtor_e_o_resumo_aparece() {
     let (fila, gravador) = execution_log::fila_com::<String>(2, 2);
     for i in 0..10 {
-        assert!(fila.enviar(format!("item-{i}"), Destino::Baixa).is_ok());
+        assert!(fila.enviar(format!("item-{i}"), Destino::Atualizacao(format!("k{i}"))).is_ok());
     }
     drop(fila);
     let entregues: Vec<String> = (0..4).filter_map(|_| gravador.proximo(resumo_texto)).collect();
@@ -247,17 +243,17 @@ fn fila_cheia_nao_bloqueia_o_produtor_e_o_resumo_aparece() {
     assert_eq!(gravador.proximo(resumo_texto).as_deref(), Some("6 omitidos (último: item-9)"));
 }
 
-/// Estado com chave nunca se perde nem sai de ordem; a baixa prioridade cabe até o teto do excedente.
+/// Transição nunca se perde nem sai de ordem; a atualização de chave nova cabe até o teto do excedente.
 #[test]
 fn trabalho_de_estado_nunca_se_perde_nem_sai_de_ordem() {
     let (fila, gravador) = execution_log::fila_com::<String>(2, 1);
     let envios = [
-        ("e0", Destino::Sobrepoe("a".into())),
-        ("b1", Destino::Baixa),
-        ("e2", Destino::Sobrepoe("b".into())),
-        ("e3", Destino::Sobrepoe("c".into())),
-        ("b4", Destino::Baixa),
-        ("b5", Destino::Baixa),
+        ("e0", Destino::Transicao),
+        ("b1", Destino::Atualizacao("b1".into())),
+        ("e2", Destino::Transicao),
+        ("e3", Destino::Transicao),
+        ("b4", Destino::Atualizacao("b4".into())),
+        ("b5", Destino::Atualizacao("b5".into())),
     ];
     for (texto, destino) in envios {
         assert!(fila.enviar(texto.to_string(), destino).is_ok());
@@ -268,13 +264,13 @@ fn trabalho_de_estado_nunca_se_perde_nem_sai_de_ordem() {
     assert_eq!(gravador.proximo(resumo_texto).as_deref(), Some("1 omitidos (último: b5)"));
 }
 
-/// 10 000 atualizações da mesma tarefa com a gravação parada: o excedente fica com uma só, a mais recente, e o estado
-/// final sai ao destravar.
+/// 10 000 atualizações do mesmo item com a gravação parada: o excedente fica com uma só, a mais recente, e o estado final
+/// sai ao destravar. Vale só para atualização de alta frequência; transição não coalesce (ver o teste de transições).
 #[test]
-fn dez_mil_atualizacoes_da_mesma_tarefa_deixam_so_o_estado_final() {
+fn dez_mil_atualizacoes_do_mesmo_item_deixam_so_a_mais_recente() {
     let (fila, gravador) = execution_log::fila_com::<u32>(2, 2);
     for i in 0..10_000u32 {
-        assert!(fila.enviar(i, Destino::Sobrepoe("tarefa-1".into())).is_ok());
+        assert!(fila.enviar(i, Destino::Atualizacao("item-1".into())).is_ok());
     }
     assert_eq!(fila.excedente_len(), 1, "uma entrada por chave, com a gravação parada");
     drop(fila);
@@ -282,22 +278,33 @@ fn dez_mil_atualizacoes_da_mesma_tarefa_deixam_so_o_estado_final() {
     assert_eq!(saida, [0, 1, 9_999], "os dois primeiros foram ao canal; o estado final sai por último");
 }
 
-/// Transições que não cabem no canal são contadas pelo tipo e saem no resumo; nenhuma entra no excedente.
+/// Transições que não cabem no canal vão para o excedente, na ordem, sem coalescer e sem perda.
 #[test]
-fn transicoes_que_nao_cabem_sao_contadas_pelo_tipo() {
+fn transicoes_que_nao_cabem_vao_para_o_excedente_sem_perda() {
     let (fila, gravador) = execution_log::fila_com::<String>(1, 1);
-    assert!(fila.enviar("primeiro".into(), Destino::Sobrepoe("x".into())).is_ok());
-    for _ in 0..3 {
-        assert!(fila.enviar("pedido".into(), Destino::Transicao("request")).is_ok());
+    assert!(fila.enviar("primeiro".into(), Destino::Atualizacao("x".into())).is_ok());
+    for i in 1..=3 {
+        assert!(fila.enviar(format!("pedido-{i}"), Destino::Transicao).is_ok());
     }
-    assert!(fila.enviar("resolvido".into(), Destino::Transicao("requestResolved")).is_ok());
-    assert_eq!(fila.excedente_len(), 0, "transição nunca entra no excedente");
+    assert!(fila.enviar("resolvido".into(), Destino::Transicao).is_ok());
+    assert_eq!(fila.excedente_len(), 4, "toda transição fica no excedente");
     drop(fila);
-    assert_eq!(gravador.proximo(resumo_texto).as_deref(), Some("primeiro"));
-    assert_eq!(
-        gravador.proximo(resumo_texto).as_deref(),
-        Some("transições: [(\"request\", 3), (\"requestResolved\", 1)]")
-    );
+    let saida: Vec<String> = (0..5).filter_map(|_| gravador.proximo(resumo_texto)).collect();
+    assert_eq!(saida, ["primeiro", "pedido-1", "pedido-2", "pedido-3", "resolvido"]);
+    assert_eq!(gravador.proximo(resumo_texto), None, "nenhum resumo: nada foi omitido");
+}
+
+/// Só a atualização de alta frequência de um item (`item`, `taskItem`) pode coalescer. Toda transição de estado vai para
+/// o excedente sem coalescer e sem descartar: pedido, criação, erro, fase, tarefa, meta e fechamento.
+#[test]
+fn so_atualizacao_de_item_coalesce_e_transicao_nunca() {
+    let item = json!({ "item": { "id": "i1" } });
+    assert_eq!(execution_log::destino_do_chat("t1", "item", &item), Destino::Atualizacao("chat:t1:item:i1".into()));
+    assert_eq!(execution_log::destino_do_chat("t1", "taskItem", &item), Destino::Atualizacao("chat:t1:taskItem:i1".into()));
+    let payload = json!({ "id": "p1", "task": { "id": "k1" }, "request": { "id": "p1" } });
+    for tipo in ["requestResolved", "created", "error", "task", "request", "phase", "closed", "goal"] {
+        assert_eq!(execution_log::destino_do_chat("t1", tipo, &payload), Destino::Transicao, "{tipo} não pode coalescer nem sair");
+    }
 }
 
 /// O resumo da fila vira uma entrada do log (`log.omitted`) na conversa a que pertencia o último omitido.
@@ -325,4 +332,90 @@ fn o_resumo_de_omitidos_vira_entrada_do_log() {
         .unwrap();
     assert_eq!(kind, "log.omitted");
     assert!(payload.contains("\"omitidos\":6"), "{payload}");
+}
+
+/// Anota o que o sink de conversa recebe: a publicação de conclusão (com o `logged`) e as árvores que mudaram.
+struct Publicacao<'a> {
+    saidas: &'a RefCell<Vec<String>>,
+}
+
+impl LogSink for Publicacao<'_> {
+    fn changed(&mut self, changes: Vec<TreeChanged>) {
+        let ids: Vec<String> = changes.iter().map(|c| c.thread_id.clone()).collect();
+        self.saidas.borrow_mut().push(format!("arvore:{}", ids.join(",")));
+    }
+    fn failed(&mut self, _signal: Value) {}
+    fn conversation(&mut self, ui: &Value, logged: bool) {
+        self.saidas.borrow_mut().push(format!("conversa:{}:{logged}", ui["type"].as_str().unwrap_or_default()));
+    }
+}
+
+/// Canal cheio com um `requestResolved`, um `error` e um `created` atrás: os três saem ao destravar, com o id, e cada um
+/// grava o que deve gravar. O `requestResolved` (conclusão) também sai para o barramento, e o `created` com pai atualiza
+/// o cursor da conversa pai. Nenhum deles pode ser omitido.
+#[test]
+fn requestresolved_error_e_created_sao_gravados_com_id_ao_destravar() {
+    let db = db();
+    {
+        let conn = db.lock().unwrap();
+        for id in ["t1", "t2"] {
+            crate::conversa::store::insert_thread(
+                &conn,
+                id,
+                "codex",
+                "/tmp/p",
+                "Título",
+                &crate::conversa::store::Tuning { model: None, effort: None, access: "ask".into() },
+                None,
+                1,
+            )
+            .unwrap();
+        }
+    }
+    let (fila, gravador) = execution_log::fila_com::<(String, Value)>(1, 1);
+    // O canal de 1 fica com a fase; os três seguintes não cabem nele.
+    assert!(fila.enviar(("phase".into(), json!({ "phase": "working" })), Destino::Transicao).is_ok());
+    assert!(fila.enviar(("requestResolved".into(), json!({ "id": "p1" })), Destino::Transicao).is_ok());
+    assert!(fila.enviar(("error".into(), json!({ "message": "falhou" })), Destino::Transicao).is_ok());
+    assert!(
+        fila.enviar(
+            ("created".into(), json!({ "thread": { "id": "t2", "agentId": "codex", "title": "filha", "parentRef": "thread:t1" } })),
+            Destino::Transicao,
+        )
+        .is_ok()
+    );
+    drop(fila);
+    let saidas: Vec<(String, Value)> = (0..4).filter_map(|_| gravador.proximo(|_, _| None)).collect();
+    assert_eq!(saidas.iter().map(|(tipo, _)| tipo.as_str()).collect::<Vec<_>>(), ["phase", "requestResolved", "error", "created"]);
+
+    let publicados = RefCell::new(Vec::new());
+    for (tipo, payload) in &saidas[1..] {
+        // Como o `emit` manda: a conversa do evento é a que o emitiu (o `created` sai da filha), e só a conclusão leva a
+        // UI para a publicação; os outros só gravam.
+        let conversa = if tipo == "created" { "t2" } else { "t1" };
+        let ui = json!({ "threadId": conversa, "type": tipo, "id": payload.get("id") });
+        let ui_publicada = (tipo == "requestResolved").then_some(&ui);
+        let job = ChatJob { thread_id: conversa, event_type: tipo, payload, ui: ui_publicada };
+        execution_log::settle_chat_with(
+            &db,
+            &job,
+            1_000,
+            |conn| execution_log::persist_chat_event(conn, conversa, tipo, payload),
+            &mut Publicacao { saidas: &publicados },
+        );
+    }
+    assert!(publicados.borrow().contains(&"conversa:requestResolved:true".to_string()), "{:?}", publicados.borrow());
+    assert!(publicados.borrow().contains(&"arvore:t2,t1".to_string()), "a criação com pai atualiza o cursor da pai: {:?}", publicados.borrow());
+
+    let conn = db.lock().unwrap();
+    let id_do_pedido: String = conn
+        .query_row("SELECT entity_id FROM harness_execution_events WHERE kind = 'request.resolved'", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(id_do_pedido, "p1");
+    for kind in ["turn.error", "thread.created", "child_thread.created"] {
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM harness_execution_events WHERE kind = ?1", [kind], |row| row.get(0))
+            .unwrap();
+        assert_eq!(n, 1, "{kind} tem que estar gravado");
+    }
 }
