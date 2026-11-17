@@ -15,6 +15,16 @@ import { canOpenWorkspaceAgent } from "@/features/tabs/workspaceCommands";
 import { canToggleChatTerminal } from "@/features/chat/terminalCommands";
 import type { ShortcutWhenValues } from "./shortcutWhen";
 
+function isShownTerminal(el: Element): boolean {
+  let node: Element | null = el;
+  while (node && node !== document.documentElement) {
+    const style = getComputedStyle(node);
+    if (style.visibility === "hidden" || style.display === "none") return false;
+    node = node.parentElement;
+  }
+  return true;
+}
+
 /** Lê apenas o contexto da janela atual; não pesquisa nem altera o conteúdo do terminal. */
 export function shortcutContext(pathname: string): ShortcutWhenValues {
   const hasDom = typeof document !== "undefined" && typeof window !== "undefined";
@@ -41,7 +51,7 @@ export function shortcutContext(pathname: string): ShortcutWhenValues {
 
   return {
     terminalFocus: !!active?.closest("[data-terminal-tab]"),
-    terminalOpen: hasDom && !!document.querySelector("[data-terminal-tab]"),
+    terminalOpen: hasDom && [...document.querySelectorAll("[data-terminal-tab]")].some(isShownTerminal),
     terminalSplitAvailable: !!focusedGroup?.active?.startsWith("a:"),
     terminalToggleAvailable: canToggleChatTerminal(pathname),
     workspaceAgentAvailable: canOpenWorkspaceAgent(pathname),
