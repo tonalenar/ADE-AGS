@@ -20,6 +20,7 @@ pub(crate) mod replay;
 pub(crate) mod recorder;
 mod pty_manager;
 mod session;
+mod write_queue;
 #[cfg(windows)]
 mod win_conpty;
 pub use pty_manager::*;

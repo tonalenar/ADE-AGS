@@ -1,17 +1,20 @@
 use super::containment::ProcessGroup;
+use super::write_queue::WriteQueue;
 use portable_pty::{CommandBuilder, MasterPty, PtySize};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::Read;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 struct PtySession {
     master: Box<dyn MasterPty + Send>,
-    /// Próprio cadeado: escrever num PTY cuja TUI parou de ler pode bloquear, e isso não pode
-    /// segurar o registro inteiro (todas as outras terminais esperavam junto).
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Escrita do PTY, com thread própria (ver `write_queue`): escrever numa TUI que parou de ler não
+    /// prende o registro nem um worker do runtime.
+    queue: WriteQueue,
     killer: Box<dyn portable_pty::Child + Send>,
     /// Contenedor de ciclo de vida de la tab. Matar `killer` alcanza solo al proceso que
     /// lanzamos; esto se lleva además a toda su descendencia (ver `containment`).
@@ -63,6 +66,11 @@ impl Utf8Stream {
         let text = String::from_utf8_lossy(&self.pending[..complete]).into_owned();
         self.pending.drain(..complete);
         text
+    }
+
+    /// Bytes de um caractere incompleto que ainda esperam o resto (não viraram texto).
+    pub(crate) fn pendentes(&self) -> usize {
+        self.pending.len()
     }
 
     /// Lo que quedó pendiente al cerrarse el PTY: ya no va a completarse.
@@ -203,7 +211,12 @@ fn append_to_buffer(id: u32, chunk: &[u8]) {
 pub(crate) fn push_capped(data: &mut Vec<u8>, chunk: &[u8], max: usize, margin: usize) {
     data.extend_from_slice(chunk);
     if data.len() > max + margin {
-        let excess = data.len() - max;
+        // Recorta até o começo de um caractere: um corte no meio deixava bytes de continuação que viravam
+        // `�` no replay. Por isso o buffer pode ficar um pouco abaixo de `max`.
+        let mut excess = data.len() - max;
+        while excess < data.len() && (data[excess] & 0xC0) == 0x80 {
+            excess += 1;
+        }
         data.drain(0..excess);
     }
 }
@@ -707,6 +720,267 @@ pub(crate) fn open_pty(size: PtySize) -> Result<portable_pty::PtyPair, String> {
     }
 }
 
+// ── Saída do PTY: leitor com guarda, emissor em lote e fim da sessão ──
+
+/// Por que o laço de leitura parou.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MotivoFim {
+    /// `read` devolveu 0: todos os descritores do escravo fecharam.
+    Eof,
+    /// `read` falhou (o fim do PTY, por exemplo).
+    ErroDeLeitura,
+    /// O emissor já não existe: sem quem entregue a saída, o processo não tem para onde escrever.
+    EmissorCaiu,
+    /// O laço deu pânico, e a guarda pegou.
+    Panico,
+}
+
+/// Para onde vai a saída do PTY: o emissor na app, um gravador nos testes.
+pub(crate) trait Destino {
+    /// Entrega um pedaço cru, na ordem em que o processo escreveu. `false` se o destino caiu.
+    fn pedaco(&mut self, bytes: Vec<u8>) -> bool;
+    /// Fim da saída, com o código do `pty-exit`.
+    fn fim(&mut self, code: i32);
+}
+
+/// Mensagem do leitor para o emissor.
+pub(crate) enum Mensagem {
+    Pedaco(Vec<u8>),
+    Fim(i32),
+}
+
+/// O que o emissor entrega ao webview.
+pub(crate) enum Evento {
+    Dados(PtyDataPayload),
+    Saida(i32),
+}
+
+/// Tamanho do lote que fecha antes da janela de tempo.
+pub(crate) const LIMITE_LOTE_BYTES: usize = 256 * 1024;
+
+/// Janela máxima que um texto espera antes de sair. Curta o bastante para o eco de digitação parecer
+/// imediato, longa o bastante para juntar uma rajada de `read`s num evento só.
+pub(crate) const JANELA_LOTE: Duration = Duration::from_millis(16);
+
+/// Quanto o filho tem para sair sozinho depois que a saída acaba.
+const PRAZO_SAIDA_APOS_EOF: Duration = Duration::from_secs(2);
+
+/// Intervalo entre as consultas de `aguarda_saida`.
+const PASSO_ESPERA_SAIDA: Duration = Duration::from_millis(25);
+
+/// Pedaços que podem esperar entre o leitor e o emissor. Se o emissor atrasar, o leitor espera.
+const CAPACIDADE_CANAL_SAIDA: usize = 256;
+
+/// Laço de leitura: lê o PTY, grava no scrollback, alimenta o Vigia e o gravador de replay, e entrega
+/// cada pedaço ao destino. Devolve por que parou.
+pub(crate) fn pump(id: u32, reader: &mut dyn Read, destino: &mut dyn Destino) -> MotivoFim {
+    // 64 KB e não 4: `read` devolve o que houver, então com pouca saída a latência é a mesma, e com
+    // muita (um build, um `npm install`) cada pedaço vira menos mensagens até o emissor.
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => return MotivoFim::Eof,
+            Ok(n) => {
+                append_to_buffer(id, &buf[..n]);
+                // Modo push do orquestrador (Fase 9): se ninguém observa esta aba, é uma leitura atômica e volta.
+                crate::orchestrator::watch::observe(id, &buf[..n]);
+                // Gravador dos testes por replay: desligado, é uma leitura atômica e volta.
+                super::recorder::observe(id, &buf[..n]);
+                if !destino.pedaco(buf[..n].to_vec()) {
+                    return MotivoFim::EmissorCaiu;
+                }
+            }
+            Err(_) => return MotivoFim::ErroDeLeitura,
+        }
+    }
+}
+
+/// Roda o laço de leitura com a guarda de pânico e fecha a sessão. Sempre entrega o fim ao destino, com
+/// código: se o laço deu pânico, o código é -1 e a sessão é morta, para a aba não ficar muda.
+pub(crate) fn rodar_leitor(id: u32, reader: &mut dyn Read, destino: &mut dyn Destino) {
+    let resultado = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pump(id, reader, destino)));
+    let motivo = resultado.unwrap_or_else(|_| {
+        eprintln!("[ade-ags] pânico no leitor do terminal {id}: a sessão foi encerrada com código -1");
+        MotivoFim::Panico
+    });
+    let code = encerra_sessao(id, motivo);
+    destino.fim(code);
+}
+
+/// Tira a sessão do registro e encerra o processo conforme o motivo. Devolve o código do `pty-exit`.
+/// O registro fica travado só na retirada: esperar ou matar o processo acontece sem o lock.
+fn encerra_sessao(id: u32, motivo: MotivoFim) -> i32 {
+    let retirada = registry().remove(&id);
+    let code = match retirada {
+        Some(mut sessao) => {
+            forget_session(&sessao);
+            encerra_processo(&mut sessao, motivo)
+        }
+        // `pty_kill` já tirou a sessão do registro e matou o processo.
+        None if motivo == MotivoFim::Panico => -1,
+        None => 0,
+    };
+    buffers().remove(&id);
+    crate::orchestrator::watch::note_exit(id, code);
+    code
+}
+
+fn encerra_processo(sessao: &mut PtySession, motivo: MotivoFim) -> i32 {
+    match motivo {
+        // Fim da saída com o filho ainda vivo: ele fechou o terminal e segue rodando. Dá um prazo para
+        // ele sair sozinho; se não sair, o grupo inteiro morre.
+        MotivoFim::Eof | MotivoFim::ErroDeLeitura => {
+            if let Some(status) = aguarda_saida(sessao.killer.as_mut(), PRAZO_SAIDA_APOS_EOF) {
+                return status.exit_code() as i32;
+            }
+            matar_arvore(sessao);
+            sessao.killer.wait().map_or(-1, |status| status.exit_code() as i32)
+        }
+        // Sem leitor ou sem emissor, a saída não tem para onde ir: o processo morre.
+        MotivoFim::EmissorCaiu | MotivoFim::Panico => {
+            matar_arvore(sessao);
+            let _ = sessao.killer.wait();
+            -1
+        }
+    }
+}
+
+/// Mata o grupo e depois o processo. O grupo vem primeiro: o `ppid` de unix precisa do pai vivo para
+/// achar os filhos (ver `stop_session`).
+fn matar_arvore(sessao: &mut PtySession) {
+    sessao.group.kill_all();
+    let _ = sessao.killer.kill();
+}
+
+/// Espera o filho sair até `prazo`. `None` se ele ainda está vivo, ou se o status não pôde ser lido.
+pub(crate) fn aguarda_saida(filho: &mut dyn portable_pty::Child, prazo: Duration) -> Option<portable_pty::ExitStatus> {
+    let limite = Instant::now() + prazo;
+    loop {
+        match filho.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) if Instant::now() < limite => std::thread::sleep(PASSO_ESPERA_SAIDA),
+            _ => return None,
+        }
+    }
+}
+
+/// Texto que espera para sair num único `pty-data`, com a posição do fluxo em que termina.
+#[derive(Default)]
+pub(crate) struct Lote {
+    texto: String,
+    /// Até onde no fluxo o `texto` chega (ver `emissor`).
+    fim: u64,
+    /// Quando o lote fecha pelo tempo: `JANELA_LOTE` depois do primeiro texto pendente.
+    prazo: Option<Instant>,
+}
+
+impl Lote {
+    /// Junta `texto`, que termina no byte `fim` do fluxo. Devolve o evento se o lote fechou.
+    pub(crate) fn recebe(&mut self, texto: &str, fim: u64, agora: Instant) -> Option<PtyDataPayload> {
+        if texto.is_empty() {
+            return None;
+        }
+        if self.texto.is_empty() {
+            self.prazo = Some(agora + JANELA_LOTE);
+        }
+        self.texto.push_str(texto);
+        self.fim = fim;
+        let venceu = self.prazo.is_some_and(|prazo| agora >= prazo);
+        if venceu || self.texto.len() >= LIMITE_LOTE_BYTES {
+            self.esvazia()
+        } else {
+            None
+        }
+    }
+
+    /// Quando o lote aberto precisa fechar, se há texto esperando.
+    pub(crate) fn prazo(&self) -> Option<Instant> {
+        self.prazo
+    }
+
+    /// Fecha o lote com o que tiver. `None` se não há texto.
+    pub(crate) fn esvazia(&mut self) -> Option<PtyDataPayload> {
+        if self.texto.is_empty() {
+            return None;
+        }
+        self.prazo = None;
+        Some(PtyDataPayload { data: std::mem::take(&mut self.texto), end: Some(self.fim) })
+    }
+}
+
+/// Emissor da saída: junta os pedaços do leitor em lotes e os entrega para `emite`.
+///
+/// Um lote fecha ao passar de `LIMITE_LOTE_BYTES` ou quando o primeiro texto pendente completa
+/// `JANELA_LOTE`. O prazo corre mesmo sem chegar pedaço novo, então um texto nunca fica preso esperando
+/// o próximo `read` (o prompt de uma TUI, por exemplo). Ao receber `Fim`, ou quando o leitor sai, emite o
+/// que sobrou e só então `Saida`, para o `pty-exit` vir sempre depois do último dado.
+///
+/// O `end` de cada evento é o último byte do fluxo já convertido em texto. Bytes incompletos de um
+/// caractere UTF-8 ficam de fora até completar, e por isso o `end` cresce estritamente de evento para evento.
+pub(crate) fn emissor(rx: Receiver<Mensagem>, agora: &dyn Fn() -> Instant, emite: &mut dyn FnMut(Evento)) {
+    let mut lote = Lote::default();
+    let mut utf8 = Utf8Stream::default();
+    let mut total = 0u64;
+    let saida = loop {
+        let proxima = match lote.prazo() {
+            None => rx.recv().ok(),
+            Some(prazo) => match rx.recv_timeout(prazo.saturating_duration_since(agora())) {
+                Ok(msg) => Some(msg),
+                Err(RecvTimeoutError::Timeout) => {
+                    if let Some(payload) = lote.esvazia() {
+                        emite(Evento::Dados(payload));
+                    }
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => None,
+            },
+        };
+        match proxima {
+            Some(Mensagem::Pedaco(bytes)) => {
+                total += bytes.len() as u64;
+                let texto = utf8.push(&bytes);
+                let fim = total - utf8.pendentes() as u64;
+                if let Some(payload) = lote.recebe(&texto, fim, agora()) {
+                    emite(Evento::Dados(payload));
+                }
+            }
+            Some(Mensagem::Fim(code)) => break Some(code),
+            None => break None,
+        }
+    };
+    // O que sobrou no UTF-8 e o lote aberto saem antes da saída.
+    let resto = utf8.finish();
+    if let Some(payload) = lote.recebe(&resto, total, agora()) {
+        emite(Evento::Dados(payload));
+    }
+    if let Some(payload) = lote.esvazia() {
+        emite(Evento::Dados(payload));
+    }
+    if let Some(code) = saida {
+        emite(Evento::Saida(code));
+    }
+}
+
+/// Destino de produção: manda os pedaços para o emissor. Se o emissor já caiu, o fim vai direto ao webview,
+/// para a aba nunca ficar muda.
+struct CanalDeSaida {
+    tx: SyncSender<Mensagem>,
+    app: AppHandle,
+    exit_event: String,
+}
+
+impl Destino for CanalDeSaida {
+    fn pedaco(&mut self, bytes: Vec<u8>) -> bool {
+        self.tx.send(Mensagem::Pedaco(bytes)).is_ok()
+    }
+
+    fn fim(&mut self, code: i32) {
+        if self.tx.send(Mensagem::Fim(code)).is_err() {
+            let _ = self.app.emit(&self.exit_event, PtyExitPayload { code });
+        }
+    }
+}
+
 /// Crea un PTY, lanza el proceso dentro, y emite eventos `pty-data-{id}` al frontend.
 ///
 /// `cols`/`rows` los manda el frontend ya medidos contra el tamaño real del contenedor
@@ -980,7 +1254,7 @@ pub async fn pty_create(
     // El grupo se crea ANTES del spawn para que ya exista cuando el proceso empiece a
     // tener descendencia propia.
     let mut group = ProcessGroup::new(id);
-    let child = match pair.slave.spawn_command(cmd) {
+    let mut child = match pair.slave.spawn_command(cmd) {
         Ok(child) => child,
         Err(e) => {
             if let Some(path) = &codex_profile {
@@ -992,15 +1266,50 @@ pub async fn pty_create(
     group.adopt(&*child);
     let root_pid = child.process_id();
 
-    let writer = Arc::new(Mutex::new(pair
-        .master
-        .take_writer()
-        .map_err(|e| format!("Failed to get PTY writer: {e}"))?));
+    // A escrita ganha thread própria (ver `write_queue`): quem escreve só enfileira.
+    let queue = match pair.master.take_writer().map_err(|e| format!("Failed to get PTY writer: {e}")) {
+        Ok(writer) => match WriteQueue::new(writer) {
+            Ok(queue) => queue,
+            Err(e) => {
+                let _ = child.kill();
+                return Err(format!("Falha ao criar a fila de escrita: {e}"));
+            }
+        },
+        Err(e) => {
+            let _ = child.kill();
+            return Err(e);
+        }
+    };
 
-    let mut reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|e| format!("Failed to get PTY reader: {e}"))?;
+    let mut reader = match pair.master.try_clone_reader() {
+        Ok(reader) => reader,
+        Err(e) => {
+            let _ = child.kill();
+            return Err(format!("Failed to get PTY reader: {e}"));
+        }
+    };
+
+    // Emissor da saída: junta os pedaços do leitor em lotes e fala com o webview. Tem thread própria,
+    // fora do runtime. Sem ele a sessão não nasce, então um erro aqui mata o processo recém-lançado.
+    let event_name = format!("pty-data-{id}");
+    let exit_event = format!("pty-exit-{id}");
+    let (saida_tx, saida_rx) = std::sync::mpsc::sync_channel::<Mensagem>(CAPACIDADE_CANAL_SAIDA);
+    let app_emissor = app.clone();
+    let exit_emissor = exit_event.clone();
+    let emissor_criado = std::thread::Builder::new().name(format!("pty-saida-{id}")).spawn(move || {
+        emissor(saida_rx, &Instant::now, &mut |evento| match evento {
+            Evento::Dados(payload) => {
+                let _ = app_emissor.emit(&event_name, payload);
+            }
+            Evento::Saida(code) => {
+                let _ = app_emissor.emit(&exit_emissor, PtyExitPayload { code });
+            }
+        })
+    });
+    if let Err(e) = emissor_criado {
+        let _ = child.kill();
+        return Err(format!("Falha ao criar o emissor de saída: {e}"));
+    }
 
     // Una tab tiene UN terminal vivo. Si la ventana se recargó (o se restauró la sesión), el
     // frontend perdió los ids de los terminales de antes y lanza otros para las mismas tabs:
@@ -1021,7 +1330,7 @@ pub async fn pty_create(
         }
         reg.insert(id, PtySession {
             master: pair.master,
-            writer,
+            queue,
             killer: child,
             group,
             tab_id: tab_id.clone(),
@@ -1040,57 +1349,15 @@ pub async fn pty_create(
     }
     buffers().insert(id, PtyBuffer::default());
 
-    let app_clone = app.clone();
-    let event_name = format!("pty-data-{id}");
-    let exit_event = format!("pty-exit-{id}");
-
-    // `spawn_blocking` y no `spawn`: `reader.read()` es una lectura bloqueante sobre el fd
-    // del PTY, y dentro de un `tokio::spawn` normal secuestra un worker del runtime durante
-    // toda la vida del proceso. Con unas pocas terminales abiertas se agotan los workers y
-    // el resto de tareas async de la app deja de progresar.
+    // `spawn_blocking` y no `spawn`: `reader.read()` es una lectura bloqueante sobre el fd del PTY, y
+    // dentro de un `tokio::spawn` normal secuestra un worker del runtime durante toda la vida del proceso.
+    // Con unas pocas terminales abiertas se agotan los workers y el resto de tareas async de la app deja
+    // de progresar. El leitor só lê e empurra os pedaços: a guarda de pânico e o fim da sessão ficam em
+    // `rodar_leitor`.
+    let app_leitor = app.clone();
     tokio::task::spawn_blocking(move || {
-        // 64 KB y no 4: `read` devuelve lo que haya, así que con poca salida la latencia es
-        // la misma, y con mucha (un build, un `npm install`) cada evento al webview lleva
-        // hasta 16 veces más — cada uno es un JSON y un `eval` en el webview.
-        let mut buf = vec![0u8; 64 * 1024];
-        let mut text = Utf8Stream::default();
-        let mut stream_end = 0u64;
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    append_to_buffer(id, &buf[..n]);
-                    stream_end += n as u64;
-                    // Modo push del orquestador (Fase 9): si nadie observa esta tab, esto
-                    // es una lectura atómica y vuelve.
-                    crate::orchestrator::watch::observe(id, &buf[..n]);
-                    // Gravador dos testes por replay: desligado, é uma leitura atômica e volta.
-                    super::recorder::observe(id, &buf[..n]);
-                    let data = text.push(&buf[..n]);
-                    if !data.is_empty() {
-                        app_clone.emit(&event_name, PtyDataPayload { data, end: Some(stream_end) }).ok();
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        let rest = text.finish();
-        if !rest.is_empty() {
-            app_clone.emit(&event_name, PtyDataPayload { data: rest, end: Some(stream_end) }).ok();
-        }
-        // Se recoge el estado real del hijo antes de avisar al frontend. Sin este `wait`
-        // el proceso queda además como zombie hasta que muere la app, porque nadie
-        // reclama su status en el sistema.
-        let code = registry()
-            .remove(&id)
-            .and_then(|mut session| {
-                forget_session(&session);
-                session.killer.wait().ok()
-            })
-            .map_or(0, |status| status.exit_code() as i32);
-        crate::orchestrator::watch::note_exit(id, code);
-        app_clone.emit(&exit_event, PtyExitPayload { code }).ok();
-        buffers().remove(&id);
+        let mut destino = CanalDeSaida { tx: saida_tx, app: app_leitor, exit_event };
+        rodar_leitor(id, reader.as_mut(), &mut destino);
     });
 
     Ok(id)
@@ -1210,12 +1477,11 @@ pub fn tail_of(id: u32, max_bytes: usize) -> Option<String> {
 /// Escribe al PTY desde código Rust (servidor IPC). `pty_write` es la versión `async`
 /// que expone el mismo comportamiento al frontend vía invoke.
 pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {
-    // Pega o escritor e SOLTA o registro antes de escrever: um write bloqueado (TUI travada,
-    // colagem grande) só espera ele mesmo.
-    let writer = registry().get(&id).map(|session| session.writer.clone()).ok_or_else(|| format!("PTY session {id} not found"))?;
-    let mut writer = writer.lock().unwrap_or_else(|e| e.into_inner());
-    writer.write_all(data.as_bytes()).map_err(|e| format!("PTY write error: {e}"))?;
-    writer.flush().map_err(|e| format!("PTY flush error: {e}"))
+    // Só enfileira: `enqueue` não bloqueia, e a escrita de verdade acontece na thread da sessão, fora do
+    // registro. Uma TUI que parou de ler devolve `Full` na hora, em vez de prender quem chamou.
+    let registro = registry();
+    let sessao = registro.get(&id).ok_or_else(|| format!("PTY session {id} not found"))?;
+    sessao.queue.enqueue(data.as_bytes()).map_err(|e| e.to_string())
 }
 
 /// Display an app notice as output. Never inject it as input into an agent's TUI.
