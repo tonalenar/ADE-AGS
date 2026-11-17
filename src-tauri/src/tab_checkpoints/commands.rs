@@ -43,19 +43,27 @@ fn in_flight() -> &'static Mutex<HashSet<String>> {
     SET.get_or_init(Default::default)
 }
 
+struct InFlightGuard(String);
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        in_flight().lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+    }
+}
+
+fn claim_in_flight(tab_id: String) -> Option<InFlightGuard> {
+    if !in_flight().lock().unwrap_or_else(|e| e.into_inner()).insert(tab_id.clone()) {
+        return None;
+    }
+    Some(InFlightGuard(tab_id))
+}
+
 /// Foto automática em segundo plano: nunca atrasa nem quebra o envio da mensagem.
 fn spawn_auto(app: AppHandle, tab_id: String, cwd: String, message: String, author: String) {
-    if !in_flight().lock().unwrap_or_else(|e| e.into_inner()).insert(tab_id.clone()) {
+    let Some(_guard) = claim_in_flight(tab_id.clone()) else {
         return;
-    }
+    };
     std::thread::spawn(move || {
-        struct InFlightGuard(String);
-        impl Drop for InFlightGuard {
-            fn drop(&mut self) {
-                in_flight().lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
-            }
-        }
-        let _guard = InFlightGuard(tab_id.clone());
+        let _guard = _guard;
         let result = db_of(&app).and_then(|db| {
             if !auto_enabled(&db) {
                 return Ok(None);
@@ -186,4 +194,24 @@ pub async fn tab_checkpoints_prune(app: AppHandle) -> Result<usize, String> {
 fn tab_checkpoints_prune_now(app: &AppHandle) -> Result<usize, String> {
     let alive: Vec<String> = crate::terminal::live_tab_dirs().into_iter().map(|(tab, _)| tab).collect();
     service::prune(&db_of(app)?, &alive, crate::util::now_ts_ms())
+}
+
+#[cfg(test)]
+mod in_flight_tests {
+    use super::*;
+
+    #[test]
+    fn limpa_in_flight_no_panico() {
+        let tab = format!("panic-{}", uuid::Uuid::new_v4().simple());
+        let result = std::panic::catch_unwind(|| {
+            let _guard = claim_in_flight(tab.clone()).expect("claim");
+            panic!("foto falhou");
+        });
+        assert!(result.is_err());
+        assert!(
+            !in_flight().lock().unwrap().contains(&tab),
+            "o pânico tem que soltar a aba"
+        );
+        assert!(claim_in_flight(tab.clone()).is_some());
+    }
 }

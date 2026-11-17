@@ -615,4 +615,15 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
     }
+
+    #[test]
+    #[cfg(unix)]
+    fn o_teto_de_stdout_encerra_antes_de_carregar_tudo() {
+        let mut cmd = hidden_command("sh");
+        cmd.args(["-c", "dd if=/dev/zero bs=1024 count=64 2>/dev/null"]);
+        let err = output_with_stdout_limit(&mut cmd, Duration::from_secs(5), 256)
+            .expect_err("o teto tem que cortar o stdout");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("stdout excedeu"), "{err}");
+    }
 }
