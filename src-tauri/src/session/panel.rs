@@ -345,7 +345,10 @@ fn read_json(path: &Path) -> Option<Value> {
 fn claude_json_path(profile: Option<&Path>) -> PathBuf {
     match profile {
         Some(dir) => dir.join(".claude.json"),
-        None => dirs::home_dir().unwrap_or_default().join(".claude.json"),
+        None => dirs::home_dir()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::PathBuf::from("/var/empty/ags-missing-home"))
+            .join(".claude.json"),
     }
 }
 
