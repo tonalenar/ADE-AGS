@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -23,6 +23,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::database::DbConnection;
+use crate::terminal::containment::ProcessGroup;
 
 use super::claude_map::TurnResult;
 use super::codex_parar::{StopAction, StopGate};
@@ -69,6 +70,8 @@ pub struct Session {
     asks: Mutex<Vec<Value>>,
     stderr: Mutex<VecDeque<String>>,
     child: Mutex<Option<tokio::process::Child>>,
+    /// A árvore do agente: o que ele lança (os netos) fica aqui dentro, e `encerrar_arvore` a mata junto.
+    group: Mutex<ProcessGroup>,
 }
 
 impl Session {
@@ -159,11 +162,24 @@ impl Session {
     /// Encerra o processo. O laço de leitura vê o fim e limpa.
     pub fn kill(&self) {
         self.alive.store(false, Ordering::SeqCst);
-        if let Some(mut child) = self.child.lock().ok().and_then(|mut c| c.take()) {
-            let _ = child.start_kill();
-        }
+        let mut child = self.child.lock().ok().and_then(|mut c| c.take());
+        let mut grupo = self.group.lock().unwrap_or_else(|e| e.into_inner());
+        encerrar_arvore(child.as_mut(), &mut grupo);
     }
 }
+
+/// Encerra a árvore de uma sessão ACP: o agente e o que ele lançou. Fechar só o filho direto deixa vivo um neto que
+/// herdou o stdout, e aí o laço de leitura da sessão nunca acaba.
+fn encerrar_arvore(child: Option<&mut tokio::process::Child>, grupo: &mut ProcessGroup) {
+    grupo.kill_all();
+    if let Some(child) = child {
+        let _ = child.start_kill();
+    }
+}
+
+/// Os ids dos grupos das sessões ACP. Começam numa faixa própria: o nome do grupo (um cgroup no Linux) não pode
+/// colidir com o das tabs nem com o dos agentes de fundo, que contam desde 1.
+static GRUPO_ACP: AtomicU32 = AtomicU32::new(0x4000_0000);
 
 fn sessions() -> &'static Mutex<HashMap<String, Arc<Session>>> {
     static SESSIONS: OnceLock<Mutex<HashMap<String, Arc<Session>>>> = OnceLock::new();
@@ -583,7 +599,10 @@ fn spawn(
     cmd.envs(crate::chat_team::env::thread_env(&row.id));
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
+    // O grupo existe antes do spawn, para que os netos que o agente lançar já nasçam dentro dele.
+    let mut grupo = ProcessGroup::new(GRUPO_ACP.fetch_add(1, Ordering::Relaxed));
     let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir {}: {e}", provider_label))?;
+    grupo.adopt(&child);
     crate::chat_team::env::register_process(&row.id, child.id());
     super::memoria::record_unsupported(app, db, row);
     let stdin = child.stdin.take().ok_or("sem stdin")?;
@@ -614,6 +633,7 @@ fn spawn(
         asks: Mutex::new(Vec::new()),
         stderr: Mutex::new(VecDeque::new()),
         child: Mutex::new(Some(child)),
+        group: Mutex::new(grupo),
     });
 
     tauri::async_runtime::spawn(write_loop(rx, stdin));
@@ -989,6 +1009,32 @@ pub fn answer(session: &Session, rpc_id: &Value, item_id: Option<&str>, options:
         let _ = session.notify("session/cancel", json!({ "sessionId": remote }));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod encerramento_tests {
+    use super::*;
+    use std::process::Stdio;
+    use tokio::io::AsyncBufReadExt;
+
+    /// O agente (aqui um `sh`) lança um neto que herda o stdout e segue vivo. Matar só o `sh` deixava o pipe aberto:
+    /// o laço de leitura da sessão nunca acabava, e o neto continuava rodando.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn encerrar_a_sessao_leva_os_netos_que_seguram_o_stdout() {
+        let mut cmd = crate::util::spawn::into_tokio(crate::util::spawn::hidden_command("sh"));
+        cmd.arg("-c").arg("sleep 60 & echo filho; wait").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+        let mut grupo = ProcessGroup::new(0x4000_0001);
+        let mut child = cmd.spawn().expect("o sh sobe");
+        grupo.adopt(&child);
+        let mut linhas = tokio::io::BufReader::new(child.stdout.take().expect("stdout")).lines();
+        // "filho" sai depois de o `sleep` já ter sido lançado: o neto já herdou o pipe.
+        assert_eq!(linhas.next_line().await.expect("leitura").as_deref(), Some("filho"));
+        encerrar_arvore(Some(&mut child), &mut grupo);
+        // Sem o neto, o pipe fecha e a leitura acaba. Com ele vivo, a espera estoura.
+        let fim = tokio::time::timeout(Duration::from_secs(10), linhas.next_line()).await;
+        assert!(matches!(fim, Ok(Ok(None))), "o neto ainda segura o stdout: {fim:?}");
+    }
 }
 
 #[cfg(test)]
