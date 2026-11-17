@@ -3,16 +3,20 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const store = vi.hoisted(() => ({ answerAsk: vi.fn(), alwaysAllow: vi.fn() }));
-vi.mock("@/features/chat/permissions/permissionsStore", () => store);
+vi.mock("@tauri-apps/api/core", () => import("@/test/invokeMock").then((m) => m.tauriCoreMock()));
 vi.mock("@tauri-apps/api/path", () => ({ homeDir: () => Promise.resolve("/Users/ton") }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string, o?: Record<string, unknown>) => (o?.target ? `${key}:${o.target}` : key), i18n: { language: "pt-BR" } }),
 }));
 
+import { invokeMock, useInvokeMock } from "@/test/invokeMock";
 import { ActivityLine } from "@/features/chat/LiveActivity";
 import { PermissionCard } from "@/features/chat/permissions/PermissionCard";
 import type { PendingAsk } from "@/features/chat/permissions/permissionModel";
+import { usePermissions } from "@/features/chat/permissions/permissionsStore";
+import { useStructured } from "@/features/chat/structured/store";
+
+useInvokeMock();
 
 const ask: PendingAsk = {
   id: "thread:q", ref: { source: "thread", threadId: "th", requestId: "q" }, agentId: "codex", agentLabel: "Codex", conversation: "thread:th",
@@ -33,13 +37,26 @@ async function render(node: React.ReactNode) {
   await act(async () => { root!.render(node); });
 }
 
+function lastAnswer() {
+  const calls = invokeMock.calls("chat_request_answer") as Array<{ requestId: string; choice: string }>;
+  return calls[calls.length - 1];
+}
+
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.useFakeTimers();
-  vi.clearAllMocks();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
+  invokeMock.on("chat_request_answer", true);
+  invokeMock.on("chat_thread_send", true);
+  invokeMock.on("chat_permission_rule_add", (args) => {
+    const input = (args as { input: { pattern: string; agentId: string; kind: string } }).input;
+    return { id: "r1", kind: input.kind, pattern: input.pattern, agentId: input.agentId, role: null, teamId: null, createdAt: 1 };
+  });
+  invokeMock.on("chat_permission_rules", []);
+  usePermissions.setState({ rules: [], rulesLoaded: false, inboxOpen: false, filter: "all", selected: "thread:q", tui: [], answered: {} });
+  useStructured.setState({ live: { th: { requests: [{ id: "q" }] } } } as never);
 });
 
 afterEach(async () => {
@@ -59,11 +76,12 @@ describe("cartão de permissão no fio", () => {
     expect(host.textContent).toContain("chat.permission.noteTerminal");
 
     await act(async () => { button("chat.permission.deny").click(); });
-    expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "deny");
+    expect(lastAnswer()).toEqual({ requestId: "q", choice: "deny" });
     await act(async () => { button("chat.permission.always").click(); });
-    expect(store.alwaysAllow).toHaveBeenLastCalledWith(ask, "bun add *");
+    expect(invokeMock.calls("chat_permission_rule_add")).toEqual([{ input: { kind: "command", pattern: "bun add *", agentId: "codex" } }]);
+    expect(lastAnswer()).toEqual({ requestId: "q", choice: "allow" });
     await act(async () => { button("chat.permission.allow").click(); });
-    expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "allow");
+    expect(lastAnswer()).toEqual({ requestId: "q", choice: "allow" });
   });
 
   it("Responder… nega e manda o texto ao agente", async () => {
@@ -76,15 +94,16 @@ describe("cartão de permissão no fio", () => {
       box.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => { button("chat.permission.sendReply").click(); });
-    expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "deny", "use o pnpm");
+    expect(lastAnswer()).toEqual({ requestId: "q", choice: "deny" });
+    expect(invokeMock.calls("chat_thread_send")[0]).toMatchObject({ threadId: "th", text: "use o pnpm" });
   });
 
   it("N nega e ⏎ permite com o foco fora de um campo", async () => {
     await render(<PermissionCard ask={ask} terminal />);
     await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true })); });
-    expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "deny");
+    expect(lastAnswer()).toEqual({ requestId: "q", choice: "deny" });
     await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
-    expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "allow");
+    expect(lastAnswer()).toEqual({ requestId: "q", choice: "allow" });
   });
 
   it("risco alto não oferece regra", async () => {
@@ -103,7 +122,6 @@ describe("linha viva", () => {
     await render(<ActivityLine live={live} startedAt={null} />);
     const status = host.querySelector('[role="status"]')!;
     expect(status.getAttribute("aria-live")).toBe("polite");
-    // O comando já está na timeline: a linha diz só «Trabalhando…» e o tempo.
     expect(status.textContent).toContain("chat.timeline.working");
     expect(status.textContent).not.toContain("bun x tauri build");
     expect(status.textContent).toContain("52 s");

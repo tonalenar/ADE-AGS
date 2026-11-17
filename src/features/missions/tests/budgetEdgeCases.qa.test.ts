@@ -7,6 +7,7 @@ import {
   needsBudgetConfirm,
   type BudgetStatus,
 } from "../budgetTypes";
+import { estimateOf, type MissionTokens } from "../tokens";
 
 describe("Guarda de Orçamento - QA Edge Cases Suite", () => {
   describe("Faixas de consumo e transições críticas (0%, 79.9%, 80%, 100%)", () => {
@@ -76,19 +77,34 @@ describe("Guarda de Orçamento - QA Edge Cases Suite", () => {
 
   describe("Modelos sem preço e agentes não medidos (integridade de custo)", () => {
     it("não inventa preço para modelo desconhecido e preserva lista de unpricedModels", () => {
+      const tokens: MissionTokens = {
+        agents: [
+          {
+            agentId: "claude-code", measured: true, input: 1, output: 1, cacheWrite: 0, cacheRead: 0, costUsd: 8.5,
+            estimate: { costUsd: 8.5, savedUsd: 0, unpricedModels: ["internal-synthetic-preview", "future-claude-7"] },
+          },
+          {
+            agentId: "gemini-qa", measured: false, input: null, output: null, cacheWrite: null, cacheRead: null, costUsd: null, estimate: null,
+          },
+        ],
+      };
+      const estimate = estimateOf(tokens);
+      expect(estimate?.costUsd).toBe(8.5);
+      expect(estimate?.unpricedModels).toEqual(["internal-synthetic-preview", "future-claude-7"]);
       const status: BudgetStatus = {
         missionId: "mission-test-1",
-        level: levelOf(8.5, 10),
+        level: levelOf(estimate!.costUsd, 10),
         budgetUsd: 10.0,
-        costUsd: 8.5,
+        costUsd: estimate!.costUsd,
         pct: 85.0,
-        unpricedModels: ["internal-synthetic-preview", "future-claude-7"],
-        unmeasuredAgents: ["gemini-qa"],
+        unpricedModels: estimate!.unpricedModels,
+        unmeasuredAgents: tokens.agents.filter((a) => !a.measured).map((a) => a.agentId),
         continueAnyway: false,
         trendUsdPerHour: 1.25,
       };
       expect(status.level).toBe("warning");
-      expect(status.unpricedModels).toContain("internal-synthetic-preview");
+      expect(status.costUsd).toBe(8.5);
+      expect(status.unpricedModels).toContain("future-claude-7");
       expect(status.unmeasuredAgents).toContain("gemini-qa");
     });
   });

@@ -38,7 +38,7 @@ export function appendMention(prev: string, mention: string): string {
 }
 
 /** Insere a transcrição no intervalo do cursor, com espaço só se faltar. Pura. */
-export function insertAtCaret(text: string, start: number, end: number, transcript: string): { text: string; caret: number } | null {
+function insertAtCaret(text: string, start: number, end: number, transcript: string): { text: string; caret: number } | null {
   const before = text.slice(0, start);
   const after = text.slice(end);
   const phrase = transcript.trim();

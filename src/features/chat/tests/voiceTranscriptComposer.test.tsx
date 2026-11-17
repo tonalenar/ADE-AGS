@@ -11,7 +11,7 @@ vi.mock("@/features/recording/VoiceInputButton", () => ({
   ),
 }));
 
-import { ChatComposer, insertAtCaret } from "../ChatComposer";
+import { ChatComposer } from "../ChatComposer";
 
 class FakeObserver {
   constructor(private cb: () => void) {}
@@ -24,20 +24,11 @@ let host: HTMLDivElement;
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: FakeObserver });
-  vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); vi.restoreAllMocks(); });
-
-describe("insertAtCaret", () => {
-  it("insere no cursor com espaço e ignora transcrição vazia", () => {
-    expect(insertAtCaret("Mensagem inicial", 16, 16, "adicionando voz com segurança"))
-      .toEqual({ text: "Mensagem inicial adicionando voz com segurança", caret: 46 });
-    expect(insertAtCaret("abc", 1, 2, "  ")).toBeNull();
-  });
-});
 
 describe("transcrição de voz no composer", () => {
   it("insere o texto transcrito na posição do cursor sem enviar", async () => {

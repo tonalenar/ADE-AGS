@@ -261,13 +261,16 @@ describe("Citar: botão flutuante pílula (T3 Code) e fechamento", () => {
     expect(citeButton()).toBeNull();
   });
 
-  it("acessível por teclado: Tab move o foco ao botão Citar e Enter/clique insere a citação", async () => {
+  it("com o botão Citar em foco, o clique nativo (Enter no <button>) insere a citação", async () => {
     await act(async () => { root.render(<Scene />); });
     await selectIn("[data-chat-item-id='msg-assist-1'] p", "troca de agente");
     const btn = citeButton()!;
-    await act(async () => { btn.focus(); });
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+      btn.focus();
+    });
     expect(document.activeElement).toBe(btn);
-    await act(async () => { btn.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); btn.click(); });
+    await act(async () => { btn.click(); });
     expect(useQuoteStore.getState().byKey["conv-1"]).toHaveLength(1);
   });
 });

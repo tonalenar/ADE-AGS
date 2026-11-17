@@ -52,8 +52,9 @@ describe("o aviso no app de conversa que terminou, falhou ou pede algo", () => {
     expect(icon).toBe("success");
     expect(action?.label).toBe("chat.inbox.open");
     action?.onClick();
-    await act(async () => { await Promise.resolve(); });
-    expect(mocks.select).toHaveBeenCalledWith("thread:t-1");
+    await act(async () => {
+      await vi.waitFor(() => expect(mocks.select).toHaveBeenCalledWith("thread:t-1"));
+    });
   });
 
   it("abrir a conversa leva à conversa indicada, e só a ela", async () => {

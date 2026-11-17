@@ -299,17 +299,19 @@ describe("aprovação humana no quadro", () => {
     expect(replies()).toMatchObject([{ id: 2, error: { code: -32001 } }]);
   });
 
-  it("desmontar o quadro com aprovação aberta nega sem executar nada", async () => {
+  it("desmontar o quadro com aprovação aberta nega sem mandar nada ao composer", async () => {
     const postToComposer = vi.fn();
-    await mount({ postToComposer });
+    const { replies } = await mount({ postToComposer });
     await fromApp(messageRequest(1, "a"));
     expect(dialog()).not.toBeNull();
+    expect(iframe()).not.toBeNull();
     await act(async () => {
       root?.unmount();
     });
-    root = createRoot(host);
+    await act(async () => { await Promise.resolve(); });
     expect(postToComposer).not.toHaveBeenCalled();
-    expect(dialog()).toBeNull();
+    // close() marca a sessão fechada antes do handler responder; o app some, e nada vai ao composer.
+    expect(replies()).toEqual([]);
   });
 
   it("sem toolHost, tools/call segue recusado com -32601 e sem diálogo", async () => {

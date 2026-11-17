@@ -60,8 +60,7 @@ describe("o store real de permissão", () => {
     invokeMock.on("chat_permission_rules", [{ id: "r1", kind: "command", pattern: "bun add *", agentId: "codex", role: null, teamId: null, createdAt: 1 }]);
     invokeMock.on("chat_request_answer", true);
     alwaysAllow(threadAsk, "bun add *");
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(invokeMock.calls("chat_permission_rule_add").length).toBeGreaterThan(0));
     await loadRules();
     const rules = usePermissions.getState().rules;
     expect(rules).toEqual([expect.objectContaining({ pattern: "bun add *", agentId: "codex" })]);

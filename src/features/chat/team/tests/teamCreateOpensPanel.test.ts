@@ -8,7 +8,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => undefined) }));
 
 import { useChatStore } from "../../store";
-import { makeOrchestrator } from "../teamStore";
+import { makeOrchestrator, reloadTeams } from "../teamStore";
 
 describe("criar o time abre o painel Time (uma vez), por ser pedido da pessoa", () => {
   beforeEach(() => useChatStore.setState({ panel: "ios", surfaces: ["ios"], panelFocus: 0 }));
@@ -21,6 +21,8 @@ describe("criar o time abre o painel Time (uma vez), por ser pedido da pessoa", 
   it("trocar o painel depois não reabre o Time sozinho", async () => {
     await makeOrchestrator({ key: "tab-1", agentId: "claude-code", agentLabel: "Claude Code", title: "x", cwd: "/repo" });
     useChatStore.setState({ panel: "ios" });
+    // Relê o time (evento cc-chat-team): isso não pode chamar addSurface de novo.
+    await reloadTeams();
     expect(useChatStore.getState().panel).toBe("ios");
   });
 });

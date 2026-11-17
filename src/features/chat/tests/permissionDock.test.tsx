@@ -3,10 +3,21 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const store = vi.hoisted(() => ({ answerAsk: vi.fn(), alwaysAllow: vi.fn() }));
-vi.mock("@/features/chat/permissions/permissionsStore", () => store);
+const ipc = vi.hoisted(() => ({ calls: [] as { cmd: string; args: Record<string, unknown> }[] }));
 vi.mock("@tauri-apps/api/path", () => ({ homeDir: () => Promise.resolve("/Users/ton") }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve([]) }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (cmd: string, args: Record<string, unknown> = {}) => {
+    ipc.calls.push({ cmd, args });
+    if (cmd === "chat_request_answer") return Promise.resolve(true);
+    if (cmd === "chat_permission_rule_add") {
+      const input = args.input as { kind: string; pattern: string; agentId: string };
+      return Promise.resolve({ id: "r1", kind: input.kind, pattern: input.pattern, agentId: input.agentId, role: null, teamId: null, createdAt: 1 });
+    }
+    if (cmd === "chat_permission_rules") return Promise.resolve([]);
+    if (cmd === "chat_thread_send") return Promise.resolve(true);
+    return Promise.resolve([]);
+  },
+}));
 vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => undefined) }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: "pt-BR" } }),
@@ -15,6 +26,8 @@ vi.mock("react-i18next", () => ({
 import { ChatFrame } from "@/features/chat/ChatFrame";
 import { PermissionCard } from "@/features/chat/permissions/PermissionCard";
 import type { PendingAsk } from "@/features/chat/permissions/permissionModel";
+import { usePermissions } from "@/features/chat/permissions/permissionsStore";
+import { useStructured } from "@/features/chat/structured/store";
 import { TimelineView } from "@/features/chat/timeline/ConversationTimeline";
 
 class FakeObserver {
@@ -41,13 +54,20 @@ const button = (prefix: string) => {
   return found as HTMLButtonElement;
 };
 
+function lastAnswer() {
+  const answers = ipc.calls.filter((c) => c.cmd === "chat_request_answer");
+  return answers[answers.length - 1]?.args;
+}
+
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: FakeObserver });
-  vi.clearAllMocks();
+  ipc.calls = [];
   vi.useFakeTimers();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
+  usePermissions.setState({ rules: [], rulesLoaded: false, inboxOpen: false, filter: "all", selected: "thread:q", tui: [], answered: {} });
+  useStructured.setState({ live: { th: { requests: [{ id: "q" }, { id: "r" }] } } } as never);
 });
 afterEach(async () => {
   await act(async () => { root.unmount(); });
@@ -132,9 +152,9 @@ describe("atalhos", () => {
     await mount(<PermissionCard ask={ask} terminal />);
     (document.activeElement as HTMLElement).blur();
     await press("n");
-    expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "deny");
+    expect(lastAnswer()).toEqual({ requestId: "q", choice: "deny" });
     await press("Enter");
-    expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "allow");
+    expect(lastAnswer()).toEqual({ requestId: "q", choice: "allow" });
   });
 
   it("digitando no composer, as teclas são texto", async () => {
@@ -143,7 +163,7 @@ describe("atalhos", () => {
     document.body.append(box);
     await press("n", box);
     await press("Enter", box);
-    expect(store.answerAsk).not.toHaveBeenCalled();
+    expect(ipc.calls.filter((c) => c.cmd === "chat_request_answer")).toEqual([]);
     box.remove();
   });
 
@@ -182,11 +202,15 @@ describe("o contrato continua o mesmo", () => {
     await mount(<PermissionCard ask={ask} terminal />);
     expect(host.textContent).toContain("~/Projects/app");
     await act(async () => { button("chat.permission.deny").click(); });
-    expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "deny");
+    expect(lastAnswer()).toEqual({ requestId: "q", choice: "deny" });
     await act(async () => { button("chat.permission.always").click(); });
-    expect(store.alwaysAllow).toHaveBeenLastCalledWith(ask, "cd *");
+    const added = ipc.calls.filter((c) => c.cmd === "chat_permission_rule_add");
+    expect(added[added.length - 1]?.args).toEqual({
+      input: { kind: "command", pattern: "cd *", agentId: "claude-code" },
+    });
+    expect(lastAnswer()).toEqual({ requestId: "q", choice: "allow" });
     await act(async () => { button("chat.permission.allow").click(); });
-    expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "allow");
+    expect(lastAnswer()).toEqual({ requestId: "q", choice: "allow" });
 
     await mount(<PermissionCard ask={{ ...ask, detail: "git push origin main", risk: "high" }} terminal />);
     expect([...host.querySelectorAll("button")].some((b) => b.textContent?.startsWith("chat.permission.always"))).toBe(false);

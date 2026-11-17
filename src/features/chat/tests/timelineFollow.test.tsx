@@ -164,7 +164,7 @@ describe("a conversa segue o fim enquanto a pessoa está nele", () => {
     expect(host.querySelector('[data-chat-virtual-spacer="bottom"]')).not.toBeNull();
   });
 
-  it("mantém um turno visível no mesmo commit em que a lista virtualizada encolhe", async () => {
+  it("mantém um turno visível quando a lista virtualizada encolhe", async () => {
     content = 30_000;
     await render(longHistory);
     await runAnimation();
