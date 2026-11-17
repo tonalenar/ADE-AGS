@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
+import { dateLocale } from "@/i18n/dateLocale";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import {
   createCheckpoint, restorable, restoreCheckpoint, rollbackPreview, rollbackTask, runCheckpoints,
@@ -10,7 +11,7 @@ import {
 import type { Task } from "./types";
 
 const when = (unix: number) =>
-  new Date(unix * 1000).toLocaleString(undefined, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  new Date(unix * 1000).toLocaleString(dateLocale(), { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 /**
  * "Volver a antes de esta tarea": muestra qué se rehace (la tarea, lo que depende de ella y lo

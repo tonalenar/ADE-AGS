@@ -106,7 +106,7 @@ export function FleetPage() {
         if (tab) tabsState.activateTab(tab.id);
         else {
           const shell = tabsState.detectedAgents.find((a) => a.id === "bash");
-          if (!shell) throw new Error("Abra um terminal deste workspace para acessar o painel Gemini.");
+          if (!shell) throw new Error(t("fleet.geminiNeedsTerminal"));
           tabsState.addTab({cwd,agent:shell});
         }
         useViewTabsStore.getState().openGemini(cwd);
