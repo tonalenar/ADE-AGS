@@ -712,14 +712,17 @@ pub async fn mission_delivery_hint(
 ) -> Result<delivery::DeliveryHint, String> {
     let db = db_of(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        let mission = store::get(&conn, &mission_id)?
-            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
-        Ok(delivery::delivery_hint(
-            &conn,
+        let mission = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            store::get(&conn, &mission_id)?
+                .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?
+        };
+        Ok(delivery::delivery_hint_with(
+            &db,
             &mission.id,
             std::path::Path::new(&mission.cwd),
             mission.started_at,
+            &|| {},
         ))
     })
     .await

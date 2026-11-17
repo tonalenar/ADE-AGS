@@ -1286,6 +1286,19 @@ mod eventos {
     }
 
     #[test]
+    fn dica_de_entrega_nao_roda_git_com_o_banco_travado() {
+        let banco = db();
+        let travado_no_git = std::cell::Cell::new(false);
+        let probe = || {
+            if banco.try_lock().is_err() {
+                travado_no_git.set(true);
+            }
+        };
+        crate::missions::delivery::delivery_hint_with(&banco, "m1", std::path::Path::new("/nao/existe"), None, &probe);
+        assert!(!travado_no_git.get(), "git rev-parse rodou com o banco travado");
+    }
+
+    #[test]
     fn un_pedido_invalido_no_avisa() {
         let (app, vistos) = app_que_escucha(db());
         let vacio = MissionInput {
