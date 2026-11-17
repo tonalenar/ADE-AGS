@@ -182,7 +182,7 @@ pub fn authorize(session: Option<&str>, claimed_tab: Option<&str>, client_pid: O
     let Some(client) = client_pid.filter(|pid| *pid > 0) else {
         return Err(ERR_NO_PID.into());
     };
-    if !descends_from(client, bound.root_pid, parent_pid) {
+    if !descends_from(client, bound.root_pid, parent_lookup()) {
         return Err(ERR_ANCESTRY.into());
     }
     Ok(bound.tab)
@@ -207,7 +207,7 @@ pub fn authorize_actor(session: Option<&str>, claimed_tab: Option<&str>, client_
     };
     let client = client_pid.filter(|pid| *pid > 0);
     match (ancestry_required(), client) {
-        (true, Some(pid)) if descends_from(pid, root, parent_pid) => Ok(tab.to_string()),
+        (true, Some(pid)) if descends_from(pid, root, parent_lookup()) => Ok(tab.to_string()),
         (true, Some(_)) => Err(ERR_ANCESTRY.into()),
         _ => Err(ERR_NO_PID.into()),
     }
@@ -236,7 +236,7 @@ pub fn release_task_process(task_id: &str) {
 /// PID registrado. Sem PID (TCP) ou sem processo registrado, recusa. Nos Unix sem API de PID fica só o `taskId` declarado
 /// (o mesmo fallback explícito de [`authorize`]).
 pub fn authorize_task(task_id: &str, client_pid: Option<u32>) -> Result<(), String> {
-    authorize_task_with(task_id, client_pid, parent_pid)
+    authorize_task_with(task_id, client_pid, parent_lookup())
 }
 
 fn authorize_task_with(task_id: &str, client_pid: Option<u32>, parent: impl FnMut(u32) -> Option<u32>) -> Result<(), String> {
@@ -266,7 +266,7 @@ pub enum Caller {
 /// nenhuma, o cliente tem de estar fora de toda árvore de processos do ADE (PTYs, conversas, tarefas): quem está dentro e
 /// chamou sem identidade apagou o ambiente de propósito (ou por sandbox) e é recusado. Sem PID do cliente não há como saber.
 pub fn classify_caller(session: Option<&str>, from: Option<&str>, client_pid: Option<u32>) -> Result<Caller, String> {
-    classify_caller_with(session, from, client_pid, parent_pid)
+    classify_caller_with(session, from, client_pid, parent_lookup())
 }
 
 fn classify_caller_with(session: Option<&str>, from: Option<&str>, client_pid: Option<u32>, parent: impl FnMut(u32) -> Option<u32>) -> Result<Caller, String> {
@@ -351,7 +351,7 @@ fn owner_of(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> Option<Owne
 /// - fora de toda árvore: [`Principal::Outside`], **desde que não declare identidade**: um `from` sem prova é forjado;
 /// - sem PID (TCP, CLI antiga): recusa, porque nada prova de que lado está.
 pub fn principal_of(session: Option<&str>, claims: &[&str], task_id: Option<&str>, client_pid: Option<u32>) -> Result<Principal, String> {
-    principal_with(session, claims, task_id, client_pid, parent_pid)
+    principal_with(session, claims, task_id, client_pid, parent_lookup())
 }
 
 fn principal_with(
@@ -427,6 +427,18 @@ fn inside_an_ade_process(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -
 
 /// `client` é `root` ou um descendente, segundo `parent`. Para no init,
 /// em ciclo ou depois de [`MAX_ANCESTORS`] passos.
+/// Um snapshot no Windows: `CreateToolhelp32Snapshot` uma vez por consulta, não a cada ancestral.
+fn parent_lookup() -> impl FnMut(u32) -> Option<u32> {
+    #[cfg(windows)]
+    let map = Some(windows_process_parents());
+    #[cfg(not(windows))]
+    let map: Option<HashMap<u32, u32>> = None;
+    move |pid| match &map {
+        Some(m) => m.get(&pid).copied().filter(|ppid| *ppid > 0),
+        None => parent_pid(pid),
+    }
+}
+
 pub(crate) fn descends_from(client: u32, root: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> bool {
     if client == 0 || root == 0 {
         return false;
@@ -478,36 +490,39 @@ fn parent_pid(pid: u32) -> Option<u32> {
 /// `CreateToolhelp32Snapshot` enxerga o pai. Se o PID não está no
 /// snapshot, a checagem fecha: não há como provar a descendência.
 #[cfg(windows)]
+#[allow(dead_code)]
 fn parent_pid(pid: u32) -> Option<u32> {
+    windows_process_parents().get(&pid).copied().filter(|ppid| *ppid > 0)
+}
+
+#[cfg(windows)]
+fn windows_process_parents() -> HashMap<u32, u32> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
 
+    let mut map = HashMap::new();
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snap == INVALID_HANDLE_VALUE {
-            return None;
+            return map;
         }
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
         if Process32FirstW(snap, &mut entry) == 0 {
             CloseHandle(snap);
-            return None;
+            return map;
         }
         loop {
-            if entry.th32ProcessID == pid {
-                let ppid = entry.th32ParentProcessID;
-                CloseHandle(snap);
-                return if ppid == 0 { None } else { Some(ppid) };
-            }
+            map.insert(entry.th32ProcessID, entry.th32ParentProcessID);
             if Process32NextW(snap, &mut entry) == 0 {
                 break;
             }
         }
         CloseHandle(snap);
-        None
     }
+    map
 }
 
 #[cfg(not(any(

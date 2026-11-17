@@ -274,6 +274,15 @@ mod arbol {
     }
 }
 
+#[test]
+fn fechamento_escala_ate_sigkill() {
+    let src = include_str!("containment.rs");
+    let hup = src.find("libc::SIGHUP").expect("SIGHUP");
+    let term = src.find("libc::SIGTERM").expect("SIGTERM");
+    let kill = src.find("libc::SIGKILL").expect("SIGKILL");
+    assert!(hup < term && term < kill, "HUP, TERM e depois KILL");
+}
+
 // ── Fin a fin: matar la tab se lleva su descendencia ────────────
 
 /// Regresión del caso que motivó este módulo, reproducido punta a punta contra procesos

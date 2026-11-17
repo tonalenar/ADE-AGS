@@ -403,9 +403,8 @@ fn redact_arg(arg: &str) -> String {
             return format!("{}***", &arg[..index + marker.len()]);
         }
     }
-    if let Some(rest) = arg.strip_prefix("Authorization:") {
-        let _ = rest;
-        return "Authorization:***".into();
+    if let Some(index) = lower.find("authorization:") {
+        return format!("{}Authorization:***", &arg[..index]);
     }
     if let Some(scheme_at) = lower.find("://") {
         if let Some(at) = arg[scheme_at + 3..].find('@') {
@@ -595,6 +594,16 @@ mod tests {
         assert!(!cred.contains("token@"), "{cred}");
         assert!(cred.contains("Authorization:***"), "{cred}");
         assert!(!cred.contains("Bearer abc"), "{cred}");
+        let header = redact_argv(
+            [
+                OsStr::new("--header=Authorization: Bearer abc"),
+                OsStr::new("AUTHORIZATION: tok"),
+            ]
+            .into_iter(),
+        );
+        assert!(header.contains("Authorization:***"), "{header}");
+        assert!(!header.contains("Bearer abc"), "{header}");
+        assert!(!header.contains("tok"), "{header}");
     }
 
     /// No CI Linux não dá para inspecionar a flag do `CreateProcess`. O contrato fica no fonte:
