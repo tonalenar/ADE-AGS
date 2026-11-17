@@ -730,14 +730,7 @@ pub fn redeliver_now(
     test_override: Option<TestResult>,
 ) -> Result<RedeliverOutcome, String> {
     let db = db_of(app)?;
-    let cwd = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        let mission = store::get(&conn, mission_id)?
-            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
-        mission.cwd
-    };
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    store::redeliver(&conn, mission_id, &cwd, pr_override, test_override)
+    store::redeliver_db(&db, mission_id, pr_override, test_override)
 }
 
 #[tauri::command]

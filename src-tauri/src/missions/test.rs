@@ -1767,6 +1767,48 @@ fn redeliver_promotes_done_without_delivery_when_merged_and_ci_green_and_test_pa
 }
 
 #[test]
+fn redeliver_libera_o_banco_e_recusa_gravacao_com_estado_antigo() {
+    let db = db();
+    let id = borrador(&db);
+    {
+        let conn = db.lock().unwrap();
+        store::mark_started_terminals(&conn, &id).unwrap();
+        store::finish_terminals(
+            &conn,
+            &id,
+            &MissionDelivery {
+                test_result: TestResult::Passed,
+                pull_request: Some("68".into()),
+                ci_status: CiStatus::Pending,
+                checked_at: 100,
+            },
+        )
+        .unwrap();
+    }
+
+    let result = store::redeliver_db_with_checker(
+        &db,
+        &id,
+        Some("68"),
+        Some(TestResult::Passed),
+        |_, _| {
+            let conn = db.try_lock().expect("git/gh não deve reter o mutex do banco");
+            conn.execute(
+                "UPDATE missions SET status='cancelled', updated_at=updated_at+1 WHERE id=?1",
+                [&id],
+            )
+            .unwrap();
+            (super::delivery::PrState::Merged, CiStatus::Success)
+        },
+    );
+
+    assert!(result.unwrap_err().contains("mudou durante a reavaliação"));
+    let conn = db.lock().unwrap();
+    assert_eq!(store::get(&conn, &id).unwrap().unwrap().status, status::CANCELLED);
+    assert_eq!(store::delivery_for_mission(&conn, &id).unwrap().unwrap().ci_status, CiStatus::Pending);
+}
+
+#[test]
 fn redeliver_is_idempotent_when_already_done() {
     let db = db();
     let id = borrador(&db);

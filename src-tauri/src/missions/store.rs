@@ -7,6 +7,7 @@ use rusqlite::{Connection, OptionalExtension, Row};
 use uuid::Uuid;
 
 use crate::util::now_ts;
+use crate::database::DbConnection;
 
 use super::delivery::{CiStatus, MissionDelivery, PrState, TestResult, mission_status, normalize_pr_reference};
 use super::types::{Mission, MissionInput, MissionSummary, status};
@@ -747,6 +748,69 @@ pub fn redeliver(
     test_override: Option<TestResult>,
 ) -> Result<RedeliverOutcome, String> {
     redeliver_with_checker(conn, mission_id, cwd, pr_override, test_override, super::delivery::check_pr_status)
+}
+
+pub fn redeliver_db_with_checker<F>(
+    db: &DbConnection,
+    mission_id: &str,
+    pr_override: Option<&str>,
+    test_override: Option<TestResult>,
+    pr_checker: F,
+) -> Result<RedeliverOutcome, String>
+where
+    F: Fn(&std::path::Path, &str) -> (PrState, CiStatus),
+{
+    let (mission, previous_delivery, target_pr) = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        let mission = get(&conn, mission_id)?
+            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
+        if mission.status == status::FAILED || mission.status == status::CANCELLED {
+            return Err(format!("Não é permitido reavaliar missão com status '{}'.", mission.status));
+        }
+        if mission.status != status::DONE && mission.status != status::DONE_WITHOUT_DELIVERY {
+            return Err(format!("Apenas missões finalizadas podem ser reavaliadas (status atual: '{}').", mission.status));
+        }
+        let delivery = delivery_for_mission(&conn, mission_id)?;
+        let target_pr = match pr_override {
+            Some(pr) if !pr.trim().is_empty() => Some(normalize_pr_reference(pr)?),
+            _ => delivery.as_ref().and_then(|item| item.pull_request.clone()),
+        };
+        (mission, delivery, target_pr)
+    };
+
+    // A consulta a git/gh ocorre com apenas o snapshot da missão em memória.
+    let checked = target_pr
+        .as_deref()
+        .map(|pr| pr_checker(std::path::Path::new(&mission.cwd), pr))
+        .unwrap_or((PrState::Unknown, CiStatus::NotApplicable));
+
+    let conn = db.lock().map_err(|error| error.to_string())?;
+    let current = get(&conn, mission_id)?
+        .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
+    let current_delivery = delivery_for_mission(&conn, mission_id)?;
+    if current.status != mission.status
+        || current.updated_at != mission.updated_at
+        || current_delivery != previous_delivery
+    {
+        return Err("A missão mudou durante a reavaliação; consulte e tente novamente.".into());
+    }
+    redeliver_with_checker(
+        &conn,
+        mission_id,
+        &mission.cwd,
+        pr_override,
+        test_override,
+        |_, _| checked,
+    )
+}
+
+pub fn redeliver_db(
+    db: &DbConnection,
+    mission_id: &str,
+    pr_override: Option<&str>,
+    test_override: Option<TestResult>,
+) -> Result<RedeliverOutcome, String> {
+    redeliver_db_with_checker(db, mission_id, pr_override, test_override, super::delivery::check_pr_status)
 }
 
 /// Cancela un borrador. No hay proceso que parar: nunca se lanzó nada.
