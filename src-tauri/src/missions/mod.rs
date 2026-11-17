@@ -734,30 +734,35 @@ pub async fn mission_finish_terminals(
     delivery: TerminalDeliveryInput,
 ) -> Result<Mission, String> {
     let db = db_of(&app)?;
-    let cwd = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        let mission = store::get(&conn, &mission_id)?
-            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
+    let lookup_id = mission_id.clone();
+    let cwd = crate::database::blocking_db(&db, move |conn| {
+        let mission = store::get(conn, &lookup_id)?
+            .ok_or_else(|| format!("não há nenhuma missão {lookup_id}"))?;
         if mission.status != status::RUNNING || mission.active_run_id.is_some() {
             return Err("Só se finaliza à mão uma missão em terminais que esteja rodando.".into());
         }
-        mission.cwd
-    };
+        Ok(mission.cwd)
+    })
+    .await?;
     let evidence = tauri::async_runtime::spawn_blocking(move || {
         delivery::assess(delivery, std::path::Path::new(&cwd))
     })
     .await
     .map_err(|e| e.to_string())??;
-    {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        if !store::finish_terminals(&conn, &mission_id, &evidence)? {
+    let finish_id = mission_id.clone();
+    let evidence = crate::database::blocking_db(&db, move |conn| {
+        if !store::finish_terminals(conn, &finish_id, &evidence)? {
             return Err("Só se finaliza à mão uma missão em terminais que esteja rodando.".into());
         }
-    }
+        Ok(evidence)
+    })
+    .await?;
     crate::decisions::observe_mission(db.clone(), &mission_id, &evidence);
     notify(&app, &mission_id);
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    store::get(&conn, &mission_id)?.ok_or_else(|| "a missão desapareceu".to_string())
+    crate::database::blocking_db(&db, move |conn| {
+        store::get(conn, &mission_id)?.ok_or_else(|| "a missão desapareceu".to_string())
+    })
+    .await
 }
 
 /// Reavalia de forma segura e idempotente a entrega de uma missão concluída.
@@ -946,14 +951,19 @@ pub(crate) fn precheck_text(conn: &Connection, mission_id: &str) -> Result<Strin
 #[tauri::command]
 pub async fn mission_precheck(app: AppHandle, mission_id: String) -> Result<String, String> {
     let db = db_of(&app)?;
-    check_launch_now(&db, &mission_id, true)?;
-    let (cwd, objective, similar) = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        let mission = store::get(&conn, &mission_id)?.ok_or("missions.error.changed")?;
+    let check_db = db.clone();
+    let check_id = mission_id.clone();
+    tauri::async_runtime::spawn_blocking(move || check_launch_now(&check_db, &check_id, true))
+        .await
+        .map_err(|e| e.to_string())??;
+    let lookup_id = mission_id.clone();
+    let (cwd, objective, similar) = crate::database::blocking_db(&db, move |conn| {
+        let mission = store::get(conn, &lookup_id)?.ok_or("missions.error.changed")?;
         let similar =
-            precheck::similar_missions(&conn, &mission_id, &mission.cwd, &mission.objective);
-        (mission.cwd, mission.objective, similar)
-    };
+            precheck::similar_missions(conn, &lookup_id, &mission.cwd, &mission.objective);
+        Ok((mission.cwd, mission.objective, similar))
+    })
+    .await?;
     tokio::task::spawn_blocking(move || {
         let check = precheck::run_with_similar(&cwd, &objective, similar);
         Ok(precheck::render(&check))
