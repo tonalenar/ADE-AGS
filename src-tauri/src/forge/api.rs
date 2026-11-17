@@ -15,6 +15,16 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+pub(super) const IMAGE_MAX_BYTES: usize = 20 * 1024 * 1024;
+
+pub(super) fn append_image_chunk(body: &mut Vec<u8>, chunk: &[u8]) -> Result<(), ForgeError> {
+    if body.len().saturating_add(chunk.len()) > IMAGE_MAX_BYTES {
+        return Err(ForgeError::Api("la imagen es demasiado grande".into()));
+    }
+    body.extend_from_slice(chunk);
+    Ok(())
+}
+
 use super::provider::{ForgeError, ForgeKind};
 
 #[derive(Debug, Clone, Serialize)]
@@ -522,7 +532,6 @@ impl Api {
     /// imagen de cualquier otro lado se pide sin credenciales, y reqwest las saca solo al
     /// redirigir a otro host (los adjuntos de GitHub terminan en S3).
     pub async fn image(&self, url: &str) -> Result<String, ForgeError> {
-        const MAX: usize = 20 * 1024 * 1024;
         let parsed = reqwest::Url::parse(url).map_err(|e| ForgeError::Api(format!("URL inválida: {e}")))?;
         if !matches!(parsed.scheme(), "https" | "http") {
             return Err(ForgeError::Api("solo imágenes http(s)".into()));
@@ -568,10 +577,7 @@ impl Api {
         }
         let mut body = Vec::new();
         while let Some(chunk) = res.chunk().await.map_err(|e| ForgeError::Api(format!("no se pudo bajar la imagen: {e}")))? {
-            if body.len().saturating_add(chunk.len()) > MAX {
-                return Err(ForgeError::Api("la imagen es demasiado grande".into()));
-            }
-            body.extend_from_slice(&chunk);
+            append_image_chunk(&mut body, &chunk)?;
         }
         use base64::Engine;
         Ok(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&body)))

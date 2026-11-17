@@ -597,11 +597,17 @@ fn checkout_pull(t: &RepoTarget, number: u64, head_ref: &str, env: &[(String, St
         run_local(&t.root, &["switch", &branch]).map_err(scm_to_forge)?;
         // Solo avanza si no hay nada local encima: un commit propio en la rama del PR no
         // se pisa.
-        run_local(&t.root, &["merge", "--ff-only", &tracking]).map_err(scm_to_forge)?;
+        merge_ff_only(&t.root, &tracking)?;
     } else {
         run_local(&t.root, &["switch", "-c", &branch, &tracking]).map_err(scm_to_forge)?;
     }
     Ok(branch)
+}
+
+pub(super) fn merge_ff_only(root: &str, tracking: &str) -> Result<(), ForgeError> {
+    crate::scm::run_local(root, &["merge", "--ff-only", tracking])
+        .map(|_| ())
+        .map_err(scm_to_forge)
 }
 
 /// Las etiquetas del repo, para sugerirlas al abrir un issue.
