@@ -3,6 +3,7 @@ import { AlertaToast } from "@/shared/ui/alerts";
 import { useTabsStore } from "@/features/tabs/store";
 import { useSkillsStore } from "@/features/skills/store";
 import { broadcastEvent, focusWindow } from "@/shared/ipc/window";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 import * as ipc from "./ipc";
 import type { WorkspaceSummary } from "./types";
@@ -44,7 +45,7 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
       const rows = await ipc.listWorkspaces();
       set({ workspaces: rows });
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: uiErrorText(e) });
     } finally {
       set({ loading: false });
     }

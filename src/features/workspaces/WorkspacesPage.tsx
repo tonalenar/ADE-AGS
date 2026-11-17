@@ -32,6 +32,7 @@ export function WorkspacesPage() {
   const renameWorkspace = useWorkspacesStore((s) => s.renameWorkspace);
   const deleteWorkspace = useWorkspacesStore((s) => s.deleteWorkspace);
   const focusIfOpen = useWorkspacesStore((s) => s.focusIfOpen);
+  const listError = useWorkspacesStore((s) => s.error);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -93,10 +94,21 @@ export function WorkspacesPage() {
           <p className="text-sm text-red-500 dark:text-red-400 mb-4">{error}</p>
         )}
 
+        {listError && (
+          <div role="alert" className="flex items-center justify-between gap-3 mb-4">
+            <p className="text-sm text-red-500 dark:text-red-400 break-words min-w-0">{listError}</p>
+            <Button variant="outline" onClick={() => void loadWorkspaces()} className="shrink-0">
+              {t("btn.retry")}
+            </Button>
+          </div>
+        )}
+
         {workspaces.length === 0 ? (
-          <p className="text-sm italic text-gray-400 dark:text-gray-500">
-            {t("home.recent.empty")}
-          </p>
+          listError ? null : (
+            <p className="text-sm italic text-gray-400 dark:text-gray-500">
+              {t("home.recent.empty")}
+            </p>
+          )
         ) : (
           <div className="flex flex-col gap-2">
             {workspaces.map((ws) => (
