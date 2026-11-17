@@ -1,8 +1,10 @@
 import { PopupSelect } from "@/shared/ui/PopupSelect";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimateSpin, Button, Input } from "neogestify-ui-components";
 
+import { uiErrorText } from "@/shared/uiErrorText";
+import { executeRenderedCommand, previewIsCurrent } from "./catalogExecute";
 import {
   graphifyCommands, graphifyRender, type GraphifyChoice, type GraphifyCommand, type GraphifyRun,
 } from "./ipc";
@@ -51,10 +53,21 @@ export function CommandCatalog({ cwd, onRun }: {
   const [preview, setPreview] = useState<Record<string, string>>({});
   const [runs, setRuns] = useState<Record<string, GraphifyRun>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const previewGen = useRef<Record<string, number>>({});
   const [agentId, setAgentId] = useState<string>("");
   const [note, setNote] = useState("");
+  const [loadError, setLoadError] = useState("");
 
-  useEffect(() => { graphifyCommands().then(setCommands).catch(() => setCommands([])); }, []);
+  const loadCommands = useCallback(() => {
+    setLoadError("");
+    graphifyCommands()
+      .then(setCommands)
+      .catch((e) => {
+        setCommands([]);
+        setLoadError(uiErrorText(e));
+      });
+  }, []);
+  useEffect(() => { loadCommands(); }, [loadCommands]);
 
   const agents = useMemo(() => agentTabs(cwd), [cwd]);
   useEffect(() => {
@@ -65,8 +78,11 @@ export function CommandCatalog({ cwd, onRun }: {
 
   /** El comando final lo arma el backend cada vez que cambia algo de la fila. */
   const refresh = useCallback(async (id: string, choice: GraphifyChoice) => {
+    const gen = (previewGen.current[id] ?? 0) + 1;
+    previewGen.current[id] = gen;
     try {
       const line = await graphifyRender(id, choice);
+      if (!previewIsCurrent(previewGen.current[id], gen)) return;
       setPreview((prev) => ({ ...prev, [id]: line }));
     } catch {
       /* Una fila que no se puede armar simplemente no muestra vista previa. */
@@ -98,13 +114,21 @@ export function CommandCatalog({ cwd, onRun }: {
   };
 
   const execute = async (command: GraphifyCommand) => {
-    const line = preview[command.id];
-    if (!line) return;
     setBusy(command.id);
     setNote("");
     try {
-      const result = await onRun(line);
+      const result = await executeRenderedCommand(
+        graphifyRender,
+        onRun,
+        command.id,
+        choiceOf(command.id),
+      );
       setRuns((prev) => ({ ...prev, [command.id]: result }));
+    } catch (e) {
+      setRuns((prev) => ({
+        ...prev,
+        [command.id]: { ok: false, code: null, output: uiErrorText(e) },
+      }));
     } finally {
       setBusy(null);
     }
@@ -138,6 +162,12 @@ export function CommandCatalog({ cwd, onRun }: {
   return (
     <div className="flex flex-col gap-4">
       {note && <p className="text-[11px] text-gray-500 dark:text-white/40">{note}</p>}
+      {loadError && (
+        <div className="flex flex-col gap-2">
+          <p className="text-[11px] text-red-700 dark:text-red-300">{loadError}</p>
+          <Button variant="outline" size="sm" onClick={loadCommands}>{t("btn.retry")}</Button>
+        </div>
+      )}
 
       {grouped.map(([group, items]) => (
         <div key={group} className="flex flex-col gap-1.5">
