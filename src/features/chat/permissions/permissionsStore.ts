@@ -199,11 +199,6 @@ export function pendingAsksOf(src: AskSources): PendingAsk[] {
 }
 
 /**
- * Todos os pedidos pendentes, de todas as fontes, o mais antigo primeiro. As abas de shell não
- * pedem nada; os respondidos aqui somem na hora. Assina o `live` inteiro: quem mostra a lista (a caixa, o cartão)
- * refaz a lista a cada pedaço de texto; quem só conta pedidos usa `usePendingAskCounts`.
- */
-/**
  * O que a lista de pedidos lê do estado ao vivo: os pedidos das conversas ativas e os itens com arquivo (as edições, que
  * dão a lista de arquivos). Cada elemento tem identidade estável enquanto não muda, então o texto do streaming não entra.
  */
@@ -219,6 +214,11 @@ function askInputsOf(s: { threads: ThreadRow[]; live: Record<string, ThreadLive>
   return out;
 }
 
+/**
+ * Todos os pedidos pendentes, de todas as fontes, o mais antigo primeiro. As abas de shell não
+ * pedem nada; os respondidos aqui somem na hora. Assina o `live` inteiro: quem mostra a lista (a caixa, o cartão)
+ * refaz a lista a cada pedaço de texto; quem só conta pedidos usa `usePendingAskCounts`.
+ */
 export function usePendingAsks(): PendingAsk[] {
   const threads = useStructured((s) => s.threads);
   const askInputs = useStructured(useShallow((s) => askInputsOf(s)));
