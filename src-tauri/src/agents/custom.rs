@@ -13,11 +13,11 @@
 //! ventana y tiene que saber en qué carpeta guarda sus skills cada TUI.
 
 use crate::database::DbConnection;
+use crate::util::now_ts;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use crate::util::now_ts;
 
 /// De dónde sale el id de sesión del archivo que la TUI acaba de crear.
 #[derive(Debug, Clone, PartialEq)]
@@ -119,11 +119,12 @@ pub fn find(conn: &rusqlite::Connection, id: &str) -> Option<CustomAgent> {
 
 // ── Comandos ─────────────────────────────────────────────────────
 
-#[tauri::command]
-pub fn list_custom_agents(db: tauri::State<DbConnection>) -> Result<Vec<CustomAgent>, String> {
+pub(crate) fn list_custom_agents_now(db: &DbConnection) -> Result<Vec<CustomAgent>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare(&format!("SELECT {COLUMNS} FROM custom_agents ORDER BY created_at ASC"))
+        .prepare(&format!(
+            "SELECT {COLUMNS} FROM custom_agents ORDER BY created_at ASC"
+        ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], row_to_custom_agent)
@@ -133,11 +134,21 @@ pub fn list_custom_agents(db: tauri::State<DbConnection>) -> Result<Vec<CustomAg
     Ok(rows)
 }
 
+#[tauri::command]
+pub async fn list_custom_agents(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<CustomAgent>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || list_custom_agents_now(&db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Crea o actualiza una TUI custom. Sin `id` crea una nueva; con `id` de una existente,
 /// la pisa entera (el formulario siempre manda el objeto completo).
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-pub fn upsert_custom_agent(
+pub async fn upsert_custom_agent(
     id: Option<String>,
     label: String,
     command: String,
@@ -146,98 +157,118 @@ pub fn upsert_custom_agent(
     sessions_dir: Option<String>,
     session_id_from: Option<String>,
     env: Option<HashMap<String, String>>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<CustomAgent, String> {
-    let label = label.trim().to_string();
-    let command = command.trim().to_string();
-    if label.is_empty() || command.is_empty() {
-        return Err("O nome e o comando são obrigatórios".to_string());
-    }
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
 
-    let resume_args = blank_to_none(resume_args);
-    if let Some(args) = &resume_args {
-        if !args.contains("{session}") {
-            return Err(
-                "Los argumentos de reanudación deben incluir {session} (ej. --resume {session})"
-                    .to_string(),
-            );
-        }
-    }
+            let label = label.trim().to_string();
+            let command = command.trim().to_string();
+            if label.is_empty() || command.is_empty() {
+                return Err("O nome e o comando são obrigatórios".to_string());
+            }
 
-    // Un path absoluto acá plantaría los symlinks fuera del proyecto, que es justo lo
-    // contrario de lo que hace la carpeta de skills (es relativa al cwd de cada tab).
-    let skills_dir = blank_to_none(skills_dir);
-    if let Some(dir) = &skills_dir {
-        if std::path::Path::new(dir).is_absolute() || dir.starts_with("~") {
-            return Err(
-                "La carpeta de skills es relativa al proyecto (ej. .agents/skills), no absoluta"
-                    .to_string(),
-            );
-        }
-    }
+            let resume_args = blank_to_none(resume_args);
+            if let Some(args) = &resume_args {
+                if !args.contains("{session}") {
+                    return Err(
+                        "Los argumentos de reanudación deben incluir {session} (ej. --resume {session})"
+                            .to_string(),
+                    );
+                }
+            }
 
-    let session_id_from = blank_to_none(session_id_from).unwrap_or_else(|| "filename".to_string());
-    let env = env.unwrap_or_default();
-    let env_json = serde_json::to_string(&env).unwrap_or_else(|_| "{}".to_string());
-    let id = id.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| Uuid::new_v4().to_string());
+            // Un path absoluto acá plantaría los symlinks fuera del proyecto, que es justo lo
+            // contrario de lo que hace la carpeta de skills (es relativa al cwd de cada tab).
+            let skills_dir = blank_to_none(skills_dir);
+            if let Some(dir) = &skills_dir {
+                if std::path::Path::new(dir).is_absolute() || dir.starts_with("~") {
+                    return Err(
+                        "La carpeta de skills es relativa al proyecto (ej. .agents/skills), no absoluta"
+                            .to_string(),
+                    );
+                }
+            }
 
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT INTO custom_agents (id, label, command, resume_args, skills_dir, sessions_dir, session_id_from, env_json, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-         ON CONFLICT(id) DO UPDATE SET
-           label = excluded.label,
-           command = excluded.command,
-           resume_args = excluded.resume_args,
-           skills_dir = excluded.skills_dir,
-           sessions_dir = excluded.sessions_dir,
-           session_id_from = excluded.session_id_from,
-           env_json = excluded.env_json",
-        rusqlite::params![
-            id,
-            label,
-            command,
-            resume_args,
-            skills_dir,
-            blank_to_none(sessions_dir),
-            session_id_from,
-            env_json,
-            now_ts()
-        ],
-    )
-    .map_err(|e| e.to_string())?;
+            let session_id_from = blank_to_none(session_id_from).unwrap_or_else(|| "filename".to_string());
+            let env = env.unwrap_or_default();
+            let env_json = serde_json::to_string(&env).unwrap_or_else(|_| "{}".to_string());
+            let id = id.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| Uuid::new_v4().to_string());
 
-    find(&conn, &id).ok_or_else(|| "No se pudo releer la TUI recién guardada".to_string())
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            conn.execute(
+                "INSERT INTO custom_agents (id, label, command, resume_args, skills_dir, sessions_dir, session_id_from, env_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT(id) DO UPDATE SET
+                   label = excluded.label,
+                   command = excluded.command,
+                   resume_args = excluded.resume_args,
+                   skills_dir = excluded.skills_dir,
+                   sessions_dir = excluded.sessions_dir,
+                   session_id_from = excluded.session_id_from,
+                   env_json = excluded.env_json",
+                rusqlite::params![
+                    id,
+                    label,
+                    command,
+                    resume_args,
+                    skills_dir,
+                    blank_to_none(sessions_dir),
+                    session_id_from,
+                    env_json,
+                    now_ts()
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+
+            find(&conn, &id).ok_or_else(|| "No se pudo releer la TUI recién guardada".to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn delete_custom_agent(id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM custom_agents WHERE id = ?1", [&id])
-        .map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn delete_custom_agent(
+    id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM custom_agents WHERE id = ?1", [&id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Importa las TUIs que una versión anterior guardaba en `localStorage` del frontend.
 /// Idempotente por id: reimportar no duplica ni pisa lo que el usuario ya editó acá.
 #[tauri::command]
-pub fn import_legacy_custom_agents(
+pub async fn import_legacy_custom_agents(
     agents: Vec<LegacyCustomAgent>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<usize, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let mut imported = 0;
-    for a in agents {
-        let changed = conn
-            .execute(
-                "INSERT OR IGNORE INTO custom_agents (id, label, command, session_id_from, env_json, created_at)
-                 VALUES (?1, ?2, ?3, 'filename', '{}', ?4)",
-                rusqlite::params![a.id, a.label, a.command, now_ts()],
-            )
-            .map_err(|e| e.to_string())?;
-        imported += changed;
-    }
-    Ok(imported)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let mut imported = 0;
+            for a in agents {
+                let changed = conn
+                    .execute(
+                        "INSERT OR IGNORE INTO custom_agents (id, label, command, session_id_from, env_json, created_at)
+                         VALUES (?1, ?2, ?3, 'filename', '{}', ?4)",
+                        rusqlite::params![a.id, a.label, a.command, now_ts()],
+                    )
+                    .map_err(|e| e.to_string())?;
+                imported += changed;
+            }
+            Ok(imported)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Deserialize)]
