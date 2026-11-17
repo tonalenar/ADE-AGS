@@ -585,3 +585,35 @@ fn categorias_de_acao_sao_multilingues_e_sem_acento() {
         assert!(!sensitive_label(label), "{label} não é ação sensível");
     }
 }
+
+#[test]
+fn termos_de_cada_categoria_valem_em_pt_en_e_es() {
+    // Rodada 1: cada termo da taxonomia, sozinho, é sensível na categoria certa, e os equivalentes dos três idiomas valem igual.
+    for (label, expected) in [
+        ("Permitir", Category::GrantPermission), ("Allow", Category::GrantPermission), ("Autorizar", Category::GrantPermission),
+        ("Authorize", Category::GrantPermission), ("Aceitar", Category::GrantPermission), ("Aceptar", Category::GrantPermission),
+        ("Accept", Category::GrantPermission), ("Confiar", Category::GrantPermission), ("Trust", Category::GrantPermission),
+        ("Abrir mesmo assim", Category::GrantPermission), ("Open anyway", Category::GrantPermission),
+        ("Abrir de todos modos", Category::GrantPermission),
+        ("Instalar", Category::Install), ("Install", Category::Install),
+        ("Enviar", Category::Send), ("Send", Category::Send),
+        ("Comprar", Category::Purchase), ("Buy", Category::Purchase), ("Purchase", Category::Purchase),
+        ("Excluir", Category::Delete), ("Apagar", Category::Delete), ("Delete", Category::Delete), ("Remove", Category::Delete),
+        ("Eliminar", Category::Delete), ("Borrar", Category::Delete),
+        ("Concluir", Category::Finish), ("Finalizar", Category::Finish), ("Finish", Category::Finish), ("Done", Category::Finish),
+        ("Terminar", Category::Finish),
+    ] {
+        assert_eq!(category(label, None), Some(expected), "{label}");
+    }
+    // Varredura: cada termo de TERMS, sozinho, cai na sua categoria. Um termo novo sem teste não passa despercebido.
+    for (cat, terms) in TERMS {
+        for term in *terms {
+            assert_eq!(category(term, None), Some(*cat), "{term}");
+        }
+    }
+    // Recusa continua livre em espanhol também, e o diálogo em espanhol ainda marca o botão genérico.
+    assert_eq!(category("Ahora no", Some(Category::GrantPermission)), None);
+    assert_eq!(category("Cerrar", Some(Category::GrantPermission)), None);
+    assert_eq!(dialog_cue("¿Quiere acceder a Documentos?"), Some(Category::GrantPermission));
+    assert_eq!(dialog_cue("Desea instalar esta aplicación"), Some(Category::Install));
+}

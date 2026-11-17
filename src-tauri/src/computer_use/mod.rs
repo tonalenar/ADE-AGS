@@ -189,12 +189,17 @@ pub(crate) enum Category {
 
 /// Os termos de cada categoria, sem acento e em minúsculas (ver `plain`). Multilíngue: pt, en e es.
 const TERMS: &[(Category, &[&str])] = &[
-    (Category::GrantPermission, &["permitir", "allow", "autorizar", "aceitar", "accept"]),
+    // Confiar e «abrir mesmo assim» concedem a execução de um app não verificado: entram como concessão.
+    (Category::GrantPermission, &[
+        "permitir", "allow", "autorizar", "authorize", "aceitar", "aceptar", "accept", "confiar", "trust",
+        "abrir mesmo assim", "open anyway", "abrir de todos modos",
+    ]),
     (Category::Install, &["instalar", "install"]),
     (Category::Send, &["enviar", "send", "submit", "publicar", "publish"]),
+    // Excluir antes de comprar: «apagar» contém «pagar», e o termo de exclusão tem de ganhar.
+    (Category::Delete, &["excluir", "apagar", "eliminar", "delete", "remove", "borrar", "reset"]),
     (Category::Purchase, &["comprar", "buy", "pagar", "pay", "checkout", "purchase", "transferir", "transfer"]),
-    (Category::Delete, &["excluir", "apagar", "delete", "remove", "borrar", "reset"]),
-    (Category::Finish, &["concluir", "finalizar", "finish", "confirmar", "confirm"]),
+    (Category::Finish, &["concluir", "finalizar", "terminar", "finish", "done", "confirmar", "confirm"]),
     (Category::SignOut, &["sair", "logout", "log out", "sign out", "cerrar sesion", "desligar"]),
     (Category::Credential, &["senha", "password", "contrasena"]),
 ];
@@ -219,6 +224,7 @@ fn dismissive(label: &str) -> bool {
         plain(label).trim(),
         "cancelar" | "cancel" | "nao" | "no" | "agora nao" | "not now" | "depois" | "later" | "fechar" | "close"
             | "voltar" | "back" | "nao permitir" | "no permitir" | "don't allow" | "don’t allow"
+            | "ahora no" | "cerrar" | "volver"
     )
 }
 
@@ -227,8 +233,9 @@ fn dismissive(label: &str) -> bool {
 pub(crate) fn dialog_cue(screen: &str) -> Option<Category> {
     const PERMISSION: &[&str] = &[
         "permitir", "allow", "autorizar", "gostaria de", "would like to", "quer acessar", "wants to", "permissao", "permission",
+        "permiso", "quiere acceder", "quiere usar",
     ];
-    const INSTALL: &[&str] = &["instalar", "install"];
+    const INSTALL: &[&str] = &["instal", "install"];
     let screen = plain(screen);
     if PERMISSION.iter().any(|m| screen.contains(m)) {
         Some(Category::GrantPermission)
