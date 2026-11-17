@@ -254,28 +254,28 @@ describe("conversationTitle", () => {
   const terms = [terminal({ title: "Refatorar login" })];
 
   it("prefere o título personalizado, aparado", () => {
-    expect(conversationTitle(row({ customTitle: "  Meu nome  ", title: "outro" }), terms)).toBe("Meu nome");
+    expect(conversationTitle(row({ customTitle: "  Meu nome  ", title: "outro" }), terms, "Nova conversa")).toBe("Meu nome");
   });
 
   it("corta o título personalizado em 120", () => {
-    const t = conversationTitle(row({ customTitle: "x".repeat(200) }), []);
+    const t = conversationTitle(row({ customTitle: "x".repeat(200) }), [], "Nova conversa");
     expect(Array.from(t)).toHaveLength(120);
     expect(t.endsWith("…")).toBe(true);
   });
 
   it("sem personalizado, usa o título aparado", () => {
-    expect(conversationTitle(row({ customTitle: "   ", title: "  Sessão  " }), terms)).toBe("Sessão");
+    expect(conversationTitle(row({ customTitle: "   ", title: "  Sessão  " }), terms, "Nova conversa")).toBe("Sessão");
   });
 
   it("sem títulos, usa o primeiro terminal cortado em 60", () => {
-    expect(conversationTitle(row(), terms)).toBe("Refatorar login");
+    expect(conversationTitle(row(), terms, "Nova conversa")).toBe("Refatorar login");
     const longo = [terminal({ title: "y".repeat(100) })];
-    expect(Array.from(conversationTitle(row(), longo))).toHaveLength(60);
+    expect(Array.from(conversationTitle(row(), longo, "Nova conversa"))).toHaveLength(60);
   });
 
   it("nunca vazio", () => {
-    expect(conversationTitle(row(), [])).toBe("Nova conversa");
-    expect(conversationTitle(row({ customTitle: "  ", title: "" }), [terminal({ title: "  " })])).toBe("Nova conversa");
+    expect(conversationTitle(row(), [], "Nova conversa")).toBe("Nova conversa");
+    expect(conversationTitle(row({ customTitle: "  ", title: "" }), [terminal({ title: "  " })], "Nova conversa")).toBe("Nova conversa");
   });
 });
 

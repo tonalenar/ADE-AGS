@@ -133,7 +133,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
       const live = tabsOfConversation(row)[0]?.title;
       if (live) return live;
     }
-    return conversationTitle(row, terminals);
+    return conversationTitle(row, terminals, t("conversations.newTitle"));
   };
 
   const countOf = (row: ConversationRow) => (row.state === "active" ? tabsOfConversation(row).length : parseConversationSnapshot(row.terminals).terminals.length);

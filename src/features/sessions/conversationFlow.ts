@@ -83,7 +83,7 @@ export async function hibernateConversation(row: ConversationRow, _ctx: FlowCont
 
   // Títulos reais das sessões antes de fechar (depois a aba some).
   const snapshot = await snapshotOf(row, tabs, true);
-  const title = row.customTitle ? row.title ?? undefined : conversationTitle(row, snapshot.terminals);
+  const title = row.customTitle ? row.title ?? undefined : conversationTitle(row, snapshot.terminals, i18n.t("conversations.newTitle"));
   // Sem terminais abertos (foram fechados na mão), o snapshot que já estava salvo não é sobrescrito por um vazio.
   const saved = await updateConversation(row.id, {
     state: "saved",
@@ -93,7 +93,7 @@ export async function hibernateConversation(row: ConversationRow, _ctx: FlowCont
   useConversationsStore.getState().upsert(saved);
   // Quem pede para trocar quer ter certeza de que nada se perdeu: a conversa está na lista, para abrir quando quiser.
   if (tabs.length > 0 && intent !== "delete") {
-    AlertaToast(i18n.t("conversations.switch.savedTitle"), i18n.t("conversations.switch.saved", { title: conversationTitle(saved, snapshot.terminals) }), "success", 4500);
+    AlertaToast(i18n.t("conversations.switch.savedTitle"), i18n.t("conversations.switch.saved", { title: conversationTitle(saved, snapshot.terminals, i18n.t("conversations.newTitle")) }), "success", 4500);
   }
 
   const close = useTabsStore.getState().closeTab;

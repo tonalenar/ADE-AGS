@@ -16,9 +16,5 @@ export function maxFixRound(spans: { kind: string; detail: string }[]): number |
 /** Texto curto da rodada na tarjeta. A última leva o gate completo. */
 export function fixRoundCaption(round: number, fullGate: boolean): string {
   const key = fullGate ? "fleet.fixRound.full" : "fleet.fixRound.short";
-  const label = i18n.t(key, { n: round });
-  if (!label || label === key) {
-    return fullGate ? `correção ${round} · gate completo` : `correção ${round}`;
-  }
-  return label;
+  return i18n.t(key, { n: round });
 }

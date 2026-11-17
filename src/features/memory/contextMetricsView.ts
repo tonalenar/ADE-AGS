@@ -1,4 +1,4 @@
-import { dateLocale } from "@/i18n/dateLocale";
+import { formatNumber } from "@/i18n/dateLocale";
 import { formatBytes, reductionPercent, type MemoryContextMetrics } from "./contextMetrics";
 
 export type RunContextMetric = Pick<MemoryContextMetrics, "runId" | "beforeBytes" | "afterBytes" | "tokensBefore" | "tokensAfter" | "entriesUsed" | "legacyContext">;
@@ -72,4 +72,4 @@ export function summarize(runs: RunContextMetric[] | null | undefined): ContextS
 }
 
 export const bytesOrNull = (n: number | null): string | null => (n === null ? null : formatBytes(n));
-export const tokensOrNull = (n: number | null): string | null => (n === null ? null : `~${n.toLocaleString(dateLocale())}`);
+export const tokensOrNull = (n: number | null): string | null => (n === null ? null : `~${formatNumber(n)}`);

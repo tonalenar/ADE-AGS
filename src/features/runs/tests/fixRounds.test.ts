@@ -1,6 +1,16 @@
-import { describe, expect, it } from "vitest";
+import i18n from "i18next";
+import { beforeAll, describe, expect, it } from "vitest";
 
+import pt from "@/i18n/locales/pt-BR.json";
 import { fixRoundCaption, maxFixRound } from "../fixRounds";
+
+beforeAll(async () => {
+  if (!i18n.isInitialized) {
+    await i18n.init({ lng: "pt-BR", resources: { "pt-BR": { translation: pt } }, interpolation: { escapeValue: false } });
+  } else {
+    await i18n.changeLanguage("pt-BR");
+  }
+});
 
 describe("rodadas de correção na telemetria", () => {
   it("mostra a maior rodada usada e ignora outros spans", () => {
