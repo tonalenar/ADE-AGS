@@ -8,21 +8,11 @@ import { dateLocale } from "@/i18n/dateLocale";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
 
 import { graphWidth, layoutGraph, type GraphRow, type Segment } from "./graphLayout";
+import { colorOfLane } from "./graphPalette";
 import { scmCommitFiles } from "./ipc";
 import type { Commit, CommitRef, ScmEntry } from "./types";
 
-/** Un color por rama, en el orden en que aparecen. Legibles en los dos temas. */
-const PALETTE = [
-  "var(--color-accent-500)",
-  "var(--color-violet-500)",
-  "color-mix(in oklab, var(--color-accent-400) 55%, var(--color-violet-400))",
-  "var(--color-accent-700)",
-  "var(--color-violet-400)",
-  "var(--color-accent-300)",
-  "var(--color-violet-600)",
-  "var(--color-accent-600)",
-];
-const colorOf = (i: number) => PALETTE[i % PALETTE.length];
+const colorOf = colorOfLane;
 
 const ROW = 24;
 const LANE = 11;
