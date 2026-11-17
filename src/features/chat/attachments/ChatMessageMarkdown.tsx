@@ -59,9 +59,12 @@ function useGalleryOf(found: MarkdownImageMedia[]) {
   // A lista só muda de identidade quando as imagens mudam. Num streaming o texto cresce a cada pedaço e
   // `found` é um array novo (quase sempre vazio) toda vez; sem isto, `load`/`open` mudam a cada pedaço, o
   // `Markdown` recria os componentes e o React remonta todos os blocos, que refazem o fade de entrada (piscar).
-  const stable = useRef(found);
-  if (stable.current !== found && !sameMarkdownImages(stable.current, found)) stable.current = found;
-  const images = stable.current;
+  const [stable, setStable] = useState(found);
+  let images = stable;
+  if (!sameMarkdownImages(stable, found)) {
+    images = found;
+    setStable(found);
+  }
   const [loadedPreviews, setLoadedPreviews] = useState<Record<string, string>>({});
   const gallery = useMemo(() => images.map((image) => ({ ...image, preview: image.preview ?? loadedPreviews[image.path] ?? null })), [images, loadedPreviews]);
 
