@@ -440,3 +440,12 @@ fn falha_ao_parar_e_relatada_com_o_id() {
 fn parar_sem_gravacao_nao_relata_falha() {
     assert!(Registry::new().parar_ativa().is_none());
 }
+
+#[test]
+fn nao_ha_parada_legada_que_engole_o_erro_da_finalizacao() {
+    let fonte = include_str!("../screen_recording.rs");
+    assert!(
+        !fonte.contains("pub fn stop_all()"),
+        "a parada legada descarta o Err da finalização; só vale stop_all_with_deadline"
+    );
+}

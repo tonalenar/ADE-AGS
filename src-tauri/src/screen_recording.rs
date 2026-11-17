@@ -943,12 +943,6 @@ struct FalhaDeParada {
     erro: String,
 }
 
-/// Para a gravação na saída do app, sem deixar processo ou vídeo aberto.
-#[allow(dead_code)]
-pub fn stop_all() {
-    let _ = REGISTRY.parar_ativa();
-}
-
 /// Teto da parada das gravações na saída do app. A thread principal não espera mais que isto: o que não
 /// terminou nesse prazo fica para trás e acompanha o processo até ele sair.
 pub const STOP_ALL_DEADLINE: Duration = Duration::from_secs(3);
