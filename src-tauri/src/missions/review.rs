@@ -34,14 +34,25 @@ fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
     let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(external_path(dir)).args(args);
     // Sin terminal que conteste: un editor o un prompt colgarían el comando.
-    cmd.env("GIT_TERMINAL_PROMPT", "0").env("GIT_EDITOR", "true").env("GIT_MERGE_AUTOEDIT", "no");
-    let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("não foi possível rodar o git: {e}"))?;
+    cmd.env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_EDITOR", "true")
+        .env("GIT_MERGE_AUTOEDIT", "no");
+    let out = output_with_timeout(&mut cmd, limit)
+        .map_err(|e| format!("não foi possível rodar o git: {e}"))?;
     if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string())
+        Ok(String::from_utf8_lossy(&out.stdout)
+            .trim_end_matches(['\n', '\r'])
+            .to_string())
     } else {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
         let out = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        Err(if !err.is_empty() { err } else if !out.is_empty() { out } else { format!("git {} falló", args.join(" ")) })
+        Err(if !err.is_empty() {
+            err
+        } else if !out.is_empty() {
+            out
+        } else {
+            format!("git {} falló", args.join(" "))
+        })
     }
 }
 
@@ -64,7 +75,9 @@ pub fn parse_numstat(raw: &str) -> Vec<FileChange> {
             continue;
         }
         let mut cols = head.splitn(3, '\t');
-        let (Some(a), Some(r), Some(path)) = (cols.next(), cols.next(), cols.next()) else { continue };
+        let (Some(a), Some(r), Some(path)) = (cols.next(), cols.next(), cols.next()) else {
+            continue;
+        };
         let path = if path.is_empty() {
             // Renombre: vienen origen y destino como entradas aparte; se muestra el destino.
             let _from = parts.next();
@@ -72,31 +85,49 @@ pub fn parse_numstat(raw: &str) -> Vec<FileChange> {
         } else {
             path.to_string()
         };
-        out.push(FileChange { path, added: a.parse().ok(), removed: r.parse().ok() });
+        out.push(FileChange {
+            path,
+            added: a.parse().ok(),
+            removed: r.parse().ok(),
+        });
     }
     out
 }
 
 /// Los archivos en conflicto de un merge a medias (antes de abortarlo).
 fn conflicted(dir: &Path) -> Vec<String> {
-    git(dir, &["diff", "--name-only", "--diff-filter=U", "-z"], GIT_FAST)
-        .map(|raw| raw.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect())
-        .unwrap_or_default()
+    git(
+        dir,
+        &["diff", "--name-only", "--diff-filter=U", "-z"],
+        GIT_FAST,
+    )
+    .map(|raw| {
+        raw.split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 /// Lo que sale de intentar un merge.
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase", tag = "result")]
 pub enum MergeOutcome {
-    Merged { commit: String },
+    Merged {
+        commit: String,
+    },
     /// Conflictos: quedan abiertos solo al actualizar la integración con origin/master.
-    Conflict { files: Vec<String> },
+    Conflict {
+        files: Vec<String>,
+    },
 }
 
 /// `-c user.*` solo si el repo no tiene identidad: sin ella git se niega a crear el commit
 /// de merge, y el usuario no tiene por qué haberla configurado para usar la app.
 pub(crate) fn identity_args(dir: &Path) -> Vec<String> {
-    let has = |key: &str| git(dir, &["config", "--get", key], GIT_FAST).is_ok_and(|v| !v.is_empty());
+    let has =
+        |key: &str| git(dir, &["config", "--get", key], GIT_FAST).is_ok_and(|v| !v.is_empty());
     let mut args = Vec::new();
     if !has("user.name") {
         args.extend(["-c".to_string(), "user.name=ADE AGS".to_string()]);
@@ -109,7 +140,7 @@ pub(crate) fn identity_args(dir: &Path) -> Vec<String> {
 
 /// `git merge --no-ff` de `branch` en `dir`. Si choca, lo aborta y devuelve los conflictos.
 pub fn merge(dir: &Path, branch: &str, message: &str) -> Result<MergeOutcome, String> {
-    merge_with_policy(dir,branch,message,false)
+    merge_with_policy(dir, branch, message, false)
 }
 
 #[cfg(test)]
@@ -117,29 +148,67 @@ mod integration_conflict_test {
     use super::*;
     #[test]
     fn master_conflict_stays_only_in_integration_until_resolved_or_aborted() {
-        let dir=std::env::temp_dir().join(format!("ags-integration-conflict-{}",uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("ags-integration-conflict-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        git(&dir,&["init","-b","master"],GIT_FAST).unwrap();
-        git(&dir,&["config","user.name","Test"],GIT_FAST).unwrap();git(&dir,&["config","user.email","test@example.invalid"],GIT_FAST).unwrap();
-        std::fs::write(dir.join("roadmap.md"),"base\n").unwrap();git(&dir,&["add","."],GIT_FAST).unwrap();git(&dir,&["commit","-m","base"],GIT_FAST).unwrap();
-        git(&dir,&["checkout","-b","cc/integration"],GIT_FAST).unwrap();std::fs::write(dir.join("roadmap.md"),"mission\n").unwrap();git(&dir,&["commit","-am","mission"],GIT_FAST).unwrap();
-        git(&dir,&["checkout","master"],GIT_FAST).unwrap();std::fs::write(dir.join("roadmap.md"),"master\n").unwrap();git(&dir,&["commit","-am","master"],GIT_FAST).unwrap();git(&dir,&["update-ref","refs/remotes/origin/master","HEAD"],GIT_FAST).unwrap();
-        git(&dir,&["checkout","cc/integration"],GIT_FAST).unwrap();
-        assert!(matches!(merge_with_policy(&dir,"origin/master","sync",true).unwrap(),MergeOutcome::Conflict {..}));
-        assert!(git(&dir,&["rev-parse","--verify","MERGE_HEAD"],GIT_FAST).is_ok());
-        assert_eq!(conflicted(&dir),vec!["roadmap.md"]);
-        git(&dir,&["merge","--abort"],GIT_FAST).unwrap();
-        assert_eq!(std::fs::read_to_string(dir.join("roadmap.md")).unwrap().replace("\r\n","\n"),"mission\n");
-        assert!(matches!(merge(&dir,"origin/master","sync").unwrap(),MergeOutcome::Conflict {..}));
-        assert!(git(&dir,&["rev-parse","--verify","MERGE_HEAD"],GIT_FAST).is_err());
-        merge_with_policy(&dir,"origin/master","sync",true).unwrap();
-        std::fs::write(dir.join("roadmap.md"),"mission\nmaster\n").unwrap();git(&dir,&["add","roadmap.md"],GIT_FAST).unwrap();git(&dir,&["commit","--no-edit"],GIT_FAST).unwrap();
-        assert!(conflicted(&dir).is_empty());assert!(git(&dir,&["rev-parse","--verify","MERGE_HEAD"],GIT_FAST).is_err());
+        git(&dir, &["init", "-b", "master"], GIT_FAST).unwrap();
+        git(&dir, &["config", "user.name", "Test"], GIT_FAST).unwrap();
+        git(
+            &dir,
+            &["config", "user.email", "test@example.invalid"],
+            GIT_FAST,
+        )
+        .unwrap();
+        std::fs::write(dir.join("roadmap.md"), "base\n").unwrap();
+        git(&dir, &["add", "."], GIT_FAST).unwrap();
+        git(&dir, &["commit", "-m", "base"], GIT_FAST).unwrap();
+        git(&dir, &["checkout", "-b", "cc/integration"], GIT_FAST).unwrap();
+        std::fs::write(dir.join("roadmap.md"), "mission\n").unwrap();
+        git(&dir, &["commit", "-am", "mission"], GIT_FAST).unwrap();
+        git(&dir, &["checkout", "master"], GIT_FAST).unwrap();
+        std::fs::write(dir.join("roadmap.md"), "master\n").unwrap();
+        git(&dir, &["commit", "-am", "master"], GIT_FAST).unwrap();
+        git(
+            &dir,
+            &["update-ref", "refs/remotes/origin/master", "HEAD"],
+            GIT_FAST,
+        )
+        .unwrap();
+        git(&dir, &["checkout", "cc/integration"], GIT_FAST).unwrap();
+        assert!(matches!(
+            merge_with_policy(&dir, "origin/master", "sync", true).unwrap(),
+            MergeOutcome::Conflict { .. }
+        ));
+        assert!(git(&dir, &["rev-parse", "--verify", "MERGE_HEAD"], GIT_FAST).is_ok());
+        assert_eq!(conflicted(&dir), vec!["roadmap.md"]);
+        git(&dir, &["merge", "--abort"], GIT_FAST).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("roadmap.md"))
+                .unwrap()
+                .replace("\r\n", "\n"),
+            "mission\n"
+        );
+        assert!(matches!(
+            merge(&dir, "origin/master", "sync").unwrap(),
+            MergeOutcome::Conflict { .. }
+        ));
+        assert!(git(&dir, &["rev-parse", "--verify", "MERGE_HEAD"], GIT_FAST).is_err());
+        merge_with_policy(&dir, "origin/master", "sync", true).unwrap();
+        std::fs::write(dir.join("roadmap.md"), "mission\nmaster\n").unwrap();
+        git(&dir, &["add", "roadmap.md"], GIT_FAST).unwrap();
+        git(&dir, &["commit", "--no-edit"], GIT_FAST).unwrap();
+        assert!(conflicted(&dir).is_empty());
+        assert!(git(&dir, &["rev-parse", "--verify", "MERGE_HEAD"], GIT_FAST).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
 
-fn merge_with_policy(dir: &Path, branch: &str, message: &str, keep_conflicts:bool) -> Result<MergeOutcome, String> {
+fn merge_with_policy(
+    dir: &Path,
+    branch: &str,
+    message: &str,
+    keep_conflicts: bool,
+) -> Result<MergeOutcome, String> {
     if branch.starts_with('-') {
         return Err(format!("branch inválida: {branch}"));
     }
@@ -147,12 +216,20 @@ fn merge_with_policy(dir: &Path, branch: &str, message: &str, keep_conflicts:boo
     args.extend(["merge", "--no-ff", "--no-edit", "-m", message, branch].map(str::to_string));
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     match git(dir, &refs, GIT_SLOW) {
-        Ok(_) => Ok(MergeOutcome::Merged { commit: git(dir, &["rev-parse", "--short", "HEAD"], GIT_FAST)? }),
+        Ok(_) => Ok(MergeOutcome::Merged {
+            commit: git(dir, &["rev-parse", "--short", "HEAD"], GIT_FAST)?,
+        }),
         Err(error) => {
             let files = conflicted(dir);
             // Si no llegó a empezar (rama inexistente, árbol sucio) no hay nada que abortar.
-            if !keep_conflicts || files.is_empty() {let _ = git(dir, &["merge", "--abort"], GIT_FAST);}
-            if files.is_empty() { Err(error) } else { Ok(MergeOutcome::Conflict { files }) }
+            if !keep_conflicts || files.is_empty() {
+                let _ = git(dir, &["merge", "--abort"], GIT_FAST);
+            }
+            if files.is_empty() {
+                Err(error)
+            } else {
+                Ok(MergeOutcome::Conflict { files })
+            }
         }
     }
 }
@@ -195,6 +272,126 @@ pub struct MissionReview {
     pub deliveries: Vec<Delivery>,
 }
 
+/// Tira do banco apenas os dados necessários; Git e filesystem rodam depois da liberação.
+pub fn review_with_db(
+    db: &crate::database::DbConnection,
+    mission_id: &str,
+) -> Result<MissionReview, String> {
+    let (project, mission_id, integration_branch, applied_at, skills_dir, tasks) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mission = super::store::get(&conn, mission_id)?.ok_or("a missão não existe mais")?;
+        let (integration_branch, applied_at) = integration_of(&conn, mission_id)?;
+        let skills_dir = crate::skills::skills_dir_from_conn(&conn).ok();
+        let tasks = if let Some(run_id) = &mission.active_run_id {
+            crate::runs::store::tasks_of_run(&conn, run_id)?
+                .into_iter()
+                .filter(|task| task.branch.is_some())
+                .map(|task| {
+                    let (review, review_note) = review_of(&conn, &task.id);
+                    (task, review, review_note)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        (
+            PathBuf::from(mission.cwd),
+            mission.id,
+            integration_branch,
+            applied_at,
+            skills_dir,
+            tasks,
+        )
+    };
+    let mut deliveries = Vec::new();
+    for (task, review, review_note) in tasks {
+        let branch = task.branch.clone().expect("branch was filtered");
+        let range = format!("HEAD...{branch}");
+        let files = git(&project, &["diff", "--numstat", "-z", &range], GIT_FAST)
+            .map(|raw| parse_numstat(&raw))
+            .unwrap_or_default();
+        let commits = git(
+            &project,
+            &["log", "--format=%s", "-n", "30", &format!("HEAD..{branch}")],
+            GIT_FAST,
+        )
+        .map(|raw| raw.lines().map(str::to_string).collect())
+        .unwrap_or_default();
+        let uncommitted = match (&task.worktree_path, task.worktree_removed) {
+            (Some(root), false) => {
+                let managed = skills_dir
+                    .as_ref()
+                    .and_then(|skills| {
+                        crate::skills::links_dir_for(root, &task.agent_id)
+                            .map(|links| crate::runs::worktrees::managed_links(&links, skills))
+                    })
+                    .unwrap_or_default();
+                dirty(Path::new(root), &managed).unwrap_or_default()
+            }
+            _ => Vec::new(),
+        };
+        deliveries.push(Delivery {
+            task_id: task.id,
+            title: task.title,
+            functional_role: task.functional_role,
+            status: task.status,
+            branch,
+            worktree_removed: task.worktree_removed,
+            commits,
+            files,
+            uncommitted,
+            review,
+            review_note,
+        });
+    }
+    let pending_commits = integration_branch
+        .as_deref()
+        .and_then(|branch| {
+            git(
+                &project,
+                &["rev-list", "--count", &format!("HEAD..{branch}")],
+                GIT_FAST,
+            )
+            .ok()
+        })
+        .and_then(|count| count.parse().ok())
+        .unwrap_or(0);
+    Ok(MissionReview {
+        mission_id,
+        integration_branch,
+        pending_commits,
+        applied_at,
+        deliveries,
+    })
+}
+
+/// Lê a referência da entrega e libera o banco antes de executar `git diff`.
+pub fn task_diff_with_db(
+    db: &crate::database::DbConnection,
+    task_id: &str,
+) -> Result<String, String> {
+    let (project, branch) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let task =
+            crate::runs::store::task_by_id(&conn, task_id)?.ok_or("a tarefa não existe mais")?;
+        let branch = task
+            .branch
+            .ok_or("esta tarefa não rodou isolada: não tem branch própria")?;
+        let project = mission_cwd_of_run(&conn, &task.run_id)?.unwrap_or(task.cwd);
+        (PathBuf::from(project), branch)
+    };
+    let mut diff = git(&project, &["diff", &format!("HEAD...{branch}")], GIT_SLOW)?;
+    if diff.len() > MAX_DIFF_BYTES {
+        let mut cut = MAX_DIFF_BYTES;
+        while !diff.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        diff.truncate(cut);
+        diff.push_str("\n\n… (diff cortado: abra a branch no explorador para ver inteiro)\n");
+    }
+    Ok(diff)
+}
+
 /// Las tareas con rama del run activo de la misión, con lo que entregó cada una.
 pub fn review(conn: &Connection, mission_id: &str) -> Result<MissionReview, String> {
     let mission = super::store::get(conn, mission_id)?.ok_or("a missão não existe mais")?;
@@ -203,16 +400,24 @@ pub fn review(conn: &Connection, mission_id: &str) -> Result<MissionReview, Stri
     let mut deliveries = Vec::new();
     if let Some(run_id) = &mission.active_run_id {
         for task in crate::runs::store::tasks_of_run(conn, run_id)? {
-            let Some(branch) = task.branch.clone() else { continue };
+            let Some(branch) = task.branch.clone() else {
+                continue;
+            };
             let range = format!("HEAD...{branch}");
             let files = git(project, &["diff", "--numstat", "-z", &range], GIT_FAST)
                 .map(|raw| parse_numstat(&raw))
                 .unwrap_or_default();
-            let commits = git(project, &["log", "--format=%s", "-n", "30", &format!("HEAD..{branch}")], GIT_FAST)
-                .map(|raw| raw.lines().map(str::to_string).collect())
-                .unwrap_or_default();
+            let commits = git(
+                project,
+                &["log", "--format=%s", "-n", "30", &format!("HEAD..{branch}")],
+                GIT_FAST,
+            )
+            .map(|raw| raw.lines().map(str::to_string).collect())
+            .unwrap_or_default();
             let uncommitted = match (&task.worktree_path, task.worktree_removed) {
-                (Some(root), false) => dirty(Path::new(root), &managed_links(conn, &task)).unwrap_or_default(),
+                (Some(root), false) => {
+                    dirty(Path::new(root), &managed_links(conn, &task)).unwrap_or_default()
+                }
                 _ => Vec::new(),
             };
             let (review, review_note) = review_of(conn, &task.id);
@@ -233,15 +438,31 @@ pub fn review(conn: &Connection, mission_id: &str) -> Result<MissionReview, Stri
     }
     let pending_commits = integration_branch
         .as_deref()
-        .and_then(|b| git(project, &["rev-list", "--count", &format!("HEAD..{b}")], GIT_FAST).ok())
+        .and_then(|b| {
+            git(
+                project,
+                &["rev-list", "--count", &format!("HEAD..{b}")],
+                GIT_FAST,
+            )
+            .ok()
+        })
         .and_then(|n| n.parse().ok())
         .unwrap_or(0);
-    Ok(MissionReview { mission_id: mission.id, integration_branch, pending_commits, applied_at, deliveries })
+    Ok(MissionReview {
+        mission_id: mission.id,
+        integration_branch,
+        pending_commits,
+        applied_at,
+        deliveries,
+    })
 }
 
 /// Los symlinks de skills que la app montó en el worktree de la tarea.
 fn managed_links(conn: &Connection, task: &crate::runs::Task) -> Vec<PathBuf> {
-    let (Ok(skills_dir), Some(cwd)) = (crate::skills::skills_dir_from_conn(conn), task.worktree_path.as_deref()) else {
+    let (Ok(skills_dir), Some(cwd)) = (
+        crate::skills::skills_dir_from_conn(conn),
+        task.worktree_path.as_deref(),
+    ) else {
         return Vec::new();
     };
     crate::skills::links_dir_for(cwd, &task.agent_id)
@@ -252,9 +473,15 @@ fn managed_links(conn: &Connection, task: &crate::runs::Task) -> Vec<PathBuf> {
 /// El diff completo de una entrega contra el proyecto (desde donde se separó).
 pub fn task_diff(conn: &Connection, task_id: &str) -> Result<String, String> {
     let task = crate::runs::store::task_by_id(conn, task_id)?.ok_or("a tarefa não existe mais")?;
-    let branch = task.branch.ok_or("esta tarefa não rodou isolada: não tem branch própria")?;
+    let branch = task
+        .branch
+        .ok_or("esta tarefa não rodou isolada: não tem branch própria")?;
     let project = mission_cwd_of_run(conn, &task.run_id)?.unwrap_or(task.cwd);
-    let mut diff = git(Path::new(&project), &["diff", &format!("HEAD...{branch}")], GIT_SLOW)?;
+    let mut diff = git(
+        Path::new(&project),
+        &["diff", &format!("HEAD...{branch}")],
+        GIT_SLOW,
+    )?;
     if diff.len() > MAX_DIFF_BYTES {
         let mut cut = MAX_DIFF_BYTES;
         while !diff.is_char_boundary(cut) {
@@ -267,25 +494,42 @@ pub fn task_diff(conn: &Connection, task_id: &str) -> Result<String, String> {
 }
 
 fn mission_cwd_of_run(conn: &Connection, run_id: &str) -> Result<Option<String>, String> {
-    let Some(mission_id) = super::store::mission_of_run(conn, run_id)? else { return Ok(None) };
+    let Some(mission_id) = super::store::mission_of_run(conn, run_id)? else {
+        return Ok(None);
+    };
     Ok(super::store::get(conn, &mission_id)?.map(|m| m.cwd))
 }
 
 // ── Estado de la revisión ────────────────────────────────────────
 
 fn review_of(conn: &Connection, task_id: &str) -> (Option<String>, Option<String>) {
-    conn.query_row("SELECT review, review_note FROM tasks WHERE id = ?1", [task_id], |r| Ok((r.get(0)?, r.get(1)?)))
-        .unwrap_or((None, None))
+    conn.query_row(
+        "SELECT review, review_note FROM tasks WHERE id = ?1",
+        [task_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .unwrap_or((None, None))
 }
 
-pub fn set_review(conn: &Connection, task_id: &str, review: Option<&str>, note: Option<&str>) -> Result<(), String> {
-    conn.execute("UPDATE tasks SET review = ?1, review_note = ?2 WHERE id = ?3", rusqlite::params![review, note, task_id])
-        .map_err(|e| e.to_string())?;
+pub fn set_review(
+    conn: &Connection,
+    task_id: &str,
+    review: Option<&str>,
+    note: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE tasks SET review = ?1, review_note = ?2 WHERE id = ?3",
+        rusqlite::params![review, note, task_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 /// La rama de integración de la misión (y su carpeta), y cuándo se aplicó.
-fn integration_of(conn: &Connection, mission_id: &str) -> Result<(Option<String>, Option<i64>), String> {
+fn integration_of(
+    conn: &Connection,
+    mission_id: &str,
+) -> Result<(Option<String>, Option<i64>), String> {
     conn.query_row(
         "SELECT integration_branch, applied_at FROM missions WHERE id = ?1",
         [mission_id],
@@ -294,16 +538,27 @@ fn integration_of(conn: &Connection, mission_id: &str) -> Result<(Option<String>
     .map_err(|e| e.to_string())
 }
 
-pub fn integration_path(conn: &Connection, mission_id: &str) -> Result<Option<(String, String)>, String> {
+pub fn integration_path(
+    conn: &Connection,
+    mission_id: &str,
+) -> Result<Option<(String, String)>, String> {
     conn.query_row(
         "SELECT integration_branch, integration_path FROM missions WHERE id = ?1",
         [mission_id],
-        |r| Ok(r.get::<_, Option<String>>(0)?.zip(r.get::<_, Option<String>>(1)?)),
+        |r| {
+            Ok(r.get::<_, Option<String>>(0)?
+                .zip(r.get::<_, Option<String>>(1)?))
+        },
     )
     .map_err(|e| e.to_string())
 }
 
-pub fn set_integration(conn: &Connection, mission_id: &str, branch: &str, path: &str) -> Result<(), String> {
+pub fn set_integration(
+    conn: &Connection,
+    mission_id: &str,
+    branch: &str,
+    path: &str,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE missions SET integration_branch = ?1, integration_path = ?2 WHERE id = ?3",
         rusqlite::params![branch, path, mission_id],
@@ -313,8 +568,11 @@ pub fn set_integration(conn: &Connection, mission_id: &str, branch: &str, path: 
 }
 
 pub fn mark_applied(conn: &Connection, mission_id: &str, at: i64) -> Result<(), String> {
-    conn.execute("UPDATE missions SET applied_at = ?1 WHERE id = ?2", rusqlite::params![at, mission_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE missions SET applied_at = ?1 WHERE id = ?2",
+        rusqlite::params![at, mission_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -333,15 +591,18 @@ pub fn accept(
     let (mission, task, existing) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let mission = super::store::get(&conn, mission_id)?.ok_or("a missão não existe mais")?;
-        let task = crate::runs::store::task_by_id(&conn, task_id)?.ok_or("a tarefa não existe mais")?;
+        let task =
+            crate::runs::store::task_by_id(&conn, task_id)?.ok_or("a tarefa não existe mais")?;
         if mission.active_run_id.as_deref() != Some(task.run_id.as_str()) {
             return Err("a tarefa não é do run atual da missão".into());
         }
         if matches!(task.status.as_str(), "pending" | "ready" | "running") {
             return Err("a tarefa ainda não terminou".into());
         }
-        if matches!(task.fix_status.as_str(), "escalated" | "accepted_pending" | "aborted")
-            || (task.status != "done" && task.fix_round > 0)
+        if matches!(
+            task.fix_status.as_str(),
+            "escalated" | "accepted_pending" | "aborted"
+        ) || (task.status != "done" && task.fix_round > 0)
         {
             return Err(
                 "esta entrega não passou no gate e não pode ser integrada como verde. Aceite com pendências, peça uma rodada manual ou aborte a tarefa."
@@ -360,7 +621,10 @@ pub fn accept(
         let existing = integration_path(&conn, mission_id)?;
         (mission, task, existing)
     };
-    let branch = task.branch.clone().ok_or("esta tarefa não rodou isolada: não tem branch própria")?;
+    let branch = task
+        .branch
+        .clone()
+        .ok_or("esta tarefa não rodou isolada: não tem branch própria")?;
 
     let integration_dir = match existing.filter(|(_, path)| Path::new(path).is_dir()) {
         Some((_, path)) => PathBuf::from(path),
@@ -382,7 +646,9 @@ pub fn accept(
     let conn = db.lock().map_err(|e| e.to_string())?;
     match &outcome {
         MergeOutcome::Merged { .. } => set_review(&conn, task_id, Some("accepted"), None)?,
-        MergeOutcome::Conflict { files } => set_review(&conn, task_id, Some("conflict"), Some(&files.join("\n")))?,
+        MergeOutcome::Conflict { files } => {
+            set_review(&conn, task_id, Some("conflict"), Some(&files.join("\n")))?
+        }
     }
     Ok(outcome)
 }
@@ -393,17 +659,24 @@ pub fn apply(db: &crate::database::DbConnection, mission_id: &str) -> Result<Mer
     let (mission, integration) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let mission = super::store::get(&conn, mission_id)?.ok_or("a missão não existe mais")?;
-        let integration = integration_path(&conn, mission_id)?.ok_or("ainda não foi aceita nenhuma entrega")?;
+        let integration =
+            integration_path(&conn, mission_id)?.ok_or("ainda não foi aceita nenhuma entrega")?;
         (mission, integration)
     };
     let project = Path::new(&mission.cwd);
     let root = crate::runs::worktrees::repo_root(project)?;
     if git(&root, &["symbolic-ref", "-q", "HEAD"], GIT_FAST).is_err() {
-        return Err("o projeto está com o HEAD solto: mude para uma branch antes de aplicar".into());
+        return Err(
+            "o projeto está com o HEAD solto: mude para uma branch antes de aplicar".into(),
+        );
     }
     // Solo lo rastreado: un archivo nuevo que el usuario no agregó (o los symlinks de skills
     // de la app) no impide un merge, y negarse por eso no tendría sentido.
-    let status = git(&root, &["status", "--porcelain", "-z", "--untracked-files=no"], GIT_FAST)?;
+    let status = git(
+        &root,
+        &["status", "--porcelain", "-z", "--untracked-files=no"],
+        GIT_FAST,
+    )?;
     let pending: Vec<String> = status
         .split('\0')
         .filter(|e| e.len() > 3)
@@ -416,15 +689,40 @@ pub fn apply(db: &crate::database::DbConnection, mission_id: &str) -> Result<Mer
         ));
     }
     // Resolve master conflicts in the isolated integration worktree first.
-    let integration_dir=Path::new(&integration.1);
-    if git(integration_dir,&["rev-parse","--verify","MERGE_HEAD"],GIT_FAST).is_ok() {
-        return Ok(MergeOutcome::Conflict {files:conflicted(integration_dir)});
+    let integration_dir = Path::new(&integration.1);
+    if git(
+        integration_dir,
+        &["rev-parse", "--verify", "MERGE_HEAD"],
+        GIT_FAST,
+    )
+    .is_ok()
+    {
+        return Ok(MergeOutcome::Conflict {
+            files: conflicted(integration_dir),
+        });
     }
-    if git(integration_dir,&["rev-parse","--verify","refs/remotes/origin/master"],GIT_FAST).is_ok() {
-        let refresh=merge_with_policy(integration_dir,"origin/master","ADE: atualizar integração com origin/master",true)?;
-        if matches!(refresh,MergeOutcome::Conflict {..}) {return Ok(refresh)}
+    if git(
+        integration_dir,
+        &["rev-parse", "--verify", "refs/remotes/origin/master"],
+        GIT_FAST,
+    )
+    .is_ok()
+    {
+        let refresh = merge_with_policy(
+            integration_dir,
+            "origin/master",
+            "ADE: atualizar integração com origin/master",
+            true,
+        )?;
+        if matches!(refresh, MergeOutcome::Conflict { .. }) {
+            return Ok(refresh);
+        }
     }
-    let outcome = merge(&root, &integration.0, &format!("ADE: missão {}", mission.title))?;
+    let outcome = merge(
+        &root,
+        &integration.0,
+        &format!("ADE: missão {}", mission.title),
+    )?;
     if matches!(outcome, MergeOutcome::Merged { .. }) {
         let conn = db.lock().map_err(|e| e.to_string())?;
         mark_applied(&conn, mission_id, crate::util::now_ts())?;
