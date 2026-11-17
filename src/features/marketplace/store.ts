@@ -1,7 +1,18 @@
 import { create } from "zustand";
+import i18n from "i18next";
 import type { SkillSummary } from "@/features/skills/types";
+import { createGeneration } from "@/shared/generation";
+import { AlertaToast } from "@/shared/ui/alerts";
 import * as ipc from "./ipc";
 import type { MarketplaceSkillEntry, RegistrySourceType, RegistrySummary } from "./types";
+
+const skillsGen = createGeneration();
+
+function reportMarketplaceError(error: unknown): string {
+  const text = String(error);
+  void AlertaToast(i18n.t("marketplace.error.title"), text, "error", 6000);
+  return text;
+}
 
 interface MarketplaceState {
   registries: RegistrySummary[];
@@ -12,6 +23,7 @@ interface MarketplaceState {
   searchingRemote: boolean;
   refreshingId: string | null;
   installingKey: string | null;
+  error: string | null;
 
   loadRegistries: () => Promise<void>;
   loadSkills: (query?: string, category?: string) => Promise<void>;
@@ -39,19 +51,30 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   searchingRemote: false,
   refreshingId: null,
   installingKey: null,
+  error: null,
 
   loadRegistries: async () => {
-    const registries = await ipc.listRegistries();
-    set({ registries });
+    try {
+      const registries = await ipc.listRegistries();
+      set({ registries, error: null });
+    } catch (e) {
+      set({ error: reportMarketplaceError(e) });
+      throw e;
+    }
   },
 
   loadSkills: async (query, category) => {
-    set({ loading: true });
+    const gen = skillsGen.next();
+    set({ loading: true, error: null });
     try {
       const skills = await ipc.listMarketplaceSkills(query, category);
+      if (!skillsGen.isCurrent(gen)) return;
       set({ skills });
+    } catch (e) {
+      if (!skillsGen.isCurrent(gen)) return;
+      set({ error: reportMarketplaceError(e) });
     } finally {
-      set({ loading: false });
+      if (skillsGen.isCurrent(gen)) set({ loading: false });
     }
   },
 
@@ -65,21 +88,33 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
       // a la grilla. `loadRegistries` además refresca el error del repo (ej. falta Node).
       await get().loadRegistries();
       await get().loadSkills(query);
+    } catch (e) {
+      reportMarketplaceError(e);
     } finally {
       set({ searchingRemote: false });
     }
   },
 
   addRegistry: async (name, sourceType, location, id) => {
-    await ipc.addRegistry(name, sourceType, location, id);
-    await get().loadRegistries();
-    await get().loadSkills();
+    try {
+      await ipc.addRegistry(name, sourceType, location, id);
+      await get().loadRegistries();
+      await get().loadSkills();
+    } catch (e) {
+      reportMarketplaceError(e);
+      throw e;
+    }
   },
 
   renameRegistry: async (id, name) => {
-    await ipc.renameRegistry(id, name);
-    await get().loadRegistries();
-    await get().loadSkills();
+    try {
+      await ipc.renameRegistry(id, name);
+      await get().loadRegistries();
+      await get().loadSkills();
+    } catch (e) {
+      reportMarketplaceError(e);
+      throw e;
+    }
   },
 
   removeRegistry: async (id) => {
@@ -92,9 +127,14 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   registrySkills: async (id) => ipc.registrySkills(id),
 
   setRegistryEnabled: async (id, enabled) => {
-    await ipc.setRegistryEnabled(id, enabled);
-    await get().loadRegistries();
-    await get().loadSkills();
+    try {
+      await ipc.setRegistryEnabled(id, enabled);
+      await get().loadRegistries();
+      await get().loadSkills();
+    } catch (e) {
+      reportMarketplaceError(e);
+      throw e;
+    }
   },
 
   refreshRegistry: async (id) => {
@@ -103,6 +143,9 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
       await ipc.refreshRegistry(id);
       await get().loadRegistries();
       await get().loadSkills();
+    } catch (e) {
+      reportMarketplaceError(e);
+      throw e;
     } finally {
       set({ refreshingId: null });
     }
@@ -110,12 +153,18 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
 
   refreshAll: async () => {
     const { registries } = get();
+    const failures: string[] = [];
     for (const r of registries) {
       // Secuencial a propósito: son requests a APIs públicas externas (rate limit anónimo
       // de GitHub incluido) — en paralelo, refrescar varios repos a la vez multiplica el
       // riesgo de pegarle a ese límite en una sola pasada.
-      await get().refreshRegistry(r.id);
+      try {
+        await get().refreshRegistry(r.id);
+      } catch (e) {
+        failures.push(`${r.name}: ${String(e)}`);
+      }
     }
+    if (failures.length) set({ error: failures.join("\n") });
   },
 
   installSkill: async (registryId, skillId) => {
