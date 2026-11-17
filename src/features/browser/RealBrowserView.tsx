@@ -143,9 +143,13 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       closed = true;
       cancelAnimationFrame(frame);
       offs.forEach((p) => p.then((off) => off()));
-      realBrowserClose(viewId).catch(() => undefined);
+      // A desmontagem manda o lugar invisível antes de fechar: o nativo não segue mostrando a página sem dono.
+      const finalPlace = sent ? { ...sent, visible: false } : null;
+      const closing = finalPlace ? realBrowserPlace(viewId, finalPlace).catch(() => undefined) : Promise.resolve();
+      closing.finally(() => realBrowserClose(viewId).catch(() => undefined));
     };
   }, [viewId, profileId, projectPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return <div ref={box} data-real-browser className="relative flex-1 h-full min-h-0 bg-white" />;
+  // Transparente, não branco: sem tema, o branco aparece como um quadro enquanto a vista nativa não desenha.
+  return <div ref={box} data-real-browser className="relative flex-1 h-full min-h-0 bg-transparent" />;
 }

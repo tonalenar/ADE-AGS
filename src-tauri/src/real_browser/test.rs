@@ -1,7 +1,7 @@
 //! Testes da superfície nativa do navegador (o Portal): o contrato do `Place` que chega do front e a lógica pura
 //! que decide o que mudou, o que a máscara desenha e quando a vista é escondida.
 
-use super::surface::{diff_place, outline, rounded_parts, PathStep, PlaceChanges, PlaceState};
+use super::surface::{diff_place, empty_clip_visibility, outline, rounded_parts, PathStep, PlaceChanges, PlaceState};
 use super::{Place, Rect};
 use serde_json::json;
 
@@ -66,4 +66,19 @@ fn place_igual_nao_reaplica() {
 
     // Sem último aplicado, tudo é aplicado.
     assert_eq!(diff_place(None, &place), PlaceChanges { frame: true, mask: true, zoom: true, resized: true });
+}
+
+#[test]
+fn recorte_vazio_transitorio_nao_esconde() {
+    let mut hidden = false;
+    let mut empty_count = 0;
+
+    // Um quadro sem recorte (uma transição) não esconde a vista.
+    assert!(!empty_clip_visibility(&mut empty_count, &mut hidden, true, false));
+    // Dois seguidos sem recorte escondem.
+    assert!(empty_clip_visibility(&mut empty_count, &mut hidden, true, false));
+    // Voltar a ter recorte mostra a vista de novo.
+    assert!(!empty_clip_visibility(&mut empty_count, &mut hidden, false, false));
+    // O `visible: false` explícito (a desmontagem) esconde na hora, mesmo com recorte.
+    assert!(empty_clip_visibility(&mut empty_count, &mut hidden, false, true));
 }

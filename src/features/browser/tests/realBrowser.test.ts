@@ -71,6 +71,13 @@ describe("lugar do navegador nativo no Portal", () => {
     expect(place.holes).toEqual([]);
   });
 
+  it("um slot zero mantém a vista montada e envia o recorte vazio sem esconder", () => {
+    const place = placeOf({ x: 0, y: 0, width: 0, height: 0 }, 0, 0, [window], [], false);
+    expect(place.visible).toBe(true);
+    expect(place.visibleRect).toBeNull();
+    expect(place.zoom).toBe(1);
+  });
+
   it("só manda de novo quando algo mudou", () => {
     const a = placeOf(portal, 800, 1, [window], [], true);
     expect(samePlace(a, placeOf(portal, 800, 1, [window], [], true))).toBe(true);

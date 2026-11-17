@@ -15,11 +15,12 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 const opened: string[] = [];
 const openedPlaces: Array<{ cornerRadius?: number }> = [];
+const placedVisibility: boolean[] = [];
 const closed: string[] = [];
 vi.mock("../realBrowser", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../realBrowser")>()),
   realBrowserOpen: (id: string, _url: string, place: { cornerRadius?: number }) => { opened.push(id); openedPlaces.push(place); return Promise.resolve(); },
-  realBrowserPlace: () => Promise.resolve(),
+  realBrowserPlace: (_id: string, place: { visible: boolean }) => { placedVisibility.push(place.visible); return Promise.resolve(); },
   realBrowserClose: (id: string) => { closed.push(id); return Promise.resolve(); },
 }));
 
@@ -43,6 +44,7 @@ beforeEach(() => {
   opened.length = 0;
   openedPlaces.length = 0;
   closed.length = 0;
+  placedVisibility.length = 0;
   useChatStore.setState({ browserMiniHover: false });
   useViewTabsStore.setState({ views: [], activeViewId: null, keepMountedIds: [] });
   host = document.createElement("div");
@@ -66,6 +68,15 @@ describe("vista do navegador nativo", () => {
     render({ floatingPreview: true });
     await act(async () => undefined);
     expect(openedPlaces[0]?.cornerRadius).toBe(16);
+  });
+
+  it("desmontagem_marca_superficie_como_invisivel", async () => {
+    render();
+    await act(async () => undefined);
+    await act(async () => root.unmount());
+
+    expect(placedVisibility[placedVisibility.length - 1]).toBe(false);
+    expect(closed).toEqual(["aba-1"]);
   });
 
   it("um pop-up da página (OAuth) chega à aba com o id que o motor já criou", async () => {

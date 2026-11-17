@@ -29,7 +29,7 @@ use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 use tokio::sync::oneshot;
 
-use super::surface::{diff_place, outline, rounded_parts, PathStep, PlaceState, RoundedPart};
+use super::surface::{diff_place, empty_clip_visibility, outline, rounded_parts, PathStep, PlaceState, RoundedPart};
 use super::{emit, on_binding};
 
 const CEF_FRAMEWORK_BUNDLE: &str = "Chromium Embedded Framework.framework";
@@ -138,6 +138,9 @@ struct Portal {
     ready: Option<oneshot::Sender<()>>,
     /// O último `place` recebido: o que já foi aplicado à vista e ao navegador, para não refazer o que não mudou.
     last_place: Option<PlaceState>,
+    /// Quadros seguidos sem recorte à vista, e se a vista está escondida (ver `empty_clip_visibility`).
+    empty_clips: u8,
+    hidden: bool,
 }
 
 #[derive(Default)]
@@ -630,7 +633,7 @@ fn prepare_popup(opener: &str, url: &str) -> Option<(String, Retained<ADEPortalH
     PORTALS.with(|portals| {
         portals.borrow_mut().insert(popup.clone(), Portal {
             host_view: host.clone(), browser: None, _observer: None, _registration: None,
-            pending: Arc::new(Mutex::new(HashMap::new())), ready: None, last_place: None,
+            pending: Arc::new(Mutex::new(HashMap::new())), ready: None, last_place: None, empty_clips: 0, hidden: true,
         });
     });
     Some((popup, host, app))
@@ -837,7 +840,7 @@ fn create_on_main(app: &AppHandle, parent: *mut AnyObject, id: &str, profile: Pa
     let pending = Arc::new(Mutex::new(HashMap::new()));
     PORTAL_APPS.with(|apps| { apps.borrow_mut().insert(id.to_string(), app.clone()); });
     PORTALS.with(|portals| {
-        portals.borrow_mut().insert(id.to_string(), Portal { host_view: host.clone(), browser: None, _observer: None, _registration: None, pending: pending.clone(), ready: Some(ready), last_place: None });
+        portals.borrow_mut().insert(id.to_string(), Portal { host_view: host.clone(), browser: None, _observer: None, _registration: None, pending: pending.clone(), ready: Some(ready), last_place: None, empty_clips: 0, hidden: false });
     });
 
     let mut client = ADEClient::new(id.to_string(), app.clone());
@@ -896,7 +899,7 @@ pub async fn cdp(app: &AppHandle, id: &str, method: &str, params: JsonValue) -> 
 
 static NEXT_CDP_ID: AtomicI32 = AtomicI32::new(1);
 
-pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i32; 4]>, corner_radius: f64, click_to_expand: bool) {
+pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i32; 4]>, corner_radius: f64, click_to_expand: bool, visible: bool) {
     let app = app.clone();
     let id = id.to_string();
     let _ = app.run_on_main_thread(move || {
@@ -910,8 +913,15 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
                 if changes.frame {
                     portal.host_view.setFrame(parent.as_deref().map(|parent| frame_in_parent(parent, rect)).unwrap_or_else(|| view_frame(rect)));
                 }
-                if changes.mask {
+                if changes.mask && !parts.is_empty() {
                     apply_rect_mask(&portal.host_view, rect[2], rect[3], &parts, corner_radius);
+                }
+                // Só a transição de escondido para visível (ou o contrário) mexe na vista: um recorte vazio de um
+                // quadro não a esconde, e a desmontagem (`visible: false`) esconde na hora.
+                let was_hidden = portal.hidden;
+                let hidden = empty_clip_visibility(&mut portal.empty_clips, &mut portal.hidden, parts.is_empty(), !visible);
+                if hidden != was_hidden {
+                    portal.host_view.setHidden(hidden);
                 }
                 *portal.host_view.ivars().parts.borrow_mut() = parts.iter().map(|[l, t, r, b]| [*l as f64, *t as f64, *r as f64, *b as f64]).collect();
                 portal.host_view.ivars().mini.set(click_to_expand);
@@ -942,11 +952,7 @@ fn chrome_zoom_level(zoom: f64) -> f64 {
 /// O arredondamento entra no próprio path: o Core Animation não aplica máscara de máscara, e o `cornerRadius` da layer
 /// da NSView não recorta a vista do CEF.
 fn apply_rect_mask(view: &NSView, width: i32, height: i32, parts: &[[i32; 4]], radius: f64) {
-    if parts.is_empty() {
-        view.setHidden(true);
-        return;
-    }
-    view.setHidden(false);
+    if parts.is_empty() { return; }
     let (w, h) = (width.max(1) as f64, height.max(1) as f64);
     let radius = radius.min(w / 2.0).min(h / 2.0).max(0.0);
     let path = unsafe { CGPathCreateMutable() };

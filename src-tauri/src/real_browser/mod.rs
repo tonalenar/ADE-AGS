@@ -27,7 +27,7 @@ mod native {
     pub async fn cdp(_: &AppHandle, _: &str, _: &str, _: Value) -> Result<Value, String> {
         Err(NO.into())
     }
-    pub fn place(_: &AppHandle, _: &str, _: [i32; 4], _: f64, _: Vec<[i32; 4]>, _: f64, _: bool) {}
+    pub fn place(_: &AppHandle, _: &str, _: [i32; 4], _: f64, _: Vec<[i32; 4]>, _: f64, _: bool, _: bool) {}
     pub async fn navigate(_: &AppHandle, _: &str, _: String) -> Result<(), String> {
         Err(NO.into())
     }
@@ -432,7 +432,7 @@ pub fn real_browser_place(app: AppHandle, window: tauri::Window, id: String, pla
     let radius = if cfg!(windows) { place.corner_radius * scale } else { place.corner_radius };
     let rect = native_rect(place.rect, scale);
     let zoom = emulated_place(&app, &id, &place, (rect, parts.clone(), radius, place.click_to_expand));
-    native::place(&app, &id, rect, zoom, parts, radius, place.click_to_expand);
+    native::place(&app, &id, rect, zoom, parts, radius, place.click_to_expand, place.visible);
     Ok(())
 }
 
@@ -702,7 +702,7 @@ pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<S
             };
             native::cdp(&app, &id, "Emulation.setDeviceMetricsOverride", metrics).await?;
             // A vista sai do zoom: a escala agora vem do CDP.
-            if let Some((rect, parts, radius, click)) = placed { native::place(&app, &id, rect, 1.0, parts, radius, click); }
+            if let Some((rect, parts, radius, click)) = placed { native::place(&app, &id, rect, 1.0, parts, radius, click, true); }
         }
         None => {
             let restore = emulated().lock().ok().and_then(|mut map| {
@@ -711,7 +711,7 @@ pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<S
                 entry.sent = None;
                 Some((entry.native.clone()?, entry.last?.2))
             });
-            if let Some(((rect, parts, radius, click), zoom)) = restore { native::place(&app, &id, rect, zoom, parts, radius, click); }
+            if let Some(((rect, parts, radius, click), zoom)) = restore { native::place(&app, &id, rect, zoom, parts, radius, click, true); }
             native::cdp(&app, &id, "Emulation.setUserAgentOverride", json!({ "userAgent": "" })).await?;
             native::cdp(&app, &id, "Emulation.clearDeviceMetricsOverride", json!({})).await?;
         }

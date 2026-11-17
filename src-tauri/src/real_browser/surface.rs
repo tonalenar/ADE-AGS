@@ -1,5 +1,5 @@
 //! Decisões puras para desenhar a superfície nativa do navegador, sem AppKit: o que mudou desde o último `place`, a
-//! máscara e o contorno dela.
+//! máscara, o contorno dela e quando a vista some.
 
 /// Uma parte visível da vista, com os cantos que devem ser arredondados.
 #[derive(Debug, PartialEq)]
@@ -87,4 +87,21 @@ pub(super) fn diff_place(last: Option<&PlaceState>, next: &PlaceState) -> PlaceC
         zoom: last.zoom != next.zoom,
         resized: size_changed,
     }
+}
+
+/// Decide se a vista fica escondida depois de um `place`. Um quadro sem recorte à vista (uma transição, um
+/// layout intermediário) não esconde: a página continua na tela com a última máscara. Dois seguidos sem recorte
+/// escondem. Um `visible: false` explícito (a desmontagem) esconde na hora. Devolve o estado novo.
+pub(super) fn empty_clip_visibility(empty_count: &mut u8, hidden: &mut bool, empty: bool, explicitly_hidden: bool) -> bool {
+    if explicitly_hidden {
+        *empty_count = 0;
+        *hidden = true;
+    } else if empty {
+        *empty_count = empty_count.saturating_add(1);
+        if *empty_count >= 2 { *hidden = true; }
+    } else {
+        *empty_count = 0;
+        *hidden = false;
+    }
+    *hidden
 }
