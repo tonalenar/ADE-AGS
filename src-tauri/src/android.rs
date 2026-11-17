@@ -52,10 +52,19 @@ fn find_tool(name: &str, sub: &str) -> Option<PathBuf> {
 }
 
 fn adb_path() -> Result<&'static PathBuf, String> {
-    static ADB: OnceLock<Option<PathBuf>> = OnceLock::new();
-    ADB.get_or_init(|| find_tool("adb", "platform-tools"))
-        .as_ref()
+    static ADB: OnceLock<PathBuf> = OnceLock::new();
+    cached_tool(&ADB, || find_tool("adb", "platform-tools"))
         .ok_or_else(|| "Não encontrei o `adb`. Instale o Android SDK (platform-tools) ou defina ANDROID_HOME.".to_string())
+}
+
+/// Guarda só o que foi achado. Sem a ferramenta agora, a próxima chamada procura de novo: o platform-tools pode ser
+/// instalado depois, sem reiniciar a ADE (antes a falha ficava guardada para sempre, A271).
+fn cached_tool(slot: &'static OnceLock<PathBuf>, find: impl FnOnce() -> Option<PathBuf>) -> Option<&'static PathBuf> {
+    if let Some(path) = slot.get() {
+        return Some(path);
+    }
+    let found = find()?;
+    Some(slot.get_or_init(|| found))
 }
 
 fn emulator_path() -> Result<PathBuf, String> {
@@ -172,7 +181,13 @@ pub fn start_avd(name: &str) -> Result<(), String> {
     let mut cmd = crate::util::spawn::command(emulator_path()?, crate::util::spawn::WindowMode::OwnWindow);
     cmd.args(["-avd", name, "-no-snapshot-save"]);
     cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    cmd.spawn().map(|_| ()).map_err(|e| format!("emulator: {e}"))
+    let mut child = cmd.spawn().map_err(|e| format!("emulator: {e}"))?;
+    // Quem não espera o filho deixa um zumbi quando o emulador sai (A270). Uma thread só espera o fim dele; a ADE
+    // não o encerra, porque o emulador tem que sobreviver a ela.
+    let _ = std::thread::Builder::new().name("ade-android-emulator-wait".into()).spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 /// El dispositivo a usar: el pedido, o el único que está listo.
