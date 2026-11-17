@@ -94,21 +94,21 @@ pub fn primeiro_caminho_livre(dir: &std::path::Path, stem: &str, ext: &str) -> s
     (2u32..).map(|n| dir.join(format!("{stem} ({n}).{ext}"))).find(|p| !p.exists()).unwrap_or(first)
 }
 
-/// Decide se as linhas de entrada de um agente podem ir ao helper e as manda pelo `write` (que devolve `false` se o
-/// helper não aceitou). Sem o toque pronto, o agente recebe o motivo, em vez de um "ok" para um toque que não chegou.
-pub fn deliver_input(lines: &[String], started: bool, input: bool, mut write: impl FnMut(&str) -> bool) -> Result<(), String> {
+/// O que vai ao helper para um lote de entrada: cada linha seguida de `\n`. Sem a sessão pronta, devolve o motivo e
+/// nada é mandado: o agente recebe o erro, em vez de um "ok" para um toque que não chega.
+pub fn input_payload(lines: &[String], started: bool, input: bool) -> Result<Vec<u8>, String> {
     if !started {
         return Err("sessão ainda não começou".into());
     }
     if !input {
         return Err("o toque do aparelho ainda não está pronto; a conexão pode ter caído".into());
     }
+    let mut bytes = Vec::new();
     for line in lines {
-        if !write(line) {
-            return Err("o helper do espelhamento não aceitou a entrada".into());
-        }
+        bytes.extend_from_slice(line.as_bytes());
+        bytes.push(b'\n');
     }
-    Ok(())
+    Ok(bytes)
 }
 
 /// Quanto falta até `deadline`, a partir de `now` (zero se já passou). Pura: a pausa do toque a usa a cada despertar.

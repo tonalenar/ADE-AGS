@@ -793,36 +793,19 @@ fn pausa_so_termina_no_prazo() {
 
 #[test]
 fn entrada_antes_do_inicio_devolve_erro() {
-    // Antes de a sessão começar, nada pode ir ao helper, e o agente recebe o motivo (não um "ok").
-    let mut escritas = Vec::new();
-    let resultado = deliver_input(&["tap 10 20".to_string()], false, false, |linha| {
-        escritas.push(linha.to_string());
-        true
-    });
+    // Antes de a sessão começar, nada vai ao helper, e o agente recebe o motivo (não um "ok").
+    let resultado = input_payload(&["tap 10 20".to_string()], false, false);
     assert_eq!(resultado, Err("sessão ainda não começou".to_string()));
-    assert!(escritas.is_empty(), "nada pode ir ao helper antes do início");
 }
 
 #[test]
 fn entrada_com_toque_pronto_chega_na_ordem() {
-    let mut escritas = Vec::new();
-    let resultado = deliver_input(&["a".to_string(), "b".to_string()], true, true, |linha| {
-        escritas.push(linha.to_string());
-        true
-    });
-    assert_eq!(resultado, Ok(()));
-    assert_eq!(escritas, vec!["a".to_string(), "b".to_string()]);
+    let bytes = input_payload(&["a".to_string(), "b".to_string()], true, true);
+    assert_eq!(bytes, Ok(b"a\nb\n".to_vec()));
 }
 
 #[test]
 fn entrada_sem_toque_pronto_nao_finge_ok() {
     // Helper que caiu (toque `false`): não é "ok" para um toque que não chega.
-    let resultado = deliver_input(&["a".to_string()], true, false, |_| true);
-    assert!(resultado.is_err());
-}
-
-#[test]
-fn entrada_que_o_helper_recusa_vira_erro() {
-    let resultado = deliver_input(&["a".to_string()], true, true, |_| false);
-    assert!(resultado.is_err());
+    assert!(input_payload(&["a".to_string()], true, false).is_err());
 }

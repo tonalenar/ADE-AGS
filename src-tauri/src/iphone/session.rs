@@ -7,7 +7,7 @@
 
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{ChildStdin, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use super::model::{self, deliver_input, GateAction, HelperEvent, HelperMsg, Link, LinkState, Transport};
+use super::model::{self, input_payload, GateAction, HelperEvent, HelperMsg, Link, LinkState, Transport};
 use super::native::decoder::Decoder;
 use super::native::view::{debug_on, now_ns, Presenter, Sink};
 use super::recording::{Frame, Tap};
@@ -98,14 +98,23 @@ impl InputTx {
         }
     }
 
-    /// Manda e espera a sessão dizer se as linhas foram ao helper. É o caminho do agente: o "ok" só sai com a entrega.
+    /// Manda e espera a sessão confirmar que a escrita no helper saiu. É o caminho do agente: o "ok" só sai com a entrega.
     pub fn send_checked(&self, lines: Vec<String>) -> Result<(), String> {
+        self.send_checked_within(lines, INPUT_REPLY_WAIT)
+    }
+
+    /// Como `send_checked`, com o prazo de resposta dado (os testes passam um prazo curto).
+    pub fn send_checked_within(&self, lines: Vec<String>, wait: Duration) -> Result<(), String> {
         if lines.is_empty() {
             return Ok(());
         }
-        let (reply, answer) = mpsc::channel();
+        let (reply, resposta) = mpsc::channel();
         self.0.send(Msg::Input(lines, Some(reply))).map_err(|_| "A sessão do aparelho terminou.".to_string())?;
-        answer.recv_timeout(INPUT_REPLY_WAIT).map_err(|_| "A sessão do aparelho não respondeu à entrada a tempo.".to_string())?
+        match resposta.recv_timeout(wait) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => Err("A sessão do aparelho não confirmou a entrada a tempo.".into()),
+            Err(RecvTimeoutError::Disconnected) => Err("A sessão do aparelho caiu antes de confirmar a entrada.".into()),
+        }
     }
 }
 
@@ -238,7 +247,7 @@ struct Worker {
 struct Child {
     process: std::process::Child,
     /// Os comandos para o helper, escritos pela thread de escrita (que tem o stdin).
-    commands: Option<Sender<Vec<u8>>>,
+    commands: Option<CommandPipe>,
     generation: u64,
     closed: bool,
 }
@@ -476,17 +485,22 @@ impl Worker {
                     }
                 }
                 Msg::Stop => return Ended::Stop,
-                Msg::Input(lines, reply) => {
-                    let result = deliver_input(&lines, started, self.input, |line| send(child, line));
-                    match &result {
-                        Ok(()) => last_input = Some(Instant::now()),
-                        Err(error) if debug_on() => eprintln!("[iphone] entrada recusada: {error}"),
-                        Err(_) => {}
+                Msg::Input(lines, reply) => match input_payload(&lines, started, self.input) {
+                    Ok(bytes) => {
+                        last_input = Some(Instant::now());
+                        match child.commands.as_ref() {
+                            // A resposta sai da thread de escrita, depois do `write` e do `flush`.
+                            Some(pipe) => pipe.submit(bytes, reply),
+                            None => answer(reply, Err("o helper do espelhamento não tem entrada".into())),
+                        }
                     }
-                    if let Some(reply) = reply {
-                        let _ = reply.send(result);
+                    Err(error) => {
+                        if debug_on() {
+                            eprintln!("[iphone] entrada recusada: {error}");
+                        }
+                        answer(reply, Err(error));
                     }
-                }
+                },
                 Msg::Helper(g, _) | Msg::Closed(g) if g != child.generation => {}
                 Msg::Closed(_) => {
                     child.closed = true;
@@ -661,8 +675,8 @@ impl Worker {
     /// esta sessão abriu (e só ele).
     fn finish(&mut self, mut child: Child) {
         // O `stop` vai pela thread de escrita; soltar o canal depois dele fecha o stdin do helper.
-        if let Some(commands) = child.commands.take() {
-            let _ = commands.send(b"stop\n".to_vec());
+        if let Some(pipe) = child.commands.take() {
+            pipe.submit(b"stop\n".to_vec(), None);
         }
         let until = Instant::now() + STOP_WAIT;
         let mut stopping = false;
@@ -692,23 +706,78 @@ impl Worker {
     }
 }
 
-/// Manda um comando ao helper pela thread de escrita; `false` se o helper já não aceita comandos.
-fn send(child: &Child, command: &str) -> bool {
-    child.commands.as_ref().is_some_and(|tx| tx.send(format!("{command}\n").into_bytes()).is_ok())
+/// Um comando na fila do stdin do helper. `reply`: quem espera a confirmação de que a escrita saiu (ou do erro).
+struct PipeWrite {
+    bytes: Vec<u8>,
+    reply: Option<Sender<Result<(), String>>>,
 }
 
-/// Thread de escrita: dona do stdin do helper. Uma escrita que falha encerra a thread, e os envios seguintes dão
-/// `false` (a sessão passa a recusar a entrada em vez de fingir que a mandou).
-fn spawn_writer(mut stdin: ChildStdin) -> Sender<Vec<u8>> {
-    let (tx, rx) = mpsc::channel::<Vec<u8>>();
-    let _ = std::thread::Builder::new().name("ade-iphone-mirror-write".into()).spawn(move || {
-        for bytes in rx {
-            if stdin.write_all(&bytes).and_then(|()| stdin.flush()).is_err() {
-                break;
+/// A ponta da thread de escrita: a sessão manda os comandos por aqui. Se a escrita quebrou, `broken` guarda o motivo, e
+/// os envios seguintes são recusados com esse motivo.
+struct CommandPipe {
+    tx: Sender<PipeWrite>,
+    broken: Arc<Mutex<Option<String>>>,
+}
+
+impl CommandPipe {
+    /// Enfileira `bytes`. Quem pediu confirmação recebe a resposta da thread de escrita, depois do `write` e do
+    /// `flush`. Com a escrita quebrada, ou com a thread fora do ar, a resposta é o erro: nunca um "ok" silencioso.
+    fn submit(&self, bytes: Vec<u8>, reply: Option<Sender<Result<(), String>>>) {
+        let broken = self.broken.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(why) = broken {
+            answer(reply, Err(refusal(&why)));
+            return;
+        }
+        if let Err(mpsc::SendError(lost)) = self.tx.send(PipeWrite { bytes, reply }) {
+            answer(lost.reply, Err(refusal("a thread de escrita saiu")));
+        }
+    }
+}
+
+fn refusal(why: &str) -> String {
+    format!("o espelho do aparelho parou de aceitar comandos: {why}")
+}
+
+fn answer(reply: Option<Sender<Result<(), String>>>, result: Result<(), String>) {
+    if let Some(reply) = reply {
+        let _ = reply.send(result);
+    }
+}
+
+/// Manda um comando de controle ao helper (o pedido de quadro-chave): sem resposta, a fila já cuida da falha.
+fn send(child: &Child, command: &str) {
+    if let Some(pipe) = child.commands.as_ref() {
+        pipe.submit(format!("{command}\n").into_bytes(), None);
+    }
+}
+
+/// Thread de escrita: dona do stdin do helper. A escrita que falha registra o motivo antes de responder, e responde
+/// erro a tudo o que ficou na fila. Por isso o `Ok` de um envio só sai depois do `write` e do `flush`.
+fn spawn_writer<W: Write + Send + 'static>(mut stdin: W) -> CommandPipe {
+    let (tx, rx) = mpsc::channel::<PipeWrite>();
+    let broken: Arc<Mutex<Option<String>>> = Arc::default();
+    let flag = broken.clone();
+    let spawned = std::thread::Builder::new().name("ade-iphone-mirror-write".into()).spawn(move || {
+        while let Ok(cmd) = rx.recv() {
+            match stdin.write_all(&cmd.bytes).and_then(|()| stdin.flush()) {
+                Ok(()) => answer(cmd.reply, Ok(())),
+                Err(error) => {
+                    let why = format!("o helper não aceitou o comando: {error}");
+                    // O motivo fica registrado antes da resposta: quem envia depois já vê a sessão quebrada.
+                    *flag.lock().unwrap_or_else(|e| e.into_inner()) = Some(why.clone());
+                    answer(cmd.reply, Err(refusal(&why)));
+                    for rest in rx.try_iter() {
+                        answer(rest.reply, Err(refusal(&why)));
+                    }
+                    return;
+                }
             }
         }
     });
-    tx
+    if spawned.is_err() {
+        *broken.lock().unwrap_or_else(|e| e.into_inner()) = Some("não consegui abrir a thread de escrita".into());
+    }
+    CommandPipe { tx, broken }
 }
 
 fn lost(error: Option<(String, String)>, code: Option<i32>, signal: Option<i32>) -> Ended {
