@@ -71,6 +71,11 @@ export interface SendTimings {
   guard?: () => boolean;
   /** O `guard` disse não: nada foi colado. */
   onSkipped?: () => void;
+  /**
+   * A mensagem não entrou no terminal: a aba não ganhou PTY a tempo, o terminal fechou antes de colar, ou o PTY
+   * recusou a escrita. Nada foi enviado, então quem espera a entrega não deve contá-la como enviada.
+   */
+  onFailed?: (motivo: string) => void;
 }
 
 const queuedTimings = new Map<string, SendTimings>();
@@ -81,19 +86,24 @@ const TURN_QUIET_MS = 5000;
 const TURN_GIVE_UP_MS = 20 * 60_000;
 
 /** Mira la terminal hasta que el agente se calla y avisa cuándo escribió por última vez. */
-function watchTurn(term: Terminal, onEnd: (at: number) => void): void {
+export function watchTurn(term: Terminal, onEnd: (at: number) => void): void {
   let quiet: number | undefined;
   let lastOutput = 0;
   const finish = () => {
     sub.dispose();
-    window.clearTimeout(quiet);
     window.clearTimeout(giveUp);
     onEnd(lastOutput);
   };
+  // Um timer só, reagendado para o fim do silêncio: cada pedaço de saída apenas anota a hora (A087).
+  const check = () => {
+    quiet = undefined;
+    const left = lastOutput + TURN_QUIET_MS - Date.now();
+    if (left > 0) quiet = window.setTimeout(check, left);
+    else finish();
+  };
   const sub = term.onWriteParsed(() => {
     lastOutput = Date.now();
-    window.clearTimeout(quiet);
-    quiet = window.setTimeout(finish, TURN_QUIET_MS);
+    if (quiet === undefined) quiet = window.setTimeout(check, TURN_QUIET_MS);
   });
   const giveUp = window.setTimeout(() => {
     sub.dispose();
@@ -160,15 +170,24 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
     sub.dispose();
     window.clearTimeout(timer);
     window.clearTimeout(giveUp);
-    if (terminals.get(tabId) !== term) return;
+    if (terminals.get(tabId) !== term) {
+      queued.delete(tabId);
+      queuedTimings.delete(tabId);
+      timings?.onFailed?.("o terminal foi fechado antes da entrada");
+      return;
+    }
     queued.delete(tabId);
     queuedTimings.delete(tabId);
     if (timings?.guard && !safeGuard(timings.guard)) {
       timings.onSkipped?.();
       return;
     }
-    pasteIntoTab(tabId, text, !timings?.draft, timings?.onRetry);
-    timings?.onSent?.(Date.now());
+    // Só conta como enviada quando o PTY aceita a escrita da colagem (A074), não quando ela entra na fila do xterm.
+    const delivery = deliverPaste(tabId, text, !timings?.draft, timings?.onRetry);
+    delivery.then(
+      () => timings?.onSent?.(Date.now()),
+      (erro: unknown) => timings?.onFailed?.(erro instanceof Error ? erro.message : String(erro)),
+    );
     if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
     if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);
   };
@@ -181,7 +200,14 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
   // terminal vivo e quieto). Antes a mensagem era descartada em silêncio, sem reenvio nem aviso.
   // Agora é enviada assim mesmo e o aviso de "não mostrou atividade" continua pelo watchStart.
   const giveUp = window.setTimeout(() => {
-    if (terminals.get(tabId) !== term) { sub.dispose(); queued.delete(tabId); queuedTimings.delete(tabId); return; }
+    if (terminals.get(tabId) !== term) {
+      sub.dispose();
+      queued.delete(tabId);
+      const timings = queuedTimings.get(tabId);
+      queuedTimings.delete(tabId);
+      timings?.onFailed?.("o terminal foi fechado antes da entrada");
+      return;
+    }
     if (!sawOutput) timings?.onStalled?.();
     send();
   }, GIVE_UP_MS);
@@ -197,24 +223,29 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
  */
 function waitUntilLive(tabId: string, term: Terminal, text: string): void {
   requestPtyLaunch(tabId);
-  const started = Date.now();
-  const timer = window.setInterval(() => {
+  // Reage à mudança da store: quando a aba ganha o PTY, a mensagem sai no mesmo passo. Sem consulta em laço (A090).
+  const parar = () => {
+    unsub();
+    window.clearTimeout(prazo);
+  };
+  const unsub = useTabsStore.subscribe(() => {
     if (terminals.get(tabId) !== term) {
-      window.clearInterval(timer);
+      parar();
       return;
     }
     if (tabPtyState(tabId) === "live") {
-      window.clearInterval(timer);
+      parar();
       sendWhenSettled(tabId, term, text);
-      return;
     }
-    if (Date.now() - started >= LAUNCH_WAIT_MS) {
-      window.clearInterval(timer);
-      queued.delete(tabId);
-      queuedTimings.get(tabId)?.onStalled?.();
-      queuedTimings.delete(tabId);
-    }
-  }, 100);
+  });
+  const prazo = window.setTimeout(() => {
+    parar();
+    queued.delete(tabId);
+    const timings = queuedTimings.get(tabId);
+    queuedTimings.delete(tabId);
+    timings?.onStalled?.();
+    timings?.onFailed?.("a aba não ganhou um terminal a tempo");
+  }, LAUNCH_WAIT_MS);
 }
 
 export function sendWhenReady(tabId: string, text: string, timings?: SendTimings): void {
@@ -266,6 +297,34 @@ export function runInTerminal(tabId: string, text: string): boolean {
 
 /** Pega `text` en la terminal de la tab y, con `submit`, lo manda. `false` si la tab no
  *  tiene una terminal viva. */
+/** Escritas do PTY pedidas enquanto uma colagem roda. O `Terminal` as reporta com `notePtyWrite`. */
+const pasteWrites = new Map<string, Promise<unknown>[]>();
+
+/**
+ * O `Terminal` chama isto com a promessa de cada escrita que mandou ao PTY (a entrada do usuário e as respostas
+ * do xterm). Fora de uma colagem não faz nada.
+ */
+export function notePtyWrite(tabId: string, write: Promise<unknown>): void {
+  pasteWrites.get(tabId)?.push(write);
+}
+
+/**
+ * Cola como `pasteIntoTab`, e devolve quando o PTY aceitou as escritas da colagem. Rejeita se alguma foi recusada
+ * (fila cheia, terminal encerrado) ou se a aba não tem terminal vivo: nesses casos a mensagem não entrou.
+ */
+function deliverPaste(tabId: string, text: string, submit: boolean, onRetry?: (at: number) => void): Promise<void> {
+  const writes: Promise<unknown>[] = [];
+  pasteWrites.set(tabId, writes);
+  let pasted: boolean;
+  try {
+    pasted = pasteIntoTab(tabId, text, submit, onRetry);
+  } finally {
+    pasteWrites.delete(tabId);
+  }
+  if (!pasted) return Promise.reject(new Error("a aba não tem terminal vivo"));
+  return Promise.all(writes).then(() => undefined);
+}
+
 export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRetry?: (at: number) => void): boolean {
   const term = terminals.get(tabId);
   if (!term) return false;

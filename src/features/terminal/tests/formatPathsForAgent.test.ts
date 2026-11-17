@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { formatPathsForAgent } from "../formatPathsForAgent";
 
@@ -35,9 +36,19 @@ describe("formatPathsForAgent", () => {
       expect(result).toBe('@"path/with/\\"quotes\\"/file.txt" ');
     });
 
-    it("com apóstrofo no caminho usa aspas duplas (as simples fechariam a citação antes)", () => {
+    it("com apóstrofo, o shell recebe aspas simples com o apóstrofo escapado como '\\''", () => {
       const result = formatPathsForAgent(undefined, ["path/with/'single'/file.txt"]);
-      expect(result).toBe(`"path/with/'single'/file.txt" `);
+      expect(result).toBe(`'path/with/'\\''single'\\''/file.txt' `);
+    });
+
+    it("nome com apóstrofo e $() sai como uma palavra só: aspas duplas expandiriam o $()", () => {
+      expect(formatPathsForAgent(undefined, ["a'$(touch x).txt"])).toBe(`'a'\\''$(touch x).txt' `);
+    });
+
+    it.runIf(process.platform !== "win32")("o sh lê o caminho com apóstrofo e $() como texto, sem executar nada", () => {
+      const quoted = formatPathsForAgent(undefined, ["a'$(printf pwned).txt"]).trim();
+      const out = execFileSync("/bin/sh", ["-c", `printf '%s' ${quoted}`], { encoding: "utf8" });
+      expect(out).toBe("a'$(printf pwned).txt");
     });
 
     it("codex com apóstrofo também usa aspas duplas", () => {

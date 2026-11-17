@@ -15,7 +15,8 @@ import { registerCapabilityResponders } from "@/features/terminal/terminalCapabi
 import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
 import { installTuiScrollRail } from "@/features/terminal/tuiScrollRail";
-import { registerTerminal } from "@/features/terminal/terminalRegistry";
+import { notePtyWrite, registerTerminal } from "@/features/terminal/terminalRegistry";
+import { createWriteFailureNotice } from "@/features/terminal/writeFailureNotice";
 import { ExcerptAction } from "@/features/terminal/ExcerptAction";
 import { decodeOsc52 } from "@/features/terminal/osc52";
 import { scrollbackEnd } from "@/features/terminal/scrollbackEnd";
@@ -159,7 +160,9 @@ function TerminalImpl({
   // Y si el contexto igual se pierde, no se reintenta: se queda en DOM para siempre. Un
   // reintento en bucle es peor que el problema que arregla.
   useEffect(() => {
-    const term = termRef.current;
+    // `liveTerm` e não `termRef`: este efeito roda antes de a terminal existir. Com `termRef` ele voltava sem
+    // fazer nada, e como as dependências não mudavam, a GPU nunca ligava para a aba que nasce visível (A078).
+    const term = liveTerm;
     if (!term || !isVisible || !gpuRenderer || gpuBrokenRef.current) return;
 
     let addon: WebglAddon | null = null;
@@ -181,7 +184,7 @@ function TerminalImpl({
       addon?.dispose();
       addon = null;
     };
-  }, [isVisible, gpuRenderer]);
+  }, [liveTerm, isVisible, gpuRenderer]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -304,11 +307,18 @@ function TerminalImpl({
     // dibujar. xterm.js no contesta varias de esas consultas, y sin respuesta OpenCode se
     // queda mudo tras pasar a la pantalla alternativa — una terminal negra. Se registra
     // antes de lanzar el proceso para no perder la primera tanda, que llega enseguida.
-    const disposeCapabilities = registerCapabilityResponders(term, (data) => {
-      if (ptyIdRef.current !== null) {
-        ptyWrite(ptyIdRef.current, data).catch(console.error);
-      }
-    });
+    // Entrada que vai ao PTY. Uma recusa (fila cheia, terminal encerrado) avisa na tela, uma vez por rajada: antes
+    // ela só ia para o console (fix 4).
+    const avisoEscrita = createWriteFailureNotice(() =>
+      showBotToast({ title: i18n.t("terminal.writeFailed.title"), text: i18n.t("terminal.writeFailed.text"), tone: "warning", ms: 5000 }),
+    );
+    const enviarEntrada = (data: string) => {
+      if (ptyIdRef.current === null) return;
+      const escrita = ptyWrite(ptyIdRef.current, data);
+      if (tabId) notePtyWrite(tabId, escrita);
+      escrita.then(() => avisoEscrita.aceita(), () => avisoEscrita.recusa());
+    };
+    const disposeCapabilities = registerCapabilityResponders(term, enviarEntrada);
 
     // La barra de scroll de xterm se esconde sola; se la deja fija cuando hay historial
     // que recorrer (ver terminalScrollbar.ts).
@@ -337,6 +347,8 @@ function TerminalImpl({
     let sentSize = "";
 
     const pollSessionId = (resolvedCwd: string, startedAfter: number) => {
+      // Fechada enquanto o PTY nascia: a descoberta começaria e nunca seria cancelada (A076).
+      if (cancelled) return;
       if (!agentId || !isResumable(agentId) || !onSessionDiscovered) return;
       // Ya se sabe cuál es: no hay nada que descubrir y cada intento cuesta (para OpenCode,
       // levantar un proceso que abre su base de datos entera).
@@ -567,9 +579,7 @@ function TerminalImpl({
     // ── 5. Input del usuario → PTY ───────────────────────────
     term.onData((data) => {
       markInput(tabId);
-      if (ptyIdRef.current !== null) {
-        ptyWrite(ptyIdRef.current, data).catch(console.error);
-      }
+      enviarEntrada(data);
     });
 
     // Imagen en el portapapeles: se guarda en una carpeta temporal y se escribe su ruta en el

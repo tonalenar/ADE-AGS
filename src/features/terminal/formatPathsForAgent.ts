@@ -23,9 +23,13 @@ function plainPath(path: string): string {
   return NEEDS_QUOTES.test(path) || path.includes("'") ? quote(path) : path;
 }
 
-/** Siempre entre comillas, sin prefijo (agentes sin sintaxis verificada). */
+/**
+ * Siempre entre comillas, sin prefijo (agentes sin sintaxis verificada, y as abas de shell). Comilla simple:
+ * dentro dela nada se expande, nem `$()` nem crase. O apóstrofo sai como `'\''`, que fecha, escapa e reabre a
+ * citação. Aspas duplas expandiriam `$()` no shell (A077).
+ */
 function quotedPath(path: string): string {
-  return quote(path);
+  return `'${path.replace(/'/g, "'\\''")}'`;
 }
 
 /**
