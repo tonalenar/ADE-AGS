@@ -100,8 +100,8 @@ export function SkillsPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    loadSkills();
-    checkHealth(workspaceId).catch(() => {});
+    void loadSkills().catch((e) => setError(String(e)));
+    checkHealth(workspaceId).catch((e) => setError(String(e)));
   }, [loadSkills, checkHealth, workspaceId]);
 
   const groups = useMemo(
@@ -233,7 +233,8 @@ export function SkillsPage() {
                         <Button variant="custom"
                           onClick={() => useSkillsStore.getState()
                             .attachSkill(skill.id, usage.workspaceId, usage.scope, usage.tabId ?? undefined, usage.cwd)
-                            .then(() => checkHealth(workspaceId))}
+                            .then(() => checkHealth(workspaceId))
+                            .catch((e) => setError(String(e)))}
                           className="cc-t px-1.5 h-5 rounded text-[10px] font-sans
                             bg-amber-200/60 dark:bg-amber-500/15
                             hover:bg-amber-300/70 dark:hover:bg-amber-500/25 inline-block"
@@ -243,7 +244,8 @@ export function SkillsPage() {
                         <Button variant="custom"
                           onClick={() => useSkillsStore.getState()
                             .detachSkill(skill.id, usage.workspaceId, usage.scope, usage.tabId ?? undefined, usage.cwd)
-                            .then(() => checkHealth(workspaceId))}
+                            .then(() => checkHealth(workspaceId))
+                            .catch((e) => setError(String(e)))}
                           className="cc-t px-1.5 h-5 rounded text-[10px] font-sans
                             bg-amber-200/60 dark:bg-amber-500/15
                             hover:bg-amber-300/70 dark:hover:bg-amber-500/25 inline-block"

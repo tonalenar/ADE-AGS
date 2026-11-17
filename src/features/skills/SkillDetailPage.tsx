@@ -95,9 +95,11 @@ export function SkillDetailPage() {
 
   useEffect(() => {
     if (!id) return;
+    let alive = true;
     load(id)
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
+      .catch((e) => { if (alive) setError(String(e)); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 

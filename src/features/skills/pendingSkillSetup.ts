@@ -13,6 +13,7 @@ const pending = new Map<string, Promise<string[]>>();
 
 export function registerPendingSkillSetup(tabId: string, setup: Promise<string[]>): void {
   pending.set(tabId, setup);
+  setup.catch(() => {});
   setup.finally(() => {
     // Solo se borra si sigue siendo LA MISMA promesa (no pisar un registro más nuevo
     // por si alguna vez se reintenta el setup de la misma tab).
