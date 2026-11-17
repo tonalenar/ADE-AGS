@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::database::{self, DbConnection, WindowRow};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -338,6 +340,33 @@ pub fn focus_window(app: tauri::AppHandle, label: String) -> Result<(), String> 
         win.set_focus().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Se o primeiro quadro da principal não chegar, abre as janelas adiadas no prazo do backend.
+pub fn arm_deferred_deadline(app: &AppHandle) {
+    let handle = app.clone();
+    let prazo = super::startup::DEFERRED_RESTORE_DEADLINE;
+    std::thread::spawn(move || {
+        std::thread::sleep(prazo);
+        restaurar_adiadas_se_prazo(&handle, prazo, prazo);
+    });
+}
+
+fn restaurar_adiadas_se_prazo(app: &AppHandle, decorrido: Duration, prazo: Duration) {
+    let Some(deferred) = app.try_state::<super::startup::DeferredRestore>() else {
+        return;
+    };
+    let rows = deferred.on_deadline(decorrido, prazo);
+    if rows.is_empty() {
+        return;
+    }
+    eprintln!(
+        "[restore] o primeiro quadro não chegou em {prazo:?}; restaurando {} janela(s) adiada(s)",
+        rows.len()
+    );
+    if let Err(error) = restore_windows(app, rows, true) {
+        eprintln!("[restore] não foi possível restaurar as janelas adiadas: {error}");
+    }
 }
 
 /// Crea las ventanas que el arranque dejó esperando el primer cuadro de la principal.

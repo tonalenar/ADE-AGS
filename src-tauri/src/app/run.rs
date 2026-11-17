@@ -43,6 +43,7 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
         if let Some(deferred) = app.try_state::<crate::window::DeferredRestore>() {
             deferred.stage(later);
         }
+        crate::window::arm_deferred_deadline(app);
         crate::window::restore_windows(app, primary, true)?;
         super::housekeeping::spawn_housekeeping(app.clone());
         // Las rotinas se disparan solas, con la app abierta (ver `routines`). En modo
@@ -929,7 +930,7 @@ pub fn run() {
             // la salida y se le pregunta al frontend si quiere cerrar todo o solo la actual.
             if let tauri::RunEvent::Exit = event {
                 // Com teto de 3 s: a gravação que não fecha nesse prazo não segura a saída (antes, até ~29 s).
-                crate::screen_recording::stop_all_with_deadline();
+                crate::screen_recording::stop_all_with_deadline(app_handle);
                 crate::voice_input::cancel_all();
                 #[cfg(target_os = "macos")]
                 crate::real_browser::cef_shutdown();
