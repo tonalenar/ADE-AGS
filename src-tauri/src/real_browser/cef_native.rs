@@ -29,6 +29,7 @@ use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 use tokio::sync::oneshot;
 
+use super::surface::{outline, rounded_parts, PathStep, RoundedPart};
 use super::{emit, on_binding};
 
 const CEF_FRAMEWORK_BUNDLE: &str = "Chromium Embedded Framework.framework";
@@ -906,9 +907,9 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
     });
 }
 
-/// Recorta a vista às partes visíveis e, com `radius > 0`, arredonda os cantos (tela do celular, miniatura).
-/// O arredondamento fica na própria máscara: o `cornerRadius` da layer de uma NSView do AppKit não recorta a
-/// vista do CEF (o AppKit administra essa layer), e a página saía quadrada para fora da curva da tela.
+/// Uma única `CAShapeLayer` recorta as partes e arredonda só os cantos externos da vista (tela do celular, miniatura).
+/// O arredondamento entra no próprio path: o Core Animation não aplica máscara de máscara, e o `cornerRadius` da layer
+/// da NSView não recorta a vista do CEF.
 fn apply_rect_mask(view: &NSView, width: i32, height: i32, parts: &[[i32; 4]], radius: f64) {
     if parts.is_empty() {
         view.setHidden(true);
@@ -916,17 +917,11 @@ fn apply_rect_mask(view: &NSView, width: i32, height: i32, parts: &[[i32; 4]], r
     }
     view.setHidden(false);
     let (w, h) = (width.max(1) as f64, height.max(1) as f64);
-    let whole = parts.len() == 1 && parts[0][0] <= 0 && parts[0][1] <= 0 && parts[0][2] >= width - 1 && parts[0][3] >= height - 1;
     let radius = radius.min(w / 2.0).min(h / 2.0).max(0.0);
     let path = unsafe { CGPathCreateMutable() };
     if path.is_null() { return; }
-    if radius > 0.0 && whole {
-        // Caso comum (tela do celular, miniatura sem nada por cima): a própria forma da máscara é arredondada.
-        unsafe { CGPathAddRoundedRect(path, ptr::null(), cg_rect(0.0, 0.0, w, h), radius, radius); }
-    } else {
-        for [left, top, right, bottom] in parts {
-            unsafe { CGPathAddRect(path, ptr::null(), cg_rect(*left as f64, *top as f64, (right-left).max(0) as f64, (bottom-top).max(0) as f64)); }
-        }
+    for part in rounded_parts(width, height, parts, radius) {
+        unsafe { add_outline(path, &part) };
     }
     let class = objc2::runtime::AnyClass::get(c"CAShapeLayer").expect("CAShapeLayer disponível no macOS");
     let mask: *mut AnyObject = unsafe { msg_send![class, layer] };
@@ -936,41 +931,32 @@ fn apply_rect_mask(view: &NSView, width: i32, height: i32, parts: &[[i32; 4]], r
         let _: () = msg_send![mask, setFrame: frame];
         let _: () = msg_send![mask, setGeometryFlipped: Bool::YES];
         let _: () = msg_send![mask, setPath: path];
-        if radius > 0.0 && !whole {
-            // Com partes escondidas (um menu por cima), as partes recortam e uma segunda forma arredondada recorta
-            // a primeira: a máscara da máscara. Um `cornerRadius` de CALayer não recorta a vista do CEF.
-            let rounded: *mut AnyObject = msg_send![class, layer];
-            let round_path = CGPathCreateMutable();
-            if !round_path.is_null() {
-                CGPathAddRoundedRect(round_path, ptr::null(), cg_rect(0.0, 0.0, w, h), radius, radius);
-                let _: () = msg_send![rounded, setFrame: frame];
-                let _: () = msg_send![rounded, setGeometryFlipped: Bool::YES];
-                let _: () = msg_send![rounded, setPath: round_path];
-                let _: () = msg_send![mask, setMask: rounded];
-                CGPathRelease(round_path);
-            }
-        }
         let _: () = msg_send![layer, setMask: mask];
         CGPathRelease(path);
     }
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CGRect { origin: CGPoint, size: CGSize }
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CGPoint { x: f64, y: f64 }
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CGSize { width: f64, height: f64 }
-fn cg_rect(x: f64, y: f64, width: f64, height: f64) -> CGRect { CGRect { origin: CGPoint { x, y }, size: CGSize { width, height } } }
+/// Escreve o contorno de uma parte no path; cada canto arredondado é um arco tangente às bordas.
+unsafe fn add_outline(path: *mut std::ffi::c_void, part: &RoundedPart) {
+    for step in outline(part) {
+        unsafe {
+            match step {
+                PathStep::Move([x, y]) => CGPathMoveToPoint(path, ptr::null(), x, y),
+                PathStep::Line([x, y]) => CGPathAddLineToPoint(path, ptr::null(), x, y),
+                PathStep::Arc { corner: [cx, cy], end: [ex, ey], radius } => CGPathAddArcToPoint(path, ptr::null(), cx, cy, ex, ey, radius),
+                PathStep::Close => CGPathCloseSubpath(path),
+            }
+        }
+    }
+}
 
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
     fn CGPathCreateMutable() -> *mut std::ffi::c_void;
-    fn CGPathAddRect(path: *mut std::ffi::c_void, transform: *const std::ffi::c_void, rect: CGRect);
-    fn CGPathAddRoundedRect(path: *mut std::ffi::c_void, transform: *const std::ffi::c_void, rect: CGRect, corner_width: f64, corner_height: f64);
+    fn CGPathMoveToPoint(path: *mut std::ffi::c_void, transform: *const std::ffi::c_void, x: f64, y: f64);
+    fn CGPathAddLineToPoint(path: *mut std::ffi::c_void, transform: *const std::ffi::c_void, x: f64, y: f64);
+    fn CGPathAddArcToPoint(path: *mut std::ffi::c_void, transform: *const std::ffi::c_void, x1: f64, y1: f64, x2: f64, y2: f64, radius: f64);
+    fn CGPathCloseSubpath(path: *mut std::ffi::c_void);
     fn CGPathRelease(path: *mut std::ffi::c_void);
 }
 

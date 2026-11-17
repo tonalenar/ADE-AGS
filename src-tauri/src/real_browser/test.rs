@@ -1,6 +1,7 @@
 //! Testes da superfície nativa do navegador (o Portal): o contrato do `Place` que chega do front e a lógica pura
 //! que decide o que mudou, o que a máscara desenha e quando a vista é escondida.
 
+use super::surface::{outline, rounded_parts, PathStep};
 use super::{Place, Rect};
 use serde_json::json;
 
@@ -23,4 +24,25 @@ fn place_le_os_campos_que_o_front_manda() {
     assert!(place.click_to_expand);
     assert!(place.visible);
     assert_eq!(place.visible_rect, Some(Rect { x: 0.0, y: 0.0, width: 300.0, height: 200.0 }));
+}
+
+#[test]
+fn path_da_mascara_tem_cantos_arredondados_com_partes() {
+    // Duas partes lado a lado: a da esquerda toca os cantos da esquerda, a da direita os da direita.
+    let parts = rounded_parts(200, 120, &[[0, 0, 100, 120], [100, 0, 200, 120]], 16.0);
+
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0].corners, [true, false, false, true]);
+    assert_eq!(parts[1].corners, [false, true, true, false]);
+
+    // O contorno tem um arco por canto externo: quatro no total, dois por parte, e nenhum no corte do meio.
+    let arcs: Vec<[f64; 2]> = parts
+        .iter()
+        .flat_map(outline)
+        .filter_map(|step| match step {
+            PathStep::Arc { corner, .. } => Some(corner),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(arcs, vec![[0.0, 120.0], [0.0, 0.0], [200.0, 0.0], [200.0, 120.0]]);
 }

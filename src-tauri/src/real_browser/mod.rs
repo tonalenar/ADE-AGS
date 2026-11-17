@@ -57,6 +57,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 
+mod surface;
 #[cfg(test)]
 #[path = "test.rs"]
 mod surface_test;
