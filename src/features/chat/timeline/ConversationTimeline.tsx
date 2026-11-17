@@ -28,7 +28,7 @@ import { SelectionComment } from "../quotes/SelectionComment";
 import { voicesByItem } from "./agentSwitch";
 import { NoticeRow } from "./NoticeRow";
 import { TurnEndNotice } from "./TurnEndNotice";
-import { clampTimelineRange, endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, thinkingTurnKey, timelineTurns, visibleTurnBody, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
+import { clampTimelineRange, endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, thinkingTurnKey, timelineTurnsCached, visibleTurnBody, type BodyRow, type ChangedFile, type Turn, type TurnsCache } from "./timelineModel";
 import type { TimelineItem, ToolKind } from "./types";
 import { prefersReducedMotion, useRevealedText } from "./useRevealedText";
 import { searchTimelineItems } from "./searchUtils";
@@ -152,8 +152,13 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   const { t } = useTranslation();
   // "Chamadas de ferramenta no chat" (Configurações → Chat): o fold mostra só o que o modo deixa.
   const toolVisibility = useChatPrefs().toolCallVisibility;
-  const allTurns = useMemo(() => timelineTurns(items), [items]);
-  const markdownMediaContent = useMemo(() => items.flatMap((item) => [item.text ?? "", item.output ?? ""]).filter(Boolean), [items]);
+  // A conta dos turnos reaproveita o que já estava pronto (A106): o pedaço que chega no fim não refaz os turnos anteriores.
+  const turnsCache = useRef<TurnsCache | null>(null);
+  const allTurns = useMemo(() => {
+    const next = timelineTurnsCached(turnsCache.current, items);
+    turnsCache.current = next;
+    return next.turns;
+  }, [items]);
   const turns = useMemo(() => applyToolCallVisibility(allTurns, toolVisibility), [allTurns, toolVisibility]);
   const compacting = useMemo(() => isCompacting(items, Date.now()), [items]);
   // O «Pensando…» com brilho: só enquanto o agente trabalha, fora de compactação e sem pedido de aprovação esperando.
@@ -341,9 +346,20 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     const scroller = scrollRef.current;
     const host = turnsHostRef.current;
     if (!scroller || !host) return;
+    // A busca leva a vista até o turno: a conversa deixa de «colar» no fim, senão o próximo ajuste a puxa de volta.
+    stick.current = false;
+    following.current = false;
+    // Sem virtualização, todos os turnos estão na tela: a posição é a que o navegador mede agora. A soma das alturas
+    // guardadas só é refeita quando a lista é virtualizada (A108), então pode estar atrasada e levar a busca errado.
+    const key = turns[index]?.key;
+    const rendered = !virtualized && key !== undefined ? contentRef.current?.querySelector<HTMLElement>(`[data-virtual-turn="${CSS.escape(key)}"]`) : null;
+    if (rendered) {
+      scroller.scrollTop = rendered.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      return;
+    }
     const hostTop = host.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
     scroller.scrollTop = hostTop + turnPrefix[index]! + TURN_GAP * index;
-  }, [turnPrefix, updateVisibleRange]);
+  }, [turnPrefix, updateVisibleRange, turns, virtualized]);
   const safeRange = clampTimelineRange(visibleRange, turns.length);
   const startIndex = virtualized ? safeRange.start : 0;
   const endIndex = virtualized ? Math.max(startIndex, safeRange.end) : turns.length;
@@ -537,7 +553,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
         {truncated && (
           <p className="text-center text-chat-caption text-gray-400 dark:text-white/35">{t("chat.timeline.truncated")}</p>
         )}
-        <ChatMarkdownMediaIndex contents={markdownMediaContent} />
+        <ChatMarkdownMediaIndex items={items} />
         {!loaded && !loadError && <p className="py-10 text-center text-chat-note text-gray-400 dark:text-white/40">{t("chat.timeline.loading")}</p>}
         {loadError && (
           <div role="alert" className="py-10 flex flex-col items-center gap-3 text-center text-chat-note text-gray-500 dark:text-white/60">

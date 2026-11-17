@@ -119,8 +119,24 @@ export function isInfraCommand(tool: TimelineItem): boolean {
   return tool.tool === "command" && INFRA_COMMAND.test(tool.label ?? "");
 }
 
-export function timelineTurns(items: TimelineItem[]): Turn[] {
-  const turns: Turn[] = [];
+/** Um ponto em que a conta dos turnos pode recomeçar do zero: `turns` turnos já estão prontos e `next` é o item seguinte. */
+interface TurnCut {
+  turns: number;
+  next: number;
+}
+
+/** A conta dos turnos com o que é preciso para reaproveitar a parte que não mudou (ver `timelineTurnsCached`). */
+export interface TurnsCache {
+  items: TimelineItem[];
+  turns: Turn[];
+  cuts: TurnCut[];
+}
+
+/**
+ * Conta os turnos a partir de `start`, acrescentando em `turns` e registrando em `cuts` os pontos limpos (depois de cada
+ * fim de turno a conta não carrega nada: recomeçar dali dá o mesmo resultado). Pura sobre os itens.
+ */
+function runTurns(items: TimelineItem[], start: number, turns: Turn[], cuts: TurnCut[]): void {
   let turn: Turn | null = null;
   let tools: TimelineItem[] = [];
   const open = (user: TimelineItem | null, key: string): Turn => {
@@ -138,7 +154,8 @@ export function timelineTurns(items: TimelineItem[]): Turn[] {
       current.final = last.item;
     }
   };
-  for (const item of items) {
+  for (let index = start; index < items.length; index++) {
+    const item = items[index]!;
     // Os tokens só alimentam a conta do turno. O raciocínio vira uma linha do corpo (abaixo).
     if (item.kind === "usage") continue;
     // Só a assinatura, sem texto (o provedor não mandou o resumo): nada a mostrar nem a abrir um turno.
@@ -182,14 +199,48 @@ export function timelineTurns(items: TimelineItem[]): Turn[] {
       else current.body.push({ type, key: item.id, tools: [item] });
     } else if (item.kind === "turnEnd") {
       // Sem a duração no arquivo, a conta é do prompt até o fim.
-      const start = current.user?.at ?? current.startedAt;
-      const durationMs = item.durationMs ?? (start !== undefined && item.at !== undefined ? item.at - start : null);
+      const begin = current.user?.at ?? current.startedAt;
+      const durationMs = item.durationMs ?? (begin !== undefined && item.at !== undefined ? item.at - begin : null);
       close(current, { durationMs, interrupted: !!item.interrupted, error: item.text?.trim() || null, files: changedFiles(tools), ...(item.at !== undefined ? { at: item.at } : {}) });
       turn = null;
       tools = [];
+      // Ponto limpo: a conta não carrega nada daqui em diante.
+      cuts.push({ turns: turns.length, next: index + 1 });
     }
   }
+}
+
+export function timelineTurns(items: TimelineItem[]): Turn[] {
+  const turns: Turn[] = [];
+  runTurns(items, 0, turns, []);
   return turns;
+}
+
+/**
+ * A mesma conta de `timelineTurns`, reaproveitando o que já estava pronto: os turnos antes do último ponto limpo que
+ * ainda é igual (os mesmos itens, pela identidade) são os mesmos objetos, e só o resto é contado de novo. Assim, quando
+ * chega um pedaço no fim da conversa, os turnos anteriores não são refeitos nem re-renderizados (A106). Pura.
+ */
+export function timelineTurnsCached(prev: TurnsCache | null, items: TimelineItem[]): TurnsCache {
+  const turns: Turn[] = [];
+  const cuts: TurnCut[] = [];
+  let start = 0;
+  if (prev) {
+    // Quantos itens do começo são exatamente os mesmos objetos.
+    const limit = Math.min(prev.items.length, items.length);
+    let same = 0;
+    while (same < limit && prev.items[same] === items[same]) same++;
+    // O último ponto limpo dentro desse trecho: dali em diante a conta recomeça.
+    const kept = prev.cuts.filter((cut) => cut.next <= same);
+    const last = kept[kept.length - 1];
+    if (last) {
+      turns.push(...prev.turns.slice(0, last.turns));
+      cuts.push(...kept);
+      start = last.next;
+    }
+  }
+  runTurns(items, start, turns, cuts);
+  return { items, turns, cuts };
 }
 
 /**

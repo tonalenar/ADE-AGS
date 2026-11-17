@@ -145,6 +145,19 @@ export function compactionOf(item: TimelineItem): Compaction | null {
   return { id: item.id, state, trigger, before: item.contextTokens ?? null, after: item.tokens ?? null, at: item.at ?? null, error: item.output ?? null };
 }
 
+/**
+ * Quando a compactação em andamento deixa de contar (o prazo do TTL). `null` = não há uma em andamento com prazo. Pura.
+ * A fila usa isso para reavaliar no prazo, sem depender de outra mudança na conversa (A114).
+ */
+export function compactionDeadline(items: readonly TimelineItem[]): number | null {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const compaction = compactionOf(items[i]);
+    if (!compaction) continue;
+    return compaction.state === "running" && compaction.at !== null ? compaction.at + COMPACTION_TTL_MS : null;
+  }
+  return null;
+}
+
 /** A conversa está compactando agora? O último aviso de compactação está «em andamento» e não expirou. */
 export function isCompacting(items: readonly TimelineItem[], now: number): boolean {
   for (let i = items.length - 1; i >= 0; i -= 1) {
