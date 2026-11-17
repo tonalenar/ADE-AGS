@@ -53,6 +53,21 @@ describe("searchHitsFromSources", () => {
     expect(hits[0]?.excerpt).toBe("+plus one");
   });
 
+  it("não trata +++i; como cabeçalho de diff depois do @@", () => {
+    const patch = [
+      "diff --git a/src/a.ts b/src/a.ts",
+      "--- a/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -1,0 +1,2 @@",
+      "+++i;",
+      "+const quota = 1;",
+    ].join("\n");
+    const { hits } = hitsOf("quota", [{ path: "src/a.ts", patch }]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.line).toBe(2);
+    expect(hits[0]?.excerpt).toContain("quota");
+  });
+
   it("limita o excerto longo", () => {
     const line = `const quota = "${"x".repeat(300)}";`;
     const { hits } = hitsOf("quota", [

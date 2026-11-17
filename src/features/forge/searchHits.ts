@@ -41,16 +41,20 @@ function hitsInLoaded(path: string, text: string, needle: string, result: Search
 function hitsInPatch(path: string, patch: string, needle: string, result: SearchHit[]): void {
   const lines = patch.split("\n");
   let newLine: number | null = null;
+  let inHunk = false;
   for (const raw of lines) {
     if (result.length >= LIMIT) break;
     const hunk = HUNK.exec(raw);
     if (hunk) {
+      inHunk = true;
       newLine = Number(hunk[1]);
       continue;
     }
-    if (raw.startsWith("+++") || raw.startsWith("---") || raw.startsWith("diff ") || raw.startsWith("index ") || raw.startsWith("\\")) {
+    // `+++`/`---` só são cabeçalho do arquivo; dentro do hunk `++i;` vira `+++i;`.
+    if (!inHunk && (raw.startsWith("+++") || raw.startsWith("---") || raw.startsWith("diff ") || raw.startsWith("index "))) {
       continue;
     }
+    if (raw.startsWith("\\")) continue;
     const marker = raw[0];
     if (marker === "-") continue;
     if (marker !== "+" && marker !== " ") continue;
