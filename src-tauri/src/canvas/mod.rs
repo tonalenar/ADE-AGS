@@ -369,9 +369,21 @@ pub fn is_orchestrator(boards: &Boards, tab: &str) -> bool {
     boards.values().any(|b| b.orchestrators.iter().any(|o| o == tab))
 }
 
-/// ¿Es `tab` orquestadora **del canvas donde está** (marcada como coroa y con nodo en ese mismo canvas)?
+/// ¿Es `tab` orquestadora **del canvas donde está**? Coroa e nó no mesmo quadro, e em
+/// nenhum quadro ela aparece só como nó (senão a coroa de outro canvas autorizaria aqui).
 pub fn is_orchestrator_here(boards: &Boards, tab: &str) -> bool {
-    boards.values().any(|b| b.orchestrators.iter().any(|o| o == tab) && b.nodes.as_object().is_some_and(|nodes| nodes.contains_key(tab)))
+    let mut aqui = false;
+    for b in boards.values() {
+        let no = b.nodes.as_object().is_some_and(|nodes| nodes.contains_key(tab));
+        let coroa = b.orchestrators.iter().any(|o| o == tab);
+        if no && !coroa {
+            return false;
+        }
+        if no && coroa {
+            aqui = true;
+        }
+    }
+    aqui
 }
 
 /// El equipo de `tab`: todas las tabs a las que se llega desde ella siguiendo conexiones,

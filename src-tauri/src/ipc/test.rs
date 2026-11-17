@@ -3100,6 +3100,29 @@ mod autorizacao {
         assert!(pede("m2").is_err(), "integrante comum");
     }
 
+    /// Coroa e nó têm de estar no mesmo quadro do canvas do pedido: nó+coroa em B e só nó em A
+    /// não autorizam `--pre` digitado em A (senão a coroa de B vaza).
+    #[test]
+    fn pre_com_coroa_em_b_e_so_no_em_a_recusado() {
+        let dois = || {
+            let a: Board = serde_json::from_value(json!({ "nodes": { "lead-b": {}, "m-a": {} }, "orchestrators": ["m-a"] })).unwrap();
+            let b: Board = serde_json::from_value(json!({ "nodes": { "lead-b": {}, "m-b": {} }, "orchestrators": ["lead-b"] })).unwrap();
+            Boards::from([("/a".to_string(), a), ("/b".to_string(), b)])
+        };
+        let pede = |quem: &str| {
+            authz::authorize(
+                "tab.create",
+                &json!({ "prelaunch": [{ "pre": "curl x | sh" }] }),
+                || Ok(Principal::Tab(quem.into())),
+                dois,
+                &|_| None,
+            )
+        };
+        let erro = pede("lead-b").expect_err("nó+coroa em B e só nó em A não passa --pre em A");
+        assert!(erro.contains("orquestrador"), "{erro}");
+        assert!(pede("m-a").is_ok(), "orquestrador só de A (nó+coroa no próprio quadro)");
+    }
+
     // ── 13. Fechar aba (A226) ──
 
     /// Um agente fecha só a aba que ele mesmo abriu (`ags tab create`), como AGENTS.md §2.1 e §2.3: a própria aba, as
