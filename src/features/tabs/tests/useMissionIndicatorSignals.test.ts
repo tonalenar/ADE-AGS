@@ -35,6 +35,7 @@ vi.mock("@/features/terminal/activity", () => ({
   sustainedTabIds: () => harness.sustained,
   lastOutputAt: () => harness.outputAt,
   lastInputAt: () => undefined,
+  useAgentActivity: { subscribe: vi.fn(() => () => undefined) },
 }));
 
 import { useMissionIndicatorSignals } from "../useMissionIndicatorSignals";

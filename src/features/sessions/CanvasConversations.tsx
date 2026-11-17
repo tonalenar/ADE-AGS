@@ -12,6 +12,7 @@ import { parseConversationSnapshot, conversationTitle, titleSources, type Conver
 import { hibernateConversation, openConversation, tabsOfConversation, type FlowContext } from "./conversationFlow";
 import { sameProject, useConversationsStore } from "./conversationsStore";
 import { deleteConversation, updateConversation } from "./ipc.projectConversations";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
 import { sessionTitle } from "./ipc";
 
 /** O ícone de uma conversa-canvas: quatro quadros, como o canvas. */
@@ -46,6 +47,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
   const [menu, setMenu] = useState<{ x: number; y: number; row: ConversationRow } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
+  const documentVisible = useDocumentVisible();
 
   useEffect(() => { void load(workspaceId); }, [workspaceId, load]);
   useEffect(() => {
@@ -57,6 +59,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
   // O contexto da conversa vira o título: o assunto real da sessão do orquestrador, não "Claude Code — C:\\pasta".
   // Relido de tempos em tempos: o título acompanha o contexto do orquestrador enquanto a conversa está ativa.
   useEffect(() => {
+    if (!documentVisible) return;
     let alive = true;
     const refresh = async () => {
       const { rows: all } = useConversationsStore.getState();
@@ -77,7 +80,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
     void refresh();
     const timer = window.setInterval(() => void refresh(), 45_000);
     return () => { alive = false; window.clearInterval(timer); };
-  }, [projectKey, upsert]);
+  }, [projectKey, upsert, documentVisible]);
 
   const mine = useMemo(
     () => rows

@@ -7,7 +7,7 @@ import { useStallAlerts } from "@/features/missions/stallAlerts";
 import { isWaitingForUser } from "@/features/missions/stalled";
 import { useMissionsStore } from "@/features/missions/store";
 import { useRunsStore } from "@/features/runs/store";
-import { activeTabIds, lastInputAt, lastOutputAt, sustainedTabIds } from "@/features/terminal/activity";
+import { activeTabIds, lastInputAt, lastOutputAt, sustainedTabIds, useAgentActivity } from "@/features/terminal/activity";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 import { useTabsStore } from "./store";
 import type { MissionIndicatorSignals } from "./missionIndicator";
@@ -59,7 +59,7 @@ function start(): () => void {
     if (pending !== undefined) return;
     pending = setTimeout(() => { pending = undefined; refresh(); }, 250);
   };
-  const unsubscribers = [useTabsStore, useCanvasStore, useMissionsStore, useRunsStore, useStallAlerts]
+  const unsubscribers = [useTabsStore, useCanvasStore, useMissionsStore, useRunsStore, useStallAlerts, useAgentActivity]
     .map((store) => store.subscribe(scheduleRefresh));
   let timer: ReturnType<typeof setInterval> | undefined;
   const resume = () => {
