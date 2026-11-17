@@ -4,7 +4,11 @@
  *
  * Função pura: não toca em DOM, PTY nem estado global.
  * Entrada típica: `screenOf(tabId, ...)?.lines` (terminalRegistry.ts).
+ *
+ * A forma do menu sozinha não basta: quem lê o texto é a saída do próprio agente (dado não confiável). Por isso o
+ * cartão só nasce com `promptDaTela`, que exige o modo de espera do detector das missões (`isWaitingForUser`).
  */
+import { isWaitingForUser } from "@/features/missions/stalled";
 
 export type PermissionChoiceId = "allow" | "allowSession" | "deny";
 
@@ -161,4 +165,25 @@ export function detectPermissionPrompt(lines: readonly string[] | null | undefin
     .toLowerCase();
 
   return { kind, title, detail, choices, signature };
+}
+
+/** O menu do Codex: o cursor é `›` e a opção de recusar termina em `(esc)`. O detector das missões não lê essas marcas. */
+const CODEX_CURSOR_RE = /^\s*›\s*1[.)]\s+\S/m;
+const CODEX_ESC_RE = /^\s*\d{1,2}[.)]\s+.*\(esc\)\s*$/m;
+
+/** O terminal está num modo de espera de resposta? O detector das missões, ou o menu do Codex. Pura. */
+function esperaResposta(lines: readonly string[]): boolean {
+  if (isWaitingForUser(lines)) return true;
+  const tail = lines.filter((l) => l.trim() !== "").slice(-TAIL_LINES).join("\n");
+  return CODEX_CURSOR_RE.test(tail) || CODEX_ESC_RE.test(tail);
+}
+
+/**
+ * O pedido de permissão da tela AGORA, só quando o terminal está em modo de espera. Sem isso, a forma de um menu
+ * impresso pelo agente bastaria para virar um cartão com botão de aprovar. Pura.
+ */
+export function promptDaTela(lines: readonly string[] | null | undefined): PermissionPrompt | null {
+  if (!lines || lines.length === 0) return null;
+  if (!esperaResposta(lines)) return null;
+  return detectPermissionPrompt(lines);
 }

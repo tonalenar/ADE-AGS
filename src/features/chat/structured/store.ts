@@ -262,11 +262,20 @@ export async function runThreadGoalAction(id: string, action: "show" | "set" | "
   }
 }
 
-export function answerRequest(threadId: string, requestId: string, choice: string): void {
+/**
+ * Responde um pedido do protocolo. O pedido só sai da tela depois de o backend confirmar: se ele recusar (o agente
+ * fechou o pedido, ou o IPC falhou), o pedido fica e o erro aparece. Devolve `true` quando o backend confirmou.
+ */
+export async function answerRequest(threadId: string, requestId: string, choice: string): Promise<boolean> {
   unsnoozeConversation(threadKey(threadId));
-  // Some da tela na hora; se o backend recusar (o agente fechou), o erro aparece.
+  try {
+    await chatRequestAnswer(requestId, choice);
+  } catch (e) {
+    patchLive(threadId, (live) => ({ ...live, error: String(e) }));
+    return false;
+  }
   patchLive(threadId, (live) => ({ ...live, requests: live.requests.filter((r) => r.id !== requestId) }));
-  chatRequestAnswer(requestId, choice).catch((e) => patchLive(threadId, (live) => ({ ...live, error: String(e) })));
+  return true;
 }
 
 export async function retuneThread(id: string, model: string | null, effort: string | null, access: ThreadAccess): Promise<boolean> {
