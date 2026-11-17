@@ -75,7 +75,7 @@ function restoreComposerFocus() {
  * posicionamento de `AssistantCitationChip` do T3 Code): abre imediatamente sobre o trecho citado
  * ou acima do chip ao editar pelo lápis, sem blockquote nem barra de dica redundante.
  */
-function CitationCommentPopover({
+export function CitationCommentPopover({
   item,
   anchorEl,
   sourceAnchor,
