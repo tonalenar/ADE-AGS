@@ -180,6 +180,11 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
       timings?.onFailed?.("o terminal foi fechado antes da entrada");
       return;
     }
+    if (tabPtyState(tabId) === "missing") {
+      // A aba pode sair do store durante a estabilização. Mantém a entrada na fila até o PTY reaparecer.
+      waitForPty(tabId, text, term);
+      return;
+    }
     queued.delete(tabId);
     queuedTimings.delete(tabId);
     if (timings?.guard && !safeGuard(timings.guard)) {
@@ -187,17 +192,10 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
       return;
     }
     // Só conta como enviada quando o PTY aceita a escrita da colagem (A074), não quando ela entra na fila do xterm.
-    if (tabPtyState(tabId) === "missing") {
-      // Aba fora do store (um chamador ou um teste): cola pelo xterm, como sempre, e conta como enviada na hora.
-      if (pasteIntoTab(tabId, text, !timings?.draft, timings?.onRetry)) timings?.onSent?.(Date.now());
-      else timings?.onFailed?.("a aba não tem terminal vivo");
-    } else {
-      // Com PTY, só conta como enviada quando o PTY aceita a colagem e o Enter (A074).
-      sendPasteToPty(tabId, term, text, !timings?.draft, timings?.onRetry).then(
-        () => timings?.onSent?.(Date.now()),
-        (erro: unknown) => timings?.onFailed?.(erro instanceof Error ? erro.message : String(erro)),
-      );
-    }
+    sendPasteToPty(tabId, term, text, !timings?.draft, timings?.onRetry).then(
+      () => timings?.onSent?.(Date.now()),
+      (erro: unknown) => timings?.onFailed?.(erro instanceof Error ? erro.message : String(erro)),
+    );
     if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
     if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);
   };

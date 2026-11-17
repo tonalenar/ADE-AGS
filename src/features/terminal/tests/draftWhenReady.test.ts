@@ -105,6 +105,33 @@ describe("sendWhenReady com draft", () => {
     unregister();
   });
 
+  it("aba removida do store depois do settle espera o PTY e falha no prazo", () => {
+    vi.useFakeTimers();
+    mocks.invoke.mockResolvedValue(undefined);
+    useTabsStore.setState({ tabs: [liveTab("tab-removed", 44)] });
+    const term = fakeTerm();
+    const unregister = registerTerminal("tab-removed", term as never);
+    const onSent = vi.fn();
+    const onFailed = vi.fn();
+    sendWhenReady("tab-removed", "briefing", { onSent, onFailed });
+
+    useTabsStore.setState({ tabs: [] });
+    term.parsed.forEach((cb) => cb());
+    vi.advanceTimersByTime(2_500);
+
+    expect(onSent).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(term.paste).not.toHaveBeenCalled();
+    expect(onFailed).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(8_000);
+    expect(onSent).not.toHaveBeenCalled();
+    expect(onFailed).toHaveBeenCalledWith(expect.stringContaining("a tempo"));
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(term.paste).not.toHaveBeenCalled();
+    unregister();
+  });
+
   it("draft escreve no PTY sem Enter e só confirma depois da escrita aceita", async () => {
     vi.useFakeTimers();
     mocks.invoke.mockResolvedValue(undefined);
@@ -170,9 +197,10 @@ describe("sendWhenReady com guard (rechecagem logo antes de colar)", () => {
     unregister();
   });
 
-  it("guard que lança é um não (falha fechada); guard que diz sim cola", () => {
+  it("guard que lança é um não (falha fechada); guard que diz sim confirma após o PTY", async () => {
     vi.useFakeTimers();
-    mocks.invoke.mockResolvedValue(undefined);
+    let resolveWrite!: () => void;
+    mocks.invoke.mockReturnValue(new Promise<void>((resolve) => { resolveWrite = resolve; }));
     useTabsStore.setState({ tabs: [liveTab("tab-guard-2", 52)] });
     const bad = fakeTerm();
     const offBad = registerTerminal("tab-guard-2", bad as never);
@@ -184,9 +212,22 @@ describe("sendWhenReady com guard (rechecagem logo antes de colar)", () => {
     useTabsStore.setState({ tabs: [liveTab("tab-guard-3", 53)] });
     const good = fakeTerm();
     const offGood = registerTerminal("tab-guard-3", good as never);
-    sendWhenReady("tab-guard-3", "y", { draft: true, guard: () => true });
+    const onSent = vi.fn();
+    sendWhenReady("tab-guard-3", "y", { guard: () => true, onSent });
     good.parsed.forEach((cb) => cb());
     vi.advanceTimersByTime(2_600);
+    expect(mocks.invoke).toHaveBeenCalledWith("pty_write_composto", {
+      id: 53,
+      passos: [
+        { tipo: "texto", dados: "y" },
+        { tipo: "pausa", ms: 80 },
+        { tipo: "texto", dados: "\r" },
+      ],
+    });
+    expect(onSent).not.toHaveBeenCalled();
+    resolveWrite();
+    await flushPromises();
+    expect(onSent).toHaveBeenCalledTimes(1);
     expect(good.paste).not.toHaveBeenCalled();
     offGood();
   });

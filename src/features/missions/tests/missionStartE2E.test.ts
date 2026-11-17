@@ -234,11 +234,12 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       if (cmd === "pty_write_composto") {
         const id = args.id as number;
         const term = mocks.terminalsByPty.get(id);
-        const passos = args.passos as Array<{ tipo: string; dados?: string }>;
-        const texto = passos.find((passo) => passo.tipo === "texto")?.dados;
-        if (texto) term?.paste(texto);
-        const enter = [...passos].reverse().find((passo) => passo.tipo === "texto")?.dados;
-        if (enter === "\r") term?.input(enter);
+        const passos = args.passos as Array<{ tipo: "texto"; dados: string } | { tipo: "pausa"; ms: number }>;
+        for (const passo of passos) {
+          if (passo.tipo === "pausa") await new Promise((resolve) => setTimeout(resolve, passo.ms));
+          else if (passo.dados === "\r") term?.input(passo.dados);
+          else term?.paste(passo.dados);
+        }
         return {};
       }
       if (cmd === "pty_write") {
@@ -377,16 +378,18 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     expect(qaTerm.pastes).toHaveLength(1);
     expect(qaTerm.pastes[0]).toContain("QA");
 
-    // Spans de start_briefing registrados
-    const briefingSpans = recordedSpans.filter((s) => s.span.kind === "start_briefing");
-    expect(briefingSpans.map((s) => s.span.actor)).toEqual(["Orquestrador", "Backend", "Frontend", "QA"]);
-
-    // 5. Após 80ms, o primeiro Enter (\r) é disparado pelo pasteIntoTab
+    // 5. O composto escreve o briefing, pausa 80ms e só então envia o primeiro Enter (\r).
+    expect(leadTerm.inputs).not.toContain("\r");
     vi.advanceTimersByTime(80);
+    await flushPromises();
     expect(leadTerm.inputs).toContain("\r");
     expect(backendTerm.inputs).toContain("\r");
     expect(frontendTerm.inputs).toContain("\r");
     expect(qaTerm.inputs).toContain("\r");
+
+    // Spans de start_briefing são registrados quando o composto termina (inclusive a pausa).
+    const briefingSpans = recordedSpans.filter((s) => s.span.kind === "start_briefing");
+    expect(briefingSpans.map((s) => s.span.actor)).toEqual(["Orquestrador", "Backend", "Frontend", "QA"]);
 
     // Simulação do comportamento das TUIs:
     // - Lead: aceitou o Enter imediatamente e começou a trabalhar
@@ -517,7 +520,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
   });
 
   describe("Cobertura detalhada dos novos callbacks (onActivity, onRetry, onStalled)", () => {
-    it("(1) onActivity é chamado exatamente uma vez na 1ª saída >4 s (e não com eco <=4 s)", () => {
+    it("(1) onActivity é chamado exatamente uma vez na 1ª saída >4 s (e não com eco <=4 s)", async () => {
       const tabId = "tab-cb-activity";
       const term = new SimulatedTerminal(["› "]);
       registerSimulated(tabId, term);
@@ -531,6 +534,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       term.emitOutput(["Prompt inicial"]);
       vi.advanceTimersByTime(2500); // settle -> paste enviado
       vi.advanceTimersByTime(80); // enter enviado
+      await flushPromises();
 
       // Saída dentro de ECHO_MS (ex.: em 2s e em 3.9s após o envio) é tratada como eco
       vi.advanceTimersByTime(2000 - 80);
@@ -558,7 +562,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       expect(activityCalls).toHaveLength(1);
     });
 
-    it("(1b) onActivity é chamado inclusive quando o agente arranca DEPOIS do aviso de 25 s (até 120 s)", () => {
+    it("(1b) onActivity é chamado inclusive quando o agente arranca DEPOIS do aviso de 25 s (até 120 s)", async () => {
       const leadTabId = "tab-late-lead";
       const memberTabId = "tab-late-member";
       const leadTerm = new SimulatedTerminal(["› "]);
@@ -583,6 +587,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       memberTerm.emitOutput(["Boot"]);
       vi.advanceTimersByTime(2500); // settle
       vi.advanceTimersByTime(80); // enter
+      await flushPromises();
 
       // Membro fica mudo até os 25s
       vi.advanceTimersByTime(START_CHECK_MS - 80);
@@ -607,7 +612,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       expect(activityCalls).toHaveLength(1);
     });
 
-    it("(1c) saídas após 120 s (START_DEADLINE_MS) não chamam onActivity pois o watcher foi descartado", () => {
+    it("(1c) saídas após 120 s (START_DEADLINE_MS) não chamam onActivity pois o watcher foi descartado", async () => {
       const tabId = "tab-deadline-expire";
       const term = new SimulatedTerminal(["› "]);
       registerSimulated(tabId, term);
@@ -621,6 +626,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       term.emitOutput(["Boot"]);
       vi.advanceTimersByTime(2500); // settle
       vi.advanceTimersByTime(80); // enter
+      await flushPromises();
 
       // Avança até ultrapassar START_DEADLINE_MS (120_000ms)
       vi.advanceTimersByTime(START_DEADLINE_MS);
@@ -706,7 +712,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       expect(retryTimes).toHaveLength(1);
     });
 
-    it("(3) agente que nunca arranca: onActivity jamais é chamado, e onStalled + onRetry são chamados aos 25 s", () => {
+    it("(3) agente que nunca arranca: onActivity jamais é chamado, e onStalled + onRetry são chamados aos 25 s", async () => {
       const leadTabId = "tab-stalled-full-lead";
       const memberTabId = "tab-stalled-full-member";
 
@@ -737,6 +743,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       memberTerm.emitOutput(["Iniciando TUI..."]);
       vi.advanceTimersByTime(2500); // settle
       vi.advanceTimersByTime(80); // enter inicial
+      await flushPromises();
 
       // Emite eco <= 4s (ECHO_MS), que NÃO conta como atividade
       vi.advanceTimersByTime(2000);
@@ -840,7 +847,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
   });
 
   describe("Orquestrador (lead)", () => {
-    it("grava start_stalled se não houver atividade, mas não cola aviso a si mesmo", () => {
+    it("grava start_stalled se não houver atividade, mas não cola aviso a si mesmo", async () => {
       const leadTabId = "tab-lead-alone";
       const leadTerm = new SimulatedTerminal(["› "]);
       registerSimulated(leadTabId, leadTerm);
@@ -856,6 +863,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       leadTerm.emitOutput(["Pronto"]);
       vi.advanceTimersByTime(2500);
       vi.advanceTimersByTime(80);
+      await flushPromises();
 
       // Avança até 25s sem atividade
       vi.advanceTimersByTime(START_CHECK_MS);
