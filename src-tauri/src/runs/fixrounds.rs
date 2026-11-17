@@ -190,13 +190,22 @@ fn slugify(text: &str) -> String {
     slug.trim_matches('-').to_string()
 }
 
+/// Procura `needle` (ASCII) em `haystack` sem diferenciar maiúsculas de minúsculas ASCII, sem criar outra string.
+/// O índice devolvido é o do texto ORIGINAL, e é o único que serve para fatiá-lo: um índice de cópia em minúsculo pode
+/// não bater (o "İ" vira dois caracteres e mais bytes).
+fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
+    haystack
+        .char_indices()
+        .map(|(index, _)| index)
+        .find(|&index| haystack.get(index..index + needle.len()).is_some_and(|found| found.eq_ignore_ascii_case(needle)))
+}
+
 fn explicit_token(corrects: Option<&str>, prompt: &str) -> Option<String> {
     if let Some(token) = corrects.map(str::trim).filter(|s| !s.is_empty()) {
         return Some(token.to_string());
     }
-    let lower = prompt.to_lowercase();
     for marker in ["corrects:", "corrects=", "fixes:", "fixes=", "corrige:", "corrigir:"] {
-        if let Some(index) = lower.find(marker) {
+        if let Some(index) = find_ascii_ci(prompt, marker) {
             let rest = prompt[index + marker.len()..].trim();
             let token: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
             if !token.is_empty() {
@@ -594,8 +603,7 @@ fn field(text: &str, name: &str) -> Option<String> {
 }
 
 fn loose_branch(text: &str) -> Option<String> {
-    let lower = text.to_lowercase();
-    let index = lower.find("branch ")?;
+    let index = find_ascii_ci(text, "branch ")?;
     let rest = text[index + "branch ".len()..].trim();
     let token: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || matches!(*c, '/' | '_' | '.' | '-')).collect();
     (!token.is_empty()).then_some(token)
@@ -1026,6 +1034,23 @@ mod tests {
         let text = specific_failure("rodando\nthread panicked at src/login.rs:40: assertion `left == right` failed\nruído");
         assert!(text.contains("src/login.rs:40"));
         assert!(!text.contains("rodando"));
+    }
+
+    /// "İ" (U+0130) vira dois caracteres ao minúsculo (`i` + U+0307), e o texto minúsculo fica com bytes a mais. Um
+    /// índice achado nele e usado no texto original cai no meio de um caractere e o fatiamento entra em pânico. O
+    /// literal "İİ FIX: x" não casa marcador nenhum (o marcador é `fixes:`): fica como guarda de que não há pânico.
+    #[test]
+    fn prompt_com_i_turco_nao_entra_em_panico() {
+        assert_eq!(explicit_token(None, "İİ FIX: x"), None);
+        // O caso que estoura: o marcador vem depois de "İ" e o caractere seguinte é multibyte (`é`).
+        assert_eq!(explicit_token(None, "İ corrects:éabc"), None);
+        assert_eq!(explicit_token(None, "İ corrects: abc-1").as_deref(), Some("abc-1"));
+        assert_eq!(loose_branch("İ branch éabc"), None);
+        assert_eq!(loose_branch("İ branch feat/x-1").as_deref(), Some("feat/x-1"));
+        // O mesmo pela classificação do canvas, que é por onde a entrega de QA chega.
+        let hit = classify_canvas("qa", "QA", false, "İ branch feat/x-1 falhou").expect("devolução de QA");
+        assert_eq!(hit.label, "feat/x-1");
+        assert!(classify_canvas("qa", "QA", false, "İ branch éabc falhou").is_some());
     }
 
     #[test]
