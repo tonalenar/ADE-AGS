@@ -43,13 +43,16 @@ pub(crate) struct Broker {
 impl Broker {
     pub(crate) fn issue_grant(&self, account_id: &str) -> String {
         let grant_id = uuid::Uuid::new_v4().simple().to_string();
-        self.grants.lock().unwrap_or_else(|e| e.into_inner()).insert(
-            grant_id.clone(),
-            Grant {
-                account_id: account_id.to_string(),
-                agent_pid: 0,
-            },
-        );
+        self.grants
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                grant_id.clone(),
+                Grant {
+                    account_id: account_id.to_string(),
+                    agent_pid: 0,
+                },
+            );
         grant_id
     }
 
@@ -138,8 +141,7 @@ impl Broker {
             .unwrap_or_else(|e| e.into_inner())
             .get(&grant_id)
             .is_some_and(|grant| {
-                grant.account_id == account_id
-                    && descends_from(caller_pid, grant.agent_pid, parent)
+                grant.account_id == account_id && descends_from(caller_pid, grant.agent_pid, parent)
             });
         if !still_authorized {
             wipe_secret(&mut key);
@@ -246,11 +248,7 @@ pub(crate) fn wipe_secret(secret: &mut String) {
     secret.clear();
 }
 
-fn helper_command(
-    ags: &std::path::Path,
-    agent: &str,
-    account_id: &str,
-) -> Result<String, String> {
+fn helper_command(ags: &std::path::Path, agent: &str, account_id: &str) -> Result<String, String> {
     if !["claude", "codex"].contains(&agent)
         || account_id.is_empty()
         || !account_id

@@ -255,12 +255,9 @@ fn ambiente_do_agente_sem_chave() {
     assert!(!env.contains_key("ANTHROPIC_API_KEY"));
     assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"));
     assert!(env.values().all(|value| value != key));
-    let settings = super::broker::write_claude_settings(
-        dir.path(),
-        Path::new("/tmp/ags"),
-        &account_id,
-    )
-    .unwrap();
+    let settings =
+        super::broker::write_claude_settings(dir.path(), Path::new("/tmp/ags"), &account_id)
+            .unwrap();
     let settings_json = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();
     assert!(settings.contains("credential claude"));
     assert!(!settings_json.contains(key));
@@ -274,19 +271,16 @@ fn settings_claude_preserva_preferencias_e_grava_so_o_comando_helper() {
         "settings.json",
         r#"{"theme":"dark","permissions":{"allow":["Bash(git status)"]}}"#,
     );
-    let first_command = super::broker::write_claude_settings(
-        dir.path(),
-        Path::new("/tmp/ags"),
-        "conta-123",
-    )
-    .unwrap();
-    let second_command = super::broker::write_claude_settings(
-        dir.path(),
-        Path::new("/tmp/ags"),
-        "conta-123",
-    )
-    .unwrap();
-    assert_eq!(first_command, second_command, "sessões da conta compartilham helper estável");
+    let first_command =
+        super::broker::write_claude_settings(dir.path(), Path::new("/tmp/ags"), "conta-123")
+            .unwrap();
+    let second_command =
+        super::broker::write_claude_settings(dir.path(), Path::new("/tmp/ags"), "conta-123")
+            .unwrap();
+    assert_eq!(
+        first_command, second_command,
+        "sessões da conta compartilham helper estável"
+    );
     let body = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();
     let settings: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(settings["theme"], "dark");
@@ -303,11 +297,8 @@ fn settings_claude_preserva_helper_de_terceiros() {
     let dir = TempDir::new();
     let original = r#"{"apiKeyHelper":"/usr/local/bin/custom-auth","theme":"dark"}"#;
     dir.write("settings.json", original);
-    let result = super::broker::write_claude_settings(
-        dir.path(),
-        Path::new("/tmp/ags"),
-        "conta-123",
-    );
+    let result =
+        super::broker::write_claude_settings(dir.path(), Path::new("/tmp/ags"), "conta-123");
     assert!(
         result.is_err(),
         "o broker não deve substituir helper alheio"
@@ -355,15 +346,20 @@ fn helper_autoriza_sessoes_vivas_renova_e_revoga_no_fechamento() {
             .unwrap(),
         "sk-teste-nao-real"
     );
-    assert!(broker
-        .redeem_with_account(&conta, 53, parent, load)
-        .is_err());
+    assert!(
+        broker
+            .redeem_with_account(&conta, 53, parent, load)
+            .is_err()
+    );
 
     broker.revoke_grant(&grant_a);
     assert!(!broker.has_account_grant(&conta));
-    assert!(broker
-        .redeem_with_account(&conta, 43, parent, load)
-        .is_err(), "uma sessão encerrada perde o acesso");
+    assert!(
+        broker
+            .redeem_with_account(&conta, 43, parent, load)
+            .is_err(),
+        "uma sessão encerrada perde o acesso"
+    );
 }
 
 #[test]

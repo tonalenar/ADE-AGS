@@ -755,17 +755,16 @@ fn codex_argv_nao_contem_o_token_da_sessao() {
     let home = std::env::temp_dir().join(format!("ags-codex-profile-{}", uuid::Uuid::new_v4()));
     let path = write_codex_profile_with_auth_at(&home, "ags-perfil", None).unwrap();
     let body = std::fs::read_to_string(&path).unwrap();
-    assert!(!body.contains(token), "o perfil não deve persistir o token: {body}");
+    assert!(
+        !body.contains(token),
+        "o perfil não deve persistir o token: {body}"
+    );
     assert!(!body.contains("ADE_SESSION"));
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(
-            mode & 0o777,
-            0o600,
-            "o perfil temporário continua privado"
-        );
+        assert_eq!(mode & 0o777, 0o600, "o perfil temporário continua privado");
     }
     let _ = std::fs::remove_dir_all(&home);
 }

@@ -1254,9 +1254,7 @@ fn browser_act_aceita_timeout_e_o_prazo_e_o_mesmo_do_portal_act() {
         r#""browser.run" if args.pointer("/request/op").and_then(Value::as_str) == Some("act")"#
     ));
     assert!(src.contains("\"portal.act\" => {"));
-    assert!(src.contains(
-        "ade_ags_lib::ipc::mcp::act_timeout_secs(args.get(\"timeout\")) + 30"
-    ));
+    assert!(src.contains("ade_ags_lib::ipc::mcp::act_timeout_secs(args.get(\"timeout\")) + 30"));
 }
 
 /// `sim_act`/`desk_act` são o `sim.act`/`desk.act` da CLI: os mesmos argumentos e a identidade que o

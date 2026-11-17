@@ -1138,11 +1138,8 @@ pub async fn pty_create(
                 let config_dir = account_profile_dir
                     .as_deref()
                     .ok_or("A pasta de configuração da conta Claude não está disponível.")?;
-                let command = crate::accounts::broker::write_claude_settings(
-                    config_dir,
-                    &ags,
-                    account_id,
-                )?;
+                let command =
+                    crate::accounts::broker::write_claude_settings(config_dir, &ags, account_id)?;
                 claude_helper_cleanup = Some((
                     config_dir.to_path_buf(),
                     command,
@@ -1163,7 +1160,9 @@ pub async fn pty_create(
                 .ok_or("A conta Codex não foi informada.")?;
             let ags = crate::ipc::install::source_binary(&app)
                 .ok_or("Não foi possível localizar o helper `ags` desta instância.")?;
-            Some(crate::accounts::broker::codex_provider_config(&ags, account_id)?)
+            Some(crate::accounts::broker::codex_provider_config(
+                &ags, account_id,
+            )?)
         } else {
             None
         };
