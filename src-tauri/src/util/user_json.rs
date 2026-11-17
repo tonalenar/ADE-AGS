@@ -1,7 +1,7 @@
 //! Leitura e gravação segura de arquivos JSON pertencentes ao usuário.
 
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -43,6 +43,13 @@ impl std::error::Error for UserJsonError {}
 
 /// Lê JSON do usuário. Só um arquivo ausente é tratado como ausência de configuração.
 pub fn read_user_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, UserJsonError> {
+    read_user_json_snapshot(path).map(|snapshot| snapshot.map(|(value, _)| value))
+}
+
+/// Lê o valor junto dos bytes observados, para operações de leitura-modificação-gravação.
+pub fn read_user_json_snapshot<T: DeserializeOwned>(
+    path: &Path,
+) -> Result<Option<(T, Vec<u8>)>, UserJsonError> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -50,7 +57,7 @@ pub fn read_user_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, Use
     };
 
     match serde_json::from_slice(&bytes) {
-        Ok(value) => Ok(Some(value)),
+        Ok(value) => Ok(Some((value, bytes))),
         Err(error) => {
             let quarantined = quarantine_path(path)?;
             fs::copy(path, &quarantined).map_err(|copy_error| {
@@ -95,6 +102,24 @@ fn quarantine_path(path: &Path) -> Result<PathBuf, UserJsonError> {
 
 /// Grava JSON em arquivo temporário exclusivo, preserva a versão anterior e renomeia no fim.
 pub fn write_user_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    write_user_json_inner(path, value, None)
+}
+
+/// Grava apenas se o arquivo ainda corresponde ao snapshot usado para montar `value`.
+/// `None` representa que o arquivo não existia quando foi lido.
+pub fn write_user_json_if_unchanged<T: Serialize>(
+    path: &Path,
+    value: &T,
+    expected: Option<&[u8]>,
+) -> Result<(), String> {
+    write_user_json_inner(path, value, Some(expected))
+}
+
+fn write_user_json_inner<T: Serialize>(
+    path: &Path,
+    value: &T,
+    expected: Option<Option<&[u8]>>,
+) -> Result<(), String> {
     let body =
         serde_json::to_vec(value).map_err(|e| format!("Não foi possível serializar JSON: {e}"))?;
     let parent = path
@@ -126,6 +151,10 @@ pub fn write_user_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Strin
     }
     drop(file);
 
+    if let Some(expected) = expected {
+        verify_snapshot(path, expected, &tmp)?;
+    }
+
     if path.exists() {
         let backup = path.with_file_name(format!("{name}.bak"));
         fs::copy(path, &backup).map_err(|e| {
@@ -138,6 +167,11 @@ pub fn write_user_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Strin
         })?;
     }
 
+    // Confere depois da cópia de segurança, o mais perto possível da troca atômica.
+    if let Some(expected) = expected {
+        verify_snapshot(path, expected, &tmp)?;
+    }
+
     if let Err(error) = fs::rename(&tmp, path) {
         let _ = fs::remove_file(&tmp);
         return Err(format!(
@@ -146,6 +180,37 @@ pub fn write_user_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Strin
         ));
     }
     Ok(())
+}
+
+fn matches_snapshot(path: &Path, expected: Option<&[u8]>) -> Result<bool, String> {
+    let current = match fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!(
+                "Não foi possível reler {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    Ok(current.as_deref() == expected)
+}
+
+fn verify_snapshot(path: &Path, expected: Option<&[u8]>, tmp: &Path) -> Result<(), String> {
+    match matches_snapshot(path, expected) {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            let _ = fs::remove_file(tmp);
+            Err(format!(
+                "O arquivo {} foi alterado durante a atualização; a versão mais recente foi preservada.",
+                path.display()
+            ))
+        }
+        Err(error) => {
+            let _ = fs::remove_file(tmp);
+            Err(error)
+        }
+    }
 }
 
 fn create_temp(

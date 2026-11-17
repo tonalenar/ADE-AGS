@@ -90,7 +90,11 @@ pub(super) fn with_trusted(config: &Value, dir: &str) -> Option<Value> {
         return None;
     }
 
-    let mut next = if config.is_object() { config.clone() } else { json!({}) };
+    let mut next = if config.is_object() {
+        config.clone()
+    } else {
+        json!({})
+    };
     {
         let root = next.as_object_mut()?;
         let projects = root.entry("projects").or_insert_with(|| json!({}));
@@ -115,17 +119,27 @@ pub(super) fn with_trusted(config: &Value, dir: &str) -> Option<Value> {
 
 /// Deja `dir` pre-aprobada para esa cuenta. No hace nada si ya lo estaba.
 pub(super) fn trust_dir(config_path: &Path, dir: &str) -> Result<(), String> {
-    let _guard = TRUST_LOCK.lock().map_err(|e| format!("Não foi possível bloquear a configuração do Claude: {e}"))?;
+    let _guard = TRUST_LOCK
+        .lock()
+        .map_err(|e| format!("Não foi possível bloquear a configuração do Claude: {e}"))?;
     // Só a ausência é normal; os demais erros protegem o login e os projetos do usuário.
-    let config: Value = crate::util::user_json::read_user_json(config_path)
-        .map_err(|e| e.to_string())?
-        .unwrap_or_else(|| json!({}));
+    let (config, original_bytes): (Value, Option<Vec<u8>>) =
+        match crate::util::user_json::read_user_json_snapshot(config_path)
+            .map_err(|e| e.to_string())?
+        {
+            Some((config, bytes)) => (config, Some(bytes)),
+            None => (json!({}), None),
+        };
 
     let Some(next) = with_trusted(&config, dir) else {
         return Ok(());
     };
 
-    crate::util::user_json::write_user_json(config_path, &next)
+    crate::util::user_json::write_user_json_if_unchanged(
+        config_path,
+        &next,
+        original_bytes.as_deref(),
+    )
 }
 
 /// Pré-aprova a pasta dos worktrees das missões na conta principal do Claude Code.

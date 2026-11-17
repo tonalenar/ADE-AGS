@@ -24,16 +24,19 @@ fn trust_dir_mantem_permissao_privada_e_projetos_anteriores() {
 fn trust_erro_de_permissao_nao_regrava() {
     use std::os::unix::fs::PermissionsExt;
 
-    // chmod não bloqueia root; nesse usuário, o cenário de permissão não se aplica.
-    if unsafe { libc::geteuid() } == 0 {
-        return;
-    }
     let root = std::env::temp_dir().join(format!("ags-trust-permission-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let path = root.join(".claude.json");
     let original = br#"{"projects":{"/keep":{"hasTrustDialogAccepted":true}}}"#;
     std::fs::write(&path, original).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    // Se o sistema ainda permite abrir o arquivo, o cenário de permissão não se aplica.
+    if std::fs::File::open(&path).is_ok() {
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        return;
+    }
 
     let result = super::trust::trust_dir(&path, "/new");
 

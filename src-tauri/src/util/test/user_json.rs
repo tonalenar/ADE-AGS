@@ -1,4 +1,6 @@
-use super::super::user_json::{UserJsonError, read_user_json, write_user_json};
+use super::super::user_json::{
+    read_user_json, write_user_json, write_user_json_if_unchanged, UserJsonError,
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -82,4 +84,23 @@ fn temporarios_concorrentes_nao_colidem() {
         writer.join().unwrap().unwrap();
     }
     assert!(read_user_json::<Sample>(&path).unwrap().is_some());
+}
+
+#[test]
+fn escrita_condicional_preserva_alteracao_concorrente() {
+    let (path, _dir) = temp_file("concurrent-update");
+    let original = br#"{"value":"antigo"}"#;
+    std::fs::write(&path, original).unwrap();
+    let next = Sample {
+        value: "novo pela ADE".into(),
+    };
+    std::fs::write(&path, br#"{"value":"novo pelo Claude"}"#).unwrap();
+
+    let error = write_user_json_if_unchanged(&path, &next, Some(original)).unwrap_err();
+
+    assert!(error.contains("alterado"));
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        br#"{"value":"novo pelo Claude"}"#
+    );
 }
