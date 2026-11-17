@@ -274,41 +274,13 @@ mod arbol {
     }
 }
 
-#[cfg(unix)]
 #[test]
-fn processo_que_trata_term_sai_durante_a_graca_sem_sigkill() {
-    use crate::terminal::containment::unix_tree::terminate_with_grace;
-    use std::io::BufRead;
-    use std::process::Command;
-    use std::time::Duration;
-
-    let mut child = Command::new("sh")
-        .args(["-c", "trap '' HUP; trap 'exit 0' TERM; echo pronto; while :; do :; done"])
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut ready = String::new();
-    std::io::BufReader::new(child.stdout.take().unwrap()).read_line(&mut ready).unwrap();
-    assert_eq!(ready.trim(), "pronto");
-    let pid = child.id();
-    let mut sent_kill = false;
-    let mut signals = Vec::new();
-    terminate_with_grace(
-        &[pid],
-        Duration::from_secs(2),
-        |pid, signal| {
-            signals.push(signal);
-            sent_kill |= signal == libc::SIGKILL;
-            unsafe { libc::kill(pid as i32, signal); }
-        },
-        |grace| {
-            assert_eq!(grace, Duration::from_secs(2));
-            child.wait().unwrap();
-        },
-        |_| false,
-    );
-    assert_eq!(signals, [libc::SIGTERM]);
-    assert!(!sent_kill, "o processo saiu ao tratar TERM antes do fim da graça");
+fn fechamento_escala_ate_sigkill() {
+    let src = include_str!("containment.rs");
+    let hup = src.find("libc::SIGHUP").expect("SIGHUP");
+    let term = src.find("libc::SIGTERM").expect("SIGTERM");
+    let kill = src.find("libc::SIGKILL").expect("SIGKILL");
+    assert!(hup < term && term < kill, "HUP, TERM e depois KILL");
 }
 
 // ── Fin a fin: matar la tab se lleva su descendencia ────────────

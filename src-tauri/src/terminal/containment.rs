@@ -332,40 +332,15 @@ pub(crate) mod unix_tree {
                 libc::kill(*pid as i32, libc::SIGHUP);
             }
         }
-        // O TERM precisa de uma janela para o agente fechar arquivos e filhos. O atraso
-        // roda numa thread própria: `kill_tree` nunca segura a thread que pediu o fechamento.
-        let pending = victims.clone();
-        if std::thread::Builder::new()
-            .name("ade-process-grace".into())
-            .spawn(move || {
-                terminate_with_grace(
-                    &pending,
-                    std::time::Duration::from_secs(2),
-                    |pid, signal| unsafe { libc::kill(pid as i32, signal); },
-                    std::thread::sleep,
-                    |pid| unsafe { libc::kill(pid as i32, 0) == 0 },
-                )
-            })
-            .is_err()
-        {
-            for pid in victims {
-                unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+        for pid in &victims {
+            unsafe {
+                libc::kill(*pid as i32, libc::SIGTERM);
             }
         }
-    }
-
-    /// Espera uma janela injetável após TERM e só força os processos que continuam vivos.
-    pub(crate) fn terminate_with_grace(
-        victims: &[u32],
-        grace: std::time::Duration,
-        mut signal: impl FnMut(u32, i32),
-        wait: impl FnOnce(std::time::Duration),
-        mut is_alive: impl FnMut(u32) -> bool,
-    ) {
-        for pid in victims { signal(*pid, libc::SIGTERM); }
-        wait(grace);
         for pid in victims {
-            if is_alive(*pid) { signal(*pid, libc::SIGKILL); }
+            unsafe {
+                libc::kill(pid as i32, libc::SIGKILL);
+            }
         }
     }
 }
