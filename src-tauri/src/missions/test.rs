@@ -1269,10 +1269,10 @@ mod eventos {
     #[test]
     fn crear_y_editar_avisan_con_el_id() {
         let (app, vistos) = app_que_escucha(db());
-        let m = mission_create(app.handle().clone(), "w1".into(), pedido(), app.state()).unwrap();
+        let m = tauri::async_runtime::block_on(mission_create(app.handle().clone(), "w1".into(), pedido(), app.state())).unwrap();
         assert_eq!(*vistos.lock().unwrap(), vec![m.id.clone()]);
 
-        mission_update(
+        tauri::async_runtime::block_on(mission_update(
             app.handle().clone(),
             m.id.clone(),
             MissionInput {
@@ -1280,7 +1280,7 @@ mod eventos {
                 ..pedido()
             },
             app.state(),
-        )
+        ))
         .unwrap();
         assert_eq!(*vistos.lock().unwrap(), vec![m.id.clone(), m.id]);
     }
@@ -1292,7 +1292,7 @@ mod eventos {
             objective: "  ".into(),
             ..pedido()
         };
-        assert!(mission_create(app.handle().clone(), "w1".into(), vacio, app.state()).is_err());
+        assert!(tauri::async_runtime::block_on(mission_create(app.handle().clone(), "w1".into(), vacio, app.state())).is_err());
         assert!(vistos.lock().unwrap().is_empty());
     }
 

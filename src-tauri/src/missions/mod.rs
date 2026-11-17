@@ -300,49 +300,76 @@ pub(crate) fn cancel(
 // ── Comandos ────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn mission_create<R: Runtime>(
+pub async fn mission_create<R: Runtime>(
     app: AppHandle<R>,
     workspace_id: String,
     input: MissionInput,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Mission, String> {
-    let mission = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        create(&conn, &workspace_id, &input)?
-    };
-    notify(&app, &mission.id);
-    Ok(mission)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mission = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            create(&conn, &workspace_id, &input)?
+        };
+        notify(&app, &mission.id);
+        Ok(mission)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn mission_update<R: Runtime>(
+pub async fn mission_update<R: Runtime>(
     app: AppHandle<R>,
     mission_id: String,
     input: MissionInput,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Mission, String> {
-    let mission = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        update(&conn, &mission_id, &input)?
-    };
-    notify(&app, &mission.id);
-    Ok(mission)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mission = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            update(&conn, &mission_id, &input)?
+        };
+        notify(&app, &mission.id);
+        Ok(mission)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn mission_list(
+pub async fn mission_list(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<MissionSummary>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || mission_list_now(&db, workspace_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn mission_list_now(
+    db: &DbConnection,
+    workspace_id: String,
 ) -> Result<Vec<MissionSummary>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list(&conn, &workspace_id)
 }
 
 #[tauri::command]
-pub fn mission_get(
+pub async fn mission_get(
     mission_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<MissionDetail, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || mission_get_now(&db, mission_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn mission_get_now(db: &DbConnection, mission_id: String) -> Result<MissionDetail, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     detail(&conn, &mission_id)
 }
@@ -457,8 +484,18 @@ pub async fn mission_accept_task(
 }
 
 #[tauri::command]
-pub fn mission_reject_task(
+pub async fn mission_reject_task(
     app: AppHandle,
+    mission_id: String,
+    task_id: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || mission_reject_task_now(&app, mission_id, task_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn mission_reject_task_now(
+    app: &AppHandle,
     mission_id: String,
     task_id: String,
 ) -> Result<(), String> {
@@ -607,8 +644,17 @@ fn mission_start_terminals_sync(
 }
 
 #[tauri::command]
-pub fn mission_check_duplicate(
+pub async fn mission_check_duplicate(
     app: AppHandle,
+    mission_id: String,
+) -> Result<Option<DuplicateMission>, String> {
+    tauri::async_runtime::spawn_blocking(move || mission_check_duplicate_now(&app, mission_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn mission_check_duplicate_now(
+    app: &AppHandle,
     mission_id: String,
 ) -> Result<Option<DuplicateMission>, String> {
     let db = db_of(&app)?;
@@ -617,8 +663,23 @@ pub fn mission_check_duplicate(
 }
 
 #[tauri::command]
-pub fn mission_check_duplicate_input(
+pub async fn mission_check_duplicate_input(
     app: AppHandle,
+    workspace_id: String,
+    cwd: String,
+    title: String,
+    objective: String,
+    current_id: Option<String>,
+) -> Result<Option<DuplicateMission>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        mission_check_duplicate_input_now(&app, workspace_id, cwd, title, objective, current_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn mission_check_duplicate_input_now(
+    app: &AppHandle,
     workspace_id: String,
     cwd: String,
     title: String,
@@ -742,8 +803,18 @@ pub fn mission_cancel(app: AppHandle, mission_id: String) -> Result<Mission, Str
 
 /// Graba el tiempo de una etapa de la misión (ver `timings`).
 #[tauri::command]
-pub fn mission_timing_add(
+pub async fn mission_timing_add(
     app: AppHandle,
+    mission_id: String,
+    span: timings::NewSpan,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || mission_timing_add_now(&app, mission_id, span))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn mission_timing_add_now(
+    app: &AppHandle,
     mission_id: String,
     span: timings::NewSpan,
 ) -> Result<(), String> {
@@ -754,7 +825,13 @@ pub fn mission_timing_add(
 
 /// Suma tiempo de trabajo real a una misión en curso (ver `active`).
 #[tauri::command]
-pub fn mission_active_add(app: AppHandle, mission_id: String, ms: i64) -> Result<(), String> {
+pub async fn mission_active_add(app: AppHandle, mission_id: String, ms: i64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || mission_active_add_now(&app, mission_id, ms))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn mission_active_add_now(app: &AppHandle, mission_id: String, ms: i64) -> Result<(), String> {
     let db = db_of(&app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     active::add(&conn, &mission_id, ms)
@@ -826,7 +903,13 @@ pub(crate) fn timings_of(conn: &Connection, mission_id: &str) -> Result<MissionT
 }
 
 #[tauri::command]
-pub fn mission_timings(app: AppHandle, mission_id: String) -> Result<MissionTimings, String> {
+pub async fn mission_timings(app: AppHandle, mission_id: String) -> Result<MissionTimings, String> {
+    tauri::async_runtime::spawn_blocking(move || mission_timings_now(&app, mission_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn mission_timings_now(app: &AppHandle, mission_id: String) -> Result<MissionTimings, String> {
     let db = db_of(&app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     timings_of(&conn, &mission_id)
@@ -947,7 +1030,13 @@ pub(crate) fn memory_briefing(db: &DbConnection, mission_id: &str) -> Result<Str
 }
 
 #[tauri::command]
-pub fn mission_memory_context(app: AppHandle, mission_id: String) -> Result<String, String> {
+pub async fn mission_memory_context(app: AppHandle, mission_id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || mission_memory_context_now(&app, mission_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn mission_memory_context_now(app: &AppHandle, mission_id: String) -> Result<String, String> {
     let db = db_of(&app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     memory_context_text(&conn, &mission_id)
