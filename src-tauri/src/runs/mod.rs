@@ -15,22 +15,26 @@ pub(crate) use adapters::codex_fast_service_tier;
 mod agents;
 mod antigravity;
 mod broker;
+pub mod checkpoints;
 mod context;
 pub(crate) mod execution_log;
-mod harness;
+#[cfg(test)]
+mod execution_log_test;
 pub(crate) mod failure;
 pub(crate) mod fixrounds;
 pub(crate) mod handoff;
+mod harness;
 pub(crate) mod ledger;
 pub(crate) mod model_discovery;
 pub(crate) mod oneshot;
+#[cfg(test)]
+mod opencode_models_test;
 pub mod orchestration;
 mod plan;
 pub(crate) mod policy;
-pub(crate) mod quota;
 pub(crate) mod pool_failover;
+pub(crate) mod quota;
 pub(crate) mod roster;
-pub mod checkpoints;
 pub(crate) mod routing;
 mod rules;
 pub mod sandbox;
@@ -39,14 +43,13 @@ pub(crate) mod store;
 pub(crate) mod supervisor;
 #[cfg(test)]
 mod test;
-#[cfg(test)]
-mod opencode_models_test;
-#[cfg(test)]
-mod execution_log_test;
 pub(crate) mod types;
 
 /// Delega a validação do schema ao adapter headless, que conhece as restrições da própria CLI.
-pub(crate) fn validate_result_schema_for_agent(agent_id: &str, schema: &serde_json::Value) -> Result<(), String> {
+pub(crate) fn validate_result_schema_for_agent(
+    agent_id: &str,
+    schema: &serde_json::Value,
+) -> Result<(), String> {
     if let Some(adapter) = agents::adapter_for(agent_id) {
         return adapter.validate_result_schema(schema);
     }
@@ -58,12 +61,12 @@ pub(crate) use adapters::{Codex, Gemini, Kimi, OpenCode};
 pub(crate) use agents::{ClaudeCode, HeadlessAgent};
 pub(crate) use antigravity::Antigravity;
 pub(crate) use context::delegated_prompt;
-pub(crate) use routing::Complexity;
-pub use store::sweep_orphans;
-pub use types::{Fact, Run, Task};
 pub use harness::HarnessExecutionGraph;
 #[cfg(test)]
 pub(crate) use harness::thread_execution_graph;
+pub(crate) use routing::Complexity;
+pub use store::sweep_orphans;
+pub use types::{Fact, Run, Task};
 
 use std::time::Duration;
 
@@ -153,10 +156,12 @@ pub fn run_read_attempt_events(
     let length = file.metadata().map_err(|error| error.to_string())?.len();
     let offset = length.saturating_sub(MAX_BYTES);
     if offset > 0 {
-        file.seek(SeekFrom::Start(offset)).map_err(|error| error.to_string())?;
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|error| error.to_string())?;
     }
     let mut bytes = Vec::with_capacity(length.saturating_sub(offset) as usize);
-    file.read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    file.read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
     if offset > 0 {
         if let Some(newline) = bytes.iter().position(|byte| *byte == b'\n') {
             bytes.drain(..=newline);
@@ -220,7 +225,9 @@ pub async fn run_start_task(
 
     let mut task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
+        let tx =
+            rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| e.to_string())?;
         let run = store::create_run(&tx, &workspace_id, &title, &cwd)?;
         let task = store::create_task(
             &tx,
@@ -242,7 +249,7 @@ pub async fn run_start_task(
             },
         )?;
         pool_failover::record_task_pool(&tx, &task.id, assignment.pool_origin.as_ref())?;
-        tx.commit().map_err(|e|e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
         task
     };
 
@@ -263,8 +270,14 @@ pub async fn run_start_task(
         }
     }
 
-    let memory = {let conn=db.lock().map_err(|e|e.to_string())?; crate::memory::snapshot_context_for_run(&conn,&task.run_id)?};
-    let extras=supervisor::LaunchExtras {prompt:Some(format!("{}{memory}",task.prompt)), ..Default::default()};
+    let memory = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::memory::snapshot_context_for_run(&conn, &task.run_id)?
+    };
+    let extras = supervisor::LaunchExtras {
+        prompt: Some(format!("{}{memory}", task.prompt)),
+        ..Default::default()
+    };
     if let Err(e) = supervisor::start(&app, task.clone(), extras) {
         return fail(&task.id, e);
     }
@@ -387,7 +400,9 @@ pub(crate) fn start_orchestration(
 
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+        let tx =
+            rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| e.to_string())?;
         let run = store::create_run_with_memory_snapshot(
             &tx,
             spec.workspace_id,
@@ -397,7 +412,7 @@ pub(crate) fn start_orchestration(
             max_parallel,
             spec.budget_usd,
         )?;
-if let Some(squad) = spec.squad {
+        if let Some(squad) = spec.squad {
             store::set_run_squad_snapshot(&tx, &run.id, squad)?;
         }
         let title: String = match spec.title {
@@ -487,7 +502,9 @@ pub(crate) fn launch_lead(app: &AppHandle, task: &Task) -> Result<(), String> {
 pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> bool {
     let task_id = task.id.clone();
     let launched = (|| -> Result<(), String> {
-        if task.role.as_deref()==Some(types::role::DREAMER) {return launch_memory_dream(app,&task);}
+        if task.role.as_deref() == Some(types::role::DREAMER) {
+            return launch_memory_dream(app, &task);
+        }
         let (run, deps, facts) = {
             let conn = db.lock().map_err(|e| e.to_string())?;
             let run = store::run_by_id(&conn, &task.run_id)?.ok_or("o run não existe mais")?;
@@ -638,7 +655,9 @@ pub fn run_list_facts(run_id: String, db: tauri::State<DbConnection>) -> Result<
 /// terminal de emergencia queda afuera por no tenerlo.
 pub(crate) fn ensure_headless(agent_id: &str) -> Result<(), String> {
     // Desktop participants have a durable, assisted execution transport, not a CLI.
-    if agent_id == crate::desktop_apps::GEMINI_DESKTOP { return Ok(()); }
+    if agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+        return Ok(());
+    }
     if let Some(error) = crate::harness::matrix::unsupported_capability_error(
         agent_id,
         crate::harness::capability::Surface::Fleet,
@@ -657,7 +676,9 @@ pub(crate) fn ensure_headless(agent_id: &str) -> Result<(), String> {
 }
 
 pub(crate) fn ensure_orchestration(agent_id: &str) -> Result<(), String> {
-    if agent_id == crate::desktop_apps::GEMINI_DESKTOP { return Ok(()); }
+    if agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+        return Ok(());
+    }
     ensure_headless(agent_id)?;
     let adapter = crate::agents::adapter_for(agent_id).ok_or("provider unavailable")?;
     if !adapter.capabilities().orchestration {
@@ -728,13 +749,21 @@ pub(crate) fn route_now(
 ) -> Result<routing::Assignment, String> {
     let roster = roster::snapshot(db, false)?;
     let tiers = routing::load_tiers(db);
-    routing::route(&roster, &tiers, &routing::resolve_pool(db, request)?, crate::util::now_ts())
+    routing::route(
+        &roster,
+        &tiers,
+        &routing::resolve_pool(db, request)?,
+        crate::util::now_ts(),
+    )
 }
 
 /// Lo que usó cada cuenta en los últimos `days` días (intentos, tokens, costo reportado), con
 /// sus límites y lo que corre ahora. Ver `ledger`.
 #[tauri::command]
-pub async fn account_usage_summary(app: AppHandle, days: u32) -> Result<Vec<ledger::AccountUsage>, String> {
+pub async fn account_usage_summary(
+    app: AppHandle,
+    days: u32,
+) -> Result<Vec<ledger::AccountUsage>, String> {
     let db = db_of(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let now = crate::util::now_ts();
@@ -747,14 +776,21 @@ pub async fn account_usage_summary(app: AppHandle, days: u32) -> Result<Vec<ledg
 
 /// Los límites de una cuenta (`account_key` como en `quota::account_key`).
 #[tauri::command]
-pub fn account_limits_get(app: AppHandle, account_key: String) -> Result<ledger::AccountLimits, String> {
+pub fn account_limits_get(
+    app: AppHandle,
+    account_key: String,
+) -> Result<ledger::AccountLimits, String> {
     let db = db_of(&app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     Ok(ledger::load_limits(&conn, &account_key))
 }
 
 #[tauri::command]
-pub fn account_limits_set(app: AppHandle, account_key: String, limits: ledger::AccountLimits) -> Result<(), String> {
+pub fn account_limits_set(
+    app: AppHandle,
+    account_key: String,
+    limits: ledger::AccountLimits,
+) -> Result<(), String> {
     let db = db_of(&app)?;
     ledger::save_limits(&db, &account_key, &limits)
 }
@@ -834,10 +870,7 @@ pub fn run_set_tiers(
             return Err(format!("'{}' não é um agente conhecido", bad.agent_id));
         }
         if entries.iter().any(|e| e.model.trim().is_empty()) {
-            return Err(format!(
-                "a faixa {} tem um modelo sem nome",
-                c.as_str()
-            ));
+            return Err(format!("a faixa {} tem um modelo sem nome", c.as_str()));
         }
     }
     routing::save_tiers(&db, &tiers)?;
@@ -886,26 +919,42 @@ pub(crate) fn isolate_task_from(
     start: &str,
 ) -> Result<Task, String> {
     let project = std::path::Path::new(&task.cwd);
+    let skills_dir = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::skills::skills_dir_from_conn(&conn)?
+    };
     let wt = worktrees::create_from(base, project, &task.title, start)?;
-
-    let conn = db.lock().map_err(|e| e.to_string())?;
+    let project_links = crate::skills::links_dir_for(&task.cwd, &task.agent_id);
+    let task_links = crate::skills::links_dir_for(&wt.task_cwd.to_string_lossy(), &task.agent_id);
     // Las skills que el usuario ve en el proyecto, también adentro. Best-effort: sin la
-    // carpeta global configurada, o sin skills, el agente arranca igual.
-    if let (Ok(skills_dir), Some(project_links), Some(task_links)) = (
-        crate::skills::skills_dir_from_conn(&conn),
-        crate::skills::links_dir_for(&task.cwd, &task.agent_id),
-        crate::skills::links_dir_for(&wt.task_cwd.to_string_lossy(), &task.agent_id),
-    ) {
+    // carpeta global configurada, o sin skills, el agente arranca igual. El link va sin lock.
+    if let (Some(project_links), Some(task_links)) = (&project_links, &task_links) {
         worktrees::link_skills(&project_links, &task_links, &skills_dir);
     }
 
-    store::set_worktree(
-        &conn,
-        &task.id,
-        &wt.task_cwd.to_string_lossy(),
-        &wt.root.to_string_lossy(),
-        &wt.branch,
-    )?;
+    let persisted = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::set_worktree_if_status(
+            &conn,
+            &task.id,
+            &task.status,
+            &wt.task_cwd.to_string_lossy(),
+            &wt.root.to_string_lossy(),
+            &wt.branch,
+        )?
+    };
+    if !persisted {
+        let links = task_links.as_deref().unwrap_or_else(|| std::path::Path::new(""));
+        let cleanup = worktrees::remove_with_branch(project, &wt, links, &skills_dir, true);
+        return Err(match cleanup {
+            Ok(_) => "a tarefa mudou de estado durante a criação do worktree".into(),
+            Err(error) => format!(
+                "a tarefa mudou de estado durante a criação do worktree; não foi possível remover {}: {error}",
+                wt.root.display()
+            ),
+        });
+    }
+    let conn = db.lock().map_err(|e| e.to_string())?;
     store::task_by_id(&conn, &task.id)?.ok_or_else(|| "a tarefa se perdeu ao ser isolada".into())
 }
 
@@ -1069,7 +1118,9 @@ pub fn reroute_to(
         if let Some(blocked) = fixrounds::block_reroute(&conn, &current)? {
             return Err(blocked);
         }
-        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+        let tx =
+            rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| e.to_string())?;
         let moved = store::reroute_task(
             &tx,
             task_id,
@@ -1230,7 +1281,12 @@ pub fn run_decide_approval(
 
 /// O núcleo de `run_decide_approval`, sem o `AppHandle`. **Privado de propósito**: nada fora
 /// de `runs` (o IPC, o MCP) consegue chamá-lo, nem o `broker`, que também é privado.
-fn decide_from_screen(db: &DbConnection, approval_id: &str, allow: bool, remember: bool) -> Result<bool, String> {
+fn decide_from_screen(
+    db: &DbConnection,
+    approval_id: &str,
+    allow: bool,
+    remember: bool,
+) -> Result<bool, String> {
     let Some(pending) = broker::get(approval_id) else {
         return Ok(false);
     };
@@ -1345,7 +1401,9 @@ pub async fn start_memory_dream(
     let _guard = crate::agents::updates::activity_guard()?;
     let (task, dream_id) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+        let tx =
+            rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| e.to_string())?;
         let input = crate::memory::dream::validate_start(&tx, workspace)?;
         let cwd:String=tx.query_row("SELECT cwd FROM runs WHERE workspace_id=?1 AND cwd<>'' ORDER BY created_at DESC LIMIT 1",[workspace],|r|r.get(0)).map_err(|_|"Workspace sem pasta no histórico.".to_string())?;
         let run = store::create_run_with_memory_snapshot(
@@ -1357,7 +1415,10 @@ pub async fn start_memory_dream(
             1,
             None,
         )?;
-        let prompt=format!("Leia os dados e proponha somente melhorias justificadas.\nUNTRUSTED DATA BEGIN\n{}\nUNTRUSTED DATA END",input);
+        let prompt = format!(
+            "Leia os dados e proponha somente melhorias justificadas.\nUNTRUSTED DATA BEGIN\n{}\nUNTRUSTED DATA END",
+            input
+        );
         let task = store::create_task(
             &tx,
             &store::NewTask {
@@ -1399,8 +1460,10 @@ pub async fn start_memory_dream(
     })
 }
 
-fn launch_memory_dream(app:&AppHandle,task:&Task)->Result<(),String> {
- if task.agent_id!="claude-code" {return Err("Sonhar requer Claude Code com ferramentas de escrita bloqueadas.".into());}
+fn launch_memory_dream(app: &AppHandle, task: &Task) -> Result<(), String> {
+    if task.agent_id != "claude-code" {
+        return Err("Sonhar requer Claude Code com ferramentas de escrita bloqueadas.".into());
+    }
     let extras = supervisor::LaunchExtras {
         prompt: Some(task.prompt.clone()),
         system_prompt: Some(crate::memory::dream::SYSTEM_PROMPT.into()),
@@ -1418,5 +1481,5 @@ fn launch_memory_dream(app:&AppHandle,task:&Task)->Result<(),String> {
         .map(|n| crate::ipc::mcp::orchestration_tool_name(n))
         .collect(),
     };
-    supervisor::start(app,task.clone(),extras)
+    supervisor::start(app, task.clone(), extras)
 }

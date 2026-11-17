@@ -1181,6 +1181,23 @@ pub fn set_worktree(
     Ok(())
 }
 
+pub fn set_worktree_if_status(
+    conn: &Connection,
+    task_id: &str,
+    expected_status: &str,
+    cwd: &str,
+    root: &str,
+    branch: &str,
+) -> Result<bool, String> {
+    let changed = conn
+        .execute(
+            "UPDATE tasks SET cwd = ?1, worktree_path = ?2, branch = ?3 WHERE id = ?4 AND status = ?5",
+            rusqlite::params![cwd, root, branch, task_id, expected_status],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(changed == 1)
+}
+
 /// `(carpeta del proyecto, cwd de la tarea, raíz del worktree)`, si corre en uno.
 pub fn worktree_of_task(conn: &Connection, task_id: &str) -> Option<(String, String, String)> {
     conn.query_row(

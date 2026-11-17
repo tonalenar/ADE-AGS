@@ -2047,6 +2047,32 @@ fn lo_que_ofrece_recordar_una_tarea_aislada_es_la_ruta_del_proyecto() {
     h.join().unwrap();
 }
 
+#[test]
+fn set_worktree_nao_grava_se_o_status_mudou_durante_o_io() {
+    let db = db_compartida();
+    let conn = db.lock().unwrap();
+    let run = run_en(&conn);
+    let id = tarea_en(&conn, &run);
+    conn.execute(
+        "UPDATE tasks SET status = 'running' WHERE id = ?1",
+        [&id],
+    )
+    .unwrap();
+
+    assert!(!store::set_worktree_if_status(
+        &conn,
+        &id,
+        "pending",
+        "/wt/stale",
+        "/wt/stale",
+        "cc/stale",
+    )
+    .unwrap());
+    let task = store::task_by_id(&conn, &id).unwrap().unwrap();
+    assert_eq!(task.status, "running");
+    assert_eq!(task.worktree_path, None);
+}
+
 /// El cableado completo del aislamiento: la tarea termina corriendo ADENTRO del worktree,
 /// con su rama anotada, y la carpeta del proyecto (la del run, de donde salen las reglas)
 /// no cambia.
