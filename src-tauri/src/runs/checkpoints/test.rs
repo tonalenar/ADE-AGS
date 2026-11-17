@@ -321,6 +321,37 @@ fn si_la_carpeta_ya_no_existe_no_se_toca_nada() {
     assert_eq!(crate::runs::store::task_by_id(&conn, &a).unwrap().unwrap().status, "done", "la tarea no se tocó");
 }
 
+/// O plano é calculado com a tarefa parada. Antes de o rollback restaurar a pasta, o tick a despacha (o
+/// `mark_dispatched` a deixa `ready`) segurando o lock do agendador. O rollback tem que esperar esse lock e revalidar:
+/// com a tarefa viva, não pode restaurar nada.
+#[test]
+fn rollback_nao_corre_com_dispatch() {
+    let r = repo();
+    let cwd = r.0.to_string_lossy().to_string();
+    let (db, run) = db_con_run(&cwd);
+    let a = tarea(&db, &run, "a", &cwd, &[]);
+    take(&db, &run, Some(&a), &r.0, kind::BEFORE, "antes de a").unwrap();
+    std::fs::write(r.0.join("a.txt"), "a trabalhou\n").unwrap();
+    {
+        let conn = db.lock().unwrap();
+        conn.execute("UPDATE tasks SET status = 'done' WHERE id = ?1", [&a]).unwrap();
+    }
+    let p = plan_de(&db, &run, &a).unwrap();
+
+    let tick = crate::runs::scheduler::tick_lock();
+    let (db2, run2) = (db.clone(), run.clone());
+    let voltar = std::thread::spawn(move || rollback(&db2, &run2, &p));
+    {
+        let conn = db.lock().unwrap();
+        conn.execute("UPDATE tasks SET status = 'ready' WHERE id = ?1", [&a]).unwrap();
+    }
+    drop(tick);
+    let resultado = voltar.join().unwrap();
+
+    assert!(resultado.is_err(), "o rollback correu com a tarefa despachada: {resultado:?}");
+    assert_eq!(read(&r.0, "a.txt").as_deref(), Some("a trabalhou\n"), "a pasta não pode ser restaurada com a tarefa viva");
+}
+
 #[test]
 fn las_fotos_viejas_de_un_run_se_sueltan_pero_la_lista_sale_en_orden() {
     let (db, run) = db_con_run("/tmp/p");

@@ -134,10 +134,16 @@ fn db_of(app: &AppHandle) -> Option<DbConnection> {
     app.try_state::<DbConnection>().map(|s| s.inner().clone())
 }
 
+/// El lock de `tick`. Quien cambia un run por fuera del agendador (rollback y restauración de foto) lo toma también:
+/// así la checagem de tareas vivas y la restauración de archivos no corren junto con un despacho.
+pub(super) fn tick_lock() -> std::sync::MutexGuard<'static, ()> {
+    TICK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Despacha lo que le toque al run y cierra lo que ya no va a correr.
 pub fn tick(app: &AppHandle, run_id: &str) {
     let Some(db) = db_of(app) else { return };
-    let _one = TICK.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = tick_lock();
 
     let mut mission_changed = None;
     let (to_launch, skipped, shadow) = {

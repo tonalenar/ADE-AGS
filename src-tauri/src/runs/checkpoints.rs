@@ -348,11 +348,17 @@ pub fn items_of(conn: &Connection, run_id: &str, tasks: &[Task]) -> Result<Vec<I
 /// Ejecuta un rollback ya planeado: foto de seguridad por carpeta, restaurar y poner las tareas
 /// en cola. Devuelve las fotos de seguridad.
 pub fn rollback(db: &crate::database::DbConnection, run_id: &str, plan: &Plan) -> Result<Vec<Checkpoint>, String> {
+    // El lock del tick vale de principio a fin: ningún despacho entra entre la revalidación y la restauración.
+    let _tick = super::scheduler::tick_lock();
     let mut safeties = Vec::new();
     // Todo se valida y se fotografía ANTES de tocar nada: si algo no se puede, no queda a medias.
     let mut to_restore = Vec::new();
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
+        // El plano se calculó antes de tomar el lock: una tarea pudo haber sido despachada desde entonces.
+        if let Some(live) = live_task(&conn, run_id)? {
+            return Err(format!("A tarefa '{live}' está rodando: pare-a antes de voltar atrás."));
+        }
         for (dir, cp_id) in &plan.restores {
             let cp = get(&conn, cp_id)?.ok_or("Uma foto do plano já não existe.")?;
             if !Path::new(dir).exists() {
@@ -383,6 +389,18 @@ pub fn rollback(db: &crate::database::DbConnection, run_id: &str, plan: &Plan) -
 }
 
 // ── Para la pantalla ────────────────────────────────────────────────
+
+/// A primeira tarefa do run que está rodando ou pronta para rodar (ocupa a vaga), se houver.
+fn live_task(conn: &Connection, run_id: &str) -> Result<Option<String>, String> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT id FROM tasks WHERE run_id = ?1 AND status IN (?2, ?3) LIMIT 1",
+        params![run_id, status::RUNNING, status::READY],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
 
 fn db_of(app: &tauri::AppHandle) -> Result<crate::database::DbConnection, String> {
     use tauri::Manager;
@@ -466,17 +484,16 @@ pub fn run_checkpoint_create(app: tauri::AppHandle, run_id: String, label: Strin
 #[tauri::command(async)]
 pub fn run_restore_checkpoint(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let db = db_of(&app)?;
-    let (cp, live) = {
+    // Mesmo lock do tick: a checagem de tarefas vivas e a restauração não correm junto com um despacho.
+    let _tick = super::scheduler::tick_lock();
+    let cp = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let cp = get(&conn, &id)?.ok_or("A foto não existe mais.")?;
-        let live: i64 = conn
-            .query_row("SELECT COUNT(*) FROM tasks WHERE run_id = ?1 AND status IN ('running','ready')", [&cp.run_id], |r| r.get(0))
-            .map_err(|e| e.to_string())?;
-        (cp, live)
+        if live_task(&conn, &cp.run_id)?.is_some() {
+            return Err("Há tarefas rodando neste run: pare-as antes de restaurar uma foto.".into());
+        }
+        cp
     };
-    if live > 0 {
-        return Err("Há tarefas rodando neste run: pare-as antes de restaurar uma foto.".into());
-    }
     if !Path::new(&cp.dir).exists() {
         return Err(format!("A pasta {} já não existe.", cp.dir));
     }
