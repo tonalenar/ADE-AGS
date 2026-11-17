@@ -386,11 +386,16 @@ pub fn deleted_workspaces(conn: &Connection) -> Result<Vec<Value>, String> {
 }
 
 #[tauri::command]
-pub fn workspace_deleted_list(
-    db: tauri::State<crate::database::DbConnection>,
+pub async fn workspace_deleted_list(
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Vec<Value>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    deleted_workspaces(&conn)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        deleted_workspaces(&conn)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -402,58 +407,83 @@ pub fn memory_export(
     export_detached(&db, &sync, &workspace_id)
 }
 #[tauri::command]
-pub fn memory_workspace_stats(
+pub async fn memory_workspace_stats(
     workspace_id: String,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Value, String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    stats(&c, &workspace_id)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        stats(&c, &workspace_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub fn memory_agent_drafts(
+pub async fn memory_agent_drafts(
     workspace_id: String,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Vec<Value>, String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    drafts(&c, &workspace_id)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        drafts(&c, &workspace_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub fn memory_promote_draft(
+pub async fn memory_promote_draft(
     workspace_id: String,
     draft_id: String,
     app: tauri::AppHandle,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<ProposalResult, String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    let r = promote_draft(&c, &workspace_id, &draft_id);
-    drop(c);
-    super::notify_changed(&app);
-    r
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        let r = promote_draft(&c, &workspace_id, &draft_id);
+        drop(c);
+        super::notify_changed(&app);
+        r
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub fn memory_discard_draft(
+pub async fn memory_discard_draft(
     workspace_id: String,
     draft_id: String,
     app: tauri::AppHandle,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<(), String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    c.execute(
-        "DELETE FROM memory_agent_drafts WHERE id=?1 AND workspace_id=?2",
-        params![draft_id, workspace_id],
-    )
-    .map_err(|e| e.to_string())?;
-    drop(c);
-    super::notify_changed(&app);
-    Ok(())
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        c.execute(
+            "DELETE FROM memory_agent_drafts WHERE id=?1 AND workspace_id=?2",
+            params![draft_id, workspace_id],
+        )
+        .map_err(|e| e.to_string())?;
+        drop(c);
+        super::notify_changed(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub fn memory_compact(
+pub async fn memory_compact(
     retention_days: i64,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<usize, String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    compact(&c, retention_days)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        compact(&c, retention_days)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -534,21 +564,26 @@ pub async fn memory_verify_source(
 }
 
 #[tauri::command]
-pub fn memory_set_verification(
+pub async fn memory_set_verification(
     entry_id: String,
     last_verified: Option<i64>,
     ttl_days: Option<i64>,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<(), String> {
     if ttl_days.is_some_and(|v| v <= 0) || last_verified.is_some_and(|v| v < 0 || v > super::now())
     {
         return Err("invalid verification metadata".into());
     }
-    let c = db.lock().map_err(|e| e.to_string())?;
-    c.execute(
-        "UPDATE memory_entries SET last_verified=?2,ttl_days=?3 WHERE id=?1",
-        params![entry_id, last_verified, ttl_days],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        c.execute(
+            "UPDATE memory_entries SET last_verified=?2,ttl_days=?3 WHERE id=?1",
+            params![entry_id, last_verified, ttl_days],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
