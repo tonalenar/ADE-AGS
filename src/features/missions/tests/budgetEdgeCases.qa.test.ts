@@ -75,7 +75,7 @@ describe("Guarda de Orçamento - QA Edge Cases Suite", () => {
   });
 
   describe("Modelos sem preço (estimateOf)", () => {
-    it("estimateOf soma só quem tem estimate e preserva unpricedModels sem inventar preço", () => {
+    it("estimateOf soma só quem tem estimate e repassa unpricedModels", () => {
       const tokens: MissionTokens = {
         agents: [
           {

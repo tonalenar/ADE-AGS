@@ -268,7 +268,6 @@ describe("Citar: botão flutuante pílula (T3 Code) e fechamento", () => {
     await act(async () => { btn.focus(); });
     expect(document.activeElement).toBe(btn);
     await act(async () => {
-      btn.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
       btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     });
     expect(useQuoteStore.getState().byKey["conv-1"]).toHaveLength(1);

@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AlertaToast } from "@/shared/ui/alerts";
+import "@/features/chat/unified/selectionActions";
 
 import { abrirConversaDoAviso, InAppNotices } from "../InAppNotices";
 
@@ -51,10 +52,7 @@ describe("o aviso no app de conversa que terminou, falhou ou pede algo", () => {
     expect(title).toBe("Refatorar o login");
     expect(icon).toBe("success");
     expect(action?.label).toBe("chat.inbox.open");
-    action?.onClick();
-    await act(async () => {
-      await import("@/features/chat/unified/selectionActions");
-    });
+    await act(async () => { action?.onClick(); });
     expect(mocks.select).toHaveBeenCalledWith("thread:t-1");
   });
 
