@@ -126,7 +126,10 @@ pub fn start(db: DbConnection) {
                 }
             }
         })
-        .expect("hilo de presença do harness");
+        .unwrap_or_else(|error| {
+            eprintln!("[harness] não foi possível criar o hilo de presença: {error}");
+            std::thread::spawn(|| {})
+        });
 }
 
 fn beat_now(db: &DbConnection, id: &str, pid: i64) -> Result<(), String> {

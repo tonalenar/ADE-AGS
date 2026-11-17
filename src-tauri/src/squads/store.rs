@@ -368,9 +368,7 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let raw_extras: String = row.get(16)?;
-    let extra_inputs: Vec<SquadExtraMemberInput> = serde_json::from_str(&raw_extras).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(16, rusqlite::types::Type::Text, Box::new(error))
-    })?;
+    let extra_inputs: Vec<SquadExtraMemberInput> = serde_json::from_str(&raw_extras).unwrap_or_default();
     let extra_members = extra_inputs
         .into_iter()
         .map(|extra| -> rusqlite::Result<SquadExtraMember> {
