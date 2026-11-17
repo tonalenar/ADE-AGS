@@ -330,3 +330,62 @@ fn ligar_o_modo_leve_nao_baixa_a_prioridade_de_quem_a_ade_nao_acompanha() {
     // Sem o ciclo de vida saber do aparelho, baixar a prioridade não teria quem a restaurasse.
     assert_eq!(super::lifecycle::set_light("aparelho-fora-do-ciclo", true), 0);
 }
+
+#[test]
+fn ligado_pelo_agente_sem_tela_fica_fora_de_vista_e_hiberna() {
+    // Sem nó no canvas, o aparelho ligado pelo agente não tem tela. Antes ele nascia à vista e nunca hibernava.
+    use super::lifecycle::{booted_entry, due};
+    use std::time::{Duration, Instant};
+    let now = Instant::now();
+    let sem_tela = booted_entry(now, false);
+    assert!(!sem_tela.visible, "sem tela, o aparelho não nasce à vista");
+    let depois = now + Duration::from_secs(600);
+    assert!(due(depois, sem_tela.last_seen, sem_tela.visible, Some(Duration::from_secs(600))), "sem tela, tem que hibernar no prazo");
+    assert!(booted_entry(now, true).visible, "ligado da tela, nasce à vista");
+}
+
+#[test]
+fn monitor_so_hiberna_quem_continua_fora_de_vista_na_hora_de_desligar() {
+    // O monitor decide com o uso de agora: quem a pessoa abriu depois do começo do ciclo não é desligado com a tela aberta.
+    use super::lifecycle::{booted_entry, claim_due};
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+    let now = Instant::now();
+    let depois = now + Duration::from_secs(600);
+    let prazo = Some(Duration::from_secs(600));
+    let mut mapa = HashMap::new();
+
+    mapa.insert("visto".to_string(), booted_entry(now, false));
+    mapa.get_mut("visto").expect("registrado").visible = true;
+    assert!(!claim_due(&mut mapa, "visto", depois, prazo), "a tela abriu: não pode hibernar");
+    assert!(mapa.contains_key("visto"), "quem foi visto segue no ciclo");
+
+    mapa.insert("esquecido".to_string(), booted_entry(now, false));
+    assert!(claim_due(&mut mapa, "esquecido", depois, prazo));
+    assert!(!mapa.contains_key("esquecido"), "reivindicado, o aparelho sai do mapa na mesma trava");
+}
+
+#[test]
+fn entrega_que_falhou_no_hid_vira_erro() {
+    // Uma falha de entrega desde a marca vira erro para o agente: nunca um "ok" para um toque que não chegou.
+    assert!(delivery_check(3, 3).is_ok());
+    assert!(delivery_check(3, 4).is_err(), "falha desde a marca: o agente é avisado");
+}
+
+#[test]
+fn udid_com_acento_nao_derruba_o_nome_do_arquivo() {
+    // O corte era por byte: um caractere não ASCII no começo virava pânico (`byte index is not a char boundary`).
+    assert_eq!(short_udid("ÁBCDEFGHIJ-1234").chars().count(), 8);
+    assert_eq!(short_udid("AB"), "AB");
+}
+
+#[test]
+fn orientacao_so_se_refaz_quando_muda() {
+    // Antes, cada `place` refazia a orientação da view, mesmo sem mudança (quatro operações de CALayer).
+    let (w, h) = (100.0_f64, 200.0_f64);
+    let agora = Some((1, w.to_bits(), h.to_bits()));
+    assert!(!needs_orient(agora, 1, w, h), "mesma orientação e tamanho: nada a fazer");
+    assert!(needs_orient(agora, 3, w, h), "girou");
+    assert!(needs_orient(agora, 1, 120.0, h), "mudou o tamanho da view");
+    assert!(needs_orient(None, 1, w, h), "a primeira vez sempre");
+}

@@ -9,6 +9,7 @@
 //! "À vista" vem do frontend (`simulator_place` com parte visível); "em uso", das ações dos agentes.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -38,11 +39,11 @@ impl Default for Settings {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Usage {
-    last_used: Option<Instant>,
-    last_seen: Instant,
-    visible: bool,
-    priority: PriorityState,
+pub(super) struct Usage {
+    pub(super) last_used: Option<Instant>,
+    pub(super) last_seen: Instant,
+    pub(super) visible: bool,
+    pub(super) priority: PriorityState,
 }
 
 /// Estado puro das aplicações: uma restauração enfileirada cobre todas as ações até terminar.
@@ -104,6 +105,23 @@ pub fn due(now: Instant, last_seen: Instant, visible: bool, after: Option<Durati
     }
 }
 
+/// O registro de um aparelho que acabou de ligar. Ligado da tela (`from_screen`), já nasce à vista. Ligado pelo agente,
+/// sem nó no canvas, nasce fora de vista: antes nascia à vista e nunca hibernava.
+pub(super) fn booted_entry(now: Instant, from_screen: bool) -> Usage {
+    Usage { last_used: None, last_seen: now, visible: from_screen, priority: PriorityState::default() }
+}
+
+/// Reivindica um aparelho para hibernar: só se ele ainda estiver devido agora, olhando o uso atual. Tira o aparelho do
+/// mapa na mesma trava, então um `seen` que chegar depois não o religa no meio do desligamento.
+pub(super) fn claim_due(map: &mut HashMap<String, Usage>, udid: &str, now: Instant, after: Option<Duration>) -> bool {
+    let Some(u) = map.get(udid) else { return false };
+    if !due(now, u.last_seen, u.visible, after) {
+        return false;
+    }
+    map.remove(udid);
+    true
+}
+
 /// Pura: só reduz a prioridade fora de vista e após a carência da última ação do agente.
 pub fn wanted_nice(light: bool, visible: bool, since_used: Duration) -> i32 {
     if light && !visible && since_used >= AGENT_PRIORITY_GRACE { NICE_LOW } else { 0 }
@@ -122,25 +140,30 @@ fn emit(udid: &str, state: &str, reason: &str) {
     }
 }
 
-/// Desliga um aparelho por economia e avisa os nós.
-fn hibernate(udid: &str, reason: &str) {
-    if let Ok(mut map) = usage().lock() {
-        map.remove(udid);
-    }
+/// Desliga um aparelho que já saiu do mapa e avisa os nós.
+fn shutdown_claimed(udid: &str, reason: &str) {
     match ops::shutdown(udid) {
         Ok(()) => emit(udid, "shutdown", reason),
         Err(e) => eprintln!("[simulator] não hibernei {udid}: {e}"),
     }
 }
 
-/// A ADE acabou de ligar `udid`. Com "um por vez", hiberna os outros que ela ligou.
-pub fn booted(app: &AppHandle, udid: &str) {
+/// Desliga um aparelho por economia e avisa os nós.
+fn hibernate(udid: &str, reason: &str) {
+    if let Ok(mut map) = usage().lock() {
+        map.remove(udid);
+    }
+    shutdown_claimed(udid, reason);
+}
+
+/// A ADE acabou de ligar `udid` (`from_screen`: pela tela, não por um agente). Com "um por vez", hiberna os outros.
+pub fn booted(app: &AppHandle, udid: &str, from_screen: bool) {
     let _ = APP.set(app.clone());
-    start_monitor();
     let now = Instant::now();
     let others: Vec<String> = match usage().lock() {
         Ok(mut map) => {
-            map.insert(udid.to_string(), Usage { last_used: None, last_seen: now, visible: true, priority: PriorityState::default() });
+            map.insert(udid.to_string(), booted_entry(now, from_screen));
+            start_monitor_locked();
             map.keys().filter(|k| k.as_str() != udid).cloned().collect()
         }
         Err(_) => Vec::new(),
@@ -259,23 +282,40 @@ pub fn forget(udid: &str) {
     }
 }
 
-/// Uma thread só, a partir do primeiro boot: hiberna o que ficou esquecido e acerta a prioridade.
-fn start_monitor() {
-    static STARTED: OnceLock<()> = OnceLock::new();
-    if STARTED.set(()).is_err() {
-        return;
+/// Há uma thread de monitor viva. Muda só com o mapa de uso travado, para o começo e o fim do monitor não se cruzarem
+/// com um `booted`.
+static MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Sobe o monitor se não houver um; quem chama segura a trava do mapa de uso.
+fn start_monitor_locked() {
+    if !MONITOR_RUNNING.swap(true, Ordering::AcqRel) {
+        std::thread::spawn(monitor);
     }
-    std::thread::spawn(|| loop {
+}
+
+/// Hiberna o que ficou esquecido e acerta a prioridade, a cada `CHECK_EVERY`. Sem aparelho que a ADE ligou, a thread
+/// sai (o próximo `booted` a sobe de novo) em vez de acordar a cada 20 s para sempre.
+fn monitor() {
+    loop {
         std::thread::sleep(CHECK_EVERY);
         let now = Instant::now();
         let current = settings().lock().map(|s| *s).unwrap_or_default();
-        let snapshot: Vec<(String, Usage)> = usage().lock().map(|m| m.iter().map(|(k, v)| (k.clone(), *v)).collect()).unwrap_or_default();
-        for (udid, u) in snapshot {
-            if due(now, u.last_seen, u.visible, current.hibernate_after) {
-                hibernate(&udid, "hibernated");
-                continue;
+        let udids: Vec<String> = {
+            let map = usage().lock().unwrap_or_else(|e| e.into_inner());
+            if map.is_empty() {
+                MONITOR_RUNNING.store(false, Ordering::Release);
+                return;
             }
-            apply_priority(&udid, false);
+            map.keys().cloned().collect()
+        };
+        for udid in udids {
+            // Decide com o uso de agora (sob a trava), não com uma cópia de antes do desligamento anterior.
+            let claimed = usage().lock().map(|mut map| claim_due(&mut map, &udid, now, current.hibernate_after)).unwrap_or(false);
+            if claimed {
+                shutdown_claimed(&udid, "hibernated");
+            } else {
+                apply_priority(&udid, false);
+            }
         }
-    });
+    }
 }

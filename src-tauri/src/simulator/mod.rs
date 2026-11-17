@@ -181,7 +181,7 @@ pub mod ops {
     pub fn screenshot(udid: &str) -> Result<String, String> {
         let dir = std::env::temp_dir().join("ade-simulator");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let file = dir.join(format!("{}-{}.png", &udid[..udid.len().min(8)], crate::util::now_ts_ms()));
+        let file = dir.join(format!("{}-{}.png", crate::simulator::model::short_udid(udid), crate::util::now_ts_ms()));
         let path = file.to_string_lossy().into_owned();
         simctl(&["io", udid, "screenshot", &path])?;
         Ok(path)
