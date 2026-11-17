@@ -181,12 +181,31 @@ pub fn start_avd(name: &str) -> Result<(), String> {
     let mut cmd = crate::util::spawn::command(emulator_path()?, crate::util::spawn::WindowMode::OwnWindow);
     cmd.args(["-avd", name, "-no-snapshot-save"]);
     cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    let mut child = cmd.spawn().map_err(|e| format!("emulator: {e}"))?;
-    // Quem não espera o filho deixa um zumbi quando o emulador sai (A270). Uma thread só espera o fim dele; a ADE
-    // não o encerra, porque o emulador tem que sobreviver a ela.
-    let _ = std::thread::Builder::new().name("ade-android-emulator-wait".into()).spawn(move || {
-        let _ = child.wait();
+    let child = cmd.spawn().map_err(|e| format!("emulator: {e}"))?;
+    // Quem não espera o filho deixa um zumbi quando o emulador sai (A270). A ADE não o encerra (o emulador tem que
+    // sobreviver a ela); só o encerra se nem a thread que o espera consegue nascer (ver `watch_child`).
+    watch_child(child, |job| std::thread::Builder::new().name("ade-android-emulator-wait".into()).spawn(job).map(|_| ()))
+}
+
+/// Entrega o emulador a uma thread que o espera. A thread é criada antes de o processo ser entregue: se ela não nasce,
+/// o emulador é encerrado e o erro volta. Antes, o erro era engolido e o filho ficava sem `wait`.
+fn watch_child(mut child: std::process::Child, spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<()>) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::channel::<std::process::Child>();
+    let job: Box<dyn FnOnce() + Send> = Box::new(move || {
+        if let Ok(mut owned) = rx.recv() {
+            let _ = owned.wait();
+        }
     });
+    if let Err(error) = spawn(job) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("emulator: não consegui acompanhar o processo ({error})"));
+    }
+    if let Err(std::sync::mpsc::SendError(mut lost)) = tx.send(child) {
+        let _ = lost.kill();
+        let _ = lost.wait();
+        return Err("emulator: a thread que acompanha o processo saiu antes do tempo".into());
+    }
     Ok(())
 }
 
