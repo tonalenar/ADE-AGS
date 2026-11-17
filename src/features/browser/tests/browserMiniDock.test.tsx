@@ -44,7 +44,12 @@ function setupView(opts: { viewport?: { width: number; height: number } | null; 
 function click(label: string) {
   const button = host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
   if (!button) throw new Error(`Botão ausente: ${label}`);
-  act(() => button.click());
+  // Um clique real chega como ponteiro (pointerdown e pointerup) e depois como `click`: o botão tem que responder a isso.
+  act(() => {
+    button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1 }));
+    button.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, pointerId: 1 }));
+    button.click();
+  });
   return button;
 }
 

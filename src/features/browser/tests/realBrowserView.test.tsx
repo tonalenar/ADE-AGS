@@ -16,16 +16,22 @@ vi.mock("@tauri-apps/api/event", () => ({
 const opened: string[] = [];
 const openedPlaces: Array<{ cornerRadius?: number }> = [];
 const placedVisibility: boolean[] = [];
+const coversSpy = vi.fn();
+vi.mock("../nativeSurface", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../nativeSurface")>();
+  return { ...original, coversOf: (...args: Parameters<typeof original.coversOf>) => { coversSpy(); return original.coversOf(...args); } };
+});
+const placedPlaces: Array<{ visible: boolean; cornerRadius?: number }> = [];
 const closed: string[] = [];
 vi.mock("../realBrowser", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../realBrowser")>()),
   realBrowserOpen: (id: string, _url: string, place: { cornerRadius?: number }) => { opened.push(id); openedPlaces.push(place); return Promise.resolve(); },
-  realBrowserPlace: (_id: string, place: { visible: boolean }) => { placedVisibility.push(place.visible); return Promise.resolve(); },
+  realBrowserPlace: (_id: string, place: { visible: boolean; cornerRadius?: number }) => { placedVisibility.push(place.visible); placedPlaces.push(place); return Promise.resolve(); },
   realBrowserClose: (id: string) => { closed.push(id); return Promise.resolve(); },
 }));
 
 import { RealBrowserView } from "../RealBrowserView";
-import { useChatStore } from "@/features/chat/store";
+import { setChatBrowserMiniHover, useChatStore } from "@/features/chat/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 
 let host: HTMLDivElement;
@@ -45,7 +51,8 @@ beforeEach(() => {
   openedPlaces.length = 0;
   closed.length = 0;
   placedVisibility.length = 0;
-  useChatStore.setState({ browserMiniHover: false });
+  placedPlaces.length = 0;
+  useChatStore.setState({ browserMiniHover: {} });
   useViewTabsStore.setState({ views: [], activeViewId: null, keepMountedIds: [] });
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -104,19 +111,70 @@ describe("vista do navegador nativo", () => {
     render({ floatingPreview: true });
     await act(async () => undefined);
     emit("real-browser-mini-hover", { id: "aba-1", inside: true });
-    expect(useChatStore.getState().browserMiniHover).toBe(true);
+    expect(useChatStore.getState().browserMiniHover["aba-1"]).toBe(true);
     emit("real-browser-mini-hover", { id: "aba-1", inside: false });
-    expect(useChatStore.getState().browserMiniHover).toBe(false);
+    expect(useChatStore.getState().browserMiniHover["aba-1"]).toBeUndefined();
     emit("real-browser-mini-hover", { id: "aba-1", inside: true });
     render({ floatingPreview: false });
-    expect(useChatStore.getState().browserMiniHover).toBe(false);
+    expect(useChatStore.getState().browserMiniHover["aba-1"]).toBeUndefined();
+  });
+
+  it("o hover de uma miniatura não acende a pílula de outra", () => {
+    setChatBrowserMiniHover("aba-1", true);
+    expect(useChatStore.getState().browserMiniHover["outra-aba"]).toBeUndefined();
+    setChatBrowserMiniHover("aba-1", false);
+    expect(useChatStore.getState().browserMiniHover).toEqual({});
   });
 
   it("fora da miniatura o hover nativo não acende a pílula", async () => {
     render({ floatingPreview: false });
     await act(async () => undefined);
     emit("real-browser-mini-hover", { id: "aba-1", inside: true });
-    expect(useChatStore.getState().browserMiniHover).toBe(false);
+    expect(useChatStore.getState().browserMiniHover["aba-1"]).toBeUndefined();
+  });
+
+  it("um pointerenter refaz a cobertura antes dos 120 ms do cache", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    // Tempo congelado: o cache de 120 ms só é testado pela entrada do mouse, não pelo relógio real.
+    vi.spyOn(performance, "now").mockReturnValue(1000);
+    vi.spyOn(HTMLElement.prototype, "checkVisibility").mockReturnValue(true);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300, toJSON: () => ({}) } as DOMRect);
+    render({ floatingPreview: true });
+    await act(async () => undefined);
+    // A medida do mount já calculou a cobertura: dentro do prazo, o quadro seguinte não recalcula.
+    coversSpy.mockClear();
+    act(() => frames.shift()?.(0));
+    expect(coversSpy).not.toHaveBeenCalled();
+
+    // A entrada do mouse num elemento novo muda o que está por cima: o próximo quadro recalcula já.
+    document.dispatchEvent(new Event("pointerenter"));
+    act(() => frames.shift()?.(0));
+    expect(coversSpy).toHaveBeenCalled();
+  });
+
+  it("trocar_forma_nao_reabre_superficie", async () => {
+    render();
+    await act(async () => undefined);
+    render({ floatingPreview: true, zoom: 0.7 });
+    await act(async () => undefined);
+
+    expect(opened).toEqual(["aba-1"]);
+    expect(closed).toEqual([]);
+  });
+
+  it("atualiza o raio nativo ao mudar a forma para PiP", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    render();
+    await act(async () => undefined);
+    render({ floatingPreview: true });
+    act(() => frames.shift()?.(performance.now()));
+
+    expect(opened).toEqual(["aba-1"]);
+    expect(placedPlaces.some((place) => place.cornerRadius === 16)).toBe(true);
   });
 
   it("a aba do pop-up nasce com o id e o perfil do opener", () => {

@@ -56,8 +56,9 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
 
   // A pílula da miniatura não fica presa visível de uma miniatura para a próxima.
   useEffect(() => {
-    if (!floatingPreview) setChatBrowserMiniHover(false);
-  }, [floatingPreview]);
+    if (!floatingPreview) setChatBrowserMiniHover(viewId, false);
+    return () => setChatBrowserMiniHover(viewId, false);
+  }, [floatingPreview, viewId]);
 
   useEffect(() => {
     const el = box.current;
@@ -72,6 +73,9 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     let placeInFlight = false;
     let lastPlaceAt = Number.NEGATIVE_INFINITY;
     let lastRect: Box | null = null;
+    // Entrar com o mouse sobre um elemento novo muda o que está por cima da página: a cobertura é medida de novo.
+    const invalidateCovers = () => { coveredAt = Number.NEGATIVE_INFINITY; };
+    document.addEventListener("pointerenter", invalidateCovers, true);
 
     const measure = (): Place => {
       const rect = boxOf(el);
@@ -131,7 +135,7 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       listen<{ id: string; back: boolean; forward: boolean }>("real-browser-history", mine((p) => latest.current.onHistory?.(p))),
       listen<{ id: string }>("real-browser-pointer", mine(() => closeAppPopovers())),
       listen<{ id: string; inside: boolean }>("real-browser-mini-hover", mine((p) => {
-        if (latest.current.floatingPreview) setChatBrowserMiniHover(p.inside);
+        if (latest.current.floatingPreview) setChatBrowserMiniHover(viewId, p.inside);
       })),
       listen<{ id: string; popup: string; url: string }>("real-browser-popup", mine((p) => latest.current.onPopup?.({ id: p.popup, url: p.url }))),
       listen<{ id: string }>("real-browser-closed", mine(() => latest.current.onClosedByPage?.())),
@@ -140,6 +144,7 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     window.addEventListener("blur", onBlur);
     return () => {
       window.removeEventListener("blur", onBlur);
+      document.removeEventListener("pointerenter", invalidateCovers, true);
       closed = true;
       cancelAnimationFrame(frame);
       offs.forEach((p) => p.then((off) => off()));
