@@ -26,10 +26,12 @@ pub(crate) fn tornar_nao_bloqueante(fd: RawFd) -> io::Result<()> {
     Ok(())
 }
 
-/// Um dup do descritor, que pertence ao chamador e é fechado quando ele cai.
+/// Um dup do descritor, que pertence ao chamador e é fechado quando ele cai. Com `F_DUPFD_CLOEXEC`, o dup não passa
+/// para os processos que o app lança depois: um deles segurando o mestre impediria o fim da sessão.
 pub(crate) fn duplicar(fd: RawFd) -> io::Result<OwnedFd> {
-    // SAFETY: `dup` devolve um descritor novo, que nenhum outro dono usa; `OwnedFd` passa a possuí-lo.
-    let novo = unsafe { libc::dup(fd) };
+    // SAFETY: `fcntl` com F_DUPFD_CLOEXEC devolve um descritor novo, que nenhum outro dono usa; `OwnedFd` passa a
+    // possuí-lo.
+    let novo = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
     if novo < 0 {
         return Err(io::Error::last_os_error());
     }
