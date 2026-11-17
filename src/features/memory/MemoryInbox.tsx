@@ -101,6 +101,8 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
       // Lo elegido que ya no existe (se decidió en otro lado) se descarta.
       const live = new Set(flatten(next).map(itemId));
       setSelected((cur) => new Set([...cur].filter((id) => live.has(id))));
+    } catch (e) {
+      setMessage(String(e));
     } finally {
       setLoaded(true);
     }

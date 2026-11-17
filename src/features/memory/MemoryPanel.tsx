@@ -67,7 +67,7 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
       setEntriesError((cur) => ({ ...cur, [which]: undefined }));
     } catch (e) {
       // Falha não é "nenhuma memória": mostra o erro e deixa a aba tentar de novo ao voltar.
-      setEntries((cur) => ({ ...cur, [which]: [] }));
+      setEntries((cur) => ({ ...cur, [which]: null }));
       setEntriesError((cur) => ({ ...cur, [which]: String(e) }));
     }
   }, [workspaceId]);
@@ -200,7 +200,10 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
             </ul>
           )
         ) : entriesError[tab as "approved" | "rejected"] ? (
-          <p role="alert" className="py-8 text-center text-[12.5px] text-red-600 dark:text-red-400">{entriesError[tab as "approved" | "rejected"]}</p>
+          <div className="py-8 text-center">
+            <p role="alert" className="text-[12.5px] text-red-600 dark:text-red-400">{entriesError[tab as "approved" | "rejected"]}</p>
+            <button type="button" className={BTN_SEC + " mt-3"} onClick={() => void loadEntries(tab as "approved" | "rejected")}>{t("btn.retry")}</button>
+          </div>
         ) : entries[tab] === null ? (
           <p className="py-8 text-center text-[12.5px] text-gray-400 dark:text-white/35">{t("memoryInbox.loading")}</p>
         ) : shownEntries.length === 0 ? (
