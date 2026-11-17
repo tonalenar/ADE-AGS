@@ -45,6 +45,8 @@ export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}
 let desktopFocusSequence = 0;
 let focusSequence = 0;
 
+const pendingUpdates = new Map<string, Array<(board: Board) => Board>>();
+
 let windowLabel = "main";
 
 /** La clave de un canvas: la ventana y la carpeta. Por ventana porque cada una tiene sus
@@ -163,12 +165,17 @@ export function setWorkMode(key: string, mode: WorkMode): void {
 
 // ── Edición ─────────────────────────────────────────────────────────
 
-function updateBoard(key: string, fn: (b: Board) => Board): void {
-  const boards = useCanvasStore.getState().boards;
+function updateBoard(key: string, fn: (b: Board) => Board, queueBeforeLoad = true): void {
+  const state = useCanvasStore.getState();
+  const boards = state.boards;
   const current = boards[key] ?? emptyBoard();
   const next = fn(current);
   if (next === current && key in boards) return;
   useCanvasStore.setState({ boards: { ...boards, [key]: next } });
+  if (!state.loaded) {
+    if (queueBeforeLoad) pendingUpdates.set(key, [...(pendingUpdates.get(key) ?? []), fn]);
+    return;
+  }
   scheduleSave(key);
 }
 
@@ -373,7 +380,7 @@ function syncBoards(): void {
   for (const key of keys) {
     const current = boards[key] ?? emptyBoard();
     const next = reconcile(current, byKey.get(key) ?? [], tabs.map((t) => t.id));
-    if (next !== current || !(key in boards)) updateBoard(key, () => next);
+    if (next !== current || !(key in boards)) updateBoard(key, () => next, false);
   }
 }
 
@@ -405,9 +412,24 @@ export function initCanvasSync(label: string): () => void {
           .filter(([k]) => k.startsWith(`${label}|`))
           .map(([k, b]) => [k, { ...emptyBoard(), ...b, viewport: safeViewport(b?.viewport), nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], threads: b?.threads ?? {}, roles: b?.roles ?? {}, subagents: b?.subagents ?? [] }]),
       );
-      useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards }, loaded: true, loadError: null, saveError: null });
+      const current = useCanvasStore.getState();
+      const merged = { ...mine };
+      if (!current.loadError) {
+        for (const [key, board] of Object.entries(current.boards)) {
+          if (!pendingUpdates.has(key)) merged[key] = board;
+        }
+      }
+      const changed = [...pendingUpdates.keys()];
+      for (const [key, updates] of pendingUpdates) {
+        let board = merged[key] ?? emptyBoard();
+        for (const update of updates) board = update(board);
+        merged[key] = board;
+      }
+      pendingUpdates.clear();
+      useCanvasStore.setState({ boards: merged, loaded: true, loadError: null, saveError: null });
       unsub = useTabsStore.subscribe(syncBoards);
       syncBoards();
+      for (const key of changed) scheduleSave(key);
     })
     .catch((error: unknown) => {
       if (disposed) return;
