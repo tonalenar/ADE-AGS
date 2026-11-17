@@ -4,6 +4,7 @@ import { Button, CloudIcon, DocumentIcon, Tooltip } from "neogestify-ui-componen
 
 import { BranchIcon, PullIcon, PushIcon, TagIcon } from "@/app/icons";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { dateLocale } from "@/i18n/dateLocale";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
 
 import { graphWidth, layoutGraph, type GraphRow, type Segment } from "./graphLayout";
@@ -11,7 +12,16 @@ import { scmCommitFiles } from "./ipc";
 import type { Commit, CommitRef, ScmEntry } from "./types";
 
 /** Un color por rama, en el orden en que aparecen. Legibles en los dos temas. */
-const PALETTE = ["#3b82f6", "#a855f7", "#f97316", "#10b981", "#ec4899", "#eab308", "#06b6d4", "#ef4444"];
+const PALETTE = [
+  "var(--color-accent-500)",
+  "var(--color-violet-500)",
+  "color-mix(in oklab, var(--color-accent-400) 55%, var(--color-violet-400))",
+  "var(--color-accent-700)",
+  "var(--color-violet-400)",
+  "var(--color-accent-300)",
+  "var(--color-violet-600)",
+  "var(--color-accent-600)",
+];
 const colorOf = (i: number) => PALETTE[i % PALETTE.length];
 
 const ROW = 24;
@@ -134,7 +144,7 @@ export function CommitGraph({ cwd, root, commits, onTag }: {
         const row = rows[i];
         const isOpen = open === c.hash;
         const list = files[c.hash];
-        const tip = `${c.hash}\n${c.author} · ${new Date(c.time * 1000).toLocaleString()}\n\n${c.subject}`;
+        const tip = `${c.hash}\n${c.author} · ${new Date(c.time * 1000).toLocaleString(dateLocale())}\n\n${c.subject}`;
         return (
           <div key={c.hash}>
             <Button variant="custom"
