@@ -57,6 +57,10 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 
+#[cfg(test)]
+#[path = "test.rs"]
+mod surface_test;
+
 /// Um retângulo em pixels CSS do app.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
 pub struct Rect {
@@ -66,14 +70,20 @@ pub struct Rect {
     pub height: f64,
 }
 
-/// Onde o Portal está: `rect` relativo à janela; `visible` e `holes` relativos ao próprio Portal.
+/// Onde o Portal está: `rect` relativo à janela; `visible_rect` e `holes` relativos ao próprio Portal.
+/// Os campos chegam em camelCase, como o front os envia (`cornerRadius`, `clickToExpand`, `visibleRect`).
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Place {
     pub rect: Rect,
     /// O zoom da página (o do Portal vezes o do canvas).
     pub zoom: f64,
-    /// A parte do Portal à vista (o resto está fora do canvas ou atrás de outra aba). `None` = nada à vista.
-    pub visible: Option<Rect>,
+    /// Falso só chega no envio final do unmount; um recorte vazio não esconde a vista viva.
+    #[serde(default = "visible_by_default")]
+    pub visible: bool,
+    /// A parte do Portal à vista (o resto está fora do canvas ou atrás de outra aba). `None` = recorte vazio.
+    #[serde(default)]
+    pub visible_rect: Option<Rect>,
     /// O que do app está por cima da página, dentro da parte à vista.
     #[serde(default)]
     pub holes: Vec<Rect>,
@@ -84,6 +94,8 @@ pub struct Place {
     #[serde(default)]
     pub corner_radius: f64,
 }
+
+fn visible_by_default() -> bool { true }
 
 /// Os Portais abertos.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -378,7 +390,8 @@ fn window_handle(window: &tauri::Window) -> Result<isize, String> {
 /// A parte da página que aparece, em retângulos relativos ao Portal: a parte à vista menos os buracos.
 /// Vazia = nada aparece (a página continua desenhando).
 pub fn region(place: &Place) -> Vec<Rect> {
-    let Some(visible) = place.visible else { return Vec::new() };
+    if !place.visible { return Vec::new(); }
+    let Some(visible) = place.visible_rect else { return Vec::new() };
     let mut parts = vec![visible];
     for hole in &place.holes {
         parts = parts.into_iter().flat_map(|part| subtract(part, *hole)).collect();
@@ -1009,7 +1022,7 @@ mod test {
 
     #[test]
     fn regiao_e_a_parte_a_vista_menos_o_que_esta_por_cima() {
-        let place = |visible, holes| Place { rect: r(0.0, 0.0, 800.0, 600.0), zoom: 1.0, visible, holes, click_to_expand: false, corner_radius: 0.0 };
+        let place = |visible_rect, holes| Place { rect: r(0.0, 0.0, 800.0, 600.0), zoom: 1.0, visible: true, visible_rect, holes, click_to_expand: false, corner_radius: 0.0 };
         assert!(region(&place(None, vec![])).is_empty(), "fora de vista não aparece nada");
         assert_eq!(region(&place(Some(r(0.0, 0.0, 800.0, 300.0)), vec![])), vec![r(0.0, 0.0, 800.0, 300.0)]);
         // Um menu de 200×100 no canto de cima à direita.

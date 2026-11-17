@@ -119,7 +119,7 @@ export function NativeScreen({ api, screenId, target, radius, onError, engaged =
       }
       const windowBox = { x: 0, y: 0, width: innerWidth, height: innerHeight };
       const place = placeOf(rect, el.offsetWidth, 1, [windowBox, ...clips.map(boxOf)], shown ? covers : [], shown);
-      return { rect: place.rect, radius: Math.round(latest.current.radius * place.zoom * 10) / 10, visible: place.visible, holes: place.holes };
+      return { rect: place.rect, radius: Math.round(latest.current.radius * place.zoom * 10) / 10, visible: place.visibleRect, holes: place.holes };
     };
 
     const tick = () => {

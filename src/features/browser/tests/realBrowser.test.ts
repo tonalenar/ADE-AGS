@@ -42,7 +42,8 @@ describe("lugar do navegador nativo no Portal", () => {
 
   it("à vista e sem nada por cima: a página inteira aparece", () => {
     const place = placeOf(portal, 800, 1, [window], [], true);
-    expect(place.visible).toEqual({ x: 0, y: 0, width: 800, height: 600 });
+    expect(place.visible).toBe(true);
+    expect(place.visibleRect).toEqual({ x: 0, y: 0, width: 800, height: 600 });
     expect(place.holes).toEqual([]);
     expect(place.zoom).toBe(1);
   });
@@ -55,7 +56,7 @@ describe("lugar do navegador nativo no Portal", () => {
 
   it("o que passa da borda do canvas é cortado", () => {
     const canvas = { x: 0, y: 0, width: 600, height: 400 };
-    expect(placeOf(portal, 800, 1, [window, canvas], [], true).visible).toEqual({ x: 0, y: 0, width: 500, height: 350 });
+    expect(placeOf(portal, 800, 1, [window, canvas], [], true).visibleRect).toEqual({ x: 0, y: 0, width: 500, height: 350 });
   });
 
   it("um menu por cima vira buraco, só a parte dele dentro do Portal", () => {
@@ -65,7 +66,8 @@ describe("lugar do navegador nativo no Portal", () => {
 
   it("fora de vista nada aparece", () => {
     const place = placeOf(portal, 800, 1, [window], [{ x: 0, y: 0, width: 10, height: 10 }], false);
-    expect(place.visible).toBeNull();
+    expect(place.visible).toBe(true);
+    expect(place.visibleRect).toBeNull();
     expect(place.holes).toEqual([]);
   });
 
