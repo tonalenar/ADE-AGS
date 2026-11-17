@@ -5972,6 +5972,8 @@
   "automation.paused.fixRounds_other": "{{count}} rodadas de correção foram interrompidas pelo fechamento e não voltam nem com o botão: reabra as tarefas pela Frota.",
   "automation.resume": "Retomar automação",
   "chat.team.provision.closed": "a conversa foi fechada antes de entrar no time",
+  "chat.team.mirror.refusedTitle": "Mudança no canvas recusada",
+  "chat.team.mirror.refused": "O time não aceitou a mudança no canvas: {{error}}. O canvas voltou ao que o time tem.",
   "chat.team.provision.entering": "entrando no time…",
   "chat.team.provision.failed": "não entrou no time: {{reason}}",
   "missions.scopes.title": "Escopos de escrita sobrepostos",

@@ -41,6 +41,7 @@ import type { TeamView } from "../ipc";
 let canvas: typeof import("@/features/canvas/store");
 let tabsStore: typeof import("@/features/tabs/store");
 let teamStore: typeof import("../teamStore");
+let toasts: typeof import("@/shared/brand/botToastStore");
 let KEY = "";
 const canvasActions = () => canvas.canvasActions;
 const tab = (id: string, agentId: string): Tab => ({ id, title: id, cwd: "/repo", agentId, agentLabel: agentId, command: agentId, ptyId: null, openedAt: 1 }) as Tab;
@@ -58,6 +59,7 @@ beforeEach(async () => {
   canvas = await import("@/features/canvas/store");
   tabsStore = await import("@/features/tabs/store");
   teamStore = await import("../teamStore");
+  toasts = await import("@/shared/brand/botToastStore");
   const { emptyBoard, reconcile } = await import("@/features/canvas/board");
   KEY = canvas.boardKey("/repo");
   backend.calls = [];
@@ -142,6 +144,8 @@ describe("o espelho canvas -> chat no app", () => {
       await settle();
       expect(calls("chat_team_link")).toHaveLength(1);
       expect(board().edges.some((e) => (e.a === "lead" && e.b === "a") || (e.a === "a" && e.b === "lead"))).toBe(false);
+      // A recusa não some: a pessoa vê o motivo, e o canvas volta ao que o time tem.
+      expect(toasts.useBotToastStore.getState().toasts).toContainEqual(expect.objectContaining({ tone: "warning", text: expect.stringContaining("aba já está em outro time") }));
     } finally {
       backend.failLink = false;
     }

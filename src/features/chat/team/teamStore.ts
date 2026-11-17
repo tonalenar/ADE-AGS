@@ -9,6 +9,7 @@ import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { showBotToast } from "@/shared/brand/botToastStore";
 
 import { chatCommand } from "../chatModel";
 import { addSurface, useChatStore } from "../store";
@@ -265,6 +266,7 @@ async function runMirror(): Promise<void> {
       for (const op of ops) {
         await applyReverse(op).catch((e) => {
           console.warn("[time] espelho canvas -> chat:", e);
+          showBotToast({ title: i18n.t("chat.team.mirror.refusedTitle"), text: i18n.t("chat.team.mirror.refused", { error: String(e) }), tone: "warning" });
           // O que o time não aceitou sai do canvas: a linha de base já o tinha como acordado, e sem isto a falha some.
           const team = useTeamStore.getState().teams.find((t) => t.id === op.teamId);
           if (team) void syncTeamCanvas(team, op.kind === "link" ? { removed: [op.ref] } : {});
