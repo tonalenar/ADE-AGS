@@ -7,6 +7,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Once, OnceLock, mpsc};
 use tauri::Emitter;
 
@@ -92,6 +93,13 @@ const PERSIST_ATTEMPTS: i64 = 3;
 /// Quantas falhas pendentes uma repetição leva por vez.
 const REPLAY_BATCH: i64 = 200;
 
+/// Trabalhos enviados à fila e ainda não tirados dela pela thread da gravação. A fila não tem limite (ver
+/// `send_to_writer`): este contador só deixa o backlog visível.
+static PENDING_JOBS: AtomicUsize = AtomicUsize::new(0);
+/// Com este tanto de trabalhos esperando, o backlog é registrado: é o sinal de um SQLite parado, antes de a memória
+/// virar problema.
+const BACKLOG_WARN: usize = 1_000;
+
 fn writer() -> &'static mpsc::Sender<QueuedEvent> {
     WRITER.get_or_init(|| {
         let (sender, receiver) = mpsc::channel::<QueuedEvent>();
@@ -99,11 +107,27 @@ fn writer() -> &'static mpsc::Sender<QueuedEvent> {
             .name("ags-harness-event-log".into())
             .spawn(move || {
                 while let Ok(event) = receiver.recv() {
+                    PENDING_JOBS.fetch_sub(1, Ordering::SeqCst);
                     handle(event);
                 }
             });
         sender
     })
+}
+
+/// Põe um trabalho na fila da gravação e conta o backlog. Sem limite de propósito: bloquear quem emite (um adaptador
+/// roda num worker do Tokio) poderia travar a janela se o SQLite parasse, e um evento descartado se perde para sempre.
+/// Quem precisar de contrapressão decide isso com a medição deste contador.
+fn send_to_writer(job: QueuedEvent) -> Result<(), mpsc::SendError<QueuedEvent>> {
+    let depth = PENDING_JOBS.fetch_add(1, Ordering::SeqCst) + 1;
+    if depth == BACKLOG_WARN {
+        eprintln!("[runs] fila de gravação com {depth} eventos esperando: o SQLite está lento ou ocupado");
+    }
+    let sent = writer().send(job);
+    if sent.is_err() {
+        PENDING_JOBS.fetch_sub(1, Ordering::SeqCst);
+    }
+    sent
 }
 
 /// Executa um trabalho da fila: tenta gravar (com repetição), registra a falha se houver, e só então entrega à janela
@@ -265,13 +289,13 @@ pub(crate) fn queue_fleet_event(
 /// reinício, ou as desta vida se a gravação voltou. Uma vez por processo, sem relógio nem polling.
 fn ensure_replay(app: &tauri::AppHandle, db: &crate::database::DbConnection) {
     REPLAY.call_once(|| {
-        let _ = writer().send(QueuedEvent::Replay { app: app.clone(), db: db.clone() });
+        let _ = send_to_writer(QueuedEvent::Replay { app: app.clone(), db: db.clone() });
     });
 }
 
 /// Entrega o trabalho à thread da fila. Se ela já caiu, faz no chamador: o evento não se perde.
 fn send_or_handle(job: QueuedEvent) {
-    if let Err(mpsc::SendError(job)) = writer().send(job) {
+    if let Err(mpsc::SendError(job)) = send_to_writer(job) {
         handle(job);
     }
 }
