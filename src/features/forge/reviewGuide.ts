@@ -184,7 +184,6 @@ export function askPrompt(input: {
   const { item, stop } = input;
   const remote: string[] = [
     `Title: ${item.title}`,
-    `URL: ${item.webUrl}`,
   ];
   if (item.sourceBranch && item.targetBranch) remote.push(`Branches: ${item.sourceBranch} → ${item.targetBranch}, head ${input.headSha.slice(0, 12)}.`);
   remote.push(

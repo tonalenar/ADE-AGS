@@ -78,7 +78,10 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
   const [appOpen, setAppOpen] = useState(false);
   const [appDraft, setAppDraft] = useState("");
   const flowRef = useRef<string | null>(null);
-  const pollTimer = useRef(createCancellableTimeout()).current;
+  const pollTimerRef = useRef<ReturnType<typeof createCancellableTimeout> | null>(null);
+  pollTimerRef.current ??= createCancellableTimeout();
+  const pollTimer = pollTimerRef.current;
+  const mountedRef = useRef(true);
 
   useEffect(() => { if (kinds.length === 0) load().catch(console.error); }, [kinds.length, load]);
   // Cambiar de tipo propone su host por defecto (el de un genérico queda vacío).
@@ -109,10 +112,14 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
   }, [oauth, kind]);
 
   // Cerrar a mitad del login no deja un flujo esperando en el backend.
-  useEffect(() => () => {
-    pollTimer.clear();
-    if (flowRef.current) forgeDeviceCancel(flowRef.current).catch(() => {});
-    flowRef.current = null;
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      pollTimer.clear();
+      if (flowRef.current) forgeDeviceCancel(flowRef.current).catch(() => {});
+      flowRef.current = null;
+    };
   }, [pollTimer]);
 
   const finish = async (account: GitAccount) => {
@@ -150,6 +157,7 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
   const poll = (flowId: string, interval: number) => {
     pollTimer.schedule(interval * 1000, () => {
       void (async () => {
+        if (!mountedRef.current) return;
         if (flowRef.current !== flowId) return;
         try {
           const r = await forgeDevicePoll(flowId);

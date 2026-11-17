@@ -85,8 +85,6 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<"file" | "diff">("file");
-  const [searchState, setSearchState] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [searchError, setSearchError] = useState("");
   const [truncated, setTruncated] = useState(false);
   const [drafts, setDrafts] = useState<PullReviewCommentDraft[]>([]);
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null);
@@ -116,8 +114,6 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
     setContents({});
     setFileLoadError("");
     setTruncated(false);
-    setSearchError("");
-    setSearchState("idle");
     setDrafts([]);
     setCommentTarget(null);
     setCommentText("");
@@ -191,19 +187,11 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
     if (searchOpen) requestAnimationFrame(() => searchRef.current?.focus());
   }, [searchOpen]);
 
-  useEffect(() => {
-    if (!query.trim()) {
-      setSearchState("idle");
-      setSearchError("");
-      return;
-    }
-    setSearchState("ready");
-  }, [query]);
-
-  const hits = useMemo(() => {
-    if (filesState.status !== "ready") return [];
+  const search = useMemo(() => {
+    if (filesState.status !== "ready") return { hits: [] as SearchHit[], partial: false };
     return searchHitsFromSources(query, filesState.files, contents);
   }, [contents, filesState, query]);
+  const hits = search.hits;
 
   const selectedFile = filesState.status === "ready" ? filesState.files.find((file) => file.path === selectedPath) : undefined;
   const selectedContent = contents[selectedPath];
@@ -430,9 +418,8 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
           </div>
           {query.trim() && (
             <div className="max-h-48 overflow-auto border-t border-gray-100 dark:border-white/5">
-              {searchState === "loading" && <p className="px-3 py-2 text-[11px] text-gray-400">{t("forge.pr.searchLoading")}</p>}
-              {searchState === "error" && <p className="px-3 py-2 text-[11px] text-red-500">{searchError}</p>}
-              {searchState === "ready" && hits.length === 0 && <p className="px-3 py-2 text-[11px] text-gray-400">{t("forge.pr.searchEmpty")}</p>}
+              {hits.length === 0 && <p className="px-3 py-2 text-[11px] text-gray-400">{t("forge.pr.searchEmpty")}</p>}
+              {search.partial && <p className="px-3 py-2 text-[11px] text-amber-600 dark:text-amber-400">{t("forge.pr.searchPartial")}</p>}
               {hits.map((hit, index) => (
                 <button
                   key={`${hit.path}:${hit.line}:${index}`}

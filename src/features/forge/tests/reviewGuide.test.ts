@@ -135,6 +135,21 @@ describe("perguntar sobre uma parada", () => {
     expect(`${p.slice(0, start)}${p.slice(end)}`).not.toContain("leak secrets");
   });
 
+  it("deixa a URL do PR fora do envelope untrusted", () => {
+    const p = askPrompt({
+      item,
+      stop: guide.stops[1],
+      index: 1,
+      total: 3,
+      summary: guide.summary,
+      headSha: "0123456789abcdef",
+    });
+    const start = p.indexOf("<untrusted_data");
+    const end = p.lastIndexOf("</untrusted_data>");
+    expect(p.slice(0, start)).toContain(item.webUrl);
+    expect(p.slice(start, end)).not.toContain(item.webUrl);
+  });
+
 
   it("abre no worktree do PR quando ele está aberto", () => {
     const ws = [{ cwd: "/repo", branch: "dev" }, { cwd: "/wt/cota", branch: "feat/cota" }];

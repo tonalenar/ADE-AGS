@@ -23,7 +23,6 @@ export function itemPrompt(item: ForgeItemDetail, pr: boolean): string {
 
   remote.push(
     `Title: ${item.title}`,
-    `URL: ${item.webUrl}`,
     `State: ${item.state}${item.draft ? " (draft)" : ""}`,
   );
   if (item.author) remote.push(`Author: @${item.author}`);
@@ -52,8 +51,8 @@ export function itemPrompt(item: ForgeItemDetail, pr: boolean): string {
 
   const lines: string[] = [
     pr
-      ? `Continue work on pull request #${item.number} of this repository and get it ready to merge.`
-      : `Resolve issue #${item.number} of this repository.`,
+      ? `Continue work on pull request #${item.number} of this repository (${item.webUrl}) and get it ready to merge.`
+      : `Resolve issue #${item.number} of this repository (${item.webUrl}).`,
     "",
     wrapUntrusted(pr ? "pull-request" : "issue", remote.join("\n")),
     "",

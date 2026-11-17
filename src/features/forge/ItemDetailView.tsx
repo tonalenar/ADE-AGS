@@ -13,6 +13,7 @@ import { pasteIntoTab } from "@/features/terminal/terminalRegistry";
 import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
 import { Markdown } from "@/shared/ui/Markdown";
 import { openExternalUrl } from "@/shared/openExternalUrl";
+import { AlertaToast } from "@/shared/ui/alerts";
 import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
 
 import { itemPrompt } from "./agentPrompt";
@@ -175,7 +176,7 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged, q
           <SendIcon className="w-3 h-3" />
           {t("forge.agent.send")}
         </Button>
-        <Button size="sm" variant="outline" onClick={() => openExternalUrl(item.webUrl).catch(console.error)}
+        <Button size="sm" variant="outline" onClick={() => openExternalUrl(item.webUrl).catch((e) => { AlertaToast(t("forge.openWeb"), String(e), "error", 5000); })}
           className="flex items-center gap-1.5">
           <ExternalIcon className="w-3 h-3" />
           {t("forge.openWeb")}
