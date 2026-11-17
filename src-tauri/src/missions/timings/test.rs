@@ -97,6 +97,21 @@ fn o_teto_nao_descarta_sinal_de_entrega() {
     assert!(spans.iter().any(|s| s.kind == "team_delivered"));
 }
 
+#[test]
+fn o_teto_cheio_de_spans_importantes_descarta_o_mais_antigo() {
+    let conn = crate::database::test_db();
+    conn.execute_batch("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w','W',0,0);
+        INSERT INTO missions(id,workspace_id,title,objective,cwd,created_at,updated_at) VALUES('m','w','T','O','/repo',1,1);").unwrap();
+    for i in 0..MAX_SPANS {
+        add(&conn, "m", &new_span("start_briefing", "A", 1_000 + i, 2_000 + i)).unwrap();
+    }
+    add(&conn, "m", &new_span("team_delivered", "A", 9_000, 9_001)).unwrap();
+    let spans = list(&conn, "m").unwrap();
+    assert_eq!(spans.len() as i64, MAX_SPANS);
+    assert!(spans.iter().any(|s| s.kind == "team_delivered"));
+    assert!(!spans.iter().any(|s| s.started_ms == 1_000));
+}
+
 fn new_span(kind: &str, actor: &str, start: i64, end: i64) -> NewSpan {
     NewSpan { kind: kind.into(), actor: actor.into(), target: String::new(), started_ms: start, ended_ms: end, detail: String::new() }
 }

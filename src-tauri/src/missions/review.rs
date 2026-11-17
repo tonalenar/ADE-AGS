@@ -24,6 +24,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 
 use crate::util::{external_path, output_with_timeout};
+use crate::util::spawn::output_with_stdout_limit;
 
 const GIT_FAST: Duration = Duration::from_secs(20);
 const GIT_SLOW: Duration = Duration::from_secs(180);
@@ -31,14 +32,23 @@ const GIT_SLOW: Duration = Duration::from_secs(180);
 const MAX_DIFF_BYTES: usize = 400 * 1024;
 
 fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
+    git_capped(dir, args, limit, None)
+}
+
+fn git_capped(dir: &Path, args: &[&str], limit: Duration, max_stdout: Option<usize>) -> Result<String, String> {
     let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(external_path(dir)).args(args);
     // Sin terminal que conteste: un editor o un prompt colgarían el comando.
     cmd.env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_EDITOR", "true")
         .env("GIT_MERGE_AUTOEDIT", "no");
-    let out = output_with_timeout(&mut cmd, limit)
-        .map_err(|e| format!("não foi possível rodar o git: {e}"))?;
+    let out = if let Some(max) = max_stdout {
+        output_with_stdout_limit(&mut cmd, limit, max)
+            .map_err(|e| format!("não foi possível rodar o git: {e}"))?
+    } else {
+        output_with_timeout(&mut cmd, limit)
+            .map_err(|e| format!("não foi possível rodar o git: {e}"))?
+    };
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout)
             .trim_end_matches(['\n', '\r'])
@@ -141,6 +151,27 @@ pub(crate) fn identity_args(dir: &Path) -> Vec<String> {
 /// `git merge --no-ff` de `branch` en `dir`. Si choca, lo aborta y devuelve los conflictos.
 pub fn merge(dir: &Path, branch: &str, message: &str) -> Result<MergeOutcome, String> {
     merge_with_policy(dir, branch, message, false)
+}
+
+#[cfg(test)]
+mod git_cap_test {
+    use super::*;
+
+    #[test]
+    fn git_diff_respeita_o_teto_de_stdout() {
+        let dir = std::env::temp_dir().join(format!("ags-review-cap-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-b", "master"], GIT_FAST).unwrap();
+        git(&dir, &["config", "user.name", "Test"], GIT_FAST).unwrap();
+        git(&dir, &["config", "user.email", "test@example.invalid"], GIT_FAST).unwrap();
+        std::fs::write(dir.join("big.txt"), "x".repeat(8_000)).unwrap();
+        git(&dir, &["add", "."], GIT_FAST).unwrap();
+        git(&dir, &["commit", "-m", "a"], GIT_FAST).unwrap();
+        std::fs::write(dir.join("big.txt"), "y".repeat(8_000)).unwrap();
+        let err = git_capped(&dir, &["diff"], GIT_FAST, Some(64)).unwrap_err();
+        assert!(err.contains("stdout excedeu"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]
@@ -380,7 +411,13 @@ pub fn task_diff_with_db(
         let project = mission_cwd_of_run(&conn, &task.run_id)?.unwrap_or(task.cwd);
         (PathBuf::from(project), branch)
     };
-    let mut diff = git(&project, &["diff", &format!("HEAD...{branch}")], GIT_SLOW)?;
+    let mut diff = match git_capped(&project, &["diff", &format!("HEAD...{branch}")], GIT_SLOW, Some(MAX_DIFF_BYTES)) {
+        Ok(diff) => diff,
+        Err(err) if err.contains("stdout excedeu") => {
+            return Ok("\n\n… (diff cortado: abra a branch no explorador para ver inteiro)\n".into());
+        }
+        Err(err) => return Err(err),
+    };
     if diff.len() > MAX_DIFF_BYTES {
         let mut cut = MAX_DIFF_BYTES;
         while !diff.is_char_boundary(cut) {

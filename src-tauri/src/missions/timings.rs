@@ -94,7 +94,13 @@ pub fn add(conn: &Connection, mission_id: &str, span: &NewSpan) -> Result<(), St
             )
             .map_err(|e| e.to_string())?;
         if removed == 0 {
-            return Ok(());
+            conn.execute(
+                "DELETE FROM mission_timings WHERE id = (
+                    SELECT id FROM mission_timings WHERE mission_id=?1
+                    ORDER BY started_ms ASC, id ASC LIMIT 1)",
+                [mission_id],
+            )
+            .map_err(|e| e.to_string())?;
         }
     }
     conn.execute(
