@@ -10,6 +10,7 @@ import type { WorkspaceSummary } from "./types";
 interface WorkspacesState {
   workspaces: WorkspaceSummary[];
   loading: boolean;
+  error: string | null;
   loadWorkspaces: () => Promise<void>;
   /** Vacía el bucket "default" (cierra sus ventanas y borra lo guardado) y abre una
    *  ventana nueva en blanco ahí — "Nuevo workspace" del encabezado lateral. Si quería
@@ -35,12 +36,15 @@ interface WorkspacesState {
 export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
   workspaces: [],
   loading: false,
+  error: null,
 
   loadWorkspaces: async () => {
-    set({ loading: true });
+    set({ loading: true, error: null });
     try {
       const rows = await ipc.listWorkspaces();
       set({ workspaces: rows });
+    } catch (e) {
+      set({ error: String(e) });
     } finally {
       set({ loading: false });
     }
