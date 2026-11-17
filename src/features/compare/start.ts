@@ -17,7 +17,6 @@ import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { appConfirm } from "@/shared/ui/appConfirm";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { uiErrorText } from "@/shared/uiErrorText";
-import { shouldUpsertComparison } from "./attachOutcome";
 import { tuiMessage } from "@/features/chat/attachments/send";
 import type { Attachment } from "@/features/chat/attachments/attachModel";
 
@@ -69,13 +68,14 @@ export async function startComparison(input: StartInput): Promise<Comparison> {
     return { entry, tabId };
   });
 
-  let saved: typeof cmp | null = null;
+  // Sem o attach a comparação não existe: não vai ao store nem ao canvas, e o erro volta ao diálogo.
+  let saved: typeof cmp;
   try {
     saved = await compareAttach(cmp.id, opened.map((o) => ({ pick: o.entry.pick, tabId: o.tabId })));
   } catch (e) {
-    AlertaToast(t("compare.title"), uiErrorText(e), "error", 7000);
+    throw new Error(uiErrorText(e));
   }
-  if (shouldUpsertComparison(saved)) upsertComparison(saved);
+  upsertComparison(saved);
 
   const key = compareBoardKey(input.cwd, cmp.id);
   canvasActions.buildComparison(key, titleIdOf(cmp.id), t("compare.groupTitle", { title: cmp.title }), opened.map((o) => ({ tabId: o.tabId, label: o.entry.label })));
@@ -91,7 +91,7 @@ export async function startComparison(input: StartInput): Promise<Comparison> {
       onStalled: () => setPending(tabId, false),
     });
   }
-  return saved ?? cmp;
+  return saved;
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
