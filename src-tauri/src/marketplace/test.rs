@@ -1,7 +1,7 @@
 //! Tests del marketplace: normalización de lo que pega el usuario, parseo de las
 //! fuentes y el formato del cache.
 
-use super::github::{normalize_github_location, parse_github_location};
+use super::github::{extend_limited, normalize_github_location, parse_github_location, skill_scan_errors, MAX_RAW_BYTES};
 use super::skillssh::{
     add_target, download_into, find_installed_skill, format_installs, install_into, normalize_owner_filter,
     parse_search_response, search, skillssh_entry, strip_ansi, write_download, SkillsShHit,
@@ -383,4 +383,29 @@ fn lo_que_trajo_skills_sh_no_se_vuelve_a_filtrar_por_texto() {
     let found = super::registries::list_cached_skills(&conn, Some("cloud".into()), None).unwrap();
     let names: Vec<&str> = found.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(names, ["azure-kusto"]);
+}
+
+#[test]
+fn teto_http_e_falha_parcial_de_skill() {
+    let mut body = vec![0u8; MAX_RAW_BYTES];
+    assert!(extend_limited(&mut body, &[1], MAX_RAW_BYTES, "árvore").is_err());
+    assert!(skill_scan_errors(0, &["a.md: 404".into()]).is_err());
+    let aviso = skill_scan_errors(2, &["b.md: timeout".into()]).unwrap().unwrap();
+    assert!(aviso.contains("2 skills"), "{aviso}");
+    assert!(skill_scan_errors(1, &[]).unwrap().is_none());
+}
+
+#[test]
+fn registry_local_recusa_path_absoluto_e_parent() {
+    assert!(super::local::relative_skill_path_ok("skills/foo"));
+    assert!(!super::local::relative_skill_path_ok("../fora"));
+    assert!(!super::local::relative_skill_path_ok("/abs/skill"));
+}
+
+#[test]
+fn npx_recusa_nome_que_vira_opcao() {
+    let tmp = std::env::temp_dir().join(format!("cc-npx-bad-{}", uuid::Uuid::new_v4()));
+    let err = install_into(&tmp, "-evil").unwrap_err();
+    assert!(err.contains("inválido"), "{err}");
+    let _ = std::fs::remove_dir_all(&tmp);
 }
