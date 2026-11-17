@@ -35,6 +35,8 @@ interface MissionsState {
  */
 let inFlight: Promise<void> | null = null;
 let again = false;
+let pendingWs = "";
+let pendingOpen: string | null = null;
 
 export const useMissionsStore = create<MissionsState>((set, get) => {
   const refresh = async (workspaceId: string, missionId: string | null) => {
@@ -93,6 +95,8 @@ export const useMissionsStore = create<MissionsState>((set, get) => {
     },
 
     onTaskChanged: async (workspaceId, openMissionId) => {
+      pendingWs = workspaceId;
+      pendingOpen = openMissionId;
       if (inFlight) {
         again = true;
         return inFlight;
@@ -101,7 +105,7 @@ export const useMissionsStore = create<MissionsState>((set, get) => {
         try {
           do {
             again = false;
-            await refresh(workspaceId, openMissionId);
+            await refresh(pendingWs, pendingOpen);
           } while (again);
         } finally {
           inFlight = null;

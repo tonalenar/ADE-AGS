@@ -561,6 +561,7 @@ export function AndroidPane({ composerTarget }: { composerTarget?: string | null
 
   useEffect(() => {
     if (!chosen) { setFrame(null); return; }
+    if (!documentVisible) return;
     let alive = true;
     let timer: number | undefined;
     const tick = async () => {
@@ -576,7 +577,7 @@ export function AndroidPane({ composerTarget }: { composerTarget?: string | null
     };
     void tick();
     return () => { alive = false; window.clearTimeout(timer); };
-  }, [chosen]);
+  }, [chosen, documentVisible]);
 
   const fail = (e: unknown) => { void AlertaToast(t("chat.panel.android"), String(e), "error", 5000); };
   const point = (e: React.PointerEvent) => {

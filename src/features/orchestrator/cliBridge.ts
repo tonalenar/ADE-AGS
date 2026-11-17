@@ -25,6 +25,7 @@ import { useRendersStore } from "@/features/renders/store";
 import { openChatTerminal } from "@/features/chat/shellTerminal";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { designRoute, parseDesignOpen } from "@/features/design/openRoute";
+import { notifyFromLabel } from "./notifyFrom";
 import { recruitCommand } from "./recruitCommand";
 import { respondToCli } from "./ipc";
 import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
@@ -130,7 +131,10 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
   // La CLI sí falla fuerte: quien automatiza necesita enterarse de que la tab quedó sin
   // las skills que pidió, no descubrirlo después mirando la terminal.
   const errors = await setup;
-  if (errors.length > 0) throw new Error(errors.join(" · "));
+  if (errors.length > 0) {
+    useTabsStore.getState().closeTab(tabId);
+    throw new Error(errors.join(" · "));
+  }
 
   // `accountId` viaja de vuelta para que el orquestador pueda comprobar con qué cuenta
   // quedó la tab sin tener que consultarlo aparte.
@@ -488,8 +492,9 @@ async function handlePortal(args: Record<string, unknown>) {
 async function handleNotify(args: Record<string, unknown>) {
   const message = str(args, "message");
   if (!message) throw new Error("Falta a mensagem");
-  const from = str(args, "from") ?? "Agente";
-  AlertaToast(from, message, "info", 10000);
+  const tabId = str(args, "tab") ?? str(args, "tabId");
+  const tab = tabId ? useTabsStore.getState().tabs.find((t) => t.id === tabId) : undefined;
+  AlertaToast(notifyFromLabel(tab?.title), message, "info", 10000);
   try {
     const win = getCurrentWindow();
     if (!(await win.isFocused())) await win.requestUserAttention(UserAttentionType.Informational);

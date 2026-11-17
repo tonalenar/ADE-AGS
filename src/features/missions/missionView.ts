@@ -198,6 +198,8 @@ export function parseBudget(raw: string): number | null {
   const comma = text.lastIndexOf(",");
   const dot = text.lastIndexOf(".");
   if (comma > -1 && dot > -1) text = comma > dot ? text.replace(/\./g, "").replace(",", ".") : text.replace(/,/g, "");
+  else if (comma === -1 && /^\d{1,3}(\.\d{3})+$/.test(text)) text = text.replace(/\./g, "");
+  else if (dot === -1 && /^\d{1,3}(,\d{3})+$/.test(text)) text = text.replace(/,/g, "");
   else text = text.replace(",", ".");
   const n = Number(text);
   return Number.isFinite(n) && n > 0 ? n : null;
