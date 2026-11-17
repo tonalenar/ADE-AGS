@@ -15,29 +15,61 @@ const PERMISSION_MARKER = "SCREEN_CAPTURE_PERMISSION_REQUIRED:";
 const IPHONE_MIRROR_MARKER = "IPHONE_MIRROR_REQUIRED:";
 
 const composerTargetsByRecording = new Map<string, string | null | undefined>();
-/** O aviso que fica de cada gravação que saiu do botão. Some quando ela para ou quando outra começa (ver `ScreenRecordButton`). */
-const orphanToastByRecording = new Map<string, number>();
+/**
+ * Cada gravação é uma geração: um número por início (ou por gravação já em curso quando o botão a encontra). Duas gerações
+ * da mesma tela são duas gravações; o aviso que fica é de uma geração só, e a parada de uma não mexe no aviso da outra.
+ */
+let generationSeq = 0;
+/** A geração em curso de cada fonte (`desktop:main`). */
+const generationByRecording = new Map<string, number>();
+/** O aviso que fica de cada geração que saiu do botão. */
+const orphanToastByGeneration = new Map<number, number>();
 
-/** Fecha o aviso de uma gravação que ficou sem botão, se houver. */
-function dismissOrphanToast(id: string): void {
-  const toastId = orphanToastByRecording.get(id);
+/** A geração em curso da fonte; se o botão encontrou uma gravação já em andamento, ela ganha uma geração agora. */
+function currentGeneration(id: string): number {
+  let generation = generationByRecording.get(id);
+  if (generation === undefined) {
+    generation = ++generationSeq;
+    generationByRecording.set(id, generation);
+  }
+  return generation;
+}
+
+/** Uma gravação nova da fonte: a geração anterior (se ainda tem aviso) sai, e a nova começa. */
+function startGeneration(id: string): number {
+  const previous = generationByRecording.get(id);
+  if (previous !== undefined) dismissOrphanToast(previous);
+  const generation = ++generationSeq;
+  generationByRecording.set(id, generation);
+  return generation;
+}
+
+/** Fecha o aviso de uma geração que ficou sem botão, se houver. */
+function dismissOrphanToast(generation: number): void {
+  const toastId = orphanToastByGeneration.get(generation);
   if (toastId === undefined) return;
-  orphanToastByRecording.delete(id);
+  orphanToastByGeneration.delete(generation);
   useBotToastStore.getState().dismiss(toastId);
+}
+
+/** A geração terminou (parou): sai da fonte se ainda for a dela, e o aviso dela fecha. */
+function endGeneration(id: string, generation: number): void {
+  if (generationByRecording.get(id) === generation) generationByRecording.delete(id);
+  dismissOrphanToast(generation);
 }
 
 /**
  * Para a gravação `id` e anexa o vídeo ao rascunho do destino dela. Fica fora do componente: a gravação pode seguir
  * depois de o botão sair da tela, e o aviso que fica (ver `ScreenRecordButton`) para por aqui.
  */
-async function stopRecordingAndAttach(id: string, fallbackTarget: string | null, t: (key: string, options?: Record<string, unknown>) => string): Promise<void> {
+async function stopRecordingAndAttach(id: string, fallbackTarget: string | null, t: (key: string, options?: Record<string, unknown>) => string, generation: number): Promise<void> {
   const path = await screenRecordingStop(id);
   const destination = composerTargetsByRecording.has(id) ? composerTargetsByRecording.get(id) : fallbackTarget;
   const { dropped } = rememberPendingCapture({ path, target: destination, kind: "recording" });
   attachToComposer([path], destination);
   if (dropped) void AlertaToast(t("screenRecording.title"), t("screenRecording.pendingDropped", { max: MAX_PENDING_CAPTURES }), "warning", 6000);
   composerTargetsByRecording.delete(id);
-  dismissOrphanToast(id);
+  endGeneration(id, generation);
   void AlertaToast(t("screenRecording.title"), t("screenRecording.attached"), "success", 3000);
 }
 
@@ -69,7 +101,8 @@ export function ScreenRecordButton({ kind, target, label, composerTarget, disabl
   useEffect(() => () => {
     const { recording: running, id: current, composerTarget: target, t: translate } = latest.current;
     if (!running) return;
-    dismissOrphanToast(current);
+    const generation = currentGeneration(current);
+    dismissOrphanToast(generation);
     const toastId = showBotToast({
       title: translate("screenRecording.title"),
       text: translate("screenRecording.stillRunning"),
@@ -78,12 +111,12 @@ export function ScreenRecordButton({ kind, target, label, composerTarget, disabl
       sticky: true,
       actionLabel: translate("screenRecording.stopAndAttach"),
       onAction: () => {
-        // Só para a gravação a que este aviso se refere: se outra começou no lugar, o aviso já saiu da tela.
-        if (orphanToastByRecording.get(current) !== toastId) return;
-        void stopRecordingAndAttach(current, target ?? null, translate).catch((error) => AlertaToast(translate("screenRecording.title"), String(error), "error", 6000));
+        // Só para a geração a que este aviso se refere: se outra começou no lugar, o aviso já saiu da tela.
+        if (orphanToastByGeneration.get(generation) !== toastId) return;
+        void stopRecordingAndAttach(current, target ?? null, translate, generation).catch((error) => AlertaToast(translate("screenRecording.title"), String(error), "error", 6000));
       },
     });
-    orphanToastByRecording.set(current, toastId);
+    orphanToastByGeneration.set(generation, toastId);
   }, []);
 
   const toggle = async () => {
@@ -91,11 +124,11 @@ export function ScreenRecordButton({ kind, target, label, composerTarget, disabl
     setBusy(true);
     try {
       if (recording) {
-        await stopRecordingAndAttach(id, composerTarget ?? null, t);
+        await stopRecordingAndAttach(id, composerTarget ?? null, t, currentGeneration(id));
         setRecording(false);
       } else {
-        // Uma gravação nova tira o aviso de uma anterior que ficou sem botão: o aviso velho não pode parar esta.
-        dismissOrphanToast(id);
+        // Uma gravação nova é outra geração: o aviso da anterior (se ficou) sai, e ele não pode parar esta.
+        startGeneration(id);
         composerTargetsByRecording.set(id, composerTarget);
         await screenRecordingStart(kind, target);
         setRecording(true);
@@ -121,7 +154,11 @@ export function ScreenRecordButton({ kind, target, label, composerTarget, disabl
       } else {
         void AlertaToast(t("screenRecording.title"), raw, "error", 5000);
       }
-      if (!recording) composerTargetsByRecording.delete(id);
+      if (!recording) {
+        composerTargetsByRecording.delete(id);
+        // Um início que falhou não deixa geração em curso para trás.
+        generationByRecording.delete(id);
+      }
       if (recording) {
         screenRecordingStatus().then((active) => setRecording(active === id)).catch(() => undefined);
       }
