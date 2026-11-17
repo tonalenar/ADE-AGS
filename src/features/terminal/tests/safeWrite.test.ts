@@ -327,6 +327,28 @@ describe("avisarBloqueio: um aviso por bloqueio seguido, com o texto certo", () 
     expect(text).toContain("Reenvie quando ele parar");
   });
 
+  it("não confirmado diz para apertar Enter na caixa do agente, e não manda reenviar (fix 2)", () => {
+    vi.mocked(showBotToast).mockClear();
+    avisarBloqueio("aviso-nao-confirmado", "peer", "unconfirmed");
+    const text = vi.mocked(showBotToast).mock.calls[0][0].text;
+    // O texto já está na caixa: reenviar duplicaria. O aviso manda só apertar Enter lá quando ele parar.
+    expect(text).toContain("Enter");
+    expect(text).not.toContain("Reenvie quando ele parar");
+    expect(text).not.toContain("Tento de novo sozinho");
+  });
+
+  it("não confirmado também não reagenda com o Vigia e o aviso de parado (fix 2)", () => {
+    vi.mocked(showBotToast).mockClear();
+    avisarBloqueio("aviso-nc-vigia", "vigia", "unconfirmed");
+    avisarBloqueio("aviso-nc-parado", "stalled", "unconfirmed");
+    const texts = vi.mocked(showBotToast).mock.calls.map(([arg]) => arg.text);
+    expect(texts).toHaveLength(2);
+    for (const text of texts) {
+      expect(text).toContain("Enter");
+      expect(text).not.toContain("sozinho");
+    }
+  });
+
   it("sem terminal tem texto próprio, e não diz que o agente está trabalhando (I9)", () => {
     avisarBloqueio("aviso-sem-terminal", "vigia", "no-terminal");
     const text = vi.mocked(showBotToast).mock.calls[0][0].text;

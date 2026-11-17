@@ -6389,7 +6389,7 @@
   "terminal.write.blockedWaiting": "{{name}} is waiting for your answer in a dialog. Nothing was sent to it.",
   "terminal.write.blockedBusy": "{{name}} is working. I didn't send it now.",
   "terminal.write.noTerminal": "{{name}} has no open terminal. Nothing was sent.",
-  "terminal.write.unconfirmed": "{{name}} did not confirm the send. The message may be stuck in the input box, unsent.",
+  "terminal.write.unconfirmed": "{{name}} did not confirm the send. The text is still in its input box, unsent: press Enter there when it stops. Do not resend the message.",
   "terminal.write.retryAuto": "I'll try again on my own.",
   "terminal.write.retryManual": "Resend when it stops.",
   "agents.update.restartFailed": "{{label}} was updated, but the app did not restart: {{cause}}. The tabs were reopened."

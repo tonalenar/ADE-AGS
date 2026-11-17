@@ -6389,7 +6389,7 @@
   "terminal.write.blockedWaiting": "{{name}} está esperando tu respuesta en un diálogo. No se le envió nada.",
   "terminal.write.blockedBusy": "{{name}} está trabajando. No lo envié ahora.",
   "terminal.write.noTerminal": "{{name}} no tiene una terminal abierta. No se envió nada.",
-  "terminal.write.unconfirmed": "{{name}} no confirmó el envío. El mensaje puede haber quedado en la caja de entrada, sin enviar.",
+  "terminal.write.unconfirmed": "{{name}} no confirmó el envío. El texto quedó en su caja de entrada, sin enviar: aprieta Enter allí cuando se detenga. No reenvíes el mensaje.",
   "terminal.write.retryAuto": "Lo intento de nuevo por mi cuenta.",
   "terminal.write.retryManual": "Reenvíalo cuando se detenga.",
   "agents.update.restartFailed": "{{label}} se actualizó, pero la app no se reinició: {{cause}}. Las pestañas se reabrieron."

@@ -74,9 +74,10 @@ export function avisarBloqueio(tabId: string, source: WriteSource, result: Exclu
     : result === "blocked-busy" ? "terminal.write.blockedBusy"
     : result === "no-terminal" ? "terminal.write.noTerminal"
     : "terminal.write.unconfirmed";
-  // O app só reagenda sozinho o que não entrou na caixa (vigia e aviso de parado). Texto na caixa ou sem terminal, não.
+  // O app só reagenda sozinho o que não entrou na caixa (vigia e aviso de parado). Não confirmado já está na caixa do
+  // agente: o aviso manda só apertar Enter lá (a frase inteira vem do catálogo), e nunca reenviar (duplicaria o texto).
   const auto = (source === "vigia" || source === "stalled") && (result === "blocked-waiting-user" || result === "blocked-busy");
-  const hint = result === "no-terminal" ? ""
+  const hint = result === "no-terminal" || result === "unconfirmed" ? ""
     : i18n.t(auto ? "terminal.write.retryAuto" : "terminal.write.retryManual");
   const text = `${i18n.t(base, { name })} ${hint}`.trim();
   showBotToast({ title: i18n.t("terminal.write.blockedTitle"), text, tone: "warning", ms: 10_000 });
@@ -116,18 +117,28 @@ export async function writeToAgent(tabId: string, text: string, opts: { submit: 
   const before = preWriteNow(tabId);
   if (before) return before;
   return new Promise<WriteResult>((resolve) => {
+    // Um único caminho de decisão: a primeira decisão real vence, e as seguintes são ignoradas.
+    let decided = false;
+    const decide = (result: WriteResult) => {
+      if (decided) return;
+      decided = true;
+      resolve(result);
+    };
     if (!opts.submit) {
-      resolve(pasteIntoTab(tabId, text, false) ? "sent" : "no-terminal");
+      const colou = pasteIntoTab(tabId, text, false);
+      decide(colou ? "sent" : "no-terminal");
       return;
     }
     const policy: SubmitPolicy = {
       gate: () => gateNow(tabId),
       // Antes de colar, nada entrou e o chamador pode tentar depois. Depois de colar, o texto está na caixa.
-      onBlocked: (block, pasted) => resolve(pasted ? "unconfirmed" : block),
-      onConfirmed: () => resolve("sent"),
-      onUnconfirmed: () => resolve("unconfirmed"),
+      onBlocked: (block, pasted) => decide(pasted ? "unconfirmed" : block),
+      onConfirmed: () => decide("sent"),
+      onUnconfirmed: () => decide("unconfirmed"),
     };
-    if (!pasteIntoTab(tabId, text, true, undefined, policy)) resolve("no-terminal");
+    const colou = pasteIntoTab(tabId, text, true, undefined, policy);
+    // Sem colar e sem nenhum evento da política: não há terminal viva para a aba.
+    if (!colou && !decided) decide("no-terminal");
   });
 }
 
