@@ -45,6 +45,31 @@ async function openWithDraft(onSave: (comment: string) => boolean, onClose: () =
   });
 }
 
+describe("o observador do editor não mede a fonte a cada mutação do documento", () => {
+  it("mutacoes_do_streaming_medem_a_fonte_uma_vez_por_quadro: vinte mutações seguidas não chamam a medição vinte vezes", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { frames.push(cb); return frames.length; });
+    try {
+      await openWithDraft(() => true, () => undefined);
+      // Os quadros pedidos pela abertura passam antes da contagem.
+      await act(async () => { frames.splice(0).forEach((cb) => cb(0)); });
+      const measure = vi.mocked(source.getBoundingClientRect);
+      measure.mockClear();
+      for (let i = 0; i < 20; i++) {
+        document.body.appendChild(document.createElement("span"));
+        await act(async () => {});
+      }
+      // A rajada não mede nada: a medição fica para o quadro.
+      expect(measure.mock.calls.length).toBe(0);
+      await act(async () => { frames.splice(0).forEach((cb) => cb(0)); });
+      // Uma checagem lê a fonte duas vezes (a âncora e a posição); vinte mutações não viram vinte checagens.
+      expect(measure.mock.calls.length).toBeLessThanOrEqual(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("o comentário da citação só se grava com ação da pessoa", () => {
   it("fonte_fora_da_area_nao_grava: a fonte que rola para fora da tela (ainda no fio) não grava nem fecha o rascunho", async () => {
     const onSave = vi.fn(() => true);
