@@ -3549,6 +3549,7 @@
   "memoryInbox.syncQueued": "Memory repository export is queued.",
   "memoryInbox.syncing": "Syncing the memory repository…",
   "memoryInbox.syncFailed": "The approval was saved, but the repository export failed: {{error}}",
+  "memoryInbox.syncFailedTitle": "Memory export failed",
   "memoryInbox.syncRetry": "Try again",
   "memoryPurge.button": "Purge",
   "memoryPurge.title": "Permanently erase memory",

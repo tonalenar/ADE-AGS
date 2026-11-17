@@ -3549,6 +3549,7 @@
   "memoryInbox.syncQueued": "La exportación del repositorio de memoria está en la cola.",
   "memoryInbox.syncing": "Sincronizando el repositorio de memoria…",
   "memoryInbox.syncFailed": "La aprobación se guardó, pero la exportación del repositorio falló: {{error}}",
+  "memoryInbox.syncFailedTitle": "Falló la exportación de memoria",
   "memoryInbox.syncRetry": "Reintentar",
   "memoryPurge.button": "Purgar",
   "memoryPurge.title": "Borrar memoria definitivamente",
