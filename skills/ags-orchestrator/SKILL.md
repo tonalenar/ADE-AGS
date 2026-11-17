@@ -826,9 +826,11 @@ ags portal close Docs                       # clean up what you created
 - Take a `snapshot` before clicking: refs (`@e3`) come from it and change after the page does.
 - Not available on a portal: running JavaScript, uploading files, cookies and storage. A
   portal may be on any site; those stay with the user and the project browser tools.
-- Dialogs and reset on a portal follow the project browser rules below. A page's `alert`, `confirm` or `prompt`
-  raised while you drive it is refused and the person is asked in the app: you cannot accept one (`dialogs accept`
-  is refused). `reset` on a real site (not localhost) asks the person first, and a step that fails is reported as
+- Dialogs and reset on a portal follow the project browser rules below. A page's dialog raised while you drive it
+  is never answered by you: `confirm` is refused and the app asks the person whether to allow that one dialog (if
+  she does, the same action, repeated, goes through once); `alert` is not answered, the person is only told; `prompt`
+  is refused (you get no text), the person is only told. `dialogs accept` is refused, and `dialogs dismiss` only lists
+  what appeared. `reset` on a real site (not localhost) asks the person first, and a step that fails is reported as
   "Reset incompleto", never as done.
 - Close the portals you created when you finish (`ags portal close <portal>`): they are visible to the
   user and each loaded page costs memory. Only portals connected to you can be closed.

@@ -423,13 +423,14 @@ browser_network marked as mocked.",
     BrowserTool {
         name: "browser_dialogs",
         op: "dialogs",
-        description: "Native dialogs (alert, confirm, prompt) that a page opens while an agent drives it are refused, \
-and the person is asked in the app. An agent cannot accept one: the person allows each dialog once in the app, and \
-the same action, repeated, then goes through. Reads what appeared.",
+        description: "A dialog a page opens while an agent drives it is never answered by the agent. confirm: refused, and \
+the app asks the person whether to allow that one dialog; if she allows it, the same action, repeated, goes through \
+once. alert: not answered; the person is only told. prompt: refused (the agent gets no text); the person is only \
+told. Lists what appeared.",
         properties: || {
             json!({
-                "action": { "type": "string", "enum": ["accept", "dismiss"], "description": "Omit it, or use dismiss, to list what appeared. accept is refused: the person decides in the app." },
-                "prompt_text": { "type": "string", "description": "Ignored: the agent does not type into a prompt. The person writes the answer in the app." },
+                "action": { "type": "string", "enum": ["accept", "dismiss"], "description": "Omit it, or use dismiss: it only lists what appeared (dismiss passes no action). accept is refused: the person decides in the app." },
+                "prompt_text": { "type": "string", "description": "Ignored: the agent never types into a prompt. The person is told about it in the app." },
             })
         },
         required: &[],
