@@ -2,10 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 import { parseUnifiedDiff, type FileDiff } from "./diffModel";
-import { scmWorkingDiff } from "./ipc";
+import { readWorkingDiff } from "./workingDiffRead";
 
-/** Quanto esperar depois do último aviso de "a conversa cresceu" para reler o diff. */
-const DIFF_DEBOUNCE_MS = 1500;
+/**
+ * Quanto esperar depois do último aviso de "a conversa cresceu" para reler o diff. Igual ao da barra de pastas
+ * (`ChatShell`), para as duas leituras caírem juntas e saírem como uma só (`readWorkingDiff`).
+ */
+const DIFF_DEBOUNCE_MS = 3000;
 
 export interface WorkingDiff {
   files: FileDiff[];
@@ -26,7 +29,7 @@ export function useWorkingDiff(cwd: string | null, tabId: string | null): { stat
 
   const load = useCallback(() => {
     if (!cwd) return;
-    scmWorkingDiff(cwd)
+    readWorkingDiff(cwd)
       .then((diff) => setState({ files: diff ? parseUnifiedDiff(diff.text) : [], truncated: diff?.truncated ?? false, loaded: true, repo: diff !== null }))
       .catch(() => setState((s) => ({ ...s, loaded: true })));
   }, [cwd]);
