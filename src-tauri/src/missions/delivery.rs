@@ -427,11 +427,22 @@ mod tests {
     }
 
     #[test]
+    fn saida_grande_do_gh_e_interpretada_sem_processo() {
+        // O mesmo JSON do `gh`, seguido de 300 KB de espaços: a interpretação não depende do pipe nem do relógio.
+        let mut stdout = br#"{"state":"OPEN","statusCheckRollup":[]}"#.to_vec();
+        stdout.extend(std::iter::repeat(b' ').take(300_000));
+        assert_eq!(parse_pr_status(&stdout).0, PrState::Open);
+    }
+
+    // quarantine: processo real (roda um `sh` que escreve 300 KB pelo pipe; roda com `cargo test -- --ignored`).
+    #[test]
+    #[ignore]
     fn stdout_maior_que_o_pipe_nao_trava_o_gh() {
         // O comando escreve bem mais que o buffer de um pipe antes de sair: um `gh` com muitos checks faz isso.
         let mut command = std::process::Command::new("sh");
         command.args(["-c", "printf '{\"state\":\"OPEN\",\"statusCheckRollup\":[]}'; head -c 300000 /dev/zero | tr '\\0' ' '"]);
-        let (state, _) = pr_view_status(command, &[], Path::new("/"), Duration::from_secs(5));
+        // Guarda contra travamento: o caminho que passa devolve assim que o processo sai, sem esperar o prazo.
+        let (state, _) = pr_view_status(command, &[], Path::new("/"), Duration::from_secs(10));
         assert_eq!(state, PrState::Open);
     }
 

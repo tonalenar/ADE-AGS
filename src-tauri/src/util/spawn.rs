@@ -288,14 +288,18 @@ pub fn output_with_input(cmd: &mut Command, input: Option<Vec<u8>>, timeout: Dur
 struct DrainedPipe {
     buf: Arc<std::sync::Mutex<Vec<u8>>>,
     closed: std::sync::mpsc::Receiver<()>,
+    /// Ligado pela thread antes do sinal: quem já consumiu o sinal ainda vê que o pipe fechou.
+    finished: Arc<AtomicBool>,
 }
 
 fn drain_pipe<R: Read + Send + 'static>(pipe: Option<R>) -> DrainedPipe {
     let buf = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (done, closed) = std::sync::mpsc::channel();
+    let finished = Arc::new(AtomicBool::new(false));
     match pipe {
         Some(mut pipe) => {
             let sink = buf.clone();
+            let flag = finished.clone();
             std::thread::spawn(move || {
                 let mut chunk = [0_u8; 8192];
                 loop {
@@ -306,20 +310,24 @@ fn drain_pipe<R: Read + Send + 'static>(pipe: Option<R>) -> DrainedPipe {
                         Err(_) => break,
                     }
                 }
+                flag.store(true, Ordering::Release);
                 let _ = done.send(());
             });
         }
         None => {
+            finished.store(true, Ordering::Release);
             let _ = done.send(());
         }
     }
-    DrainedPipe { buf, closed }
+    DrainedPipe { buf, closed, finished }
 }
 
 impl DrainedPipe {
     /// O que o pipe trouxe até `deadline`, e se ele já tinha fechado até lá.
     fn collect(self, deadline: Instant) -> (Vec<u8>, bool) {
-        let closed = self.closed.recv_timeout(deadline.saturating_duration_since(Instant::now())).is_ok();
+        // Só o `Timeout` quer dizer "ainda aberto": `Disconnected` é a thread que já terminou (o pipe fechou).
+        let waited = self.closed.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        let closed = self.finished.load(Ordering::Acquire) || !matches!(waited, Err(std::sync::mpsc::RecvTimeoutError::Timeout));
         let bytes = std::mem::take(&mut *self.buf.lock().unwrap_or_else(|e| e.into_inner()));
         (bytes, closed)
     }
@@ -649,8 +657,11 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
     }
 
+    // quarantine: processo real (espera o prazo de 300 ms e um neto de 5 s; roda com `cargo test -- --ignored`).
+    // A regra do prazo sem relógio está nos testes `pipe_*` abaixo.
     #[cfg(unix)]
     #[test]
+    #[ignore]
     fn neto_que_herda_o_pipe_nao_trava_a_chamada_alem_do_prazo() {
         // O filho sai logo, mas um neto que herdou o stdout o mantém aberto por 5 s. A chamada volta no prazo com o
         // que já saiu, em vez de esperar o neto.
@@ -660,6 +671,31 @@ mod tests {
         let out = output(&mut cmd, Duration::from_millis(300)).expect("o filho saiu no prazo");
         assert!(started.elapsed() < Duration::from_secs(3), "a chamada esperou o neto");
         assert_eq!(out.stdout, b"hi\n");
+    }
+
+
+    #[test]
+    fn pipe_aberto_volta_na_hora_com_prazo_vencido() {
+        // Sem relógio: o pipe continua aberto (o escritor vive), então a coleta com prazo já vencido não espera.
+        let (reader, writer) = std::io::pipe().expect("pipe");
+        let drained = drain_pipe(Some(reader));
+        let (_, closed) = drained.collect(Instant::now());
+        assert!(!closed, "pipe com escritor vivo não pode ser dado como fechado");
+        drop(writer);
+    }
+
+    #[test]
+    fn pipe_fechado_entrega_o_que_saiu() {
+        // Sem relógio: o fim do pipe é sinalizado pelo próprio canal, então a leitura só segue depois de tudo chegar.
+        use std::io::Write;
+        let (reader, mut writer) = std::io::pipe().expect("pipe");
+        let drained = drain_pipe(Some(reader));
+        writer.write_all(b"hi\n").expect("escreve");
+        drop(writer);
+        drained.closed.recv().expect("o leitor chega ao fim quando o escritor sai");
+        let (bytes, closed) = drained.collect(Instant::now());
+        assert!(closed);
+        assert_eq!(bytes, b"hi\n");
     }
 
 }
