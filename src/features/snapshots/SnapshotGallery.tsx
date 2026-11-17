@@ -7,6 +7,7 @@ import { useImagePreview } from "@/features/chat/attachments/useImagePreview";
 import { attachToComposer } from "@/features/chat/store";
 import { ReloadIcon } from "@/features/chat/chatIcons";
 
+import { dateLocale } from "@/i18n/dateLocale";
 import { snapshotGalleryCopy, snapshotGalleryDelete, snapshotGalleryList, type SnapshotItem } from "./ipc";
 import { snapshotCanCopy, snapshotLabel, snapshotTime } from "./model";
 
@@ -120,7 +121,7 @@ function SnapshotCard({ item, confirming, canCopy, onView, onCopy, onAttach, onA
       </button>
       <div className="flex flex-col gap-1 p-2">
         <span className="truncate text-[12px] font-medium text-gray-800 dark:text-white/85">{label || t("snapshots.untitled")}</span>
-        <span className="truncate text-[11px] text-gray-500 dark:text-white/50">{new Date(snapshotTime(item)).toLocaleString()}</span>
+        <span className="truncate text-[11px] text-gray-500 dark:text-white/50">{new Date(snapshotTime(item)).toLocaleString(dateLocale())}</span>
         <div className="flex flex-wrap gap-1">
           {canCopy && <button type="button" onClick={onCopy} className={button}>{t("snapshots.copy")}</button>}
           <button type="button" onClick={onAttach} className={button}>{t("snapshots.attach")}</button>
