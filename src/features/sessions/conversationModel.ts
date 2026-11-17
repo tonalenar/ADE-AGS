@@ -4,6 +4,8 @@
  * conversa reabre cada um no mesmo lugar do canvas.
  */
 
+import i18n from "i18next";
+
 import type { Box } from "@/features/canvas/geometry";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { SHELL_AGENT_ID, type Tab } from "@/features/tabs/types";
@@ -17,7 +19,10 @@ const MAX_TERMINALS = 24;
 const MAX_LINKS = 64;
 const TITLE_MAX = 60;
 const CUSTOM_MAX = 120;
-const FALLBACK_TITLE = "Nova conversa";
+const fallbackTitle = () => {
+  const label = i18n.t("conversations.newTitle");
+  return !label || label === "conversations.newTitle" ? "Nova conversa" : label;
+};
 
 /** Um terminal de agente tal como vai para o snapshot da conversa. */
 export interface TerminalSnapshot {
@@ -271,7 +276,7 @@ export function conversationTitle(row: ConversationRow, terminals: TerminalSnaps
   const title = typeof row.title === "string" ? row.title.trim() : "";
   if (title && !isAdeNoticeTitle(title)) return title;
   const lead = cleanText(pickRestoreOrder(terminals)[0]?.title, TITLE_MAX);
-  return lead && !isAdeNoticeTitle(lead) ? lead : FALLBACK_TITLE;
+  return lead && !isAdeNoticeTitle(lead) ? lead : fallbackTitle();
 }
 
 /**
