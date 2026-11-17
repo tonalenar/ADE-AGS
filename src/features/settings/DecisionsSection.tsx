@@ -7,6 +7,7 @@ import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "
 import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, jevModels, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
 import { NO_HEURISTIC, POINT_MODE, shadowSummary, type PointMode } from "@/features/settings/decisionsModel";
 import { applyDecisionModelUpdate, defaultDecisionSettings, isDirty, modelAfterProviderChange, modelOptions, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 const PROVIDERS: DecisionProviderId[] = ["none", "laya_local", "laya_studio", "jev"];
 const POINT_LABEL: Record<string, string> = {
@@ -180,7 +181,7 @@ export function DecisionsSection() {
         setSettings({ ...loaded, model: modelAfterProviderChange(loaded.model, loaded.provider) });
         setSaved(loaded);
       })
-      .catch((error: unknown) => setStatus(String(error)));
+      .catch((error: unknown) => setStatus(uiErrorText(error)));
     void loadSettings();
     jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
     decisionShadowReport().then(setReport).catch(() => undefined);
@@ -251,7 +252,7 @@ export function DecisionsSection() {
       setSaved(stored);
       setStatus(t("settings.decisions.saved"));
     } catch (error) {
-      setStatus(String(error));
+      setStatus(uiErrorText(error));
     }
   };
 
@@ -263,7 +264,7 @@ export function DecisionsSection() {
       setSettings((cur) => ({ ...cur, ...flag }));
       setSaved((cur) => ({ ...cur, ...flag }));
     } catch (error) {
-      setStatus(String(error));
+      setStatus(uiErrorText(error));
     }
   };
 
@@ -278,7 +279,7 @@ export function DecisionsSection() {
         ? { ok: true, text: t("settings.decisions.testOk", { ms: result.latencyMs }) }
         : { ok: false, text: t("settings.decisions.testFail", { ms: result.latencyMs, error: result.error ?? "" }) });
     } catch (error) {
-      put({ ok: false, text: String(error) });
+      put({ ok: false, text: uiErrorText(error) });
     } finally {
       setTesting(null);
     }
@@ -289,7 +290,7 @@ export function DecisionsSection() {
     try {
       setReport(await decisionShadowReport());
     } catch (error) {
-      setStatus(String(error));
+      setStatus(uiErrorText(error));
     }
   };
 
@@ -492,7 +493,7 @@ export function DecisionsSection() {
         action={
           <span className="flex gap-2">
             <button type="button" onClick={() => void loadReport()} className={BTN}>{t("settings.decisions.refresh")}</button>
-            <button type="button" onClick={() => void exportCsv().catch((error: unknown) => setStatus(String(error)))} className={BTN}>{t("settings.decisions.export")}</button>
+            <button type="button" onClick={() => void exportCsv().catch((error: unknown) => setStatus(uiErrorText(error)))} className={BTN}>{t("settings.decisions.export")}</button>
           </span>
         }
       >

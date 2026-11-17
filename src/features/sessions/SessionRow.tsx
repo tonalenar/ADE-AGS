@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import { ArrowRightIcon, Badge, Button, ChevronDownIcon, DocumentIcon, StackIcon, Tooltip, TrashIcon } from "neogestify-ui-components";
 import { AlertaConfirmacion, AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 import { useSessionsStore } from "@/features/sessions/store";
 import type { SessionHistoryEntry } from "@/features/sessions/types";
@@ -122,7 +123,7 @@ export function SessionRow({
       );
       if (outcome === "ok") AlertaToast(t("sessions.export.title"), t("sessions.export.done"), "success", 4000);
     } catch (e) {
-      AlertaToast(t("sessions.export.title"), String(e), "error", 6000);
+      AlertaToast(t("sessions.export.title"), uiErrorText(e), "error", 6000);
     } finally {
       setBusy(false);
     }
@@ -138,7 +139,7 @@ export function SessionRow({
     try {
       await deleteSession(entry.id, workspaceId);
     } catch (e) {
-      AlertaToast(t("sessions.delete.action"), String(e), "error", 6000);
+      AlertaToast(t("sessions.delete.action"), uiErrorText(e), "error", 6000);
     } finally {
       setBusy(false);
     }

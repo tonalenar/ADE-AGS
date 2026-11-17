@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 import { useCanvasStore, conversationBoardKey } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
@@ -111,7 +112,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
     try {
       await work();
     } catch (e) {
-      AlertaToast(t("conversations.title"), String(e), "error", 7000);
+      AlertaToast(t("conversations.title"), uiErrorText(e), "error", 7000);
     } finally {
       setBusy(null);
     }

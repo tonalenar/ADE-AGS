@@ -8,6 +8,7 @@ import { useShellGroups } from "@/app/shellContext";
 import { useTabsStore } from "@/features/tabs/store";
 import type { RepoGroup, WorkspaceNode } from "@/features/workspaces/workspaceTree";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 import { openExternalUrl } from "@/shared/openExternalUrl";
 
 import { ForgeItemsView, type ItemFilter } from "./ForgeItemsView";
@@ -221,7 +222,7 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
         <ForgeIcon kind={target.kind} className="w-4 h-4 shrink-0 text-gray-500 dark:text-white/45" />
         {link ? (
           <button type="button"
-            onClick={() => { openExternalUrl(link).catch((e) => { AlertaToast(t("forge.panel.openInBrowser"), String(e), "error", 5000); }); }}
+            onClick={() => { openExternalUrl(link).catch((e) => { AlertaToast(t("forge.panel.openInBrowser"), uiErrorText(e), "error", 5000); }); }}
             title={`${t("forge.panel.openInBrowser")} · ${link}`}
             aria-label={`${t("forge.panel.openInBrowser")}: ${target.path}`}
             className="cc-t group min-w-0 flex items-center gap-1.5 rounded-md px-1 -mx-1 py-0.5

@@ -8,4 +8,11 @@ describe("uiErrorText", () => {
     expect(uiErrorText(new Error("ipc"))).toBe("ipc");
     expect(uiErrorText("texto")).toBe("texto");
   });
+
+  it("objeto sem message vira kind ou JSON curto", () => {
+    expect(uiErrorText({ kind: "ipc" })).toBe("ipc");
+    expect(uiErrorText({ code: 7, path: "/tmp" })).toBe('{"code":7,"path":"/tmp"}');
+    expect(uiErrorText({ kind: "ipc" })).not.toBe("[object Object]");
+    expect(uiErrorText({ code: 7 })).not.toBe("[object Object]");
+  });
 });

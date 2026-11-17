@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { getSetting, setSetting } from "@/shared/ipc/settings";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 import { parseFixRoundsInput } from "@/features/settings/fixRoundsValue";
 
 /** A mesma chave que `runs/fixrounds.rs` lee. Sin valor, el teto es 2. */
@@ -34,7 +35,7 @@ export function FixRoundsSetting() {
     setValue(String(n));
     setSetting(KEY, String(n)).catch((e) => {
       setValue(previous);
-      AlertaToast(t("settings.fixRounds.label"), String(e), "error", 6000);
+      AlertaToast(t("settings.fixRounds.label"), uiErrorText(e), "error", 6000);
     });
   };
 

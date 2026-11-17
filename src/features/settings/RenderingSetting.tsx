@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { GPU_COMPOSITING_KEY, renderingInfo, setSetting, type RenderingInfo } from "@/shared/ipc/settings";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 import { SettingsToggleRow } from "@/features/settings/SettingsSection";
 
 /**
@@ -33,7 +34,7 @@ export function RenderingSetting() {
         setInfo({ ...info, gpuCompositing: value });
         setSetting(GPU_COMPOSITING_KEY, value ? "1" : "0").catch((e) => {
           setInfo(previous);
-          AlertaToast(t("settings.rendering.gpu"), String(e), "error", 6000);
+          AlertaToast(t("settings.rendering.gpu"), uiErrorText(e), "error", 6000);
         });
       }}
       label={t("settings.rendering.gpu")}
