@@ -28,6 +28,7 @@ pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub const DETACHED_PROCESS: u32 = 0x0000_0008;
 
 const POLL: Duration = Duration::from_millis(25);
+const STDERR_CAPTURE_LIMIT: usize = 64 * 1024;
 
 /// Como a janela do processo filho deve nascer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,6 +124,24 @@ pub fn output_with_stdout_limit(
     timeout: Duration,
     max_stdout_bytes: usize,
 ) -> io::Result<Output> {
+    output_with_stdout_limit_inner(cmd, timeout, max_stdout_bytes, false).map(|(output, _)| output)
+}
+
+/// Como `output_with_stdout_limit`, mas devolve o prefixo capturado quando o teto é excedido.
+pub fn output_with_stdout_limit_truncated(
+    cmd: &mut Command,
+    timeout: Duration,
+    max_stdout_bytes: usize,
+) -> io::Result<(Output, bool)> {
+    output_with_stdout_limit_inner(cmd, timeout, max_stdout_bytes, true)
+}
+
+fn output_with_stdout_limit_inner(
+    cmd: &mut Command,
+    timeout: Duration,
+    max_stdout_bytes: usize,
+    keep_truncated: bool,
+) -> io::Result<(Output, bool)> {
     apply_window(cmd, WindowMode::Hidden);
     prepare_session(cmd);
     let started = Instant::now();
@@ -131,12 +150,34 @@ pub fn output_with_stdout_limit(
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()?;
     let mut guard = GroupGuard::adopt(&child);
     let exceeded = Arc::new(AtomicBool::new(false));
     let reader_exceeded = exceeded.clone();
     let (reader_done_tx, reader_done_rx) = std::sync::mpsc::channel();
+    let Some(mut stderr_pipe) = child.stderr.take() else {
+        guard.kill();
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(io::Error::other("stderr indisponível"));
+    };
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::with_capacity(STDERR_CAPTURE_LIMIT);
+        let mut chunk = [0_u8; 8192];
+        loop {
+            match stderr_pipe.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(count) => {
+                    let remaining = STDERR_CAPTURE_LIMIT.saturating_sub(bytes.len());
+                    bytes.extend_from_slice(&chunk[..count.min(remaining)]);
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
+        bytes
+    });
     let Some(mut pipe) = child.stdout.take() else {
         guard.kill();
         let _ = child.kill();
@@ -174,16 +215,21 @@ pub fn output_with_stdout_limit(
     let mut child_status = None;
     let mut reader_done = false;
     let status = loop {
-        if exceeded.load(Ordering::Acquire) {
+        if exceeded.load(Ordering::Acquire) && !keep_truncated {
             guard.kill();
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
+            let _ = stderr_reader.join();
             log_finish(&program, &argv, started.elapsed(), None);
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("stdout excedeu o limite de {max_stdout_bytes} bytes"),
             ));
+        }
+        if exceeded.load(Ordering::Acquire) && child_status.is_none() {
+            guard.kill();
+            child_status = child.wait().ok();
         }
         if child_status.is_none() {
             match child.try_wait() {
@@ -194,6 +240,7 @@ pub fn output_with_stdout_limit(
                     let _ = child.kill();
                     let _ = child.wait();
                     let _ = reader.join();
+                    let _ = stderr_reader.join();
                     log_finish(&program, &argv, started.elapsed(), None);
                     return Err(error);
                 }
@@ -210,6 +257,7 @@ pub fn output_with_stdout_limit(
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
+            let _ = stderr_reader.join();
             log_finish(&program, &argv, started.elapsed(), None);
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
@@ -222,7 +270,8 @@ pub fn output_with_stdout_limit(
     let stdout = reader
         .join()
         .map_err(|_| io::Error::other("a leitura de stdout falhou"))??;
-    if exceeded.load(Ordering::Acquire) {
+    let truncated = exceeded.load(Ordering::Acquire);
+    if truncated && !keep_truncated {
         log_finish(&program, &argv, started.elapsed(), status.code());
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -230,11 +279,10 @@ pub fn output_with_stdout_limit(
         ));
     }
     log_finish(&program, &argv, started.elapsed(), status.code());
-    Ok(Output {
-        status,
-        stdout,
-        stderr: Vec::new(),
-    })
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| io::Error::other("a leitura de stderr falhou"))?;
+    Ok((Output { status, stdout, stderr }, truncated))
 }
 
 /// Como [`output`], escrevendo `input` na entrada padrão do filho (numa thread, para um filho
@@ -625,5 +673,25 @@ mod tests {
             .expect_err("o teto tem que cortar o stdout");
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("stdout excedeu"), "{err}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn limite_de_stdout_preserva_stderr_diagnostico() {
+        let mut cmd = hidden_command("sh");
+        cmd.args(["-c", "echo 'fatal: branch ausente' >&2; exit 1"]);
+        let out = output_with_stdout_limit(&mut cmd, Duration::from_secs(5), 256).unwrap();
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains("fatal: branch ausente"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn captura_stderr_para_no_teto_sem_bloquear_o_filho() {
+        let mut cmd = hidden_command("sh");
+        cmd.args(["-c", "head -c 100000 /dev/zero >&2"]);
+        let out = output_with_stdout_limit(&mut cmd, Duration::from_secs(5), 256).unwrap();
+        assert!(out.status.success());
+        assert_eq!(out.stderr.len(), STDERR_CAPTURE_LIMIT);
     }
 }

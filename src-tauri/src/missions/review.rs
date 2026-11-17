@@ -66,6 +66,42 @@ fn git_capped(dir: &Path, args: &[&str], limit: Duration, max_stdout: Option<usi
     }
 }
 
+fn git_capped_prefix(
+    dir: &Path,
+    args: &[&str],
+    limit: Duration,
+    max_stdout: usize,
+) -> Result<(String, bool), String> {
+    let mut cmd = crate::util::spawn::hidden_command("git");
+    cmd.arg("-C").arg(external_path(dir)).args(args);
+    cmd.env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_EDITOR", "true")
+        .env("GIT_MERGE_AUTOEDIT", "no");
+    let (out, truncated) = crate::util::spawn::output_with_stdout_limit_truncated(
+        &mut cmd,
+        limit,
+        max_stdout,
+    )
+    .map_err(|error| format!("não foi possível rodar o git: {error}"))?;
+    if out.status.success() || truncated {
+        return Ok((
+            String::from_utf8_lossy(&out.stdout)
+                .trim_end_matches(['\n', '\r'])
+                .to_string(),
+            truncated,
+        ));
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    Err(if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        format!("git {} falló", args.join(" "))
+    })
+}
+
 /// Un archivo de la entrega, con sus líneas agregadas y quitadas (`None` = binario).
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -157,6 +193,17 @@ pub fn merge(dir: &Path, branch: &str, message: &str) -> Result<MergeOutcome, St
 mod git_cap_test {
     use super::*;
 
+    fn review_db(project: &Path, branch: &str) -> crate::database::DbConnection {
+        let conn = crate::database::test_db();
+        conn.execute_batch(
+            "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+             INSERT INTO runs (id, workspace_id, objective, cwd, created_at) VALUES ('r', 'ws', 'o', '/unused', 0);
+             INSERT INTO tasks (id, run_id, title, prompt, agent_id, cwd, created_at) VALUES ('t', 'r', 'T', 'P', 'codex', '/unused', 0);",
+        ).unwrap();
+        conn.execute("UPDATE tasks SET cwd=?1, branch=?2 WHERE id='t'", rusqlite::params![project.to_string_lossy(), branch]).unwrap();
+        std::sync::Arc::new(std::sync::Mutex::new(conn))
+    }
+
     #[test]
     fn git_diff_respeita_o_teto_de_stdout() {
         let dir = std::env::temp_dir().join(format!("ags-review-cap-{}", uuid::Uuid::new_v4()));
@@ -170,6 +217,47 @@ mod git_cap_test {
         std::fs::write(dir.join("big.txt"), "y".repeat(8_000)).unwrap();
         let err = git_capped(&dir, &["diff"], GIT_FAST, Some(64)).unwrap_err();
         assert!(err.contains("stdout excedeu"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diff_maior_que_o_teto_mostra_o_prefixo_e_avisa_o_corte() {
+        let dir = std::env::temp_dir().join(format!("ags-review-large-diff-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-b", "master"], GIT_FAST).unwrap();
+        git(&dir, &["config", "user.name", "Test"], GIT_FAST).unwrap();
+        git(&dir, &["config", "user.email", "test@example.invalid"], GIT_FAST).unwrap();
+        std::fs::write(dir.join("large.txt"), "x".repeat(500_000)).unwrap();
+        git(&dir, &["add", "."], GIT_FAST).unwrap();
+        git(&dir, &["commit", "-m", "base"], GIT_FAST).unwrap();
+        git(&dir, &["checkout", "-b", "feature"], GIT_FAST).unwrap();
+        std::fs::write(dir.join("large.txt"), "y".repeat(500_000)).unwrap();
+        git(&dir, &["commit", "-am", "large change"], GIT_FAST).unwrap();
+        git(&dir, &["checkout", "master"], GIT_FAST).unwrap();
+
+        let db = review_db(&dir, "feature");
+        let diff = task_diff_with_db(&db, "t").unwrap();
+        assert!(diff.starts_with("diff --git"), "o prefixo do diff deve continuar visível");
+        assert!(diff.contains("diff cortado"), "deve avisar que o restante foi cortado");
+        assert!(diff.len() >= MAX_DIFF_BYTES, "deve exibir o prefixo limitado: {}", diff.len());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn branch_ausente_mostra_o_diagnostico_do_git() {
+        let dir = std::env::temp_dir().join(format!("ags-review-missing-branch-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-b", "master"], GIT_FAST).unwrap();
+        git(&dir, &["config", "user.name", "Test"], GIT_FAST).unwrap();
+        git(&dir, &["config", "user.email", "test@example.invalid"], GIT_FAST).unwrap();
+        std::fs::write(dir.join("a"), "base").unwrap();
+        git(&dir, &["add", "."], GIT_FAST).unwrap();
+        git(&dir, &["commit", "-m", "base"], GIT_FAST).unwrap();
+
+        let db = review_db(&dir, "branch-ausente");
+        let err = task_diff_with_db(&db, "t").unwrap_err();
+        assert!(err.contains("branch-ausente"), "{err}");
+        assert!(err.contains("unknown") || err.contains("bad revision"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
@@ -411,14 +499,13 @@ pub fn task_diff_with_db(
         let project = mission_cwd_of_run(&conn, &task.run_id)?.unwrap_or(task.cwd);
         (PathBuf::from(project), branch)
     };
-    let mut diff = match git_capped(&project, &["diff", &format!("HEAD...{branch}")], GIT_SLOW, Some(MAX_DIFF_BYTES)) {
-        Ok(diff) => diff,
-        Err(err) if err.contains("stdout excedeu") => {
-            return Ok("\n\n… (diff cortado: abra a branch no explorador para ver inteiro)\n".into());
-        }
-        Err(err) => return Err(err),
-    };
-    if diff.len() > MAX_DIFF_BYTES {
+    let (mut diff, truncated) = git_capped_prefix(
+        &project,
+        &["diff", &format!("HEAD...{branch}")],
+        GIT_SLOW,
+        MAX_DIFF_BYTES,
+    )?;
+    if truncated || diff.len() > MAX_DIFF_BYTES {
         let mut cut = MAX_DIFF_BYTES;
         while !diff.is_char_boundary(cut) {
             cut -= 1;
