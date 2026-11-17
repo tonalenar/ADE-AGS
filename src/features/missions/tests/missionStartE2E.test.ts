@@ -31,6 +31,11 @@ const mocks = vi.hoisted(() => ({
   addTab: vi.fn(),
   activateTab: vi.fn(),
   board: vi.fn(),
+  tabs: [] as Array<{ id: string; ptyId: number | null }>,
+  tabListeners: new Set<() => void>(),
+  tabIds: [] as string[],
+  nextPtyId: 1,
+  terminalsByPty: new Map<number, SimulatedTerminal>(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -46,8 +51,12 @@ vi.mock("@/features/tabs/store", () => ({
         { id: "codex", command: "codex", available: true },
         { id: "claude-code", command: "claude", available: true },
       ],
-      tabs: [],
+      tabs: mocks.tabs,
     }),
+    subscribe: (listener: () => void) => {
+      mocks.tabListeners.add(listener);
+      return () => mocks.tabListeners.delete(listener);
+    },
   },
 }));
 vi.mock("@/features/canvas/store", () => ({
@@ -67,6 +76,8 @@ vi.mock("../autonomy", () => ({
  */
 class SimulatedTerminal {
   public rows = 24;
+  public cols = 80;
+  public modes = { bracketedPasteMode: false };
   public lines: string[] = [];
   public isAlt = false;
   public inputs: string[] = [];
@@ -146,10 +157,31 @@ class SimulatedTerminal {
 
 const cleanups: Array<() => void> = [];
 
+function notifyTabsChanged(): void {
+  for (const listener of mocks.tabListeners) listener();
+}
+
+function setPtyLive(tabId: string, term: SimulatedTerminal): void {
+  let tab = mocks.tabs.find((candidate) => candidate.id === tabId);
+  if (!tab) {
+    tab = { id: tabId, ptyId: null };
+    mocks.tabs.push(tab);
+  }
+  if (tab.ptyId == null) tab.ptyId = mocks.nextPtyId++;
+  mocks.terminalsByPty.set(tab.ptyId, term);
+  notifyTabsChanged();
+}
+
 function registerSimulated(tabId: string, term: SimulatedTerminal): SimulatedTerminal {
+  if (!mocks.tabs.some((candidate) => candidate.id === tabId)) mocks.tabs.push({ id: tabId, ptyId: null });
   const unregister = registerTerminal(tabId, term as unknown as import("@xterm/xterm").Terminal);
+  setPtyLive(tabId, term);
   cleanups.push(unregister);
   return term;
+}
+
+async function flushPromises(): Promise<void> {
+  for (let i = 0; i < 8; i++) await Promise.resolve();
 }
 
 const workspace = (name: string, path: string) => ({
@@ -170,6 +202,17 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     vi.clearAllMocks();
     recordedSpans.length = 0;
     cleanups.splice(0, cleanups.length).forEach((fn) => fn());
+    mocks.tabs.length = 0;
+    mocks.tabListeners.clear();
+    mocks.tabIds.length = 0;
+    mocks.nextPtyId = 1;
+    mocks.terminalsByPty.clear();
+    mocks.addTab.mockImplementation(() => {
+      const id = mocks.tabIds.shift() ?? `tab-e2e-${mocks.tabs.length}`;
+      mocks.tabs.push({ id, ptyId: null });
+      notifyTabsChanged();
+      return id;
+    });
 
     mocks.invoke.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
       if (cmd === "mission_prepare_team") {
@@ -186,6 +229,23 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       }
       if (cmd === "mission_timing_add") {
         recordedSpans.push(args as unknown as { missionId: string; span: { kind: string; actor?: string; detail?: string; startedMs: number; endedMs: number } });
+        return {};
+      }
+      if (cmd === "pty_write_composto") {
+        const id = args.id as number;
+        const term = mocks.terminalsByPty.get(id);
+        const passos = args.passos as Array<{ tipo: string; dados?: string }>;
+        const texto = passos.find((passo) => passo.tipo === "texto")?.dados;
+        if (texto) term?.paste(texto);
+        const enter = [...passos].reverse().find((passo) => passo.tipo === "texto")?.dados;
+        if (enter === "\r") term?.input(enter);
+        return {};
+      }
+      if (cmd === "pty_write") {
+        const term = mocks.terminalsByPty.get(args.id as number);
+        const data = args.data as string;
+        if (data === "\r") term?.input(data);
+        else term?.paste(data);
         return {};
       }
       return {};
@@ -273,11 +333,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     const frontendTabId = "tab-e2e-frontend";
     const qaTabId = "tab-e2e-qa";
 
-    mocks.addTab
-      .mockReturnValueOnce(leadTabId)
-      .mockReturnValueOnce(backendTabId)
-      .mockReturnValueOnce(frontendTabId)
-      .mockReturnValueOnce(qaTabId);
+    mocks.tabIds.push(leadTabId, backendTabId, frontendTabId, qaTabId);
 
     // Cria os 4 terminais simulados
     const leadTerm = new SimulatedTerminal(["$ codex --model o3-mini"]);
@@ -309,6 +365,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     expect(backendTerm.pastes).toHaveLength(0);
 
     vi.advanceTimersByTime(2500);
+    await flushPromises();
 
     // Todos os briefings foram colados automaticamente!
     expect(leadTerm.pastes).toHaveLength(1);
@@ -742,7 +799,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
         { id: "backend", label: "Backend", description: "API", instructions: "API" },
       ];
 
-      mocks.addTab.mockReturnValueOnce("tab-all-lead").mockReturnValueOnce("tab-all-backend");
+      mocks.tabIds.push("tab-all-lead", "tab-all-backend");
 
       const leadTerm = new SimulatedTerminal(["› "]);
       const backendTerm = new SimulatedTerminal(["› "]);
@@ -757,10 +814,12 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
 
       // Orquestrador mostra atividade aos 5s
       vi.advanceTimersByTime(5000);
+      await flushPromises();
       leadTerm.emitOutput(["Planejando tarefas..."]);
 
       // Backend mostra atividade aos 12s
       vi.advanceTimersByTime(7000);
+      await flushPromises();
       backendTerm.emitOutput(["Iniciando backend..."]);
 
       // Verifica que o span 'start_all_working' foi registrado para 'all'

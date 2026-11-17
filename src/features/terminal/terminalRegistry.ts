@@ -35,6 +35,8 @@ export function recentPaste(tabId: string, now = Date.now(), within = 3000): str
 
 /** Mensajes para agentes que todavía no terminaron de arrancar. */
 const queued = new Map<string, string>();
+/** Cancelamento da espera da aba/PTY, para limpar ao entregar ou substituir a mensagem. */
+const ptyWaits = new Map<string, () => void>();
 
 /** Cuánto tiene que estar callada la terminal para dar por hecho que la TUI ya arrancó y
  *  espera que le escriban. Los comandos previos y el arranque imprimen en ráfagas. */
@@ -44,8 +46,7 @@ const GIVE_UP_MS = 45_000;
 /** Aba restaurada sem PTY: espera o lançamento e desiste com `onStalled`, sem o timer de 45 s. */
 const LAUNCH_WAIT_MS = 8_000;
 
-/** `missing` = o teste (ou um caller) não tem a aba no store: cola se o xterm existe.
- *  `idle` = a aba existe e ainda não lançou o processo. `live` = já tem PTY. */
+/** `missing` = a aba ainda não está no store; `idle` = existe sem processo; `live` = tem PTY. */
 function tabPtyState(tabId: string): "missing" | "idle" | "live" {
   const tab = useTabsStore.getState().tabs.find((tab) => tab.id === tabId);
   if (!tab) return "missing";
@@ -165,6 +166,7 @@ function safeGuard(guard: () => boolean): boolean {
 
 /** Espera a que la TUI termine de arrancar y le manda `text`. */
 function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
+  ptyWaits.get(tabId)?.();
   let timer: number | undefined;
   let sawOutput = false;
   const timings = queuedTimings.get(tabId);
@@ -221,48 +223,70 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
   }, GIVE_UP_MS);
 }
 
-/**
- * Deja un mensaje para el agente de `tabId`, que se envía cuando su TUI termina de
- * arrancar. Es para una tab recién abierta: pegar antes le escribiría al shell de los
- * comandos previos, o a una TUI que todavía no dibujó su entrada y lo tira.
- *
- * Ninguna de las TUIs tiene un flag común para "arrancá con este mensaje", así que se
- * espera a que la terminal se quede quieta, que es cuando la persona empezaría a escribir.
- */
-function waitUntilLive(tabId: string, term: Terminal, text: string): void {
-  requestPtyLaunch(tabId);
-  // Reage à mudança da store: quando a aba ganha o PTY, a mensagem sai no mesmo passo. Sem consulta em laço (A090).
+/** Aguarda a aba e o PTY aparecerem; sem aba no store, ainda não há destino para lançar. */
+function waitForPty(tabId: string, text: string, expectedTerm = terminals.get(tabId)): void {
+  ptyWaits.get(tabId)?.();
+  let done = false;
+  let launchRequested = false;
+  let unsub: () => void = () => undefined;
+  let prazo = 0;
   const parar = () => {
+    if (done) return;
+    done = true;
     unsub();
     window.clearTimeout(prazo);
+    if (ptyWaits.get(tabId) === parar) ptyWaits.delete(tabId);
   };
-  const unsub = useTabsStore.subscribe(() => {
-    if (terminals.get(tabId) !== term) {
+  const falhar = (motivo: string) => {
+    if (queued.get(tabId) !== text) {
       parar();
       return;
     }
-    if (tabPtyState(tabId) === "live") {
-      parar();
-      sendWhenSettled(tabId, term, text);
-    }
-  });
-  const prazo = window.setTimeout(() => {
     parar();
     queued.delete(tabId);
     const timings = queuedTimings.get(tabId);
     queuedTimings.delete(tabId);
     timings?.onStalled?.();
-    timings?.onFailed?.("a aba não ganhou um terminal a tempo");
-  }, LAUNCH_WAIT_MS);
+    timings?.onFailed?.(motivo);
+  };
+  const conferir = () => {
+    if (queued.get(tabId) !== text) {
+      parar();
+      return;
+    }
+    if (expectedTerm && terminals.get(tabId) !== expectedTerm) {
+      falhar("o terminal foi fechado antes da entrada");
+      return;
+    }
+    const tab = useTabsStore.getState().tabs.find((candidate) => candidate.id === tabId);
+    if (!tab) return;
+    if (tab.ptyId == null) {
+      if (!launchRequested) {
+        launchRequested = true;
+        requestPtyLaunch(tabId);
+      }
+      return;
+    }
+    const term = terminals.get(tabId);
+    // A aba pode ganhar o PTY antes de o componente montar o xterm. registerTerminal
+    // retoma a entrega quando esse terminal estiver pronto.
+    if (!term) return;
+    parar();
+    sendWhenSettled(tabId, term, text);
+  };
+  ptyWaits.set(tabId, parar);
+  unsub = useTabsStore.subscribe(conferir);
+  prazo = window.setTimeout(() => falhar("a aba não ganhou um terminal a tempo"), LAUNCH_WAIT_MS);
+  conferir();
 }
 
 export function sendWhenReady(tabId: string, text: string, timings?: SendTimings): void {
+  ptyWaits.get(tabId)?.();
   queued.set(tabId, text);
   if (timings) queuedTimings.set(tabId, timings);
   const term = terminals.get(tabId);
-  if (!term) return;
-  if (tabPtyState(tabId) === "idle") {
-    waitUntilLive(tabId, term, text);
+  if (!term || tabPtyState(tabId) !== "live") {
+    waitForPty(tabId, text, term);
     return;
   }
   sendWhenSettled(tabId, term, text);
@@ -280,8 +304,8 @@ export function registerTerminal(tabId: string, term: Terminal): () => void {
   });
   const pending = queued.get(tabId);
   if (pending !== undefined) {
-    if (tabPtyState(tabId) === "idle") waitUntilLive(tabId, term, pending);
-    else sendWhenSettled(tabId, term, pending);
+    if (tabPtyState(tabId) === "live") sendWhenSettled(tabId, term, pending);
+    else if (!ptyWaits.has(tabId)) waitForPty(tabId, pending, term);
   }
   return () => {
     input.dispose();
