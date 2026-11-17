@@ -14,6 +14,7 @@ import { loadLimitsFor, loadLimitsTolerant, parseLimitsForm, type LimitsLoad } f
 import { AddAccountDialog } from "@/features/accounts/AddAccountDialog";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
 import { AppDialog } from "@/shared/ui/AppDialog";
+import { PanelBoundary } from "@/app/PanelBoundary";
 import { PoolsSection } from "@/features/accounts/PoolsSection";
 
 /** Una cuenta: nombre simbólico, quién está logueado, y qué se puede hacer con ella. */
@@ -331,6 +332,9 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
 
   return (
     <>
+      {/* A lista e o que a cerca (o pool, o limite, o rodapé) ficam numa fronteira. Os diálogos abaixo são
+          irmãos dela, e não entram nela: o login abre um terminal (um PTY), e um erro na lista não o derruba. */}
+      <PanelBoundary name="contas-lista">
       <div className="flex items-center gap-2 h-9 shrink-0 px-4
         border-b border-gray-200 dark:border-white/8">
         <span className="flex-1 min-w-0 truncate text-[11.5px] font-semibold
@@ -424,6 +428,8 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
         <InfoIcon className="w-3.5 h-3.5 mt-px shrink-0" />
         <span>{t("settings.accounts.systemDefault")}</span>
       </div>
+
+      </PanelBoundary>
 
       {adding && (
         <AddAccountDialog agentId={agent.agentId} onClose={() => setAdding(false)} />
