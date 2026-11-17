@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
 import type { Artboard, ArtboardStatus } from "./designApi";
-import { DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
+import { CHOOSER_MODE, DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
 
 const CHIP: Record<ArtboardStatus, string> = {
   draft: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
@@ -33,7 +33,10 @@ export function BoardCard({ board, active, comments, live = true, dragHandle = f
   const { t } = useTranslation();
   const [choosing, setChoosing] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
-  const srcDoc = useMemo(() => (live ? buildSrcdoc(board.html, { chooser: choosing }) : ""), [live, board.html, choosing]);
+  const srcDoc = useMemo(() => (live ? buildSrcdoc(board.html) : ""), [live, board.html]);
+  const tellChooser = () => {
+    frame.current?.contentWindow?.postMessage({ type: CHOOSER_MODE, on: choosing }, "*");
+  };
   // Só se aceita a escolha vinda do iframe desta prancheta (o conteúdo é hostil).
   useEffect(() => {
     if (!choosing) return;
@@ -47,6 +50,7 @@ export function BoardCard({ board, active, comments, live = true, dragHandle = f
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
   }, [choosing, onChoose]);
+  useEffect(() => { tellChooser(); }, [choosing, srcDoc]);
   const size = { width: board.width, height: board.height };
   return (
     <div style={{ width: board.width }}>
@@ -65,7 +69,7 @@ export function BoardCard({ board, active, comments, live = true, dragHandle = f
       </div>
       {live ? (
         // No canvas, o iframe só recebe o mouse ao escolher: senão engoliria o zoom e o arrastar.
-        <iframe ref={frame} title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc} referrerPolicy="no-referrer"
+        <iframe ref={frame} title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc} referrerPolicy="no-referrer" onLoad={tellChooser}
           className={`block bg-white rounded-sm shadow-md border-0 ${board.status === "rejected" ? "opacity-50" : ""} ${dragHandle && !choosing ? "pointer-events-none" : ""}`}
           style={size} />
       ) : (

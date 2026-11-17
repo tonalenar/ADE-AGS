@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { designApi, onDesignChanged, type Design, type DesignDetail } from "./designApi";
-import { designsForBoard, freshDesigns } from "./scope";
+import { designsForBoardDetails, freshDesigns } from "./scope";
 
 export interface DesignScope { cwd: string | null; missionId: string | null }
 
@@ -23,10 +23,10 @@ export function useScopedDesigns(scope: DesignScope) {
   const reload = useCallback(async () => {
     const mine = ++seq.current;
     try {
-      const list = designsForBoard(await designApi.list(), scopeRef.current);
-      const full = await Promise.all(list.map((d) => designApi.get(d.id).catch(() => null)));
+      const full = designsForBoardDetails(await designApi.listDetails(), scopeRef.current);
       if (mine !== seq.current) return;
-      setDetails(full.filter((d): d is DesignDetail => d !== null));
+      setDetails(full);
+      const list = full.map((d) => d.design);
       if (known.current) {
         const fresh = freshDesigns(known.current, list);
         if (fresh.length > 0) {
@@ -36,7 +36,7 @@ export function useScopedDesigns(scope: DesignScope) {
       }
       known.current = new Set(list.map((d) => d.id));
     } catch {
-      if (mine === seq.current) setDetails([]);
+      // Erro transitório: conserva as pranchetas que já estão na tela.
     }
   }, []);
 

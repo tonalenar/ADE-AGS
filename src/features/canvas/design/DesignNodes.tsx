@@ -3,6 +3,7 @@ import { type Node, type NodeProps } from "@xyflow/react";
 
 import { BoardCard } from "./BoardCard";
 import type { Artboard } from "./designApi";
+import { keepFrameMounted } from "./framePolicy";
 
 export interface DesignActions {
   onEdit: (board: Artboard) => void;
@@ -23,12 +24,9 @@ export interface DesignFrameData extends Record<string, unknown> { title: string
 export type DesignBoardFlowNode = Node<DesignBoardData, "designBoard">;
 export type DesignFrameFlowNode = Node<DesignFrameData, "designFrame">;
 
-/** Quanto o iframe espera fora da tela antes de ser desmontado (evita piscar ao dar pan). */
-const FREEZE_AFTER_MS = 1500;
-
 /**
- * O iframe só existe enquanto a prancheta está (quase) na tela, e entra na fila de ociosidade: vários
- * iframes montando juntos travariam o canvas. Fora da tela é desmontado (congelado) depois de um tempo.
+ * O iframe entra na fila de ociosidade ao aparecer. Depois de montado, fora da tela continua
+ * montado (estado do documento intacto); só o primeiro paint espera o idle.
  */
 export function useFrameLive(): { ref: React.RefObject<HTMLDivElement | null>; live: boolean } {
   const ref = useRef<HTMLDivElement>(null);
@@ -42,10 +40,7 @@ export function useFrameLive(): { ref: React.RefObject<HTMLDivElement | null>; l
     return () => io.disconnect();
   }, []);
   useEffect(() => {
-    if (!visible) {
-      const timer = setTimeout(() => setLive(false), FREEZE_AFTER_MS);
-      return () => clearTimeout(timer);
-    }
+    if (!visible) return;
     const idle = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (h: number) => void });
     if (idle.requestIdleCallback && idle.cancelIdleCallback) {
       const h = idle.requestIdleCallback(() => setLive(true), { timeout: 800 });
@@ -54,7 +49,7 @@ export function useFrameLive(): { ref: React.RefObject<HTMLDivElement | null>; l
     const timer = setTimeout(() => setLive(true), 50);
     return () => clearTimeout(timer);
   }, [visible]);
-  return { ref, live };
+  return { ref, live: keepFrameMounted(live, visible) };
 }
 
 export const DesignBoardNode = memo(function DesignBoardNode({ data }: NodeProps<DesignBoardFlowNode>) {
