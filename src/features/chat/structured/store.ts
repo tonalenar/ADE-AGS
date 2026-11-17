@@ -159,7 +159,7 @@ export function hydrateThread(id: string): void {
           ...live,
           // O que chegou por evento enquanto lia fica (é mais novo).
           items: [...items.filter((i) => !live.items.some((x) => x.id === i.id)), ...live.items],
-          requests: requests.length > 0 ? requests : live.requests,
+          requests: requestsAfterRead(requests, live.requests),
           phase: status.working ? "working" : live.phase,
           providerConfig: providerConfig ?? live.providerConfig,
         }));
@@ -187,6 +187,12 @@ export function retryThreadHydration(id: string): void {
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   const { [key]: _removed, ...rest } = record;
   return rest;
+}
+
+/** Os pedidos da leitura, mais os que chegaram por evento enquanto ela corria (a leitura não os viu). Pura. */
+function requestsAfterRead<T extends { id: string }>(read: T[], live: T[]): T[] {
+  const ids = new Set(read.map((r) => r.id));
+  return [...read, ...live.filter((r) => !ids.has(r.id))];
 }
 
 /** Mostra uma conversa por protocolo. */
