@@ -194,7 +194,7 @@ pub async fn open_workspace(
     // cayó, las filas quedan en `is_open = 1` sin ninguna ventana real detrás, y confiar en
     // la columna haría que "abrir workspace" no hiciera nada visible.
     let already_live =
-        database::db_get_workspace_windows(workspace_id.clone(), app.state::<DbConnection>())?;
+        database::db_get_workspace_windows_now(workspace_id.clone(), app.state::<DbConnection>().inner())?;
     let live_window = already_live
         .iter()
         .find_map(|row| app.get_webview_window(&row.label));
@@ -226,7 +226,7 @@ pub async fn open_workspace(
     // filas vacías que `restore_windows` se saltó, no quedó ninguna ventana viva
     // para este workspace pese a haberlo "abierto" — se le abre una en blanco en vez de
     // dejar al usuario sin nada visible.
-    let live_now = database::db_get_workspace_windows(workspace_id.clone(), app.state::<DbConnection>())?;
+    let live_now = database::db_get_workspace_windows_now(workspace_id.clone(), app.state::<DbConnection>().inner())?;
     if live_now.is_empty() {
         spawn_blank_window(&app, &db, &workspace_id)?;
     }
@@ -246,7 +246,7 @@ pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String
     let default_id = database::DEFAULT_WORKSPACE_ID;
 
     let open_rows =
-        database::db_get_workspace_windows(default_id.to_string(), app.state::<DbConnection>())?;
+        database::db_get_workspace_windows_now(default_id.to_string(), app.state::<DbConnection>().inner())?;
     for w in &open_rows {
         if let Some(win) = app.get_webview_window(&w.label) {
             let _ = super::close_guard::close_now(&win);
