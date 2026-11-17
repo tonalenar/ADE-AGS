@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { MAX_PENDING_CAPTURES, rememberPendingCapture } from "@/features/chat/attachments/pendingCaptures";
 import { RecordIcon } from "@/features/chat/chatIcons";
 import { attachToComposer } from "@/features/chat/store";
-import { showBotToast } from "@/shared/brand/botToastStore";
+import { showBotToast, useBotToastStore } from "@/shared/brand/botToastStore";
 import { AlertaToast } from "@/shared/ui/alerts";
 
 import { openPrivacySettings, screenRecordingStart, screenRecordingStatus, screenRecordingStop, type RecordingSource } from "./ipc";
@@ -15,6 +15,16 @@ const PERMISSION_MARKER = "SCREEN_CAPTURE_PERMISSION_REQUIRED:";
 const IPHONE_MIRROR_MARKER = "IPHONE_MIRROR_REQUIRED:";
 
 const composerTargetsByRecording = new Map<string, string | null | undefined>();
+/** O aviso que fica de cada gravação que saiu do botão. Some quando ela para ou quando outra começa (ver `ScreenRecordButton`). */
+const orphanToastByRecording = new Map<string, number>();
+
+/** Fecha o aviso de uma gravação que ficou sem botão, se houver. */
+function dismissOrphanToast(id: string): void {
+  const toastId = orphanToastByRecording.get(id);
+  if (toastId === undefined) return;
+  orphanToastByRecording.delete(id);
+  useBotToastStore.getState().dismiss(toastId);
+}
 
 /**
  * Para a gravação `id` e anexa o vídeo ao rascunho do destino dela. Fica fora do componente: a gravação pode seguir
@@ -27,6 +37,7 @@ async function stopRecordingAndAttach(id: string, fallbackTarget: string | null,
   attachToComposer([path], destination);
   if (dropped) void AlertaToast(t("screenRecording.title"), t("screenRecording.pendingDropped", { max: MAX_PENDING_CAPTURES }), "warning", 6000);
   composerTargetsByRecording.delete(id);
+  dismissOrphanToast(id);
   void AlertaToast(t("screenRecording.title"), t("screenRecording.attached"), "success", 3000);
 }
 
@@ -58,7 +69,8 @@ export function ScreenRecordButton({ kind, target, label, composerTarget, disabl
   useEffect(() => () => {
     const { recording: running, id: current, composerTarget: target, t: translate } = latest.current;
     if (!running) return;
-    showBotToast({
+    dismissOrphanToast(current);
+    const toastId = showBotToast({
       title: translate("screenRecording.title"),
       text: translate("screenRecording.stillRunning"),
       tone: "warning",
@@ -66,9 +78,12 @@ export function ScreenRecordButton({ kind, target, label, composerTarget, disabl
       sticky: true,
       actionLabel: translate("screenRecording.stopAndAttach"),
       onAction: () => {
+        // Só para a gravação a que este aviso se refere: se outra começou no lugar, o aviso já saiu da tela.
+        if (orphanToastByRecording.get(current) !== toastId) return;
         void stopRecordingAndAttach(current, target ?? null, translate).catch((error) => AlertaToast(translate("screenRecording.title"), String(error), "error", 6000));
       },
     });
+    orphanToastByRecording.set(current, toastId);
   }, []);
 
   const toggle = async () => {
@@ -79,6 +94,8 @@ export function ScreenRecordButton({ kind, target, label, composerTarget, disabl
         await stopRecordingAndAttach(id, composerTarget ?? null, t);
         setRecording(false);
       } else {
+        // Uma gravação nova tira o aviso de uma anterior que ficou sem botão: o aviso velho não pode parar esta.
+        dismissOrphanToast(id);
         composerTargetsByRecording.set(id, composerTarget);
         await screenRecordingStart(kind, target);
         setRecording(true);

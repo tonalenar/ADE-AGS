@@ -36,7 +36,7 @@ import type { RequestRow, ThreadRow } from "./ipc";
 import { EMPTY_LIVE, isLocalAcpAgent, isPlanExit, menuAccess, questionOf, togglePlan } from "./model";
 import { AgentSwitchDialog } from "./AgentSwitchDialog";
 import { LogFailureNotice } from "./LogFailureNotice";
-import { answerRequest, autoCompactThreadOnReturn, clearThreadContext, compactThread, hydrateThread, interruptThread, retuneThread, runThreadGoalAction, sendToThread, switchThreadAgent, useStructured } from "./store";
+import { answerRequest, autoCompactThreadOnReturn, clearThreadContext, compactThread, hydrateThread, interruptThread, retryThreadHydration, retuneThread, runThreadGoalAction, sendToThread, switchThreadAgent, useStructured } from "./store";
 import { lacksApproval, switchableAgents } from "./switchModel";
 import { showBotToast } from "@/shared/brand/botToastStore";
 
@@ -62,6 +62,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   const team = side ? null : teamOfThread;
   const live = useStructured((s) => s.live[thread.id]) ?? EMPTY_LIVE;
   const hydrated = useStructured((s) => !!s.hydrated[thread.id]);
+  const hydrateError = useStructured((s) => s.hydrateErrors[thread.id] ?? null);
   const goal = useStructured((s) => s.goals[thread.id] ?? null);
   const goalNotice = useStructured((s) => s.goalNotices[thread.id] ?? null);
   // Trocar de agente na mesma conversa: a escolha espera a confirmação (a cada troca).
@@ -300,7 +301,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <ChatFrame composer={composer} list={(bottomInset) => (
-        <TimelineView quoteKey={card.tabId} bottomInset={bottomInset} items={shownItems} loaded={hydrated || (side?.history.length ?? 0) > 0} truncated={side?.truncated ?? false} working={working || !!request} live
+        <TimelineView quoteKey={card.tabId} bottomInset={bottomInset} items={shownItems} loaded={hydrated || (side?.history.length ?? 0) > 0} loadError={hydrateError} onRetryLoad={() => retryThreadHydration(thread.id)} truncated={side?.truncated ?? false} working={working || !!request} live
           approval={ask ? null : note} approvalDocked={!!ask}
           streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending} threadId={thread.id}
           conversationKey={key} searchTargetId={searchTarget?.itemId} searchTargetToken={searchTarget?.token} onSearchTargetApplied={clearThreadSearchJump}

@@ -26,15 +26,12 @@ const digitar = (valor: string) => act(async () => {
 });
 const enviarComEnter = () => act(async () => {
   textarea().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-  // Deixa o `submit` assíncrono terminar de aguardar o `onSubmit` antes de conferir o texto.
-  await Promise.resolve();
-  await Promise.resolve();
 });
 
 describe("o composer só limpa o texto depois de o envio ser aceito", () => {
-  it("composer_mantem_texto_quando_envio_falha: o envio que não confirmou (sem `true`) deixa o texto na caixa", async () => {
-    // Hoje a recusa do backend chega assim: o `onSubmit` termina sem devolver `true`.
-    const onSubmit = vi.fn(() => Promise.resolve(undefined) as unknown as Promise<boolean>);
+  it("composer_mantem_texto_quando_envio_falha: o envio recusado (false) deixa o texto na caixa", async () => {
+    // A recusa do backend: o `onSubmit` resolve `false`.
+    const onSubmit = vi.fn(() => Promise.resolve(false));
     await act(async () => { root.render(<ChatComposer placeholder="p" onSubmit={onSubmit} />); });
     await digitar("minha mensagem");
     await enviarComEnter();
@@ -48,5 +45,17 @@ describe("o composer só limpa o texto depois de o envio ser aceito", () => {
     await digitar("minha mensagem");
     await enviarComEnter();
     expect(textarea().value).toBe("");
+  });
+
+  it("texto_digitado_durante_o_envio_nao_e_apagado: o que a pessoa digitou enquanto o IPC ia é mantido, mesmo com o envio aceito", async () => {
+    let accept: (value: boolean) => void = () => undefined;
+    const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => { accept = resolve; }));
+    await act(async () => { root.render(<ChatComposer placeholder="p" onSubmit={onSubmit} />); });
+    await digitar("primeira");
+    await enviarComEnter();
+    // Enquanto o backend não responde, a pessoa escreve mais na mesma caixa.
+    await digitar("primeira e uma segunda");
+    await act(async () => { accept(true); });
+    expect(textarea().value).toBe("primeira e uma segunda");
   });
 });

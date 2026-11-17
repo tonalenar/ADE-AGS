@@ -4430,6 +4430,8 @@
   "chat.access.safeHint": "Aprova as ações rotineiras, como nas missões.",
   "chat.timeline.truncated": "O começo desta conversa ficou de fora (é longa demais).",
   "chat.timeline.loading": "Carregando a conversa…",
+  "chat.timeline.loadFailed": "Não foi possível abrir a conversa.",
+  "chat.timeline.retryLoad": "Tentar de novo",
   "chat.timeline.waiting": "Esperando o {{agent}} gravar a conversa…",
   "chat.timeline.openTerminal": "Ver o terminal",
   "chat.timeline.empty": "Mande a primeira mensagem para o {{agent}}.",

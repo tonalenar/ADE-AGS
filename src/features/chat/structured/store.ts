@@ -30,11 +30,13 @@ interface StructuredState {
   goalNotices: Record<string, string | null>;
   /** As conversas cuja timeline já foi lida do banco. */
   hydrated: Record<string, boolean>;
+  /** A última falha de leitura de cada conversa, quando as tentativas se esgotaram (a timeline mostra e oferece tentar de novo). */
+  hydrateErrors: Record<string, string>;
   /** Falhas de gravação do log, por conversa, até a pessoa dispensá-las. Não entram no chat. */
   logFailures: Record<string, LogFailure[]>;
 }
 
-export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, logFailures: {} }));
+export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, hydrateErrors: {}, logFailures: {} }));
 
 /** Um sinal de falha do log entra na conversa afetada, sem repetir o mesmo aviso. Sinal sem conversa é ignorado. */
 export function recordLogFailure(raw: unknown): void {
@@ -138,9 +140,13 @@ function readThread(id: string) {
   return Promise.all([chatThreadItems(id), chatThreadRequests(id), chatThreadStatus(id), chatThreadGoalGet(id), chatThreadProviderConfig(id)]);
 }
 
+/** Pausa entre as tentativas de leitura: cresce a cada falha, para não martelar o banco que acabou de falhar. */
+const HYDRATE_RETRY_MS = 300;
+
 /**
- * Lê a conversa do banco. Tenta de novo algumas vezes; se todas falharem, a conversa deixa de ficar «carregando» para
- * sempre: o erro vai para o aviso dela e a próxima abertura tenta de novo.
+ * Lê a conversa do banco. Tenta algumas vezes, com uma pausa crescente; se todas falharem, a conversa não fica
+ * «carregando» para sempre: a falha vai para `hydrateErrors`, a timeline mostra o erro e oferece tentar de novo
+ * (`retryThreadHydration`).
  */
 export function hydrateThread(id: string): void {
   if (useStructured.getState().hydrated[id]) return;
@@ -159,14 +165,29 @@ export function hydrateThread(id: string): void {
           providerConfig: providerConfig ?? live.providerConfig,
         }));
         useStructured.setState((s) => ({ goals: { ...s.goals, [id]: Object.prototype.hasOwnProperty.call(s.goals, id) ? s.goals[id]! : goal } }));
+        useStructured.setState((s) => ({ hydrateErrors: withoutKey(s.hydrateErrors, id) }));
         return;
       } catch (error) {
         lastError = error;
+        if (attempt < HYDRATE_ATTEMPTS - 1) await new Promise<void>((resolve) => setTimeout(resolve, HYDRATE_RETRY_MS * (attempt + 1)));
       }
     }
-    useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: false } }));
-    patchLive(id, (live) => ({ ...live, error: String(lastError) }));
+    useStructured.setState((s) => ({
+      hydrated: { ...s.hydrated, [id]: false },
+      hydrateErrors: { ...s.hydrateErrors, [id]: String(lastError) },
+    }));
   })();
+}
+
+/** Tenta de novo a leitura de uma conversa cuja timeline falhou (o botão «Tentar de novo»). */
+export function retryThreadHydration(id: string): void {
+  useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: false }, hydrateErrors: withoutKey(s.hydrateErrors, id) }));
+  hydrateThread(id);
+}
+
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  const { [key]: _removed, ...rest } = record;
+  return rest;
 }
 
 /** Mostra uma conversa por protocolo. */
@@ -192,11 +213,33 @@ export interface NewThread {
  * devolve `null` (a conversa vazia fica na lista, sem apagar nada) e quem chamou mantém o texto na caixa.
  */
 export async function startThread(input: NewThread, text: string, images?: string[], background = false, fastMode?: boolean, onError?: (message: string) => void): Promise<string | null> {
-  const id = await createThread(input);
+  const { id } = await createFirstThread(input);
   const accepted = await sendToThread(id, text, onError, undefined, images, fastMode);
   if (!accepted) return null;
+  firstMessageAccepted(input);
   if (!background) openThread(id);
   return id;
+}
+
+/** A conversa criada para a primeira mensagem, por entrada (a chave é o próprio pedido de criação), ainda sem mensagem aceita. */
+const unacceptedFirstThreads = new Map<string, string>();
+
+/**
+ * Cria a conversa da primeira mensagem. Se a tentativa anterior com a mesma entrada não teve a mensagem aceita, a mesma
+ * conversa é reaproveitada: uma recusa não deixa uma conversa vazia a mais a cada tentativa. `reused` diz qual foi o caso.
+ */
+export async function createFirstThread(input: NewThread): Promise<{ id: string; reused: boolean }> {
+  const key = JSON.stringify(input);
+  const reusedId = unacceptedFirstThreads.get(key);
+  if (reusedId) return { id: reusedId, reused: true };
+  const id = await createThread(input);
+  unacceptedFirstThreads.set(key, id);
+  return { id, reused: false };
+}
+
+/** A primeira mensagem foi aceita: a conversa deixa de ser reaproveitada por essa entrada. */
+export function firstMessageAccepted(input: NewThread): void {
+  unacceptedFirstThreads.delete(JSON.stringify(input));
 }
 
 /** Cria a conversa por protocolo sem abri-la nem mandar nada (o time é montado antes de a tela trocar). */

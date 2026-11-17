@@ -4430,6 +4430,8 @@
   "chat.access.safeHint": "Aprueba las acciones rutinarias, como en las misiones.",
   "chat.timeline.truncated": "El comienzo de esta conversación quedó afuera (es demasiado larga).",
   "chat.timeline.loading": "Cargando la conversación…",
+  "chat.timeline.loadFailed": "No se pudo abrir la conversación.",
+  "chat.timeline.retryLoad": "Intentar de nuevo",
   "chat.timeline.waiting": "Esperando que {{agent}} guarde la conversación…",
   "chat.timeline.openTerminal": "Ver la terminal",
   "chat.timeline.empty": "Envía el primer mensaje a {{agent}}.",

@@ -214,6 +214,9 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     return true;
   };
   const attachments = useAttachments();
+  // A lista de anexos mais recente, para o envio em andamento saber se a caixa mudou (ver `submit`).
+  const attachmentsNowRef = useRef(attachments.list);
+  attachmentsNowRef.current = attachments.list;
   const quotes = useQuotes(quoteKey);
   const quotesRef = useRef(quotes);
   quotesRef.current = quotes;
@@ -564,13 +567,20 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
       // As citações vão depois do texto (o `@agente` do começo continua valendo) e antes dos anexos.
       const send = background && onBackgroundSubmit ? onBackgroundSubmit : onSubmit;
       // O texto só sai da caixa depois de o envio ser aceito: se o backend recusar, ele continua aqui para tentar de novo.
-      if ((await send(withQuotes(text, quotes), attachments.list)) !== true) return false;
+      const sentText = text;
+      const sentAttachments = attachments.list;
+      if ((await send(withQuotes(sentText, quotes), sentAttachments)) !== true) return false;
       historyDraft.current = null;
       setHistoryIndex(null);
+      // Enquanto o IPC ia, a pessoa pode ter digitado ou anexado mais na mesma caixa. Só limpa o que foi enviado: se o
+      // conteúdo mudou, a edição nova fica (como o cofre faz em `stashContentOf`).
+      const typedMeanwhile = (ref.current?.value ?? sentText) !== sentText;
+      const attachedMeanwhile = attachmentsNowRef.current !== sentAttachments;
+      if (typedMeanwhile || attachedMeanwhile) return true;
       setText("");
       setRestoredCaptureNotice(null);
       // Pode rodar depois de a conversa já ter trocado (o envio cria a conversa): o registro sai aqui, não no efeito.
-      forgetPendingCaptures(eventTarget, attachments.list.map((item) => item.path));
+      forgetPendingCaptures(eventTarget, sentAttachments.map((item) => item.path));
       attachments.clear();
       if (quoteKey) clearQuotesFor(quoteKey);
       return true;

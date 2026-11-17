@@ -103,7 +103,7 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export const TimelineView = memo(function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, approvalDocked = false, live: _live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied }: {
+export const TimelineView = memo(function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, approvalDocked = false, live: _live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied, loadError = null, onRetryLoad }: {
   /** A conversa por protocolo (os avisos do pool de contas pedem a resposta dela). */
   threadId?: string;
   /** Identidade local usada para abrir a busca apenas na timeline visível. */
@@ -144,6 +144,10 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   searchTargetId?: string | null;
   searchTargetToken?: number | null;
   onSearchTargetApplied?: (token: number) => void;
+  /** A leitura da conversa falhou de vez: a timeline mostra o erro no lugar do «Carregando…». */
+  loadError?: string | null;
+  /** Tenta a leitura de novo (o botão do erro). */
+  onRetryLoad?: () => void;
 }) {
   const { t } = useTranslation();
   // "Chamadas de ferramenta no chat" (Configurações → Chat): o fold mostra só o que o modo deixa.
@@ -534,7 +538,18 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
           <p className="text-center text-chat-caption text-gray-400 dark:text-white/35">{t("chat.timeline.truncated")}</p>
         )}
         <ChatMarkdownMediaIndex contents={markdownMediaContent} />
-        {!loaded && <p className="py-10 text-center text-chat-note text-gray-400 dark:text-white/40">{t("chat.timeline.loading")}</p>}
+        {!loaded && !loadError && <p className="py-10 text-center text-chat-note text-gray-400 dark:text-white/40">{t("chat.timeline.loading")}</p>}
+        {loadError && (
+          <div role="alert" className="py-10 flex flex-col items-center gap-3 text-center text-chat-note text-gray-500 dark:text-white/60">
+            <p className="m-0">{t("chat.timeline.loadFailed")}</p>
+            {onRetryLoad && (
+              <button type="button" onClick={onRetryLoad}
+                className="h-7 px-3 rounded-md border border-gray-200 dark:border-white/10 text-gray-700 dark:text-white/70 hover:bg-gray-100 dark:hover:bg-white/[0.06]">
+                {t("chat.timeline.retryLoad")}
+              </button>
+            )}
+          </div>
+        )}
         {missing && onOpenTerminal && (
           <div className="py-10 flex flex-col items-center gap-3 text-center text-chat-note text-gray-400 dark:text-white/40">
             <p>{t("chat.timeline.waiting", { agent: agentLabel })}</p>
