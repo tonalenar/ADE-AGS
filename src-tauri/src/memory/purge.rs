@@ -98,6 +98,32 @@ pub(crate) fn revisions_coordinated_with(
     scope: &Scope,
     antes_do_io: &dyn Fn(),
 ) -> Result<(), String> {
+    revisions_coordinated_impl(db, sync, entry_id, revision, scope, antes_do_io, &|_| Ok(()))
+}
+
+#[cfg(test)]
+pub(crate) fn revisions_coordinated_failing_at(
+    db: &crate::database::DbConnection,
+    sync: &super::repo_sync::RepoSync,
+    entry_id: &str,
+    revision: Option<i64>,
+    scope: &Scope,
+    stage: &'static str,
+) -> Result<(), String> {
+    revisions_coordinated_impl(db, sync, entry_id, revision, scope, &|| {}, &|current| {
+        if current == stage { Err(format!("falha de teste na etapa {stage}")) } else { Ok(()) }
+    })
+}
+
+fn revisions_coordinated_impl(
+    db: &crate::database::DbConnection,
+    sync: &super::repo_sync::RepoSync,
+    entry_id: &str,
+    revision: Option<i64>,
+    scope: &Scope,
+    antes_do_io: &dyn Fn(),
+    falha_no_io: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<(), String> {
     let plan = {
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
         plan_purge(&conn, entry_id, revision, scope.events_root.is_some())?
@@ -124,8 +150,11 @@ pub(crate) fn revisions_coordinated_with(
         return Err(format!("A redação do NDJSON falhou; a revisão continua no banco para nova tentativa ({error})."));
     }
     sync.forget_discarded_pending(&applied.workspace);
-    if let Err(error) = scrub_coordinated_with(db, scope, &applied, antes_do_io) {
-        return Err(format!("A memória foi removida do banco, mas a limpeza dos arquivos locais falhou ({error}). Repita o apagamento para concluir."));
+    if let Err(error) = scrub_coordinated_with(db, scope, &applied, antes_do_io, falha_no_io) {
+        return Err(match restore_purge(db, &applied) {
+            Ok(()) => format!("A limpeza dos arquivos locais falhou ({error}); a revisão foi restaurada no banco. Os arquivos podem ter sido parcialmente limpos; repita o apagamento para concluir."),
+            Err(restore) => format!("A limpeza dos arquivos locais falhou ({error}) e a revisão não pôde ser restaurada no banco ({restore}). O estado do apagamento pode estar parcial."),
+        });
     }
     Ok(())
 }
@@ -302,15 +331,18 @@ fn scrub_coordinated_with(
     scope: &Scope,
     applied: &Applied,
     antes_do_io: &dyn Fn(),
+    falha_no_io: &dyn Fn(&str) -> Result<(), String>,
 ) -> Result<(), String> {
     let projection = {
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
         super::repo::render(&conn, &applied.workspace, &[]).ok()
     };
     antes_do_io();
+    falha_no_io("repositório")?;
     super::repo::rewrite_workspace_repos(&scope.memory_root, &applied.workspace, projection.as_ref(), &applied.bodies)?;
     let dirs = super::repo::workspace_repo_dirs(&scope.memory_root, &applied.workspace)?;
     for dir in &dirs {
+        falha_no_io("arquivo de revisão")?;
         super::repo::with_repo_gate(dir, || {
             super::lifecycle::refresh_revision_archive_db(db, &applied.workspace, dir, antes_do_io)
         })?;
@@ -322,11 +354,13 @@ fn scrub_coordinated_with(
     };
     // Em base em memória não há arquivo para compactar: só os testes chegam aqui sem arquivo.
     if let Some(file) = main_file {
+        falha_no_io("banco")?;
         reclaim_pages_side(&file)?;
     }
     if let Some(database) = &scope.database_file {
         antes_do_io();
         for backup in upgrade_backups(database)? {
+            falha_no_io("backup")?;
             rewrite_backup(&backup, &applied.workspace, &applied.entry_id, &applied.revisions)?;
         }
     }

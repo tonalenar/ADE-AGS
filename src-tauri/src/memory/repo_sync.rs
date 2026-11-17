@@ -1523,7 +1523,8 @@ mod tests {
             events_root: None,
         };
         let error = crate::memory::purge::revisions_coordinated(&db, &sync, &entry.entry_id, Some(entry.revision), &scope).unwrap_err();
-        assert!(error.contains("Repita"), "{error}");
+        assert!(error.contains("repita"), "{error}");
+        assert_revision_restored(&db, &entry.entry_id, entry.revision, "falha no repositório");
         assert!(!sync.is_paused("w"), "o resume tem de correr mesmo quando a reescrita falha");
         std::fs::remove_file(&repo).unwrap();
         {
@@ -1550,6 +1551,65 @@ mod tests {
         Arc::new(Mutex::new(conn))
     }
 
+    #[test]
+    fn purge_falha_ao_atualizar_archive_e_restaura_a_revisao() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _) = approved_pair(&db, &sync);
+        let repo_dir = {
+            let conn = db.lock().unwrap();
+            let exported = repo::export_at(&conn, "w", root.path(), None).unwrap();
+            PathBuf::from(exported.path)
+        };
+        std::fs::create_dir(repo_dir.join("revisions.json")).unwrap();
+        let scope = crate::memory::purge::Scope { memory_root: root.path().to_path_buf(), database_file: None, events_root: None };
+
+        let error = crate::memory::purge::revisions_coordinated(&db, &sync, &target.entry_id, Some(target.revision), &scope).unwrap_err();
+
+        assert!(error.contains("revisão foi restaurada"), "{error}");
+        assert_revision_restored(&db, &target.entry_id, target.revision, "falha no archive");
+        assert!(repo_dir.join("revisions.json").is_dir());
+    }
+
+    #[test]
+    fn purge_falha_no_vacuum_e_restaura_a_revisao() {
+        let root = TempDir::new();
+        let database_file = root.path().join("base.db");
+        let db = file_fixture(&database_file);
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _) = approved_pair(&db, &sync);
+        let scope = crate::memory::purge::Scope { memory_root: root.path().to_path_buf(), database_file: Some(database_file.clone()), events_root: None };
+
+        let error = crate::memory::purge::revisions_coordinated_failing_at(&db, &sync, &target.entry_id, Some(target.revision), &scope, "banco").unwrap_err();
+
+        assert!(error.contains("revisão foi restaurada"), "{error}");
+        assert_revision_restored(&db, &target.entry_id, target.revision, "falha no VACUUM");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn purge_falha_ao_ler_backups_e_restaura_a_revisao() {
+        let root = TempDir::new();
+        let database_file = root.path().join("base.db");
+        let db = file_fixture(&database_file);
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _) = approved_pair(&db, &sync);
+        let original = root.path().join("backup-original");
+        std::fs::write(&original, "backup").unwrap();
+        std::os::unix::fs::symlink(&original, root.path().join("base.v1-abc.backup")).unwrap();
+        let scope = crate::memory::purge::Scope { memory_root: root.path().to_path_buf(), database_file: Some(database_file), events_root: None };
+
+        let error = crate::memory::purge::revisions_coordinated(&db, &sync, &target.entry_id, Some(target.revision), &scope).unwrap_err();
+
+        assert!(error.contains("revisão foi restaurada"), "{error}");
+        assert_revision_restored(&db, &target.entry_id, target.revision, "falha no backup");
+        assert_eq!(std::fs::read_to_string(&original).unwrap(), "backup");
+    }
+
     /// Conjunto (entrada, revisão) das revisões na base, para comparar antes e depois do purge.
     fn revision_set(db: &DbConnection) -> Vec<(String, i64)> {
         let conn = db.lock().unwrap();
@@ -1560,6 +1620,13 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap()
+    }
+
+    fn assert_revision_restored(db: &DbConnection, entry_id: &str, revision: i64, context: &str) {
+        assert!(revision_set(db).contains(&(entry_id.to_string(), revision)), "{context} deixou a revisão marcada como purgada");
+        let conn = db.lock().unwrap();
+        let audit_count: i64 = conn.query_row("SELECT COUNT(*) FROM memory_purge_audit WHERE entry_id=?1 AND revision=?2", rusqlite::params![entry_id, revision], |row| row.get(0)).unwrap();
+        assert_eq!(audit_count, 0, "{context} deixou o purge auditado como concluído");
     }
 
     /// Duas memórias aprovadas: a alvo e uma que não pode ser tocada pelo purge.

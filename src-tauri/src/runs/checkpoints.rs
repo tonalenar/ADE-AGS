@@ -542,7 +542,7 @@ pub fn run_rollback_preview(
 
 /// Vuelve a antes de `task_id`. El plan se calcula de nuevo acá (no se confía en el de la pantalla).
 #[tauri::command(async)]
-pub fn run_rollback(app: tauri::AppHandle, task_id: String) -> Result<Vec<String>, String> {
+pub async fn run_rollback(app: tauri::AppHandle, task_id: String) -> Result<Vec<String>, String> {
     let db = db_of(&app)?;
     let (run_id, plan, _) = planned(&db, &task_id)?;
     rollback(&db, &run_id, &plan)?;
@@ -550,8 +550,38 @@ pub fn run_rollback(app: tauri::AppHandle, task_id: String) -> Result<Vec<String
         super::supervisor::notify_changed(&app, id);
     }
     // Las que quedaron en cola arrancan solas cuando les toca.
-    super::scheduler::tick(&app, &run_id);
+    let tick_app = app.clone();
+    dispatch_scheduler_tick_with(move || super::scheduler::tick(&tick_app, &run_id)).await?;
     Ok(plan.tasks)
+}
+
+async fn dispatch_scheduler_tick_with(tick: impl FnOnce() + Send + 'static) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(tick).await.map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use std::sync::mpsc;
+
+    #[tokio::test]
+    async fn rollback_despacha_tick_para_thread_de_trabalho() {
+        let source = include_str!("checkpoints.rs");
+        let rollback = source
+            .split("pub async fn run_rollback(")
+            .nth(1)
+            .expect("run_rollback precisa existir")
+            .split("\n}\n\nasync fn dispatch_scheduler_tick")
+            .next()
+            .expect("o corpo de run_rollback precisa terminar antes dos checkpoints");
+        assert!(rollback.contains("dispatch_scheduler_tick_with(move || super::scheduler::tick"), "run_rollback precisa despachar o tick pelo helper de trabalho");
+        assert!(!rollback.contains("scheduler::tick(&app"), "run_rollback não pode executar scheduler::tick na thread do runtime");
+
+        let current = std::thread::current().id();
+        let (send, receive) = mpsc::channel();
+        super::dispatch_scheduler_tick_with(move || send.send(std::thread::current().id()).unwrap()).await.unwrap();
+        let worker = receive.recv().expect("a sonda do tick deve executar");
+        assert_ne!(worker, current, "a sonda do tick rodou na thread chamadora");
+    }
 }
 
 /// Una foto a pedido de la carpeta del run.
