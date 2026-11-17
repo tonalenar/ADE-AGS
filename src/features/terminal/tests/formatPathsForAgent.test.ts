@@ -36,17 +36,22 @@ describe("formatPathsForAgent", () => {
       expect(result).toBe('@"path/with/\\"quotes\\"/file.txt" ');
     });
 
-    it("com apóstrofo, o shell recebe aspas simples com o apóstrofo escapado como '\\''", () => {
-      const result = formatPathsForAgent(undefined, ["path/with/'single'/file.txt"]);
+    it("com apóstrofo, a aba de shell (bash) recebe aspas simples com o apóstrofo escapado como '\\''", () => {
+      const result = formatPathsForAgent("bash", ["path/with/'single'/file.txt"]);
       expect(result).toBe(`'path/with/'\\''single'\\''/file.txt' `);
     });
 
-    it("nome com apóstrofo e $() sai como uma palavra só: aspas duplas expandiriam o $()", () => {
-      expect(formatPathsForAgent(undefined, ["a'$(touch x).txt"])).toBe(`'a'\\''$(touch x).txt' `);
+    it("nome com apóstrofo e $() sai como uma palavra só na aba de shell", () => {
+      expect(formatPathsForAgent("bash", ["a'$(touch x).txt"])).toBe(`'a'\\''$(touch x).txt' `);
+    });
+
+    it("sem agente conhecido, o fallback mantém as aspas de antes (o texto vai a uma TUI, não a um shell)", () => {
+      expect(formatPathsForAgent(undefined, ["path/with/'single'/file.txt"])).toBe(`"path/with/'single'/file.txt" `);
+      expect(formatPathsForAgent("meu-agente", ["a'b.txt"])).toBe(`"a'b.txt" `);
     });
 
     it.runIf(process.platform !== "win32")("o sh lê o caminho com apóstrofo e $() como texto, sem executar nada", () => {
-      const quoted = formatPathsForAgent(undefined, ["a'$(printf pwned).txt"]).trim();
+      const quoted = formatPathsForAgent("bash", ["a'$(printf pwned).txt"]).trim();
       const out = execFileSync("/bin/sh", ["-c", `printf '%s' ${quoted}`], { encoding: "utf8" });
       expect(out).toBe("a'$(printf pwned).txt");
     });

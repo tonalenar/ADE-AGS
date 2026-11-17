@@ -15,7 +15,7 @@ import { registerCapabilityResponders } from "@/features/terminal/terminalCapabi
 import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
 import { installTuiScrollRail } from "@/features/terminal/tuiScrollRail";
-import { notePtyWrite, registerTerminal } from "@/features/terminal/terminalRegistry";
+import { registerTerminal } from "@/features/terminal/terminalRegistry";
 import { createWriteFailureNotice } from "@/features/terminal/writeFailureNotice";
 import { ExcerptAction } from "@/features/terminal/ExcerptAction";
 import { decodeOsc52 } from "@/features/terminal/osc52";
@@ -315,7 +315,6 @@ function TerminalImpl({
     const enviarEntrada = (data: string) => {
       if (ptyIdRef.current === null) return;
       const escrita = ptyWrite(ptyIdRef.current, data);
-      if (tabId) notePtyWrite(tabId, escrita);
       escrita.then(() => avisoEscrita.aceita(), () => avisoEscrita.recusa());
     };
     const disposeCapabilities = registerCapabilityResponders(term, enviarEntrada);

@@ -1,7 +1,9 @@
 import type { Terminal } from "@xterm/xterm";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { ptyWrite } from "@/features/terminal/ipc";
 
+import { markInput } from "./activity";
 import { requestPtyLaunch } from "./ptyLaunch";
 
 /**
@@ -183,11 +185,17 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
       return;
     }
     // Só conta como enviada quando o PTY aceita a escrita da colagem (A074), não quando ela entra na fila do xterm.
-    const delivery = deliverPaste(tabId, text, !timings?.draft, timings?.onRetry);
-    delivery.then(
-      () => timings?.onSent?.(Date.now()),
-      (erro: unknown) => timings?.onFailed?.(erro instanceof Error ? erro.message : String(erro)),
-    );
+    if (tabPtyState(tabId) === "missing") {
+      // Aba fora do store (um chamador ou um teste): cola pelo xterm, como sempre, e conta como enviada na hora.
+      if (pasteIntoTab(tabId, text, !timings?.draft, timings?.onRetry)) timings?.onSent?.(Date.now());
+      else timings?.onFailed?.("a aba não tem terminal vivo");
+    } else {
+      // Com PTY, só conta como enviada quando o PTY aceita a colagem e o Enter (A074).
+      sendPasteToPty(tabId, term, text, !timings?.draft, timings?.onRetry).then(
+        () => timings?.onSent?.(Date.now()),
+        (erro: unknown) => timings?.onFailed?.(erro instanceof Error ? erro.message : String(erro)),
+      );
+    }
     if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
     if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);
   };
@@ -297,32 +305,64 @@ export function runInTerminal(tabId: string, text: string): boolean {
 
 /** Pega `text` en la terminal de la tab y, con `submit`, lo manda. `false` si la tab no
  *  tiene una terminal viva. */
-/** Escritas do PTY pedidas enquanto uma colagem roda. O `Terminal` as reporta com `notePtyWrite`. */
-const pasteWrites = new Map<string, Promise<unknown>[]>();
-
 /**
- * O `Terminal` chama isto com a promessa de cada escrita que mandou ao PTY (a entrada do usuário e as respostas
- * do xterm). Fora de uma colagem não faz nada.
+ * O texto de uma colagem como o xterm o mandaria: quebra de linha vira CR, e com bracketed paste ligado o texto vem
+ * entre `ESC[200~` e `ESC[201~`. Pura. O envelope é montado aqui, e não pelo `paste` do xterm, para não depender de o
+ * `onData` disparar síncrono.
  */
-export function notePtyWrite(tabId: string, write: Promise<unknown>): void {
-  pasteWrites.get(tabId)?.push(write);
+export function pasteEnvelope(text: string, bracketed: boolean): string {
+  const body = text.replace(/\r?\n/g, "\r");
+  return bracketed ? `\x1b[200~${body}\x1b[201~` : body;
+}
+
+/** Pausa entre a colagem e o Enter: algumas TUIs ainda processam o pegado, e tomariam o Enter como parte dele. */
+const ENTER_PAUSE_MS = 80;
+
+/** O PTY da aba agora (ou `null`). */
+function ptyIdOf(tabId: string): number | null {
+  return useTabsStore.getState().tabs.find((tab) => tab.id === tabId)?.ptyId ?? null;
 }
 
 /**
- * Cola como `pasteIntoTab`, e devolve quando o PTY aceitou as escritas da colagem. Rejeita se alguma foi recusada
- * (fila cheia, terminal encerrado) ou se a aba não tem terminal vivo: nesses casos a mensagem não entrou.
+ * Manda a colagem pela fila do PTY e, se `submit`, o Enter depois da pausa. A promessa resolve quando o último envio
+ * (o Enter, se houver) foi aceito pelo PTY, e rejeita se algum foi recusado. Quem espera sabe que a mensagem entrou.
  */
-function deliverPaste(tabId: string, text: string, submit: boolean, onRetry?: (at: number) => void): Promise<void> {
-  const writes: Promise<unknown>[] = [];
-  pasteWrites.set(tabId, writes);
-  let pasted: boolean;
-  try {
-    pasted = pasteIntoTab(tabId, text, submit, onRetry);
-  } finally {
-    pasteWrites.delete(tabId);
-  }
-  if (!pasted) return Promise.reject(new Error("a aba não tem terminal vivo"));
-  return Promise.all(writes).then(() => undefined);
+export function sendPasteToPty(
+  tabId: string,
+  term: Terminal,
+  text: string,
+  submit: boolean,
+  onRetry?: (at: number) => void,
+): Promise<void> {
+  const id = ptyIdOf(tabId);
+  if (id == null) return Promise.reject(new Error("a aba não tem terminal vivo"));
+  markInput(tabId);
+  if (submit) lastPaste.set(tabId, { text, at: Date.now() });
+  const colada = ptyWrite(id, pasteEnvelope(text, term.modes.bracketedPasteMode));
+  if (!submit) return colada;
+  scheduleSubmitRetries(tabId, term, text, onRetry);
+  return colada
+    .then(() => new Promise<void>((resolve) => window.setTimeout(resolve, ENTER_PAUSE_MS)))
+    .then(() => ptyWrite(id, "\r"));
+}
+
+/**
+ * Um pegado grande (Codex: "[Pasted Content 3904 chars]") puede tragarse el Enter y dejar el briefing escrito sin
+ * enviar. Se mira la pantalla y se reintenta. Hermes y OpenCode no cambian el pegado por un marcador: el texto queda
+ * entero en la caja, con el cursor al final (`typedTextPending`). Si todavía dice "starting agent…", también se
+ * tragan el Enter.
+ */
+function scheduleSubmitRetries(tabId: string, term: Terminal, text: string, onRetry?: (at: number) => void): void {
+  SUBMIT_RETRY_MS.forEach((delay) =>
+    setTimeout(() => {
+      if (terminals.get(tabId) !== term) return;
+      const screen = screenOf(tabId, null, 12);
+      if ((screen && pasteStillPending(screen.lines)) || typedTextPending(beforeCursor(term), text)) {
+        term.input("\r");
+        onRetry?.(Date.now());
+      }
+    }, delay),
+  );
 }
 
 export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRetry?: (at: number) => void): boolean {
@@ -337,21 +377,8 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRet
   // El Enter va aparte y un momento después: algunas TUIs todavía están procesando el
   // pegado cuando llega, y lo toman como parte de él en vez de como "enviar".
   if (submit) {
-    setTimeout(() => term.input("\r"), 80);
-    // Un pegado grande (Codex: "[Pasted Content 3904 chars]") puede tragarse ese Enter y dejar el
-    // briefing escrito sin enviar: el agente nunca arranca. Se mira la pantalla y se reintenta. O Hermes e o
-    // OpenCode não trocam o colado por um marcador: o texto fica inteiro na caixa, com o cursor no fim dele
-    // (`typedTextPending`). Ainda "starting agent…", eles também engolem o Enter.
-    SUBMIT_RETRY_MS.forEach((delay) =>
-      setTimeout(() => {
-        if (terminals.get(tabId) !== term) return;
-        const screen = screenOf(tabId, null, 12);
-        if ((screen && pasteStillPending(screen.lines)) || typedTextPending(beforeCursor(term), text)) {
-          term.input("\r");
-          onRetry?.(Date.now());
-        }
-      }, delay),
-    );
+    setTimeout(() => term.input("\r"), ENTER_PAUSE_MS);
+    scheduleSubmitRetries(tabId, term, text, onRetry);
   }
   return true;
 }
