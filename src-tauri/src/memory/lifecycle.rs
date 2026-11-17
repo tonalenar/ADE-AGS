@@ -152,6 +152,7 @@ pub fn export_detached(
 }
 
 /// Rewrites an archive that already exists. Purge does not create one that the user never exported.
+#[cfg(test)]
 pub(crate) fn refresh_revision_archive(
     conn: &Connection,
     workspace: &str,
@@ -161,6 +162,26 @@ pub(crate) fn refresh_revision_archive(
         return Ok(());
     }
     let prepared = prepare_archive(conn, workspace)?;
+    write_archive(dir, &prepared.body)
+}
+
+/// Como `refresh_revision_archive`, sem o mutex do banco durante a escrita do arquivo: o corpo
+/// é montado com o mutex tomado, o mutex é solto, e só então `revisions.json` é gravado.
+/// `antes_da_escrita` roda logo antes da gravação, com o mutex já solto (os testes usam a sonda).
+pub(crate) fn refresh_revision_archive_db(
+    db: &crate::database::DbConnection,
+    workspace: &str,
+    dir: &std::path::Path,
+    antes_da_escrita: &dyn Fn(),
+) -> Result<(), String> {
+    if !dir.join("revisions.json").exists() {
+        return Ok(());
+    }
+    let prepared = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        prepare_archive(&conn, workspace)?
+    };
+    antes_da_escrita();
     write_archive(dir, &prepared.body)
 }
 

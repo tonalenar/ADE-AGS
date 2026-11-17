@@ -43,9 +43,12 @@ pub fn revisions(conn: &Connection, entry_id: &str, revision: Option<i64>, scope
     finish_local(conn, &applied, scope)
 }
 
-/// Produção. O git não corre com o mutex do banco: a pausa precisa que o worker termine o
-/// render, e `run_git` recusa a thread que ainda segura o lock de exportação.
-/// `resume_workspace` roda no `Drop`, inclusive quando a pausa ou a reescrita falha.
+/// Produção. Nada disto segura o mutex do banco durante I/O: o banco é lido e solto, o disco
+/// (NDJSON, repositório, backups) é tocado sem ele, o `VACUUM` roda numa conexão lateral, e a
+/// gravação final confere que o conjunto de revisões não mudou. O git não corre com o mutex: a
+/// pausa precisa que o worker termine o render, e `run_git` recusa a thread que ainda segura o
+/// lock de exportação. `resume_workspace` roda no `Drop`, inclusive quando a pausa ou a
+/// reescrita falha.
 pub fn revisions_coordinated(
     db: &crate::database::DbConnection,
     sync: &super::repo_sync::RepoSync,
@@ -53,16 +56,37 @@ pub fn revisions_coordinated(
     revision: Option<i64>,
     scope: &Scope,
 ) -> Result<(), String> {
+    revisions_coordinated_with(db, sync, entry_id, revision, scope, &|| {})
+}
+
+/// Como `revisions_coordinated`. `antes_do_io` roda em cada fase de I/O, com o mutex do banco
+/// já solto: os testes usam para provar isso com `try_lock`.
+pub(crate) fn revisions_coordinated_with(
+    db: &crate::database::DbConnection,
+    sync: &super::repo_sync::RepoSync,
+    entry_id: &str,
+    revision: Option<i64>,
+    scope: &Scope,
+    antes_do_io: &dyn Fn(),
+) -> Result<(), String> {
+    let plan = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        plan_purge(&conn, entry_id, revision, scope.events_root.is_some())?
+    };
+    antes_do_io();
+    // NDJSON antes do commit: se falhar, a revisão continua no banco e a tentativa seguinte
+    // ainda tem o texto.
+    scrub_event_paths(&plan.event_paths, scope.events_root.as_deref(), &plan.bodies())?;
     let applied = {
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-        apply_sqlite(&conn, entry_id, revision, scope.events_root.as_deref())?
+        commit_purge(&conn, plan, revision)?
     };
     let _resume = PauseGuard { sync, workspace: applied.workspace.clone() };
     if let Err(error) = sync.pause_workspace(&applied.workspace) {
         return Err(format!("A memória foi removida do banco, mas a exportação em andamento não pôde ser pausada ({error}). Repita o apagamento para concluir."));
     }
     sync.forget_discarded_pending(&applied.workspace);
-    if let Err(error) = scrub_coordinated(db, scope, &applied) {
+    if let Err(error) = scrub_coordinated_with(db, scope, &applied, antes_do_io) {
         return Err(format!("A memória foi removida do banco, mas a limpeza dos arquivos locais falhou ({error}). Repita o apagamento para concluir."));
     }
     Ok(())
@@ -79,7 +103,25 @@ impl Drop for PauseGuard<'_> {
     }
 }
 
-fn apply_sqlite(conn: &Connection, entry_id: &str, revision: Option<i64>, events_root: Option<&Path>) -> Result<Applied, String> {
+/// O que o purge vai apagar, lido com o mutex tomado. Nada é apagado nessa fase.
+struct Plan {
+    workspace: String,
+    entry_id: String,
+    /// Revisões a apagar, com o corpo lido agora. Vazio quando a revisão já foi só auditada.
+    rows: Vec<(i64, String)>,
+    /// Ids das revisões só auditadas (sem linha a apagar).
+    audited_ids: Vec<i64>,
+    /// NDJSON das tasks do workspace que podem conter o texto. Redigidos sem o mutex.
+    event_paths: Vec<String>,
+}
+
+impl Plan {
+    fn bodies(&self) -> Vec<String> {
+        self.rows.iter().map(|(_, body)| body.clone()).collect()
+    }
+}
+
+fn plan_purge(conn: &Connection, entry_id: &str, revision: Option<i64>, with_events: bool) -> Result<Plan, String> {
     let workspace: Option<String> = conn
         .query_row("SELECT workspace_id FROM memory_entries WHERE id=?1", [entry_id], |row| row.get(0))
         .optional()
@@ -89,19 +131,43 @@ fn apply_sqlite(conn: &Connection, entry_id: &str, revision: Option<i64>, events
     };
     let rows = revision_bodies(conn, entry_id, revision)?;
     if rows.is_empty() {
-        let audited = audited(conn, entry_id, revision)?;
-        if !audited {
+        if !audited(conn, entry_id, revision)? {
             return Err("memory revision is unavailable".into());
         }
-        let ids = audited_revisions(conn, entry_id, revision)?;
-        return Ok(Applied { workspace, entry_id: entry_id.to_string(), revisions: ids, bodies: Vec::new() });
+        let audited_ids = audited_revisions(conn, entry_id, revision)?;
+        return Ok(Plan { workspace, entry_id: entry_id.to_string(), rows, audited_ids, event_paths: Vec::new() });
     }
-    let revisions: Vec<i64> = rows.iter().map(|(id, _)| *id).collect();
     let bodies: Vec<String> = rows.iter().map(|(_, body)| body.clone()).collect();
-    // Antes do commit: se o NDJSON falhar, a revisão continua no banco e a tentativa seguinte ainda tem o texto.
-    scrub_event_logs(conn, &workspace, events_root, &bodies)?;
-    delete_revisions(conn, &workspace, entry_id, &revisions, &bodies)?;
-    Ok(Applied { workspace, entry_id: entry_id.to_string(), revisions, bodies })
+    let event_paths = if with_events { event_log_paths(conn, &workspace, &bodies)? } else { Vec::new() };
+    Ok(Plan { workspace, entry_id: entry_id.to_string(), rows, audited_ids: Vec::new(), event_paths })
+}
+
+/// Grava o purge. Antes, confere que as revisões são as mesmas que foram lidas: se a memória
+/// mudou enquanto o mutex estava solto, não apaga o que não foi lido nem o que não foi redigido.
+fn commit_purge(conn: &Connection, plan: Plan, revision: Option<i64>) -> Result<Applied, String> {
+    if plan.rows.is_empty() {
+        return Ok(Applied {
+            workspace: plan.workspace,
+            entry_id: plan.entry_id,
+            revisions: plan.audited_ids,
+            bodies: Vec::new(),
+        });
+    }
+    if revision_bodies(conn, &plan.entry_id, revision)? != plan.rows {
+        return Err("A memória mudou durante o apagamento. Repita o apagamento para concluir.".into());
+    }
+    let revisions: Vec<i64> = plan.rows.iter().map(|(id, _)| *id).collect();
+    let bodies = plan.bodies();
+    delete_revisions(conn, &plan.workspace, &plan.entry_id, &revisions, &bodies)?;
+    Ok(Applied { workspace: plan.workspace, entry_id: plan.entry_id, revisions, bodies })
+}
+
+/// Só para teste: plano, redação e commit numa conexão só, como a versão anterior.
+#[cfg(test)]
+fn apply_sqlite(conn: &Connection, entry_id: &str, revision: Option<i64>, events_root: Option<&Path>) -> Result<Applied, String> {
+    let plan = plan_purge(conn, entry_id, revision, events_root.is_some())?;
+    scrub_event_paths(&plan.event_paths, events_root, &plan.bodies())?;
+    commit_purge(conn, plan, revision)
 }
 
 #[cfg(test)]
@@ -117,29 +183,81 @@ fn finish_local(conn: &Connection, applied: &Applied, scope: Option<&Scope>) -> 
     Ok(())
 }
 
-fn scrub_coordinated(db: &crate::database::DbConnection, scope: &Scope, applied: &Applied) -> Result<(), String> {
+/// Lista os NDJSON das tasks do workspace que podem conter o texto, lida com o mutex tomado.
+fn event_log_paths(conn: &Connection, workspace: &str, bodies: &[String]) -> Result<Vec<String>, String> {
+    let needles = super::repo::redaction_needles(bodies);
+    if needles.is_empty() || !table_exists(conn, "tasks") || !column_exists(conn, "tasks", "events_path") {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn
+        .prepare("SELECT t.events_path FROM tasks t JOIN runs r ON r.id=t.run_id WHERE r.workspace_id=?1 AND t.events_path IS NOT NULL")
+        .map_err(|e| e.to_string())?;
+    let paths = stmt
+        .query_map([workspace], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    Ok(paths)
+}
+
+/// Redige o texto apagado nos NDJSON listados. Roda sem o mutex do banco.
+fn scrub_event_paths(paths: &[String], events_root: Option<&Path>, bodies: &[String]) -> Result<(), String> {
+    let Some(root) = events_root else { return Ok(()) };
+    let needles = super::repo::redaction_needles(bodies);
+    if needles.is_empty() || paths.is_empty() {
+        return Ok(());
+    }
+    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    for path in paths {
+        scrub_one_event_log(Path::new(path), &root, &needles)?;
+    }
+    Ok(())
+}
+
+/// Artefatos derivados: repositório git, `revisions.json`, `VACUUM` e backups. Nenhum deles
+/// roda com o mutex do banco preso; o `VACUUM` vai numa conexão lateral.
+fn scrub_coordinated_with(
+    db: &crate::database::DbConnection,
+    scope: &Scope,
+    applied: &Applied,
+    antes_do_io: &dyn Fn(),
+) -> Result<(), String> {
     let projection = {
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
         super::repo::render(&conn, &applied.workspace, &[]).ok()
     };
+    antes_do_io();
     super::repo::rewrite_workspace_repos(&scope.memory_root, &applied.workspace, projection.as_ref(), &applied.bodies)?;
     let dirs = super::repo::workspace_repo_dirs(&scope.memory_root, &applied.workspace)?;
     for dir in &dirs {
         super::repo::with_repo_gate(dir, || {
-            let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-            super::lifecycle::refresh_revision_archive(&conn, &applied.workspace, dir)
+            super::lifecycle::refresh_revision_archive_db(db, &applied.workspace, dir, antes_do_io)
         })?;
     }
-    {
+    antes_do_io();
+    let main_file = {
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-        reclaim_pages(&conn)?;
-        if let Some(database) = &scope.database_file {
-            for backup in upgrade_backups(database)? {
-                rewrite_backup(&backup, &applied.workspace, &applied.entry_id, &applied.revisions)?;
-            }
+        main_database_file(&conn)
+    };
+    // Em base em memória não há arquivo para compactar: só os testes chegam aqui sem arquivo.
+    if let Some(file) = main_file {
+        reclaim_pages_side(&file)?;
+    }
+    if let Some(database) = &scope.database_file {
+        antes_do_io();
+        for backup in upgrade_backups(database)? {
+            rewrite_backup(&backup, &applied.workspace, &applied.entry_id, &applied.revisions)?;
         }
     }
     Ok(())
+}
+
+/// `VACUUM` e checkpoint do WAL numa conexão lateral do arquivo da base. O mutex compartilhado
+/// não fica preso: só as escritas concorrentes esperam pelo lock do próprio SQLite.
+fn reclaim_pages_side(database: &Path) -> Result<(), String> {
+    let conn = crate::database::open_side_connection_at(database).map_err(|error| error.to_string())?;
+    let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+    conn.execute_batch("VACUUM").map_err(|error| error.to_string())
 }
 
 fn revision_bodies(conn: &Connection, entry_id: &str, revision: Option<i64>) -> Result<Vec<(i64, String)>, String> {
@@ -197,6 +315,7 @@ fn delete_revisions(conn: &Connection, workspace: &str, entry_id: &str, revision
     tx.commit().map_err(|_| "could not finish purge".into())
 }
 
+#[cfg(test)]
 fn reclaim_pages(conn: &Connection) -> Result<(), String> {
     let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
     conn.execute_batch("VACUUM").map_err(|error| error.to_string())
@@ -394,27 +513,6 @@ fn scrub_sqlite_copies(conn: &Connection, workspace: &str, bodies: &[String]) ->
                 conn.execute("UPDATE memory_agent_drafts SET input_json=?2 WHERE id=?1", params![id, redacted]).map_err(|e| e.to_string())?;
             }
         }
-    }
-    Ok(())
-}
-
-fn scrub_event_logs(conn: &Connection, workspace: &str, events_root: Option<&Path>, bodies: &[String]) -> Result<(), String> {
-    let Some(root) = events_root else { return Ok(()) };
-    let needles = super::repo::redaction_needles(bodies);
-    if needles.is_empty() || !table_exists(conn, "tasks") || !column_exists(conn, "tasks", "events_path") {
-        return Ok(());
-    }
-    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let mut stmt = conn
-        .prepare("SELECT t.events_path FROM tasks t JOIN runs r ON r.id=t.run_id WHERE r.workspace_id=?1 AND t.events_path IS NOT NULL")
-        .map_err(|e| e.to_string())?;
-    let paths = stmt
-        .query_map([workspace], |row| row.get::<_, String>(0))
-        .map_err(|e| e.to_string())?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|e| e.to_string())?;
-    for path in paths {
-        scrub_one_event_log(Path::new(&path), &root, &needles)?;
     }
     Ok(())
 }

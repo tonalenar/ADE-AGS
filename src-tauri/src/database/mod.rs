@@ -18,7 +18,7 @@ mod lock_lint;
 mod test;
 
 pub use wal::spawn_wal_maintenance;
-pub(crate) use connection::{open_side_connection, user_db_path};
+pub(crate) use connection::{open_side_connection, open_side_connection_at, user_db_path};
 pub use connection::{
     __cmd__db_boot_status, __tauri_command_name_db_boot_status, DbConnection, db_boot_status,
     db_upgrade_pending, finish_db, mark_db_ready, prepare_db, wait_until_db_ready,

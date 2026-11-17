@@ -1535,4 +1535,111 @@ mod tests {
         assert!(status.error.is_none(), "{:?}", status.error);
         assert!(notes(root.path()).contains("after the failed purge"));
     }
+
+    /// Base em arquivo com o schema real: o `VACUUM` do purge precisa de um arquivo para a
+    /// conexão lateral.
+    fn file_fixture(path: &std::path::Path) -> DbConnection {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        crate::database::migrate(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w','Test workspace',0,0);
+             INSERT INTO missions(id,workspace_id,title,objective,cwd,created_at,updated_at) VALUES('m','w','Mission','objective','/test',0,0);",
+        )
+        .unwrap();
+        Arc::new(Mutex::new(conn))
+    }
+
+    /// Conjunto (entrada, revisão) das revisões na base, para comparar antes e depois do purge.
+    fn revision_set(db: &DbConnection) -> Vec<(String, i64)> {
+        let conn = db.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT entry_id, revision FROM memory_revisions ORDER BY entry_id, revision")
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    }
+
+    /// Duas memórias aprovadas: a alvo e uma que não pode ser tocada pelo purge.
+    fn approved_pair(db: &DbConnection, sync: &RepoSync) -> (crate::memory::ProposalResult, crate::memory::ProposalResult) {
+        let conn = db.lock().unwrap();
+        let target = propose(&conn, "alvo", "PURGE_TARGET_BODY");
+        let other = propose(&conn, "outra", "PURGE_OTHER_BODY");
+        decide_and_schedule(&conn, sync, &target.entry_id, target.revision, true).unwrap();
+        decide_and_schedule(&conn, sync, &other.entry_id, other.revision, true).unwrap();
+        (target, other)
+    }
+
+    /// O purge apaga só a revisão alvo e refaz `revisions.json` sem o texto. Cada fase de I/O
+    /// (repositório, arquivo do archive, `VACUUM`) roda com o mutex do banco solto: a sonda
+    /// confere isso com `try_lock` no mesmo thread, no instante em que a fase começa.
+    #[test]
+    fn purge_nao_segura_o_mutex_no_io_e_apaga_so_o_alvo() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _other) = approved_pair(&db, &sync);
+        let sentinel = "PURGE_ARCHIVE_SENTINEL_7c1d";
+        {
+            let conn = db.lock().unwrap();
+            let exported = repo::export_at(&conn, "w", root.path(), Some((&target.entry_id, target.revision))).unwrap();
+            let repo = std::path::PathBuf::from(&exported.path);
+            std::fs::write(repo.join("revisions.json"), format!("{{\n  \"body\": \"{sentinel}\"\n}}\n")).unwrap();
+        }
+        let before = revision_set(&db);
+        let scope = crate::memory::purge::Scope {
+            memory_root: root.path().to_path_buf(),
+            database_file: None,
+            events_root: None,
+        };
+        let sonda_db = db.clone();
+        let fases = std::cell::Cell::new(0);
+        crate::memory::purge::revisions_coordinated_with(&db, &sync, &target.entry_id, Some(target.revision), &scope, &|| {
+            assert!(sonda_db.try_lock().is_ok(), "uma fase de I/O do purge rodou com o mutex do banco preso");
+            fases.set(fases.get() + 1);
+        })
+        .unwrap();
+        assert!(fases.get() >= 3, "as fases de I/O não foram todas alcançadas: {}", fases.get());
+
+        let after = revision_set(&db);
+        let apagadas: Vec<_> = before.iter().filter(|r| !after.contains(r)).cloned().collect();
+        assert_eq!(apagadas, vec![(target.entry_id.clone(), target.revision)], "o purge apagou mais do que o alvo");
+        assert_eq!(after.len(), before.len() - 1);
+
+        let repo = root.path().join(repo::workspace_repo_name("w"));
+        let archive = std::fs::read_to_string(repo.join("revisions.json")).unwrap_or_default();
+        assert!(!archive.contains(sentinel), "revisions.json ficou com o texto apagado: {archive}");
+    }
+
+    /// Com base em arquivo, o `VACUUM` roda numa conexão lateral: a sonda da fase de compactação
+    /// confere que o mutex do banco está solto, e o conjunto apagado segue sendo só o alvo.
+    #[test]
+    fn purge_compacta_numa_conexao_lateral_sem_o_mutex() {
+        let root = TempDir::new();
+        let database_file = root.path().join("base.db");
+        let db = file_fixture(&database_file);
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, other) = approved_pair(&db, &sync);
+        let before = revision_set(&db);
+        // Com o arquivo da base, a fase de backups também roda (e tem que estar com o mutex solto).
+        let scope = crate::memory::purge::Scope {
+            memory_root: root.path().to_path_buf(),
+            database_file: Some(database_file),
+            events_root: None,
+        };
+        let sonda_db = db.clone();
+        crate::memory::purge::revisions_coordinated_with(&db, &sync, &target.entry_id, Some(target.revision), &scope, &|| {
+            assert!(sonda_db.try_lock().is_ok(), "o VACUUM ou o backup rodou com o mutex do banco preso");
+        })
+        .unwrap();
+
+        let after = revision_set(&db);
+        let apagadas: Vec<_> = before.iter().filter(|r| !after.contains(r)).cloned().collect();
+        assert_eq!(apagadas, vec![(target.entry_id.clone(), target.revision)]);
+        assert!(after.contains(&(other.entry_id.clone(), other.revision)), "a outra memória foi tocada");
+    }
 }

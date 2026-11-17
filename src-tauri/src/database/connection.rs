@@ -69,7 +69,12 @@ fn db_path() -> PathBuf {
 /// conexão global (`DbConnection`) o `Mutex` ficava preso durante tudo isso e o resto do app
 /// (autosave, IPC, Vigia) parava. Em WAL as duas convivem; `busy_timeout` cobre as escritas.
 pub(crate) fn open_side_connection() -> SqlResult<Connection> {
-    let conn = Connection::open(db_path())?;
+    open_side_connection_at(&db_path())
+}
+
+/// Como `open_side_connection`, para um arquivo de base dado. Os testes usam uma base temporária.
+pub(crate) fn open_side_connection_at(path: &std::path::Path) -> SqlResult<Connection> {
+    let conn = Connection::open(path)?;
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
          PRAGMA busy_timeout = 30000;",
