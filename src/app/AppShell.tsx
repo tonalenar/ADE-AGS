@@ -1,5 +1,6 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { lazyWithRetry } from "@/app/lazyWithRetry";
+import { StatusBarRegion } from "@/app/StatusBarRegion";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -57,7 +58,6 @@ const ChatShell = lazyWithRetry(() => import("@/features/chat/ChatShell").then((
 const AppSessionsSidebar = lazyWithRetry(() => import("@/features/chat/sidebar/AppSessionsSidebar").then((module) => ({ default: module.AppSessionsSidebar })));
 const ExplorerDrawer = lazyWithRetry(() => import("@/features/sidePanel/ExplorerDrawer").then((module) => ({ default: module.ExplorerDrawer })));
 const SessionPanel = lazyWithRetry(() => import("@/features/sidePanel/SessionPanel").then((module) => ({ default: module.SessionPanel })));
-const StatusBar = lazyWithRetry(() => import("@/app/StatusBar").then((module) => ({ default: module.StatusBar })));
 const CommandPalette = lazyWithRetry(() => import("@/features/palette/CommandPalette").then((module) => ({ default: module.CommandPalette })));
 const CompareHost = lazyWithRetry(() => import("@/features/compare/CompareHost").then((module) => ({ default: module.CompareHost })));
 const ArchivedMessagePreviewHost = lazyWithRetry(() => import("@/features/sessions/ArchivedMessagePreview").then((module) => ({ default: module.ArchivedMessagePreviewHost })));
@@ -386,7 +386,8 @@ export function AppShell() {
       </div>
 
       <div className={chat ? "hidden" : "contents"}>
-        <PanelBoundary name="status-bar"><Suspense fallback={null}><StatusBar repo={activeRepo} /></Suspense></PanelBoundary>
+        {/* Barra de status e diálogo do login: cada um na sua fronteira (ver `StatusBarRegion`). */}
+        <StatusBarRegion repo={activeRepo} />
       </div>
 
       <PanelBoundary name="palette"><Suspense fallback={null}><CommandPalette /></Suspense></PanelBoundary>
