@@ -113,12 +113,12 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
     // que hubiera dejado otro workspace en esas mismas carpetas. Cada tab lo re-verifica
     // igual antes de lanzar su proceso (`reconcile_tab_skills`), pero hacerlo acá es lo
     // que permite que el health check post-apertura no vea todo como "missing".
-    {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        for w in rows.iter() {
-            let dirs = crate::skills::link_dirs_of_window(&conn, &w.id);
-            crate::skills::reconcile_link_dirs(&conn, &dirs);
-        }
+    for w in rows.iter() {
+        let dirs = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            crate::skills::link_dirs_of_window(&conn, &w.id)
+        };
+        crate::skills::reconcile_link_dirs_db(&db, &dirs);
     }
 
     Ok(())

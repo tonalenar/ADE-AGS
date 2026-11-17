@@ -374,8 +374,9 @@ fn archived_session_id(conn: &Connection) -> Option<String> {
 /// puede lanzar procesos) y recién después se escribe con el lock puesto.
 fn archive(db: &DbConnection, tab_id: &str, ws: &str) {
     let resolved = resolve_for_archive(db, tab_id);
+    let boards = crate::canvas::load_boards();
     let conn = db.lock().unwrap();
-    archive_tab_row(&conn, tab_id, ws, &resolved).unwrap();
+    archive_tab_row(&conn, tab_id, ws, &resolved, &boards).unwrap();
 }
 
 fn setup_db() -> DbConnection {

@@ -214,11 +214,12 @@ pub(crate) fn archive_tab_row(
     tab_id: &str,
     workspace_id: &str,
     resolved: &ResolvedSession,
+    boards: &crate::canvas::Boards,
 ) -> Result<(), String> {
     // All closure paths converge here, including window/workspace deletion. Preserve
     // the resolved session before the disposable tabs row is removed.
     conn.execute("UPDATE tabs SET session_id=COALESCE(?1,session_id) WHERE id=?2",rusqlite::params![resolved.session_id,tab_id]).map_err(|e|e.to_string())?;
-    crate::usage::capture_mission_tabs(conn, &crate::canvas::load_boards())?;
+    crate::usage::capture_mission_tabs(conn, boards)?;
     conn.execute("UPDATE mission_usage_tabs SET closed_at=?1 WHERE tab_id=?2 AND closed_at IS NULL",rusqlite::params![now_ts(),tab_id]).map_err(|e|e.to_string())?;
     upsert_history_row(conn, tab_id, workspace_id, resolved, now_ts())?;
     Ok(())
@@ -892,12 +893,15 @@ pub(crate) fn checkpoint_sessions(
 
 /// Guarda un checkpoint de las tabs vivas del workspace. Ver [`checkpoint_sessions`].
 #[tauri::command]
-pub fn db_checkpoint_sessions(
+pub async fn db_checkpoint_sessions(
     workspace_id: String,
     extras: Vec<CheckpointExtra>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<u32, String> {
-    checkpoint_sessions(&db, &workspace_id, &extras)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || checkpoint_sessions(&db, &workspace_id, &extras))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 /// Aplica título, fijado y ocultar sobre una entrada. Lo que no viene en el parche no se

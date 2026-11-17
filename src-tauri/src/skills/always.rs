@@ -11,7 +11,7 @@
 use crate::database::DbConnection;
 use rusqlite::OptionalExtension;
 
-use super::links::{fetch_skill_row, reconcile_link_dirs};
+use super::links::{fetch_skill_row, reconcile_link_dirs_db};
 use super::types::SkillInfo;
 
 pub(crate) const KEY: &str = "skills.always_on";
@@ -88,9 +88,12 @@ fn open_link_dirs(conn: &rusqlite::Connection) -> Vec<(String, String)> {
 /// Liga na primeira instalação de uma skill que vem com a app. Se a pessoa desligou depois, uma atualização não liga
 /// de novo: só a instalação conta.
 pub(super) fn enable_on_install(db: &DbConnection, skill_id: &str) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    if set(&conn, skill_id, true)? {
-        reconcile_link_dirs(&conn, &open_link_dirs(&conn));
+    let pairs = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        set(&conn, skill_id, true)?.then(|| open_link_dirs(&conn))
+    };
+    if let Some(pairs) = pairs {
+        reconcile_link_dirs_db(db, &pairs);
     }
     Ok(())
 }
@@ -103,13 +106,16 @@ pub fn list_always_on_skills(db: tauri::State<DbConnection>) -> Result<Vec<Strin
 
 #[tauri::command]
 pub fn set_skill_always_on(skill_id: String, on: bool, db: tauri::State<DbConnection>) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    if on {
-        // Só uma skill instalada pode ser ligada: um id inventado não entra na lista.
-        fetch_skill_row(&conn, &skill_id)?;
-    }
-    if set(&conn, &skill_id, on)? {
-        reconcile_link_dirs(&conn, &open_link_dirs(&conn));
+    let pairs = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        if on {
+            // Só uma skill instalada pode ser ligada: um id inventado não entra na lista.
+            fetch_skill_row(&conn, &skill_id)?;
+        }
+        set(&conn, &skill_id, on)?.then(|| open_link_dirs(&conn))
+    };
+    if let Some(pairs) = pairs {
+        reconcile_link_dirs_db(&db, &pairs);
     }
     Ok(())
 }

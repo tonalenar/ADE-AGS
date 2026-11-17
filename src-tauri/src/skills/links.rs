@@ -132,22 +132,43 @@ pub(super) fn desired_skills_for_link_dir(
 /// Best-effort por diseño: corre en el arranque de cada tab y en cada cierre de
 /// tab/ventana, donde un conflicto puntual (ej. una carpeta real ocupando el path de un
 /// symlink) no debe abortar la operación — `check_symlinks_health` lo reporta después.
-pub(crate) fn reconcile_link_dir(
+/// Lo que `reconcile_link_dir` lee de la base. Se arma con el mutex tomado y se aplica sin
+/// él: el disco (`read_dir`, symlinks, `remove_dir`) no debe bloquear a otros comandos.
+pub(crate) struct LinkPlan {
+    dir: PathBuf,
+    skills_dir: PathBuf,
+    /// Skills que deben quedar montadas, con la ruta exacta de cada montaje.
+    desired: Vec<(SkillInfo, PathBuf)>,
+    /// Slugs de las skills deseadas: lo que no esté acá se quita del directorio.
+    keep: std::collections::HashSet<String>,
+}
+
+/// Primer paso, con la base: arma el plan sin tocar el disco.
+pub(crate) fn link_plan(
     conn: &rusqlite::Connection,
     cwd: &str,
     agent_id: &str,
-) -> Result<(), String> {
-    let Some(dir) = links_dir_for_conn(conn, cwd, agent_id) else { return Ok(()) };
+) -> Result<Option<LinkPlan>, String> {
+    let Some(dir) = links_dir_for_conn(conn, cwd, agent_id) else { return Ok(None) };
     let skills_dir = skills_dir_from_conn(conn)?;
-
     let desired: Vec<SkillInfo> = desired_skills_for_link_dir(conn, cwd, agent_id)?
         .into_iter()
         .filter(|s| agent_is_compatible(s, agent_id))
         .collect();
-    let keep: std::collections::HashSet<String> =
-        desired.iter().map(|s| slug_from_source_path(&s.source_path)).collect();
+    let keep = desired.iter().map(|s| slug_from_source_path(&s.source_path)).collect();
+    let desired = desired
+        .into_iter()
+        .map(|s| {
+            let path = dir.join(slug_from_source_path(&s.source_path));
+            (s, path)
+        })
+        .collect();
+    Ok(Some(LinkPlan { dir, skills_dir, desired, keep }))
+}
 
-    if let Ok(entries) = std::fs::read_dir(&dir) {
+/// Segundo paso, sin la base: aplica el plan sobre el disco.
+pub(crate) fn apply_link_plan(plan: &LinkPlan) {
+    if let Ok(entries) = std::fs::read_dir(&plan.dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if !is_mount(&path) {
@@ -157,24 +178,33 @@ pub(crate) fn reconcile_link_dir(
             // apunta a la copia global (skill borrada a mano) también se limpia acá.
             // En Windows un junction no es `is_symlink`, pero sí es un montaje nuestro.
             let Ok(target) = std::fs::read_link(&path) else { continue };
-            if !points_inside(&target, &skills_dir) {
+            if !points_inside(&target, &plan.skills_dir) {
                 continue; // montaje que no gestiona ADE AGS
             }
             let name = entry.file_name().to_string_lossy().to_string();
-            if !keep.contains(&name) {
+            if !plan.keep.contains(&name) {
                 remove_symlink_best_effort(&path);
             }
         }
     }
 
-    for skill in &desired {
-        let _ = ensure_symlink(conn, skill, cwd, agent_id);
+    for (skill, link_path) in &plan.desired {
+        let _ = ensure_symlink_at(skill, link_path);
     }
 
     // Si no quedó ninguna skill, tampoco queda el directorio vacío tirado en el repo del
     // usuario (`remove_dir` falla solo si no está vacío, que es justo lo que queremos).
-    let _ = std::fs::remove_dir(&dir);
+    let _ = std::fs::remove_dir(&plan.dir);
+}
 
+pub(crate) fn reconcile_link_dir(
+    conn: &rusqlite::Connection,
+    cwd: &str,
+    agent_id: &str,
+) -> Result<(), String> {
+    if let Some(plan) = link_plan(conn, cwd, agent_id)? {
+        apply_link_plan(&plan);
+    }
     Ok(())
 }
 
@@ -186,6 +216,34 @@ pub(crate) fn reconcile_link_dirs(conn: &rusqlite::Connection, pairs: &[(String,
     for (cwd, agent_id) in pairs {
         if seen.insert((cwd.clone(), agent_id.clone())) {
             let _ = reconcile_link_dir(conn, cwd, agent_id);
+        }
+    }
+}
+
+/// Como `reconcile_link_dirs`, sin segurar el mutex del banco mientras toca el disco: cada
+/// par lee su plan con el mutex tomado, lo suelta y recién después aplica el plan.
+pub(crate) fn reconcile_link_dirs_db(db: &crate::database::DbConnection, pairs: &[(String, String)]) {
+    reconcile_link_dirs_with(db, pairs, apply_link_plan);
+}
+
+/// Núcleo de `reconcile_link_dirs_db`. `aplicar` recibe cada plan fuera del mutex (los tests
+/// lo usan para comprobarlo).
+pub(crate) fn reconcile_link_dirs_with(
+    db: &crate::database::DbConnection,
+    pairs: &[(String, String)],
+    mut aplicar: impl FnMut(&LinkPlan),
+) {
+    let mut seen = std::collections::HashSet::new();
+    for (cwd, agent_id) in pairs {
+        if !seen.insert((cwd.clone(), agent_id.clone())) {
+            continue;
+        }
+        let plan = match db.lock() {
+            Ok(conn) => link_plan(&conn, cwd, agent_id),
+            Err(_) => continue,
+        };
+        if let Ok(Some(plan)) = plan {
+            aplicar(&plan);
         }
     }
 }
@@ -309,7 +367,11 @@ pub(super) fn ensure_symlink(
     let Some(link_path) = link_path_for_conn(conn, cwd, agent_id, &slug) else {
         return Ok(()); // agente sin carpeta de skills conocida ni declarada, se saltea
     };
+    ensure_symlink_at(skill, &link_path)
+}
 
+/// La parte de disco de `ensure_symlink`: deja `skill` montada en `link_path`. No lee la base.
+pub(super) fn ensure_symlink_at(skill: &SkillInfo, link_path: &Path) -> Result<(), String> {
     if link_path.symlink_metadata().is_ok() {
         if is_mount(&link_path) {
             let target = std::fs::read_link(&link_path).map_err(|e| e.to_string())?;

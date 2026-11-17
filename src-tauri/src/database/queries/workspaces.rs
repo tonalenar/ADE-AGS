@@ -120,6 +120,7 @@ pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result
         }).collect()
     };
 
+    let boards = crate::canvas::load_boards();
     let conn = db.lock().map_err(|e| e.to_string())?;
 
     // Antes de perder todo (cascada windows→tabs→project_skills.tab_id), archivar cada
@@ -138,7 +139,7 @@ pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result
     drop(tab_ids_stmt);
     for tab_id in &tab_ids {
         let resolved = resolved.get(tab_id.as_str()).cloned().unwrap_or_default();
-        archive_tab_row(&conn, tab_id, workspace_id, &resolved)?;
+        archive_tab_row(&conn, tab_id, workspace_id, &resolved, &boards)?;
     }
 
     let affected_dirs = crate::skills::link_dirs_of_workspace(&conn, workspace_id);
@@ -146,7 +147,8 @@ pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result
     conn.execute("DELETE FROM windows WHERE workspace_id = ?1", [workspace_id])
         .map_err(|e| e.to_string())?;
 
-    crate::skills::reconcile_link_dirs(&conn, &affected_dirs);
+    drop(conn);
+    crate::skills::reconcile_link_dirs_db(db, &affected_dirs);
     Ok(())
 }
 

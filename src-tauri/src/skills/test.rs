@@ -323,9 +323,10 @@ fn reanudar_una_sesion_recupera_sus_skills() {
     // Cerrar la tab: se archiva y su fila desaparece (con ella, por cascada, sus
     // attachments).
     let resolved = crate::database::resolve_for_archive(&state, &tab_id);
+    let boards = crate::canvas::load_boards();
     let history_id = {
         let conn = state.lock().unwrap();
-        crate::database::archive_tab_row(&conn, &tab_id, &workspace_id, &resolved)
+        crate::database::archive_tab_row(&conn, &tab_id, &workspace_id, &resolved, &boards)
             .expect("archivar");
         conn.execute("DELETE FROM tabs WHERE id = ?1", [&tab_id])
             .unwrap();
@@ -2049,4 +2050,22 @@ fn attachear_dos_veces_no_duplica_la_fila() {
         )
         .unwrap();
     assert_eq!(filas, 1, "tres attach del mismo alcance dejaron {filas} filas");
+}
+
+/// Reconciliar skills toca el disco (symlinks, `remove_dir`). Eso no puede pasar con el
+/// mutex del banco preso: la sonda confirma el mutex libre en cada plan que se aplica.
+#[test]
+fn reconciliar_skills_no_segura_el_banco_al_tocar_el_disco() {
+    let db: DbConnection = std::sync::Arc::new(std::sync::Mutex::new(crate::database::test_db()));
+    let probe = db.clone();
+    let mut planes = 0;
+    super::links::reconcile_link_dirs_with(
+        &db,
+        &[("/ruta-que-no-existe/proyecto".into(), "claude-code".into())],
+        |_plan| {
+            assert!(probe.try_lock().is_ok(), "el disco se tocó con el banco preso");
+            planes += 1;
+        },
+    );
+    assert_eq!(planes, 1, "el plan de la tab no se aplicó");
 }
