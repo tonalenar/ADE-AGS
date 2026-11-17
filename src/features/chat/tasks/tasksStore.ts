@@ -77,6 +77,9 @@ export async function stopTask(task: BgTask, threadId: string | null): Promise<s
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let lastSaved: string | null = null;
+let saveFailures = 0;
+/** Quantas vezes uma gravação recusada pelo banco é tentada de novo, sem esperar outra mudança. */
+const MAX_SAVE_RETRIES = 3;
 
 function scheduleSave(): void {
   if (saveTimer) clearTimeout(saveTimer);
@@ -85,7 +88,10 @@ function scheduleSave(): void {
     const raw = serializePersisted(useTasks.getState().byKey);
     if (raw === lastSaved) return;
     lastSaved = raw;
-    setSetting(TASKS_SETTING, raw).catch(() => { lastSaved = null; });
+    setSetting(TASKS_SETTING, raw).then(() => { saveFailures = 0; }, () => {
+      lastSaved = null;
+      if (++saveFailures <= MAX_SAVE_RETRIES) scheduleSave();
+    });
   }, SAVE_DEBOUNCE_MS);
 }
 
