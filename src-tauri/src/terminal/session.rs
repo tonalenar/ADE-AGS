@@ -227,6 +227,13 @@ fn authorize_by_pid(claimed_tab: Option<&str>, client_pid: Option<u32>) -> Resul
     };
     let mut current = client;
     for _ in 0..MAX_ANCESTORS {
+        if let Some(tab) = claimed.filter(|claimed_tab| {
+            roots
+                .iter()
+                .any(|(tab, root)| tab == *claimed_tab && *root == current)
+        }) {
+            return Ok(tab.to_string());
+        }
         if let Some((tab, _)) = roots.iter().find(|(_, root)| *root == current) {
             if claimed.is_some_and(|value| value != tab) {
                 return Err(ERR_FORGED.into());
@@ -780,6 +787,41 @@ mod tests {
             authorize_actor(Some(&issued.token), Some(&thread), Some(std::process::id()))
                 .unwrap_err()
                 .contains("ADE_TAB_ID")
+        );
+    }
+
+    #[test]
+    fn aba_declarada_desambigua_sessoes_de_teste_com_o_mesmo_pid_raiz() {
+        if !ancestry_required() {
+            return;
+        }
+        let first = Issued::new("pid-collision-first");
+        let second = Issued::new("pid-collision-second");
+        let root_tabs: Vec<String> = {
+            let sessions = registry();
+            sessions
+                .by_tab
+                .iter()
+                .filter_map(|(tab, token)| {
+                    sessions
+                        .by_token
+                        .get(token)
+                        .filter(|bound| bound.root_pid == std::process::id())
+                        .map(|_| tab.clone())
+                })
+                .collect()
+        };
+        let first_root = root_tabs.first().expect("há sessões registradas");
+        let claimed = if first_root == &first.tab {
+            &second.tab
+        } else {
+            &first.tab
+        };
+
+        assert_ne!(first_root, claimed);
+        assert_eq!(
+            authorize(None, Some(claimed), Some(std::process::id())).unwrap(),
+            *claimed
         );
     }
 
