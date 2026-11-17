@@ -9,6 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 /// Where derived artifacts live. Absent in unit tests so they never touch `~/.ags`.
@@ -30,7 +31,7 @@ struct Applied {
     event_paths: Vec<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct RevisionRow {
     revision: i64,
     status: String,
@@ -49,12 +50,21 @@ struct RevisionRow {
     decided_at: Option<i64>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct EntryState {
     status: String,
     current_revision: Option<i64>,
     updated_at: i64,
 }
+
+#[derive(Serialize, Deserialize)]
+struct PendingRestore {
+    entry_id: String,
+    restore_rows: Vec<RevisionRow>,
+    entry_state: Option<EntryState>,
+}
+
+const PENDING_RESTORE_PREFIX: &str = "memory.purge.pending_restore.";
 
 pub fn main_database_file(conn: &Connection) -> Option<PathBuf> {
     conn.query_row("SELECT file FROM pragma_database_list WHERE name='main'", [], |row| row.get::<_, String>(0))
@@ -98,7 +108,7 @@ pub(crate) fn revisions_coordinated_with(
     scope: &Scope,
     antes_do_io: &dyn Fn(),
 ) -> Result<(), String> {
-    revisions_coordinated_impl(db, sync, entry_id, revision, scope, antes_do_io, &|_| Ok(()))
+    revisions_coordinated_impl(db, sync, entry_id, revision, scope, antes_do_io, &|_| Ok(()), &|_| Ok(()))
 }
 
 #[cfg(test)]
@@ -112,6 +122,24 @@ pub(crate) fn revisions_coordinated_failing_at(
 ) -> Result<(), String> {
     revisions_coordinated_impl(db, sync, entry_id, revision, scope, &|| {}, &|current| {
         if current == stage { Err(format!("falha de teste na etapa {stage}")) } else { Ok(()) }
+    }, &|_| Ok(()))
+}
+
+#[cfg(test)]
+pub(crate) fn revisions_coordinated_failing_restore_at(
+    db: &crate::database::DbConnection,
+    sync: &super::repo_sync::RepoSync,
+    entry_id: &str,
+    revision: Option<i64>,
+    scope: &Scope,
+    io_stage: &'static str,
+    attempts: &std::sync::atomic::AtomicUsize,
+) -> Result<(), String> {
+    revisions_coordinated_impl(db, sync, entry_id, revision, scope, &|| {}, &|current| {
+        if current == io_stage { Err(format!("falha de teste na etapa {io_stage}")) } else { Ok(()) }
+    }, &|_| {
+        attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err("falha injetada ao restaurar a revisão".into())
     })
 }
 
@@ -123,7 +151,9 @@ fn revisions_coordinated_impl(
     scope: &Scope,
     antes_do_io: &dyn Fn(),
     falha_no_io: &dyn Fn(&str) -> Result<(), String>,
+    falha_na_restauracao: &dyn Fn(u8) -> Result<(), String>,
 ) -> Result<(), String> {
+    recover_pending_restores(db)?;
     let plan = {
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
         plan_purge(&conn, entry_id, revision, scope.events_root.is_some())?
@@ -141,19 +171,19 @@ fn revisions_coordinated_impl(
     };
     let _resume = PauseGuard { sync, workspace: applied.workspace.clone() };
     if let Err(error) = sync.pause_workspace(&applied.workspace) {
-        restore_purge(db, &applied).map_err(|restore| format!("A exportação em andamento não pôde ser pausada ({error}) e a revisão não pôde ser restaurada ({restore})."))?;
+        restore_purge_with_retry(db, &applied, falha_na_restauracao).map_err(|restore| format!("A exportação em andamento não pôde ser pausada ({error}). {restore}"))?;
         return Err(format!("A exportação em andamento não pôde ser pausada ({error}); a revisão foi restaurada no banco."));
     }
     if let Err(error) = scrub_event_paths(&applied.event_paths, scope.events_root.as_deref(), &applied.bodies) {
         // Mantém a regra anterior: se o NDJSON falhar, restaura a revisão para permitir nova tentativa.
-        restore_purge(db, &applied).map_err(|restore| format!("A redação do NDJSON falhou ({error}) e a revisão não pôde ser restaurada ({restore})."))?;
+        restore_purge_with_retry(db, &applied, falha_na_restauracao).map_err(|restore| format!("A redação do NDJSON falhou ({error}). {restore}"))?;
         return Err(format!("A redação do NDJSON falhou; a revisão continua no banco para nova tentativa ({error})."));
     }
     sync.forget_discarded_pending(&applied.workspace);
     if let Err(error) = scrub_coordinated_with(db, scope, &applied, antes_do_io, falha_no_io) {
-        return Err(match restore_purge(db, &applied) {
+        return Err(match restore_purge_with_retry(db, &applied, falha_na_restauracao) {
             Ok(()) => format!("A limpeza dos arquivos locais falhou ({error}); a revisão foi restaurada no banco. Os arquivos podem ter sido parcialmente limpos; repita o apagamento para concluir."),
-            Err(restore) => format!("A limpeza dos arquivos locais falhou ({error}) e a revisão não pôde ser restaurada no banco ({restore}). O estado do apagamento pode estar parcial."),
+            Err(restore) => format!("A limpeza dos arquivos locais falhou ({error}). {restore}"),
         });
     }
     Ok(())
@@ -249,27 +279,96 @@ fn commit_purge(conn: &Connection, plan: Plan, revision: Option<i64>) -> Result<
     Ok(Applied { workspace: plan.workspace, entry_id: plan.entry_id, revisions, bodies, restore_rows: plan.restore_rows, entry_state: plan.entry_state, event_paths: plan.event_paths })
 }
 
-/// Restaura a linha quando a redação do NDJSON falha após o commit SQL.
-fn restore_purge(db: &crate::database::DbConnection, applied: &Applied) -> Result<(), String> {
-    if applied.restore_rows.is_empty() { return Ok(()); }
+fn restore_pending(
+    db: &crate::database::DbConnection,
+    pending: &PendingRestore,
+    pending_key: Option<&str>,
+) -> Result<(), String> {
+    if pending.restore_rows.is_empty() && pending_key.is_none() { return Ok(()); }
     let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
     let tx = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
-    for row in &applied.restore_rows {
+    for row in &pending.restore_rows {
         tx.execute(
             "INSERT OR IGNORE INTO memory_revisions (entry_id,revision,status,operation,kind,priority,body,content_hash,actor_kind,source_run_id,source_task_id,source_fact_id,reason,expected_revision,created_at,decided_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
-            params![applied.entry_id, row.revision, row.status, row.operation, row.kind, row.priority, row.body, row.content_hash, row.actor_kind, row.source_run_id, row.source_task_id, row.source_fact_id, row.reason, row.expected_revision, row.created_at, row.decided_at],
+            params![pending.entry_id, row.revision, row.status, row.operation, row.kind, row.priority, row.body, row.content_hash, row.actor_kind, row.source_run_id, row.source_task_id, row.source_fact_id, row.reason, row.expected_revision, row.created_at, row.decided_at],
         ).map_err(|e| format!("could not restore memory revision: {e}"))?;
-        tx.execute("DELETE FROM memory_purge_audit WHERE entry_id=?1 AND revision=?2", params![applied.entry_id, row.revision]).map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM memory_purge_audit WHERE entry_id=?1 AND revision=?2", params![pending.entry_id, row.revision]).map_err(|e| e.to_string())?;
     }
-    if let Some(state) = &applied.entry_state {
+    if let Some(state) = &pending.entry_state {
         // A memória pode ter recebido outra revisão enquanto o NDJSON era redigido. Só revive
         // o estado anterior se ele ainda estiver no estado deixado por este purge.
         tx.execute(
             "UPDATE memory_entries SET status=?2,current_revision=?3,updated_at=?4 WHERE id=?1 AND status='deleted' AND current_revision IS NULL",
-            params![applied.entry_id, state.status, state.current_revision, state.updated_at],
+            params![pending.entry_id, state.status, state.current_revision, state.updated_at],
         ).map_err(|e| e.to_string())?;
     }
+    if let Some(key) = pending_key {
+        tx.execute("DELETE FROM settings WHERE key=?1", [key]).map_err(|e| e.to_string())?;
+    }
     tx.commit().map_err(|e| e.to_string())
+}
+
+fn restore_purge_with_retry(
+    db: &crate::database::DbConnection,
+    applied: &Applied,
+    falha_injetada: &dyn Fn(u8) -> Result<(), String>,
+) -> Result<(), String> {
+    let pending = PendingRestore {
+        entry_id: applied.entry_id.clone(),
+        restore_rows: applied.restore_rows.clone(),
+        entry_state: applied.entry_state.clone(),
+    };
+    let mut last_error = String::new();
+    for attempt in 1..=2 {
+        match falha_injetada(attempt).and_then(|()| restore_pending(db, &pending, None)) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = error,
+        }
+    }
+    match persist_pending_restore(db, &pending) {
+        Ok(()) => Err(format!("A restauração falhou após duas tentativas ({last_error}); será refeita no próximo boot.")),
+        Err(error) => Err(format!("A restauração falhou após duas tentativas ({last_error}) e não foi possível registrar a pendência ({error}).")),
+    }
+}
+
+fn persist_pending_restore(
+    db: &crate::database::DbConnection,
+    pending: &PendingRestore,
+) -> Result<(), String> {
+    let key = format!("{PENDING_RESTORE_PREFIX}{}", pending.entry_id);
+    let value = serde_json::to_string(pending).map_err(|error| error.to_string())?;
+    let conn = db.lock().map_err(|error| error.to_string())?;
+    let tx = Transaction::new_unchecked(&conn, TransactionBehavior::Immediate).map_err(|error| error.to_string())?;
+    tx.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?1,?2)", params![key, value])
+        .map_err(|error| error.to_string())?;
+    let stored: String = tx.query_row("SELECT value FROM settings WHERE key=?1", [&key], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    if stored != value {
+        return Err("já existe outra restauração pendente para esta memória".into());
+    }
+    tx.commit().map_err(|error| error.to_string())
+}
+
+/// Reaplica restaurações de purge pendentes antes do sincronizador ou de outra operação de memória.
+pub(crate) fn recover_pending_restores(db: &crate::database::DbConnection) -> Result<(), String> {
+    let pending = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        let mut stmt = conn.prepare("SELECT key,value FROM settings WHERE substr(key,1,length(?1))=?1 ORDER BY key")
+            .map_err(|error| error.to_string())?;
+        let rows = stmt.query_map([PENDING_RESTORE_PREFIX], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }).map_err(|error| error.to_string())?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|error| error.to_string())?
+    };
+    for (key, value) in pending {
+        let item: PendingRestore = serde_json::from_str(&value).map_err(|error| format!("restauração pendente inválida em {key}: {error}"))?;
+        let expected_key = format!("{PENDING_RESTORE_PREFIX}{}", item.entry_id);
+        if key != expected_key {
+            return Err(format!("a chave da restauração pendente não corresponde à memória ({key})"));
+        }
+        restore_pending(db, &item, Some(&key)).map_err(|error| format!("não foi possível reaplicar a restauração pendente de {}: {error}", item.entry_id))?;
+    }
+    Ok(())
 }
 
 /// Só para teste: plano, redação e commit numa conexão só, como a versão anterior.

@@ -857,7 +857,7 @@ pub fn run() {
             _ => {}
         })
         .setup(|app| {
-            crate::memory::repo_sync::install(app);
+            crate::memory::repo_sync::install(app).map_err(|error| std::io::Error::other(error))?;
             // Os envios às abas (peers, `ags tab send`, chat…) tiram um ponto de restauração antes.
             crate::tab_checkpoints::install(app.handle());
             // Las cookies y el storage de cada sitio que se abre en el navegador de las tabs

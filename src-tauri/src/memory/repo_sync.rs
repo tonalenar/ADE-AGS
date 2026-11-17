@@ -761,8 +761,9 @@ fn dirty_workspaces(conn: &rusqlite::Connection) -> Result<Vec<String>, String> 
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
-pub fn install(app: &tauri::App) {
+pub fn install(app: &tauri::App) -> Result<(), String> {
     let db = app.state::<DbConnection>().inner().clone();
+    super::purge::recover_pending_restores(&db)?;
     let root = repo::default_root().expect("home unavailable");
     let sync = RepoSync::new(db, root);
     let handle = app.handle().clone();
@@ -772,6 +773,7 @@ pub fn install(app: &tauri::App) {
     sync.spawn();
     sync.reconcile_pending();
     app.manage(sync);
+    Ok(())
 }
 
 #[tauri::command]
@@ -810,6 +812,7 @@ pub fn decide_and_schedule(
 mod tests {
     use super::*;
     use crate::memory::{ProposalActor, ProposalInput};
+    use rusqlite::OptionalExtension;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Barrier;
 
@@ -1589,6 +1592,37 @@ mod tests {
         assert_revision_restored(&db, &target.entry_id, target.revision, "falha no VACUUM");
     }
 
+    #[test]
+    fn purge_persiste_restauracao_pendente_quando_o_restore_falha() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _) = approved_pair(&db, &sync);
+        let scope = crate::memory::purge::Scope { memory_root: root.path().to_path_buf(), database_file: None, events_root: None };
+        let restore_attempts = AtomicUsize::new(0);
+
+        let error = crate::memory::purge::revisions_coordinated_failing_restore_at(
+            &db, &sync, &target.entry_id, Some(target.revision), &scope, "repositório", &restore_attempts,
+        ).unwrap_err();
+        assert_eq!(restore_attempts.load(Ordering::SeqCst), 2, "a restauração deve ser tentada duas vezes");
+
+        let pending_key = format!("memory.purge.pending_restore.{}", target.entry_id);
+        let conn = db.lock().unwrap();
+        let pending: Option<String> = conn.query_row("SELECT value FROM settings WHERE key=?1", [&pending_key], |row| row.get(0)).optional().unwrap();
+        assert!(pending.is_some(), "o conteúdo necessário para restaurar precisa ficar persistido; erro: {error}");
+        drop(conn);
+        assert!(error.contains("será refeita"), "a mensagem precisa dizer que a restauração será refeita: {error}");
+        assert_revision_absent(&db, &target.entry_id, target.revision);
+
+        crate::memory::purge::recover_pending_restores(&db).unwrap();
+
+        assert_revision_restored(&db, &target.entry_id, target.revision, "recuperação no boot");
+        let conn = db.lock().unwrap();
+        let pending_count: i64 = conn.query_row("SELECT COUNT(*) FROM settings WHERE key=?1", [&pending_key], |row| row.get(0)).unwrap();
+        assert_eq!(pending_count, 0, "a pendência só deve ser removida depois da restauração");
+    }
+
     #[cfg(unix)]
     #[test]
     fn purge_falha_ao_ler_backups_e_restaura_a_revisao() {
@@ -1627,6 +1661,10 @@ mod tests {
         let conn = db.lock().unwrap();
         let audit_count: i64 = conn.query_row("SELECT COUNT(*) FROM memory_purge_audit WHERE entry_id=?1 AND revision=?2", rusqlite::params![entry_id, revision], |row| row.get(0)).unwrap();
         assert_eq!(audit_count, 0, "{context} deixou o purge auditado como concluído");
+    }
+
+    fn assert_revision_absent(db: &DbConnection, entry_id: &str, revision: i64) {
+        assert!(!revision_set(db).contains(&(entry_id.to_string(), revision)), "a falha injetada não impediu a restauração");
     }
 
     /// Duas memórias aprovadas: a alvo e uma que não pode ser tocada pelo purge.
