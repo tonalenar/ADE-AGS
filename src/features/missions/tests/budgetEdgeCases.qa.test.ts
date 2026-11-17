@@ -5,7 +5,6 @@ import {
   levelOf,
   nearLimit,
   needsBudgetConfirm,
-  type BudgetStatus,
 } from "../budgetTypes";
 import { estimateOf, type MissionTokens } from "../tokens";
 
@@ -75,8 +74,8 @@ describe("Guarda de Orçamento - QA Edge Cases Suite", () => {
     });
   });
 
-  describe("Modelos sem preço e agentes não medidos (integridade de custo)", () => {
-    it("não inventa preço para modelo desconhecido e preserva lista de unpricedModels", () => {
+  describe("Modelos sem preço (estimateOf)", () => {
+    it("estimateOf soma só quem tem estimate e preserva unpricedModels sem inventar preço", () => {
       const tokens: MissionTokens = {
         agents: [
           {
@@ -90,22 +89,9 @@ describe("Guarda de Orçamento - QA Edge Cases Suite", () => {
       };
       const estimate = estimateOf(tokens);
       expect(estimate?.costUsd).toBe(8.5);
+      expect(estimate?.savedUsd).toBe(0);
       expect(estimate?.unpricedModels).toEqual(["internal-synthetic-preview", "future-claude-7"]);
-      const status: BudgetStatus = {
-        missionId: "mission-test-1",
-        level: levelOf(estimate!.costUsd, 10),
-        budgetUsd: 10.0,
-        costUsd: estimate!.costUsd,
-        pct: 85.0,
-        unpricedModels: estimate!.unpricedModels,
-        unmeasuredAgents: tokens.agents.filter((a) => !a.measured).map((a) => a.agentId),
-        continueAnyway: false,
-        trendUsdPerHour: 1.25,
-      };
-      expect(status.level).toBe("warning");
-      expect(status.costUsd).toBe(8.5);
-      expect(status.unpricedModels).toContain("future-claude-7");
-      expect(status.unmeasuredAgents).toContain("gemini-qa");
+      expect(levelOf(estimate!.costUsd, 10)).toBe("warning");
     });
   });
 

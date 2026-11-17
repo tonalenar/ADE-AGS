@@ -299,7 +299,8 @@ describe("aprovação humana no quadro", () => {
     expect(replies()).toMatchObject([{ id: 2, error: { code: -32001 } }]);
   });
 
-  it("desmontar o quadro com aprovação aberta nega sem mandar nada ao composer", async () => {
+  it("fecha sem mandar texto ao composer e sem responder ao app", async () => {
+    vi.useFakeTimers();
     const postToComposer = vi.fn();
     const { replies } = await mount({ postToComposer });
     await fromApp(messageRequest(1, "a"));
@@ -308,7 +309,7 @@ describe("aprovação humana no quadro", () => {
     await act(async () => {
       root?.unmount();
     });
-    await act(async () => { await Promise.resolve(); });
+    await act(async () => { vi.advanceTimersByTime(1_000); });
     expect(postToComposer).not.toHaveBeenCalled();
     // close() marca a sessão fechada antes do handler responder; o app some, e nada vai ao composer.
     expect(replies()).toEqual([]);

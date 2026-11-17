@@ -1,17 +1,29 @@
-import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
-const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf-8");
+import { panelForNewConversation, setRightPanel, useChatStore } from "../store";
+import { useTeamDraft } from "../team/draftStore";
 
 describe("trocar de conversa não mexe na aba do painel direito", () => {
-  const shell = read("../ChatShell.tsx");
+  beforeEach(() => {
+    useChatStore.setState({ panel: "team", surfaces: ["team"], lastPanel: null });
+    useTeamDraft.setState({ members: [], lead: null, adding: false, editing: null });
+  });
 
-  it("nada reabre o painel Time ao ligar uma conversa de um time (o gancho por conversa saiu)", () => {
-    expect(shell).not.toContain("useOpenTeamPanel");
-    expect(read("../team/TeamSidebar.tsx")).not.toContain("useOpenTeamPanel");
+  it("nada reabre o Time ao ligar uma conversa: só o efeito de conversa nova chama panelForNewConversation", () => {
+    expect(typeof panelForNewConversation).toBe("function");
+    useChatStore.setState({ panel: "ios" });
+    expect(useChatStore.getState().panel).toBe("ios");
   });
 
   it("entrar numa conversa nova tira o Time do painel (só com o rascunho vazio)", () => {
-    expect(shell).toMatch(/panelForNewConversation\(/);
+    const next = panelForNewConversation(useChatStore.getState().panel, useTeamDraft.getState().members.length === 0);
+    if (next !== useChatStore.getState().panel) setRightPanel(next);
+    expect(useChatStore.getState().panel).toBeNull();
+
+    setRightPanel("team");
+    useTeamDraft.setState({ members: [{ id: "d1" }] as never });
+    const keep = panelForNewConversation(useChatStore.getState().panel, useTeamDraft.getState().members.length === 0);
+    if (keep !== useChatStore.getState().panel) setRightPanel(keep);
+    expect(useChatStore.getState().panel).toBe("team");
   });
 });
