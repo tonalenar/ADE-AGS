@@ -319,6 +319,12 @@ impl Mapper {
         self.end_uuid.take()
     }
 
+    /// O turno acabou (com `result` ou sem ele, se o processo caiu): o estado do turno não passa para o próximo. O corte
+    /// que ficou sem `result` não suprime o aviso por subtipo do turno seguinte.
+    pub fn encerra_turno(&mut self) {
+        self.truncated = false;
+    }
+
     /// A pessoa negou esta ferramenta: o resultado dela aparece como negado.
     pub fn deny(&mut self, tool_use_id: &str) {
         self.denied.insert(tool_use_id.to_string());

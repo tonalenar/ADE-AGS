@@ -358,6 +358,19 @@ mod claude {
         assert!(items(m.feed(&fim, 7)).iter().all(|i| i.kind != ItemKind::Notice), "o resultado não repete o aviso da mensagem");
     }
 
+    /// O corte de um turno que acabou sem `result` (o processo caiu) não pode suprimir o aviso por subtipo do turno
+    /// seguinte: o app fecha o turno com `encerra_turno`, e o estado do corte sai com ele.
+    #[test]
+    fn corte_sem_resultado_nao_suprime_o_aviso_do_turno_seguinte() {
+        let mut m = Mapper::default();
+        let corte = json!({ "type": "assistant", "message": { "id": "msg_30", "role": "assistant", "stop_reason": "max_tokens",
+            "content": [{ "type": "text", "text": "parcial" }] }, "parent_tool_use_id": null, "uuid": "u-30" });
+        assert_eq!(items(m.feed(&corte, 1)).iter().filter(|i| i.kind == ItemKind::Notice).count(), 1);
+        m.encerra_turno();
+        let limite = json!({ "type": "result", "subtype": "error_max_tokens", "is_error": false, "result": "", "uuid": "r-31", "duration_ms": 5 });
+        assert_eq!(items(m.feed(&limite, 2)).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["n:responseTruncated:r-31"]);
+    }
+
     #[test]
     fn o_acesso_vira_o_modo_de_permissao_do_claude_e_volta() {
         let pairs = [("ask", "default"), ("edits", "acceptEdits"), ("safe", "auto"), ("full", "bypassPermissions"), ("plan", "plan")];
