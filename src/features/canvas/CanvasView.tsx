@@ -70,6 +70,7 @@ import { RoleEditDialog } from "./RoleEditDialog";
 import { applyTabRole } from "./applyRole";
 import type { AgentRoleChoice } from "./agentRole";
 import { boardKeyOfTab, canvasActions, compareOfKey, missionOfKey, useActiveBoardKey, useCanvasStore } from "./store";
+import { usePortalViewLifetime } from "./portalLifetime";
 import { ThreadNode, type ThreadFlowNode } from "./ThreadNode";
 import { selectConversation } from "@/features/chat/unified/selectionActions";
 import { useSelectedRef } from "@/features/chat/unified/useConversations";
@@ -1264,12 +1265,11 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
   const ensure = useViewTabsStore((s) => s.ensurePortalView);
   const drop = useViewTabsStore((s) => s.dropPortalView);
   const view = useViewTabsStore((s) => s.portalViews.find((v) => v.id === id));
-  useEffect(() => {
-    ensure(id, cwd, portal.url, portal.viewport, portal.realChrome);
-    // Al borrar el portal (o cerrar el canvas) se suelta la vista y con ella el navegador.
-    return () => drop(id);
-    // La URL inicial solo cuenta al crear la vista.
-  }, [id, cwd]);
+  // Al borrar el portal (o cerrar el canvas) se suelta la vista y con ella el navegador. Cambiar la carpeta de
+  // referencia no recria la vista: a URL inicial só cuenta al crear la vista.
+  usePortalViewLifetime(id, cwd, (portalId, currentCwd) => {
+    ensure(portalId, currentCwd, portal.url, portal.viewport, portal.realChrome);
+  }, drop);
 
   // Lo que el navegador va visitando se guarda en el canvas, para reabrir donde estaba.
   const shown = view?.url ?? "";

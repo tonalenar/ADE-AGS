@@ -9,6 +9,7 @@ import { BrowserFloatGrip } from "../BrowserFloatGrip";
 import { publishMeasuredChatBrowser, subscribeToMeasuredChatBrowser } from "@/features/chat/browserMeasurement";
 import { useChatStore } from "@/features/chat/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { usePortalViewLifetime } from "@/features/canvas/portalLifetime";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -68,4 +69,22 @@ describe("superfície nativa do navegador", () => {
     publishMeasuredChatBrowser("browser-1", { left: 8, top: 9, width: 500, height: 350 });
     expect(useChatStore.getState().browser).toEqual({ viewId: "browser-1", rect: { left: 8, top: 9, width: 500, height: 350 } });
   });
+
+  it("cwd_muda_sem_recriar_portal", () => {
+    // Trocar a pasta de referência não recria a vista do Portal: ela é criada uma vez e só sai ao desmontar.
+    const ensure = vi.fn();
+    const drop = vi.fn();
+    const mount = (cwd: string) => act(() => root.render(<PortalLifetime id="portal-1" cwd={cwd} ensure={ensure} drop={drop} />));
+    mount("/workspace/a");
+    mount("/workspace/b");
+
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(ensure).toHaveBeenCalledWith("portal-1", "/workspace/a");
+    expect(drop).not.toHaveBeenCalled();
+  });
 });
+
+function PortalLifetime({ id, cwd, ensure, drop }: { id: string; cwd: string; ensure: (id: string, cwd: string) => void; drop: (id: string) => void }) {
+  usePortalViewLifetime(id, cwd, ensure, drop);
+  return null;
+}

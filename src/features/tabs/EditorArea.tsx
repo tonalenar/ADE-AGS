@@ -61,6 +61,8 @@ export function EditorArea() {
   // aberta): nada de canvas, grade ou grupos por cima da tela da conversa.
   const chat = useChatShell();
   const boardCanvas = useWorkMode() === "canvas";
+  // Uma vez montado, o canvas fica montado: trocar para o modo Abas só o esconde, sem desmontar os Portais.
+  const [canvasMounted, setCanvasMounted] = useState(boardCanvas);
   const canvas = boardCanvas && !chat;
   const grid = useMissionGrid();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -68,6 +70,10 @@ export function EditorArea() {
   const groupIds = groups.map((g) => g.id).join("|");
   // Los huecos de la grade aparecen y desaparecen sin que cambie el árbol: hay que reobservarlos.
   const gridIds = grid ? grid.join("|") : "";
+
+  useEffect(() => {
+    if (boardCanvas) setCanvasMounted(true);
+  }, [boardCanvas]);
 
   // A paleta e os atalhos pedem a mesma ação; revalidar aqui garante que só abrimos o
   // assistente dentro do workspace e com uma pasta ativa. Nada inicia até a pessoa confirmar.
@@ -119,8 +125,8 @@ export function EditorArea() {
           navegador desmontado perde a página. `visibility` sozinho não basta — o @xyflow marca
           cada nó medido com `visibility: visible`, que vence o herdado —, então ele também sai da
           tela, sem mudar de tamanho (como as terminais ocultas do `TerminalPanel`). */}
-      {boardCanvas && (
-        <div className="absolute inset-0" style={chat ? { visibility: "hidden", transform: "translateX(-300vw)" } : undefined}>
+      {canvasMounted && (
+        <div className="absolute inset-0" style={!boardCanvas || chat ? { visibility: "hidden", transform: "translateX(-300vw)" } : undefined}>
           <Suspense fallback={<div className="absolute inset-0" aria-busy="true" />}>
             <CanvasView />
           </Suspense>
