@@ -543,6 +543,12 @@ function TerminalImpl({
           ...(peekContinuity(tabId) ? { aiMemoryContinuity: true } : {}),
           ...(scrubSecrets ? { scrubSecrets: true } : {}),
         });
+        // A aba foi fechada enquanto o processo nascia. O cleanup já rodou, quando ainda não havia id, então
+        // não viu este PTY: mata-se aqui, e não se registram listeners que ninguém desmontaria.
+        if (cancelled) {
+          ptyKill(ptyId).catch(console.error);
+          return;
+        }
         takeContinuity(tabId); // o PTY nasceu: a intenção foi usada. Numa falha ela fica para a nova tentativa.
         ptyIdRef.current = ptyId;
         sentSize = `${createdCols}x${createdRows}`;
