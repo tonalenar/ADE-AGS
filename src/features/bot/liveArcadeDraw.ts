@@ -3,7 +3,16 @@ import type { PlacedBarrel, SceneSlot } from "./liveArcadeScene";
 import { ARCADE_H, ARCADE_W, BEAM_LEFT, BEAM_RIGHT, LEVEL_BASE_Y, TOWER_LEFT, TOWER_WIDTH, beamY, ladderX, levelOfStage } from "./liveArcadeScene";
 
 const DIM = "#77799b";
-const FONT = (px: number) => `${px}px "Press Start 2P", monospace`;
+/** Uma string por tamanho: o quadro não monta a fonte de novo. */
+const fonts = new Map<number, string>();
+const FONT = (px: number) => {
+  let font = fonts.get(px);
+  if (font === undefined) {
+    font = `${px}px "Press Start 2P", monospace`;
+    fonts.set(px, font);
+  }
+  return font;
+};
 const STAGE_ORDER: ArcadeStageId[] = ["delivery", "review", "tests", "work", "opening"];
 
 export const ROLE_COLOR: Record<HeroRole, string> = {
@@ -215,12 +224,14 @@ function drawTower(ctx: CanvasRenderingContext2D, tower: ArcadeTower, label: str
   ctx.fillText(label, TOWER_LEFT - 8, bottom - tower.blocks.length * h - 6);
 }
 export interface DrawLabels {
-  arcade: string; team: string; trophy: string; tower: string;
+  arcade: string; team: string; trophy: string;
   stage: (stage: ArcadeStageId) => string;
   status: (status: string) => string;
 }
 export interface DrawInput {
-  scene: ArcadeScene; slots: Map<string, SceneSlot>; title: string; labels: DrawLabels;
+  scene: ArcadeScene; slots: Map<string, SceneSlot>;
+  /** Título já recortado (o chamador guarda o recorte até o título mudar). */
+  title: string; labels: DrawLabels; towerLabel: string;
   boss: DrawBoss; bolts: Array<{ x: number; y: number; color: string }>;
   heroes: Placed[]; barrels: Array<PlacedBarrel<ArcadeBarrel>>; trophy: ArcadeTrophy; tower: ArcadeTower; frame: number;
 }
@@ -237,7 +248,7 @@ export function drawArcade(ctx: CanvasRenderingContext2D, input: DrawInput) {
   ctx.fillText(labels.arcade, 24, 28);
   ctx.font = FONT(8);
   ctx.fillStyle = "#f4efff";
-  ctx.fillText(input.title.length > 54 ? input.title.slice(0, 51) + "..." : input.title, 24, 52);
+  ctx.fillText(input.title, 24, 52);
   ctx.fillStyle = "#63dfff";
   ctx.fillText(scene.currentStage ? labels.stage(scene.currentStage) : "—", ARCADE_W - 265, 30);
   // A história da fase: uma linha por vez.
@@ -311,7 +322,7 @@ export function drawArcade(ctx: CanvasRenderingContext2D, input: DrawInput) {
   ctx.fillRect(826, top - 10, 20, 4);
   ctx.font = FONT(6);
   ctx.fillText(labels.trophy, 812, top + 22);
-  drawTower(ctx, input.tower, labels.tower);
+  drawTower(ctx, input.tower, input.towerLabel);
   drawBoss(ctx, input.boss.boss, input.boss.x, input.boss.y, input.boss.hit, frame, input.boss.label);
 
   ctx.fillStyle = "#9799b9";
