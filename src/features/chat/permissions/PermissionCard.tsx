@@ -202,6 +202,8 @@ export function PermissionCard({ ask, terminal }: { ask: PendingAsk; terminal: b
             </button>
           )}
           <button ref={allowRef} type="button" onClick={() => answerAsk(ask, "allow")}
+            // O foco cai aqui ao chegar o pedido: um ⏎ com o comando colapsado não pode virar clique nativo em Permitir (C1).
+            onKeyDown={(e) => { if (e.key === "Enter" && long && !expanded) e.preventDefault(); }}
             className="h-7 px-3 inline-flex items-center rounded-lg bg-accent-600 text-white text-chat-note font-medium hover:bg-accent-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/70 focus-visible:ring-offset-1 dark:focus-visible:ring-offset-surface-raised">
             {t("chat.permission.allow")}<Kbd onPrimary>⏎</Kbd>
           </button>

@@ -278,6 +278,14 @@ function rememberWatches(): void {
     /* sem armazenamento: vale só nesta sessão */
   }
 }
+/**
+ * O número do lembrete que acabou de sair. Conta no registro atual (o que o tick seguinte deixou), e não no objeto
+ * capturado quando a cutucada foi agendada: senão o incremento se perdia (A168). Pura.
+ */
+export function contaLembreteEnviado(atual: Watch | undefined, capturado: Watch): number {
+  return (atual ?? capturado).nudges + 1;
+}
+
 /** Quando cada aba foi reportada ao modelo; missões com uma consulta em andamento. */
 const lastPoke = new Map<string, number>();
 const inFlight = new Set<string>();
@@ -563,8 +571,7 @@ export function vigiaTick(now = Date.now()): Promise<void> {
       // Orquestrador trabalhando, ou sem responder à cutucada anterior: espera o próximo ciclo.
       if (!mayPoke(lead.id, now)) continue;
       poke(lead.id, `[${VIGIA_NAME}] ${finding.nudge}`, now, () => {
-        // Conta no registro atual: o `watch` capturado pode ter sido trocado pelo tic seguinte (A168).
-        const nudges = (watches.get(mission.id)?.nudges ?? watch.nudges) + 1;
+        const nudges = contaLembreteEnviado(watches.get(mission.id), watch);
         patchWatch(mission, { nudges, lastNudge: Date.now() });
         reportToChat(lead.id, reportLine(finding.stuck, `lembrete ${nudges}/${NUDGE_LIMIT} enviado ao ${lead.title}.`));
       });

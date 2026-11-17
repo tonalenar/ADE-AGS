@@ -52,9 +52,11 @@ export function announceResult(t: TFunction, label: string, result: AgentUpdateR
       sticky: true,
     });
   } else {
+    // A causa (o que o processo imprimiu, ou a exceção) vai junto: o motivo genérico sozinho não diz o que aconteceu (I2).
+    const cause = result.output?.trim().slice(0, 200);
     showBotToast({
       title: label,
-      text: t("agents.update.failed", { label, error: reasonText(t, result.error) }),
+      text: t("agents.update.failed", { label, error: cause ? `${reasonText(t, result.error)} (${cause})` : reasonText(t, result.error) }),
       tone: "warning",
       sticky: true,
     });
@@ -119,6 +121,15 @@ export async function runAgentUpdate(t: TFunction, info: AgentUpdateInfo): Promi
       appRestarting: false,
     }))
     .finally(stopCreeping);
+  // O reinício que falhou não some: a atualização ficou feita, mas a app não reiniciou (I1).
+  if (outcome.restartError) {
+    showBotToast({
+      title: info.label,
+      text: t("agents.update.restartFailed", { label: info.label, cause: outcome.restartError }),
+      tone: "warning",
+      sticky: true,
+    });
+  }
   // Con reinicio de la app el globo queda en 100% hasta que la app se cierra; si no, se retira.
   if (!outcome.appRestarting) useBotToastStore.getState().dismiss(progressId);
   if (!outcome.appRestarting) announceResult(t, info.label, outcome.result);

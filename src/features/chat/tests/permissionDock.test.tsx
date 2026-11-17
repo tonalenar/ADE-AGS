@@ -148,6 +148,22 @@ describe("atalhos", () => {
     expect(store.answerAsk).toHaveBeenLastCalledWith(expect.objectContaining({ id: ask.id }), "allow");
   });
 
+  it("⏎ no botão Permitir não dispara o clique nativo quando o comando está colapsado (C1)", async () => {
+    await mount(<PermissionCard ask={{ ...ask, detail: LONG }} terminal />);
+    const allow = button("chat.permission.allow");
+    const keepsDefault = allow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    // Cancelado (dispatchEvent devolve falso): o Enter não vira clique em Permitir.
+    expect(keepsDefault).toBe(false);
+    expect(store.answerAsk).not.toHaveBeenCalled();
+  });
+
+  it("⏎ no botão Permitir segue o clique normal quando o comando está inteiro (C1)", async () => {
+    await mount(<PermissionCard ask={ask} terminal />);
+    const allow = button("chat.permission.allow");
+    const keepsDefault = allow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(keepsDefault).toBe(true);
+  });
+
   it("digitando no composer, as teclas são texto", async () => {
     await mount(<PermissionCard ask={ask} terminal />);
     const box = document.createElement("textarea");

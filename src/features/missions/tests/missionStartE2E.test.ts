@@ -319,6 +319,8 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     expect(frontendTerm.pastes[0]).toContain("Frontend");
     expect(qaTerm.pastes).toHaveLength(1);
     expect(qaTerm.pastes[0]).toContain("QA");
+    // O envio conta quando o Enter sai (PR08): colar sozinho ainda não é envio.
+    expect(recordedSpans.filter((s) => s.span.kind === "start_briefing")).toHaveLength(0);
 
     // 5. Após 80ms, o primeiro Enter (\r) é disparado pelo pasteIntoTab
     vi.advanceTimersByTime(80);
@@ -413,8 +415,10 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     const qaInputsBeforeCheck = qaTerm.inputs.length;
     const leadPastesBeforeCheck = leadTerm.pastes.length;
 
-    // O relógio do início começa no Enter (80 ms depois da colagem, PR08): o limite vale a partir dele.
-    vi.advanceTimersByTime(START_CHECK_MS - 4900 + 80);
+    // O relógio do início começa no Enter (80 ms depois da colagem, PR08): aos 25 s da colagem ainda não há aviso.
+    vi.advanceTimersByTime(START_CHECK_MS - 4900);
+    expect(recordedSpans.filter((s) => s.span.kind === "start_stalled" && s.span.actor === "QA")).toHaveLength(0);
+    vi.advanceTimersByTime(80);
 
     // Backend e Frontend tiveram atividade detectada após ECHO_MS -> NÃO foram dados como stalled!
     // QA NUNCA arrancou:

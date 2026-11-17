@@ -132,14 +132,19 @@ describe("updateAgentRestarting", () => {
   });
 });
 
-describe("updateAgentRestarting: reinício da app que rejeita (A167)", () => {
-  it("reabre as terminais fechadas e mantém a atualização como feita", async () => {
+describe("updateAgentRestarting: reinício da app que rejeita (A167, I1)", () => {
+  it("reabre as terminais fechadas, mantém a atualização como feita e devolve a causa do reinício", async () => {
     const { deps, calls } = world();
     deps.restartApp = async () => { calls.push("restartApp"); throw new Error("sem permissão"); };
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const out = await updateAgentRestarting("codex", deps);
     expect(out.result.ok).toBe(true);
     expect(out.appRestarting).toBe(false);
     expect(out.reopened).toBe(2);
+    // A falha não some em silêncio: é registrada e volta ao fluxo com a causa (I1).
+    expect(out.restartError).toContain("sem permissão");
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
     expect(calls).toEqual(["kill:11", "kill:12", "update:true", "restartApp", "restart:t1", "restart:t2"]);
   });
 });
