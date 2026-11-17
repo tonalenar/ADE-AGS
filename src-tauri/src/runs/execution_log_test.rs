@@ -219,3 +219,73 @@ fn o_replay_nao_repete_falha_da_frota_que_nao_tem_payload() {
     assert_eq!(calls.get(), 0, "a Frota não guarda payload para repetir: a falha só fica visível");
     assert_eq!(abertas(&db), 1);
 }
+
+// ── Fila da gravação: teto sem bloquear o produtor ──────────
+
+use super::execution_log::Prioridade;
+
+fn resumo_texto(ultimo: String, omitidos: u64) -> Option<String> {
+    Some(format!("{omitidos} omitidos (último: {ultimo})"))
+}
+
+/// Canal de 2 e excedente de baixa prioridade de 2: 4 trabalhos seguem, os outros 6 de baixa prioridade são contados.
+/// O produtor volta de cada envio (com a fila cheia, bloquear travaria o teste); sem produtor, a fila esvazia e o
+/// resumo sai antes de qualquer outro trabalho.
+#[test]
+fn fila_cheia_nao_bloqueia_o_produtor_e_o_resumo_aparece() {
+    let (fila, gravador) = execution_log::fila_com::<String>(2, 2);
+    for i in 0..10 {
+        assert!(fila.enviar(format!("item-{i}"), Prioridade::Baixa).is_ok());
+    }
+    drop(fila);
+    let entregues: Vec<String> = (0..4).filter_map(|_| gravador.proximo(resumo_texto)).collect();
+    assert_eq!(entregues, ["item-0", "item-1", "item-2", "item-3"]);
+    assert_eq!(gravador.proximo(resumo_texto).as_deref(), Some("6 omitidos (último: item-9)"));
+}
+
+/// Trabalho de estado nunca se perde nem sai de ordem, mesmo com o canal e o excedente de baixa prioridade cheios.
+#[test]
+fn trabalho_de_estado_nunca_se_perde_nem_sai_de_ordem() {
+    let (fila, gravador) = execution_log::fila_com::<String>(2, 1);
+    let envios = [
+        ("e0", Prioridade::Estado),
+        ("b1", Prioridade::Baixa),
+        ("e2", Prioridade::Estado),
+        ("e3", Prioridade::Estado),
+        ("b4", Prioridade::Baixa),
+        ("b5", Prioridade::Baixa),
+    ];
+    for (texto, prioridade) in envios {
+        assert!(fila.enviar(texto.to_string(), prioridade).is_ok());
+    }
+    drop(fila);
+    let saida: Vec<String> = (0..5).filter_map(|_| gravador.proximo(resumo_texto)).collect();
+    assert_eq!(saida, ["e0", "b1", "e2", "e3", "2 omitidos (último: b5)"]);
+}
+
+/// O resumo da fila vira uma entrada do log (`log.omitted`) na conversa a que pertencia o último omitido.
+#[test]
+fn o_resumo_de_omitidos_vira_entrada_do_log() {
+    let conn = crate::database::test_db();
+    crate::conversa::store::insert_thread(
+        &conn,
+        "t1",
+        "codex",
+        "/tmp/p",
+        "Título",
+        &crate::conversa::store::Tuning { model: None, effort: None, access: "ask".into() },
+        None,
+        1,
+    )
+    .unwrap();
+    execution_log::record_chat_event(&conn, "t1", "logOmitted", &json!({ "omitidos": 6 })).unwrap();
+    let (kind, payload): (String, String) = conn
+        .query_row(
+            "SELECT kind, payload_json FROM harness_execution_events WHERE thread_id = 't1' AND kind = 'log.omitted'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(kind, "log.omitted");
+    assert!(payload.contains("\"omitidos\":6"), "{payload}");
+}

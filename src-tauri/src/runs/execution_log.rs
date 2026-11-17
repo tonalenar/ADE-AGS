@@ -7,8 +7,8 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Once, OnceLock, mpsc};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, Once, OnceLock, mpsc};
 use tauri::Emitter;
 
 #[derive(Clone, Debug, Serialize)]
@@ -78,7 +78,6 @@ enum QueuedEvent {
     },
 }
 
-static WRITER: OnceLock<mpsc::Sender<QueuedEvent>> = OnceLock::new();
 /// A repetição das falhas pendentes roda uma vez por processo, no primeiro trabalho da fila.
 static REPLAY: Once = Once::new();
 
@@ -93,41 +92,156 @@ const PERSIST_ATTEMPTS: i64 = 3;
 /// Quantas falhas pendentes uma repetição leva por vez.
 const REPLAY_BATCH: i64 = 200;
 
-/// Trabalhos enviados à fila e ainda não tirados dela pela thread da gravação. A fila não tem limite (ver
-/// `send_to_writer`): este contador só deixa o backlog visível.
-static PENDING_JOBS: AtomicUsize = AtomicUsize::new(0);
-/// Com este tanto de trabalhos esperando, o backlog é registrado: é o sinal de um SQLite parado, antes de a memória
-/// virar problema.
-const BACKLOG_WARN: usize = 1_000;
+/// Canal da gravação, em trabalhos que esperam o gravador. Cheio, o produtor não espera: o trabalho vai para o
+/// excedente (estado) ou é contado (baixa prioridade).
+pub(crate) const CANAL_CAP: usize = 4_096;
+/// Quantos trabalhos de baixa prioridade o excedente aceita. Passou disso, o próximo é contado como omitido.
+pub(crate) const EXCEDENTE_BAIXA: usize = 1_024;
 
-fn writer() -> &'static mpsc::Sender<QueuedEvent> {
+/// Prioridade de um trabalho da fila: baixa para atualizações substituíveis; estado para o resto.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Prioridade {
+    Estado,
+    Baixa,
+}
+
+struct Estado<T> {
+    /// O que não coube no canal, na ordem de chegada. Depois do canal, sempre: a ordem é a do excedente enquanto ele
+    /// tem trabalho.
+    excedente: VecDeque<T>,
+    /// Quantos trabalhos de baixa prioridade foram omitidos desde o último resumo.
+    omitidos: u64,
+    /// O último trabalho omitido: dele saem a conversa e o aplicativo do resumo.
+    ultimo_omitido: Option<T>,
+}
+
+/// O lado que enfileira. Não bloqueia: com a fila cheia, o trabalho vai para o excedente ou é contado.
+pub(crate) struct Fila<T> {
+    canal: mpsc::SyncSender<T>,
+    estado: Arc<Mutex<Estado<T>>>,
+    excedente_baixa: usize,
+}
+
+/// O lado que grava: tira os trabalhos na ordem de chegada e emite o resumo quando a fila esvazia.
+pub(crate) struct Gravador<T> {
+    recebe: mpsc::Receiver<T>,
+    estado: Arc<Mutex<Estado<T>>>,
+}
+
+fn trancar<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+pub(crate) fn fila_com<T>(canal: usize, excedente_baixa: usize) -> (Fila<T>, Gravador<T>) {
+    let (envio, recebe) = mpsc::sync_channel(canal);
+    let estado = Arc::new(Mutex::new(Estado { excedente: VecDeque::new(), omitidos: 0, ultimo_omitido: None }));
+    (
+        Fila { canal: envio, estado: estado.clone(), excedente_baixa },
+        Gravador { recebe, estado },
+    )
+}
+
+pub(crate) fn fila<T>() -> (Fila<T>, Gravador<T>) {
+    fila_com(CANAL_CAP, EXCEDENTE_BAIXA)
+}
+
+impl<T> Fila<T> {
+    /// Põe um trabalho na fila sem esperar. Devolve o trabalho se o gravador já caiu (quem chama grava por conta própria).
+    pub(crate) fn enviar(&self, trabalho: T, prioridade: Prioridade) -> Result<(), T> {
+        let mut estado = trancar(&self.estado);
+        // Com excedente, o canal fica de fora: a ordem de chegada é a do excedente.
+        let trabalho = if estado.excedente.is_empty() {
+            match self.canal.try_send(trabalho) {
+                Ok(()) => return Ok(()),
+                Err(mpsc::TrySendError::Disconnected(t)) => return Err(t),
+                Err(mpsc::TrySendError::Full(t)) => t,
+            }
+        } else {
+            trabalho
+        };
+        match prioridade {
+            Prioridade::Baixa if estado.excedente.len() >= self.excedente_baixa => {
+                estado.omitidos += 1;
+                estado.ultimo_omitido = Some(trabalho);
+            }
+            Prioridade::Baixa | Prioridade::Estado => estado.excedente.push_back(trabalho),
+        }
+        Ok(())
+    }
+}
+
+impl<T> Gravador<T> {
+    /// O próximo trabalho, na ordem de chegada. Quando a fila esvazia com omitidos pendentes, devolve antes o resumo
+    /// que `resumo` monta a partir do último omitido. `None` quando não há mais nada e o produtor já caiu.
+    pub(crate) fn proximo(&self, resumo: impl FnOnce(T, u64) -> Option<T>) -> Option<T> {
+        match self.recebe.try_recv() {
+            Ok(trabalho) => Some(trabalho),
+            Err(vazio) => {
+                // Só o resultado desta chamada: tentar de novo aqui poderia tirar um trabalho que chegou agora.
+                let caiu = matches!(vazio, mpsc::TryRecvError::Disconnected);
+                {
+                    let mut estado = trancar(&self.estado);
+                    if let Some(trabalho) = estado.excedente.pop_front() {
+                        return Some(trabalho);
+                    }
+                    if estado.omitidos > 0 {
+                        let omitidos = std::mem::take(&mut estado.omitidos);
+                        if let Some(ultimo) = estado.ultimo_omitido.take()
+                            && let Some(trabalho) = resumo(ultimo, omitidos)
+                        {
+                            return Some(trabalho);
+                        }
+                    }
+                }
+                if caiu { None } else { self.recebe.recv().ok() }
+            }
+        }
+    }
+}
+
+static WRITER: OnceLock<Fila<QueuedEvent>> = OnceLock::new();
+
+fn writer() -> &'static Fila<QueuedEvent> {
     WRITER.get_or_init(|| {
-        let (sender, receiver) = mpsc::channel::<QueuedEvent>();
+        let (fila_gravacao, gravador) = fila::<QueuedEvent>();
         let _ = std::thread::Builder::new()
             .name("ags-harness-event-log".into())
             .spawn(move || {
-                while let Ok(event) = receiver.recv() {
-                    PENDING_JOBS.fetch_sub(1, Ordering::SeqCst);
+                while let Some(event) = gravador.proximo(resumo_de_omitidos) {
                     handle(event);
                 }
             });
-        sender
+        fila_gravacao
     })
 }
 
-/// Põe um trabalho na fila da gravação e conta o backlog. Sem limite de propósito: bloquear quem emite (um adaptador
-/// roda num worker do Tokio) poderia travar a janela se o SQLite parasse, e um evento descartado se perde para sempre.
-/// Quem precisar de contrapressão decide isso com a medição deste contador.
-fn send_to_writer(job: QueuedEvent) -> Result<(), mpsc::SendError<QueuedEvent>> {
-    let depth = PENDING_JOBS.fetch_add(1, Ordering::SeqCst) + 1;
-    if depth == BACKLOG_WARN {
-        eprintln!("[runs] fila de gravação com {depth} eventos esperando: o SQLite está lento ou ocupado");
+/// O resumo de trabalhos de baixa prioridade omitidos: um evento do chat, na conversa do último omitido.
+fn resumo_de_omitidos(ultimo: QueuedEvent, omitidos: u64) -> Option<QueuedEvent> {
+    match ultimo {
+        QueuedEvent::Chat { app, db, thread_id, .. } => Some(QueuedEvent::Chat {
+            app,
+            db,
+            thread_id,
+            event_type: "logOmitted".into(),
+            payload: json!({ "omitidos": omitidos }),
+            ui: None,
+        }),
+        _ => None,
     }
-    let sent = writer().send(job);
-    if sent.is_err() {
-        PENDING_JOBS.fetch_sub(1, Ordering::SeqCst);
+}
+
+/// A prioridade de um trabalho: `item` e `taskItem` do chat são atualizações substituíveis; o resto é estado.
+fn prioridade_de(job: &QueuedEvent) -> Prioridade {
+    match job {
+        QueuedEvent::Chat { event_type, .. } if matches!(event_type.as_str(), "item" | "taskItem") => Prioridade::Baixa,
+        _ => Prioridade::Estado,
     }
-    sent
+}
+
+/// Põe um trabalho na fila da gravação sem esperar. Devolve o trabalho se a gravação já caiu.
+fn send_to_writer(job: QueuedEvent) -> Result<(), QueuedEvent> {
+    let prioridade = prioridade_de(&job);
+    writer().enviar(job, prioridade)
 }
 
 /// Executa um trabalho da fila: tenta gravar (com repetição), registra a falha se houver, e só então entrega à janela
@@ -295,7 +409,7 @@ fn ensure_replay(app: &tauri::AppHandle, db: &crate::database::DbConnection) {
 
 /// Entrega o trabalho à thread da fila. Se ela já caiu, faz no chamador: o evento não se perde.
 fn send_or_handle(job: QueuedEvent) {
-    if let Err(mpsc::SendError(job)) = send_to_writer(job) {
+    if let Err(job) = send_to_writer(job) {
         handle(job);
     }
 }
@@ -1020,6 +1134,14 @@ pub(crate) fn record_chat_event(
             None,
             format!("thread.closed:{thread_id}:{now}"),
             json!({}),
+        )?,
+        // O resumo do que a fila omitiu (ver `Fila::enviar`): uma entrada do log, com quantas atualizações saíram.
+        "logOmitted" => record(
+            "log.omitted",
+            None,
+            None,
+            format!("log.omitted:{}", uuid::Uuid::new_v4()),
+            payload.clone(),
         )?,
         _ => {}
     }
