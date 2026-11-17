@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 mod jev;
 pub use jev::JevDecider;
@@ -165,37 +166,93 @@ fn secret(text: &str) -> bool {
     crate::decisions::computer_secret(text)
 }
 
+/// Categoria de uma ação sensível. Toda categoria pede a confirmação da pessoa, sem depender do `sensivel: yes` do modelo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Category {
+    /// Permitir, allow, autorizar, aceitar, accept: concede acesso ou aceita um pedido do sistema.
+    GrantPermission,
+    /// Instalar, install.
+    Install,
+    /// Enviar, send, submit, publicar, publish.
+    Send,
+    /// Comprar, buy, pagar, pay, checkout, transferir, transfer.
+    Purchase,
+    /// Excluir, apagar, delete, remove, borrar, reset.
+    Delete,
+    /// Concluir, finalizar, finish, confirmar, confirm.
+    Finish,
+    /// Sair, logout, sign out, cerrar sesión, desligar.
+    SignOut,
+    /// Senha, password, contraseña.
+    Credential,
+}
+
+/// Os termos de cada categoria, sem acento e em minúsculas (ver `plain`). Multilíngue: pt, en e es.
+const TERMS: &[(Category, &[&str])] = &[
+    (Category::GrantPermission, &["permitir", "allow", "autorizar", "aceitar", "accept"]),
+    (Category::Install, &["instalar", "install"]),
+    (Category::Send, &["enviar", "send", "submit", "publicar", "publish"]),
+    (Category::Purchase, &["comprar", "buy", "pagar", "pay", "checkout", "purchase", "transferir", "transfer"]),
+    (Category::Delete, &["excluir", "apagar", "delete", "remove", "borrar", "reset"]),
+    (Category::Finish, &["concluir", "finalizar", "finish", "confirmar", "confirm"]),
+    (Category::SignOut, &["sair", "logout", "log out", "sign out", "cerrar sesion", "desligar"]),
+    (Category::Credential, &["senha", "password", "contrasena"]),
+];
+
+/// O texto sem acento e em minúsculas: `Instalár` e `instalar` casam igual. Pura.
+fn plain(text: &str) -> String {
+    text.nfd().filter(|c| !is_combining_mark(*c)).collect::<String>().to_lowercase()
+}
+
+/// A categoria do próprio rótulo, pelos termos. Pura.
+fn category_of_label(label: &str) -> Option<Category> {
+    let label = plain(label);
+    TERMS
+        .iter()
+        .find(|(_, terms)| terms.iter().any(|term| label.contains(term)))
+        .map(|(category, _)| *category)
+}
+
+/// Botões que só recusam ou fecham: nunca concedem nem executam nada, nem num diálogo de permissão. Pura.
+fn dismissive(label: &str) -> bool {
+    matches!(
+        plain(label).trim(),
+        "cancelar" | "cancel" | "nao" | "no" | "agora nao" | "not now" | "depois" | "later" | "fechar" | "close"
+            | "voltar" | "back" | "nao permitir" | "no permitir" | "don't allow" | "don’t allow"
+    )
+}
+
+/// O que a tela diz sobre o diálogo aberto: a categoria que ele pede, quando o texto traz a marca de um diálogo de
+/// permissão ou de instalação. Pura.
+pub(crate) fn dialog_cue(screen: &str) -> Option<Category> {
+    const PERMISSION: &[&str] = &[
+        "permitir", "allow", "autorizar", "gostaria de", "would like to", "quer acessar", "wants to", "permissao", "permission",
+    ];
+    const INSTALL: &[&str] = &["instalar", "install"];
+    let screen = plain(screen);
+    if PERMISSION.iter().any(|m| screen.contains(m)) {
+        Some(Category::GrantPermission)
+    } else if INSTALL.iter().any(|m| screen.contains(m)) {
+        Some(Category::Install)
+    } else {
+        None
+    }
+}
+
+/// A categoria sensível de um controle tocado. O rótulo decide. Num diálogo de permissão ou de instalação (`cue`), o
+/// botão que não diz a própria ação (OK, Sim, um ícone sem texto, um rótulo que o OCR não leu) é a própria ação e
+/// herda a categoria do diálogo; só recusar ou fechar fica de fora. Pura.
+pub(crate) fn category(label: &str, cue: Option<Category>) -> Option<Category> {
+    if dismissive(label) {
+        return None;
+    }
+    category_of_label(label).or(cue)
+}
+
+/// Pede confirmação pelo rótulo, sem o texto da tela. O alvo `screen` tem rótulo genérico: o controle tocado é
+/// classificado pelo decisor, com `category`.
 fn sensitive_label(label: &str) -> bool {
-    let label = label.to_lowercase();
-    [
-        "enviar",
-        "send",
-        "submit",
-        "comprar",
-        "buy",
-        "pay",
-        "pagar",
-        "checkout",
-        "delete",
-        "apagar",
-        "excluir",
-        "remove",
-        "senha",
-        "password",
-        "sair",
-        "logout",
-        "log out",
-        "sign out",
-        "purchase",
-        "confirmar",
-        "confirm",
-        "enviar",
-        "borrar",
-        "contraseña",
-        "cerrar sesión",
-    ]
-    .iter()
-    .any(|term| label.contains(term))
+    category(label, None).is_some()
 }
 
 fn valid(observation: &Observation) -> bool {
