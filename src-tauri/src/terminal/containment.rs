@@ -327,19 +327,9 @@ pub(crate) mod unix_tree {
         let mut victims = descendants(root, &procs);
         victims.reverse(); // hojas primero
         victims.push(root);
-        for pid in &victims {
-            unsafe {
-                libc::kill(*pid as i32, libc::SIGHUP);
-            }
-        }
-        for pid in &victims {
-            unsafe {
-                libc::kill(*pid as i32, libc::SIGTERM);
-            }
-        }
         for pid in victims {
             unsafe {
-                libc::kill(pid as i32, libc::SIGKILL);
+                libc::kill(pid as i32, libc::SIGHUP);
             }
         }
     }
