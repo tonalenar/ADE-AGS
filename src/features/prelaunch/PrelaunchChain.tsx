@@ -59,7 +59,7 @@ export function PrelaunchChain({ value, onChange, agentCommand }: PrelaunchChain
 
   const resolved = value.map((s) => stepCommand(s, presets)).filter((c): c is string => !!c);
   const preview = resolved.length
-    ? `${resolved.join(" && ")} && exec ${agentCommand ?? "<agente>"}`
+    ? `${resolved.join(" && ")} && exec ${agentCommand ?? t("prelaunch.agentPlaceholder")}`
     : null;
 
   return (

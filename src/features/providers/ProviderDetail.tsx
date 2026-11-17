@@ -43,7 +43,7 @@ function AccountLine({ account, onLogin, onRemove }: {
         <span className="flex items-center gap-2 min-w-0">
           <b className="truncate text-[14px] font-medium text-gray-900 dark:text-white">{account.name}</b>
           {system && <span className="shrink-0 text-[11px] px-1.5 py-px rounded-[5px] bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-white/60">{t("providers.account.system")}</span>}
-          {byKey && <span className="shrink-0 text-[11px] px-1.5 py-px rounded-[5px] bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-white/60">API key</span>}
+          {byKey && <span className="shrink-0 text-[11px] px-1.5 py-px rounded-[5px] bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-white/60">{t("accounts.kind.apiKey")}</span>}
         </span>
         <span title={`${account.envVar}=${account.dir}`} className="truncate text-[12.5px] text-gray-500 dark:text-white/50">
           {checking ? t("settings.accounts.health.checking") : ok ? accountIdentity(account, health) : t("settings.accounts.pendingLogin")}

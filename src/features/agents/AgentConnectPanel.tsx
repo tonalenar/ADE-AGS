@@ -74,7 +74,7 @@ function LinkedAccount({ account }: { account: AgentAccount }) {
       {account.label ?? account.name}
       <span className="text-gray-400 dark:text-white/40">
         {` · ${account.loggedIn ? t("accounts.ready") : t("accounts.needsLogin")}`}
-        {account.kind === "api_key" ? " · API key" : ""}
+        {account.kind === "api_key" ? ` · ${t("accounts.kind.apiKey")}` : ""}
       </span>
     </p>
   );
