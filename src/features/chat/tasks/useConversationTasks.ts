@@ -14,6 +14,17 @@ export const EVENT_ENGINES = new Set(["claude-code", "codex"]);
 
 const NO_ITEMS: TimelineItem[] = [];
 
+/** As tarefas derivadas de uma lista de itens, por identidade da lista: o botão e o painel leem a mesma, e a derivação roda uma vez. */
+const derivedByItems = new WeakMap<TimelineItem[], BgTask[]>();
+function derivedOf(items: TimelineItem[]): BgTask[] {
+  let derived = derivedByItems.get(items);
+  if (!derived) {
+    derived = tasksFromItems(items);
+    derivedByItems.set(items, derived);
+  }
+  return derived;
+}
+
 export interface ConversationTasks {
   key: string | null;
   threadId: string | null;
@@ -31,7 +42,7 @@ export function useConversationTasks(key: string | null): ConversationTasks {
   const agentId = useStructured((s) => (threadId ? s.threads.find((t) => t.id === threadId)?.agentId ?? null : null));
   const items = useStructured((s) => (threadId && agentId && ITEM_ENGINES.has(agentId) ? s.live[threadId]?.items ?? NO_ITEMS : NO_ITEMS));
   const state = useTasks((s) => (key ? s.byKey[key] : undefined) ?? EMPTY_TASKS);
-  const derived = useMemo(() => tasksFromItems(items), [items]);
+  const derived = useMemo(() => derivedOf(items), [items]);
   const tasks = useMemo(() => (threadId ? visibleTasks(state, derived) : []), [state, derived, threadId]);
   return { key: threadId ? key : null, threadId, agentId, tasks, derived, transcripts: state.transcripts, running: runningCount(tasks) };
 }
