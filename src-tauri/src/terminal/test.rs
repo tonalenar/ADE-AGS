@@ -700,7 +700,7 @@ fn fila_preserva_ordem_e_recusa_quando_cheia() {
     let (escrito_tx, escrito_rx) = mpsc::channel();
     let saida = Arc::new(Mutex::new(Vec::new()));
     let escritor = EscritorTravado { portao: portao_rx, escrito: escrito_tx, saida: saida.clone() };
-    let fila = WriteQueue::new(Box::new(escritor)).unwrap();
+    let fila = WriteQueue::new(Box::new(escritor), Box::new(|| {}), Box::new(|_| {})).unwrap();
 
     // 256 pedaços entram. O primeiro pode já estar sendo escrito, e conta na capacidade.
     let mut esperado = String::new();
@@ -746,11 +746,226 @@ fn fila_recusa_com_encerrado_depois_que_a_escrita_falha() {
     }
 
     let (solta_tx, solta_rx) = mpsc::channel();
-    let fila = WriteQueue::new(Box::new(EscritaQuebrada { solta: solta_tx })).unwrap();
+    let fila = WriteQueue::new(Box::new(EscritaQuebrada { solta: solta_tx }), Box::new(|| {}), Box::new(|_| {})).unwrap();
     assert_eq!(fila.enqueue(b"x"), Ok(()));
     // A thread solta o receptor antes da escrita: quando o aviso chega, a fila já está fechada.
     solta_rx.recv().unwrap();
     assert_eq!(fila.enqueue(b"y"), Err(PtyWriteError::Closed));
+}
+
+/// Escritor que cai no primeiro `write` depois de liberado: é o TTY que o processo fechou.
+struct EscritorQueQuebra {
+    portao: std::sync::mpsc::Receiver<()>,
+    solta: std::sync::mpsc::Sender<()>,
+}
+
+impl std::io::Write for EscritorQueQuebra {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        let _ = self.portao.recv();
+        Err(std::io::Error::other("tty fechado"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for EscritorQueQuebra {
+    fn drop(&mut self) {
+        let _ = self.solta.send(());
+    }
+}
+
+#[test]
+fn queda_da_escrita_conta_as_entradas_perdidas_e_avisa() {
+    use super::write_queue::{FalhaEscrita, PtyWriteError, WriteQueue};
+    use std::sync::mpsc;
+
+    let (portao_tx, portao_rx) = mpsc::channel();
+    let (solta_tx, solta_rx) = mpsc::channel();
+    let (aviso_tx, aviso_rx) = mpsc::channel::<FalhaEscrita>();
+    let escritor = EscritorQueQuebra { portao: portao_rx, solta: solta_tx };
+    let fila = WriteQueue::new(
+        Box::new(escritor),
+        Box::new(|| {}),
+        Box::new(move |falha| {
+            let _ = aviso_tx.send(falha);
+        }),
+    )
+    .unwrap();
+
+    // Três entradas aceitas antes de a escrita cair: nenhuma chegou ao processo.
+    let pedacos: [&[u8]; 3] = [b"a", b"b", b"c"];
+    for pedaco in pedacos {
+        assert_eq!(fila.enqueue(pedaco), Ok(()));
+    }
+    portao_tx.send(()).unwrap();
+    solta_rx.recv().unwrap();
+
+    let falha = aviso_rx.try_recv().expect("a queda avisa quem é dono da fila");
+    assert_eq!(falha.perdidas, 3, "a que falhou e as duas que estavam na fila");
+    assert_eq!(fila.enqueue(b"d"), Err(PtyWriteError::Closed));
+}
+
+/// Escritor que fica preso até o lado mestre fechar, como um TTY cuja TUI parou de ler.
+struct EscritorPreso {
+    liberacao: std::sync::mpsc::Receiver<()>,
+    entrou: std::sync::mpsc::Sender<()>,
+    solta: std::sync::mpsc::Sender<()>,
+}
+
+impl std::io::Write for EscritorPreso {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        let _ = self.entrou.send(());
+        let _ = self.liberacao.recv();
+        Err(std::io::Error::other("lado mestre fechado"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for EscritorPreso {
+    fn drop(&mut self) {
+        let _ = self.solta.send(());
+    }
+}
+
+#[test]
+fn remover_a_fila_fecha_o_lado_mestre_e_libera_a_escrita_presa() {
+    use super::write_queue::WriteQueue;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Arc};
+
+    let (liberacao_tx, liberacao_rx) = mpsc::channel::<()>();
+    let (entrou_tx, entrou_rx) = mpsc::channel();
+    let (solta_tx, solta_rx) = mpsc::channel();
+    let fechou = Arc::new(AtomicBool::new(false));
+    let fechou_no_fechar = fechou.clone();
+    let fila = WriteQueue::new(
+        Box::new(EscritorPreso { liberacao: liberacao_rx, entrou: entrou_tx, solta: solta_tx }),
+        Box::new(move || {
+            fechou_no_fechar.store(true, Ordering::SeqCst);
+            // Fechar o lado mestre: a escrita presa vê o fechamento e volta com erro.
+            drop(liberacao_tx);
+        }),
+        Box::new(|_| {}),
+    )
+    .unwrap();
+    fila.enqueue(b"x").unwrap();
+    // A escrita já está presa quando a sessão sai do registro.
+    entrou_rx.recv().unwrap();
+
+    drop(fila);
+    assert!(fechou.load(Ordering::SeqCst), "remover a fila fecha o lado mestre");
+    // Sem o fechamento a escrita ficaria presa para sempre; com ele, a thread termina.
+    solta_rx.recv().unwrap();
+}
+
+#[test]
+fn linha_entra_inteira_ou_nao_entra() {
+    use super::write_queue::WriteQueue;
+    use std::sync::{mpsc, Arc, Mutex};
+
+    let (portao_tx, portao_rx) = mpsc::channel();
+    let (escrito_tx, escrito_rx) = mpsc::channel();
+    let saida = Arc::new(Mutex::new(Vec::new()));
+    let escritor = EscritorTravado { portao: portao_rx, escrito: escrito_tx, saida: saida.clone() };
+    let fila = WriteQueue::new(Box::new(escritor), Box::new(|| {}), Box::new(|_| {})).unwrap();
+
+    // 255 entradas deixam uma vaga. A linha (texto + Enter) cabe inteira nela, como um pedido só.
+    for i in 0..255 {
+        fila.enqueue(format!("{i:03}").as_bytes()).unwrap();
+    }
+    assert_eq!(fila.enqueue_linha(b"ls"), Ok(()), "a linha cabe inteira na única vaga");
+
+    for _ in 0..256 {
+        portao_tx.send(()).unwrap();
+    }
+    for _ in 0..256 {
+        escrito_rx.recv().unwrap();
+    }
+    let escrito = String::from_utf8(saida.lock().unwrap().clone()).unwrap();
+    let mut esperado: String = (0..255).map(|i| format!("{i:03}")).collect();
+    esperado.push_str("ls\r");
+    assert_eq!(escrito, esperado);
+}
+
+/// `aguarda_saida_com` com relógio e pausa de teste: a espera é medida, nunca dormida.
+#[test]
+fn aguarda_saida_respeita_o_prazo_sem_relogio_real() {
+    use super::pty_manager::aguarda_saida_com;
+    use portable_pty::ExitStatus;
+    use std::cell::Cell;
+    use std::time::{Duration, Instant};
+
+    let relogio = Cell::new(Instant::now());
+    let agora = || {
+        let t = relogio.get();
+        relogio.set(t + Duration::from_millis(10));
+        t
+    };
+    let pausas = Cell::new(0u32);
+    let pausa = |_: Duration| pausas.set(pausas.get() + 1);
+
+    // Prazo zero: quem ainda está vivo volta na hora, sem pausa.
+    assert!(aguarda_saida_com(|| Ok(None), Duration::ZERO, &agora, &pausa).is_none());
+    assert_eq!(pausas.get(), 0);
+
+    // Sai na terceira consulta: duas pausas entre as consultas, e o status certo.
+    let mut consultas = 0;
+    let saida = aguarda_saida_com(
+        || {
+            consultas += 1;
+            Ok(if consultas < 3 { None } else { Some(ExitStatus::with_exit_code(3)) })
+        },
+        Duration::from_secs(30),
+        &agora,
+        &pausa,
+    );
+    assert_eq!(saida.map(|s| s.exit_code()), Some(3));
+    assert_eq!(pausas.get(), 2);
+}
+
+/// A080: uma aba com terminal vivo reaproveita o terminal, e nunca ganha um segundo com a mesma aba.
+#[test]
+fn aba_com_terminal_vivo_reaproveita_o_terminal_e_nao_cria_outro() {
+    use super::pty_manager::{entrada_da_aba, EntradaDaAba};
+    let vivos = vec![(3u32, Some("tab-a")), (9, Some("tab-a")), (7, Some("tab-b")), (11, None)];
+    assert_eq!(entrada_da_aba(vivos.iter().copied(), Some("tab-a")), EntradaDaAba::Reaproveitar(9));
+    assert_eq!(entrada_da_aba(vivos.iter().copied(), Some("tab-z")), EntradaDaAba::Criar);
+    assert_eq!(entrada_da_aba(vivos.iter().copied(), None), EntradaDaAba::Criar);
+}
+
+/// A092: os `.cmd` de lançamento velhos saem; os recentes e os de outra extensão ficam.
+#[test]
+fn lancamentos_antigos_saem_e_os_recentes_ficam() {
+    use super::pty_manager::limpa_lancamentos_antigos;
+    use std::time::{Duration, SystemTime};
+    let dir = std::env::temp_dir().join(format!("ade-launch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let agora = SystemTime::now();
+    let velho = dir.join("velho.cmd");
+    let recente = dir.join("recente.cmd");
+    let outro = dir.join("velho.txt");
+    for arquivo in [&velho, &recente, &outro] {
+        std::fs::write(arquivo, "x").unwrap();
+    }
+    let dois_dias = agora - Duration::from_secs(2 * 86_400);
+    std::fs::File::options().write(true).open(&velho).unwrap().set_modified(dois_dias).unwrap();
+    std::fs::File::options().write(true).open(&outro).unwrap().set_modified(dois_dias).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&recente)
+        .unwrap()
+        .set_modified(agora - Duration::from_secs(3600))
+        .unwrap();
+
+    let removidos = limpa_lancamentos_antigos(&dir, agora, Duration::from_secs(86_400));
+    assert_eq!(removidos, 1);
+    assert!(!velho.exists() && recente.exists() && outro.exists());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Destino de teste: guarda os pedaços e os fins, na ordem em que chegam.
@@ -885,36 +1100,6 @@ fn lote_fecha_pela_janela_de_16_ms_ou_pelo_limite() {
     assert!(lote.esvazia().is_none());
 }
 
-#[cfg(unix)]
-#[test]
-fn filho_que_segue_vivo_depois_do_eof_respeita_o_prazo() {
-    use super::pty_manager::aguarda_saida;
-    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-    use std::time::Duration;
-
-    let pair = native_pty_system()
-        .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
-        .unwrap();
-    let mut comando = CommandBuilder::new("sh");
-    comando.arg("-c");
-    comando.arg("exec sleep 30");
-    let mut vivo = pair.slave.spawn_command(comando).unwrap();
-    // Prazo zero: quem ainda não saiu segue vivo, e a espera não passa do prazo.
-    assert!(aguarda_saida(vivo.as_mut(), Duration::ZERO).is_none());
-    vivo.kill().unwrap();
-    let _ = vivo.wait();
-
-    // Outro par de PTY, como uma sessão nova do app: o escravo do primeiro já foi usado e morto.
-    let outro = native_pty_system()
-        .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
-        .unwrap();
-    let mut comando = CommandBuilder::new("sh");
-    comando.arg("-c");
-    comando.arg("exit 3");
-    let mut morre = outro.slave.spawn_command(comando).unwrap();
-    let status = aguarda_saida(morre.as_mut(), Duration::from_secs(30)).expect("o processo que termina é colhido no prazo");
-    assert_eq!(status.exit_code(), 3);
-}
 
 #[cfg(unix)]
 #[test]

@@ -287,10 +287,10 @@ pub(crate) fn submit_style(agent_id: Option<&str>) -> SubmitStyle {
     if agent_id == Some(crate::agents::SHELL_AGENT_ID) { SubmitStyle::Line } else { SubmitStyle::Prompt }
 }
 
-/// Uma linha de shell: o texto e o Enter, uma vez só.
+/// Uma linha de shell: o texto e o Enter entram num pedido só, ou não entram. Em duas chamadas, uma fila
+/// cheia no meio deixava o texto no terminal sem o Enter.
 fn submit_line(pty_id: u32, text: &str) -> Result<(), String> {
-    crate::terminal::write_to_pty(pty_id, text)?;
-    crate::terminal::write_to_pty(pty_id, "\r")
+    crate::terminal::write_line_to_pty(pty_id, text)
 }
 
 /// Os terminais do chat que este processo já entregou a um agente. A aba nova só chega ao banco depois do debounce

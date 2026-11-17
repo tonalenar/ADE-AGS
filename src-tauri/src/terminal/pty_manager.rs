@@ -464,7 +464,9 @@ fn shell_running(script: String) -> CommandBuilder {
     script.hash(&mut hasher);
     let dir = std::env::temp_dir().join("ags-launch");
     let file = dir.join(format!("{:016x}.cmd", hasher.finish()));
-    let written = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, batch_launch_contents(&script)));
+    let _ = std::fs::create_dir_all(&dir);
+    limpa_lancamentos_antigos(&dir, std::time::SystemTime::now(), Duration::from_secs(86_400));
+    let written = std::fs::write(&file, batch_launch_contents(&script));
     let mut cmd = CommandBuilder::new("cmd");
     cmd.arg("/C");
     match written {
@@ -852,13 +854,56 @@ fn matar_arvore(sessao: &mut PtySession) {
     let _ = sessao.killer.kill();
 }
 
+/// Decisão de um `pty_create` numa aba: reaproveitar o terminal vivo dela, ou criar outro.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum EntradaDaAba {
+    Reaproveitar(u32),
+    Criar,
+}
+
+/// Pura: a aba com terminal vivo reaproveita o mais novo dela. Sem aba, ou sem terminal vivo, cria.
+pub(crate) fn entrada_da_aba<'a>(sessoes: impl Iterator<Item = (u32, Option<&'a str>)>, aba: Option<&str>) -> EntradaDaAba {
+    match aba.and_then(|aba| newest_for_tab(sessoes, aba)) {
+        Some(id) => EntradaDaAba::Reaproveitar(id),
+        None => EntradaDaAba::Criar,
+    }
+}
+
+/// Apaga os `.cmd` de lançamento com mais de `idade_max`. Os recentes ficam: podem ser de um terminal que
+/// ainda lê o script. O Windows recusa apagar um arquivo que um `cmd` ainda tem aberto, e nesse caso ele fica.
+/// Devolve quantos saíram.
+#[cfg(any(windows, test))]
+pub(crate) fn limpa_lancamentos_antigos(dir: &std::path::Path, agora: std::time::SystemTime, idade_max: Duration) -> usize {
+    let Ok(entradas) = std::fs::read_dir(dir) else { return 0 };
+    entradas
+        .flatten()
+        .filter(|entrada| entrada.path().extension().is_some_and(|ext| ext == "cmd"))
+        .filter(|entrada| {
+            let modificado = entrada.metadata().and_then(|m| m.modified()).ok();
+            modificado.and_then(|m| agora.duration_since(m).ok()).is_some_and(|idade| idade > idade_max)
+        })
+        .filter(|entrada| std::fs::remove_file(entrada.path()).is_ok())
+        .count()
+}
+
 /// Espera o filho sair até `prazo`. `None` se ele ainda está vivo, ou se o status não pôde ser lido.
 pub(crate) fn aguarda_saida(filho: &mut dyn portable_pty::Child, prazo: Duration) -> Option<portable_pty::ExitStatus> {
-    let limite = Instant::now() + prazo;
+    aguarda_saida_com(|| filho.try_wait(), prazo, &Instant::now, &|passo| std::thread::sleep(passo))
+}
+
+/// A mesma espera, com a consulta, o relógio e a pausa injetados. Nos testes nada dorme, e o tempo
+/// passa só pelo relógio de teste.
+pub(crate) fn aguarda_saida_com(
+    mut sonda: impl FnMut() -> std::io::Result<Option<portable_pty::ExitStatus>>,
+    prazo: Duration,
+    agora: &dyn Fn() -> Instant,
+    pausa: &dyn Fn(Duration),
+) -> Option<portable_pty::ExitStatus> {
+    let limite = agora() + prazo;
     loop {
-        match filho.try_wait() {
+        match sonda() {
             Ok(Some(status)) => return Some(status),
-            Ok(None) if Instant::now() < limite => std::thread::sleep(PASSO_ESPERA_SAIDA),
+            Ok(None) if agora() < limite => pausa(PASSO_ESPERA_SAIDA),
             _ => return None,
         }
     }
@@ -990,6 +1035,22 @@ impl Destino for CanalDeSaida {
 /// y no vuelven a redibujar bien tras un `SIGWINCH` post-arranque — quedaban con
 /// contenido cortado/desbordado hasta el primer redibujado manual. Con el tamaño correcto
 /// desde el primer byte, ese problema no llega a existir.
+/// Os argumentos de `pty_create` como chegam do IPC, levados como um valor só para a thread de bloqueio.
+struct PtyCreateArgs {
+    command: String,
+    cwd: String,
+    agent_id: Option<String>,
+    account_id: Option<String>,
+    cols: u16,
+    rows: u16,
+    env: Option<std::collections::HashMap<String, String>>,
+    env_before_account: Option<std::collections::HashMap<String, String>>,
+    prelaunch: Option<Vec<String>>,
+    ai_memory_continuity: Option<bool>,
+    scrub_secrets: Option<bool>,
+    extra_args: Option<Vec<String>>,
+}
+
 // O contrato IPC mantém campos planos e o AppHandle é fornecido pelo Tauri.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
@@ -997,28 +1058,54 @@ pub async fn pty_create(
     command: String,
     cwd: String,
     agent_id: Option<String>,
-    // IDs de conta são a única informação de conta que cruza o IPC. Perfil e credencial
-    // são resolvidos aqui, a partir do banco desta instância e do keyring do SO.
     account_id: Option<String>,
     cols: u16,
     rows: u16,
-    // Overrides posteriores à conta, declarados para este processo.
     env: Option<std::collections::HashMap<String, String>>,
-    // Ambiente da TUI custom/MCP do navegador, aplicado antes da conta para preservar
-    // a precedência anterior do merge feito na interface.
     env_before_account: Option<std::collections::HashMap<String, String>>,
-    // `prelaunch`: comandos a ejecutar antes del agente, ya resueltos y en orden (ver el
-    // módulo `prelaunch`). Vacío = se lanza igual que siempre, sin ningún intermediario.
     prelaunch: Option<Vec<String>>,
-    // Só nasce após confirmação explícita no preview; nunca se aplica a PTY vivo.
     ai_memory_continuity: Option<bool>,
-    // Aba de integrante de missão que pediu: o ambiente herdado perde as credenciais de outros
-    // serviços (ver `runs::sandbox::scrub_env`). Ausente = como sempre: aba da pessoa.
     scrub_secrets: Option<bool>,
-    // Overrides MCP somente do processo, usados pelo Codex TUI; nunca altera o config global.
     extra_args: Option<Vec<String>>,
     app: AppHandle,
 ) -> Result<u32, String> {
+    // O lançamento é bloqueante (keyring, banco, abertura do PTY, `spawn`): roda numa thread de bloqueio,
+    // nunca num worker do runtime (A084).
+    let args = PtyCreateArgs {
+        command,
+        cwd,
+        agent_id,
+        account_id,
+        cols,
+        rows,
+        env,
+        env_before_account,
+        prelaunch,
+        ai_memory_continuity,
+        scrub_secrets,
+        extra_args,
+    };
+    tokio::task::spawn_blocking(move || criar_pty(args, app))
+        .await
+        .map_err(|e| format!("Falha ao criar o terminal: {e}"))?
+}
+
+/// Corpo bloqueante de `pty_create`: o que é feito com os argumentos depois que chegam.
+fn criar_pty(args: PtyCreateArgs, app: AppHandle) -> Result<u32, String> {
+    let PtyCreateArgs {
+        command,
+        cwd,
+        agent_id,
+        account_id,
+        cols,
+        rows,
+        env,
+        env_before_account,
+        prelaunch,
+        ai_memory_continuity,
+        scrub_secrets,
+        extra_args,
+    } = args;
     let _update_guard = crate::agents::updates::activity_guard()?;
     let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
     let steps = prelaunch.unwrap_or_default();
@@ -1029,6 +1116,12 @@ pub async fn pty_create(
     let mut requested_env = env_before_account.clone().unwrap_or_default();
     requested_env.extend(env_after_account.iter().map(|(name, value)| (name.clone(), value.clone())));
     let tab_id = requested_env.get("ADE_TAB_ID").cloned().filter(|tab| !tab.is_empty());
+    // Uma aba tem UM terminal vivo: se ela já tem um, devolve o id dele, sem lançar outro processo. A mesma
+    // regra é conferida de novo na inserção, sob a trava do registro, para cobrir duas chamadas simultâneas.
+    let entrada = entrada_da_aba(registry().iter().map(|(k, s)| (*k, s.tab_id.as_deref())), tab_id.as_deref());
+    if let EntradaDaAba::Reaproveitar(existente) = entrada {
+        return Ok(existente);
+    }
     // A política local de provedores também vale para abas abertas diretamente pelo ADE.
     // Abas de missão continuam sob a política por papel da orquestração, nunca por provedor.
     if requested_env.get("ADE_MISSION_ID").is_none()
@@ -1266,9 +1359,22 @@ pub async fn pty_create(
     group.adopt(&*child);
     let root_pid = child.process_id();
 
-    // A escrita ganha thread própria (ver `write_queue`): quem escreve só enfileira.
+    // A escrita ganha thread própria (ver `write_queue`): quem escreve só enfileira. Soltar a fila mata o
+    // processo, e assim o escravo fecha e um `write_all` preso volta com erro. Uma queda avisa o terminal.
+    let mut matador = child.clone_killer();
+    let evento_aviso = format!("pty-data-{id}");
+    let app_aviso = app.clone();
     let queue = match pair.master.take_writer().map_err(|e| format!("Failed to get PTY writer: {e}")) {
-        Ok(writer) => match WriteQueue::new(writer) {
+        Ok(writer) => match WriteQueue::new(
+            writer,
+            Box::new(move || {
+                let _ = matador.kill();
+            }),
+            Box::new(move |falha| {
+                let texto = format!("\r\n[ade-ags] o terminal não recebeu {} entrada(s): {}\r\n", falha.perdidas, falha.motivo);
+                let _ = app_aviso.emit(&evento_aviso, PtyDataPayload { data: texto, end: None });
+            }),
+        ) {
             Ok(queue) => queue,
             Err(e) => {
                 let _ = child.kill();
@@ -1311,41 +1417,41 @@ pub async fn pty_create(
         return Err(format!("Falha ao criar o emissor de saída: {e}"));
     }
 
-    // Una tab tiene UN terminal vivo. Si la ventana se recargó (o se restauró la sesión), el
-    // frontend perdió los ids de los terminales de antes y lanza otros para las mismas tabs:
-    // los viejos seguían corriendo, con la misma sesión del agente abierta ("conversation is
-    // open in another app") y su memoria. Al llegar el nuevo, el anterior de esa tab se va.
-    let replaced = {
+    // Uma aba tem UM terminal vivo. Se outro chegou para ela enquanto este era lançado, o terminal que
+    // já está vivo fica, e o processo recém-lançado é encerrado (ele ainda não escreveu nada na aba). Quem
+    // chamou nunca perde o terminal que já estava rodando: antes, este lançamento matava o vivo (A080).
+    // A checagem e a inserção são sob a mesma trava: duas chamadas simultâneas não criam dois terminais.
+    {
         let mut reg = registry();
-        let old: Vec<u32> = match &tab_id {
-            Some(tab) => reg.iter().filter(|(_, s)| s.tab_id.as_deref() == Some(tab.as_str())).map(|(k, _)| *k).collect(),
-            None => Vec::new(),
-        };
-        let removed: Vec<PtySession> = old.iter().filter_map(|k| reg.remove(k)).collect();
-        for session in &removed {
-            forget_session(session);
+        let entrada = entrada_da_aba(reg.iter().map(|(k, s)| (*k, s.tab_id.as_deref())), tab_id.as_deref());
+        match entrada {
+            EntradaDaAba::Reaproveitar(existente) => {
+                drop(reg);
+                group.kill_all();
+                let _ = child.kill();
+                let _ = child.wait();
+                if let Some(path) = &codex_profile {
+                    let _ = std::fs::remove_file(path);
+                }
+                return Ok(existente);
+            }
+            EntradaDaAba::Criar => {
+                if let (Some(tab), Some(token), Some(pid)) = (tab_id.as_deref(), session_token.as_deref(), root_pid) {
+                    super::publish_token(tab, token, pid);
+                }
+                reg.insert(id, PtySession {
+                    master: pair.master,
+                    queue,
+                    killer: child,
+                    group,
+                    tab_id: tab_id.clone(),
+                    cwd: cwd.clone(),
+                    session_token: session_token.clone(),
+                    codex_profile,
+                    ai_memory_settings: memory.settings_file.take(),
+                });
+            }
         }
-        if let (Some(tab), Some(token), Some(pid)) = (tab_id.as_deref(), session_token.as_deref(), root_pid) {
-            super::publish_token(tab, token, pid);
-        }
-        reg.insert(id, PtySession {
-            master: pair.master,
-            queue,
-            killer: child,
-            group,
-            tab_id: tab_id.clone(),
-            cwd: cwd.clone(),
-            session_token: session_token.clone(),
-            codex_profile,
-            ai_memory_settings: memory.settings_file.take(),
-        });
-        (old, removed)
-    };
-    for (k, mut session) in replaced.0.iter().copied().zip(replaced.1) {
-        session.group.kill_all();
-        let _ = session.killer.kill();
-        let _ = session.killer.wait();
-        buffers().remove(&k);
     }
     buffers().insert(id, PtyBuffer::default());
 
@@ -1482,6 +1588,14 @@ pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {
     let registro = registry();
     let sessao = registro.get(&id).ok_or_else(|| format!("PTY session {id} not found"))?;
     sessao.queue.enqueue(data.as_bytes()).map_err(|e| e.to_string())
+}
+
+/// Escreve uma linha (texto e Enter) como um pedido só: ou entra inteira, ou não entra. Assim o Enter nunca
+/// fica sem o texto, nem o texto sem o Enter, quando a fila enche no meio.
+pub fn write_line_to_pty(id: u32, text: &str) -> Result<(), String> {
+    let registro = registry();
+    let sessao = registro.get(&id).ok_or_else(|| format!("PTY session {id} not found"))?;
+    sessao.queue.enqueue_linha(text.as_bytes()).map_err(|e| e.to_string())
 }
 
 /// Display an app notice as output. Never inject it as input into an agent's TUI.
