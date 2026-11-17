@@ -917,8 +917,7 @@ pub(crate) fn dispatch(app: &tauri::AppHandle, op: &str, args: &Value) -> Result
         views.forget(id);
     }
     if !is_read(op) {
-        app.emit("design-changed", json!({"designId":result["id"],"isNew":result["isNew"].as_bool().unwrap_or(false),"deleted":op=="delete","archived":result["archived"],"title":result["title"],"workspace":result["workspace"],"missionId":result["missionId"]}))
-            .map_err(|e| e.to_string())?;
+        let _ = app.emit("design-changed", json!({"designId":result["id"],"isNew":result["isNew"].as_bool().unwrap_or(false),"deleted":op=="delete","archived":result["archived"],"title":result["title"],"workspace":result["workspace"],"missionId":result["missionId"]}));
     }
     Ok(result)
 }

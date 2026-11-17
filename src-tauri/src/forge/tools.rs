@@ -511,7 +511,12 @@ async fn call(app: &AppHandle, cwd: &str, name: &str, args: &Value) -> Result<St
                     let tag = arg_str(args, "tag").ok_or("missing `tag`")?.to_string();
                     // El tag arma la ruta del archivo de notas: nada de `..` ni separadores de
                     // Windows, y nada que git lea como opción.
-                    if tag.starts_with('-') || tag.contains("..") || tag.contains('\\') || tag.chars().any(char::is_whitespace) {
+                    if tag.starts_with('-')
+                        || tag.contains("..")
+                        || tag.contains('\\')
+                        || tag.contains('/')
+                        || tag.chars().any(char::is_whitespace)
+                    {
                         return Err("invalid tag".into());
                     }
                     // Las notas que el repo ya tiene escritas para ese tag, si no vienen otras.

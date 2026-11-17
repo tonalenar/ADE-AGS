@@ -84,13 +84,25 @@ async fn save_account(
         created_at: now_ts(),
         storage: None,
     };
-    let conn = db(app)?;
-    let row = account.clone();
-    account.id = crate::database::blocking_db(&conn, move |conn| store::upsert(conn, &row)).await?;
     let dir = data_dir(app)?;
     let id = account.id.clone();
-    account.storage = Some(blocking(move || secret::save(&dir, &id, &secret)).await??);
-    Ok(account)
+    account.storage = Some(blocking({
+        let dir = dir.clone();
+        let id = id.clone();
+        move || secret::save(&dir, &id, &secret)
+    }).await??);
+    let conn = db(app)?;
+    let row = account.clone();
+    match crate::database::blocking_db(&conn, move |conn| store::upsert(conn, &row)).await {
+        Ok(saved_id) => {
+            account.id = saved_id;
+            Ok(account)
+        }
+        Err(e) => {
+            let _ = blocking(move || secret::delete(&dir, &id)).await;
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]
@@ -512,13 +524,13 @@ fn patch_contains_target(patch: &str, old_target: Option<u32>, new_target: Optio
             continue;
         }
         match raw.as_bytes().first().copied() {
-            Some(b'+') if !raw.starts_with("+++") => {
+            Some(b'+') if old_line.is_some() && !raw.starts_with("+++ ") => {
                 if old_target.is_none() && new_line == new_target {
                     return true;
                 }
                 new_line = new_line.and_then(|line| line.checked_add(1));
             }
-            Some(b'-') if !raw.starts_with("---") => {
+            Some(b'-') if old_line.is_some() && !raw.starts_with("--- ") => {
                 if new_target.is_none() && old_line == old_target {
                     return true;
                 }
@@ -535,6 +547,17 @@ fn patch_contains_target(patch: &str, old_target: Option<u32>, new_target: Optio
         }
     }
     false
+}
+
+#[cfg(test)]
+mod patch_tests {
+    use super::patch_contains_target;
+
+    #[test]
+    fn linha_de_conteudo_com_mais_nao_e_cabecalho() {
+        let patch = "@@ -1,2 +1,3 @@\n context\n+++ not a header\n+added\n";
+        assert!(patch_contains_target(patch, None, Some(2)));
+    }
 }
 
 #[tauri::command]
@@ -574,7 +597,7 @@ fn checkout_pull(t: &RepoTarget, number: u64, head_ref: &str, env: &[(String, St
         run_local(&t.root, &["switch", &branch]).map_err(scm_to_forge)?;
         // Solo avanza si no hay nada local encima: un commit propio en la rama del PR no
         // se pisa.
-        let _ = run_local(&t.root, &["merge", "--ff-only", &tracking]);
+        run_local(&t.root, &["merge", "--ff-only", &tracking]).map_err(scm_to_forge)?;
     } else {
         run_local(&t.root, &["switch", "-c", &branch, &tracking]).map_err(scm_to_forge)?;
     }
