@@ -17,9 +17,6 @@ import { createGeneration } from "@/shared/generation";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { uiErrorText } from "@/shared/uiErrorText";
 
-const statusGen = createGeneration();
-const logGen = createGeneration();
-
 import { BranchMenu } from "./BranchMenu";
 import { CommitGraph } from "./CommitGraph";
 import { CreateTagDialog } from "./CreateTagDialog";
@@ -134,12 +131,15 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
    *  (el número sobre el icono, las marcas del árbol) también tienen que enterarse. */
   const lastCount = useRef<number | null>(null);
 
+  /** Una generación por panel: dos paneles no pueden descartar la lectura del otro. */
+  const [gens] = useState(() => ({ status: createGeneration(), log: createGeneration() }));
+
   const load = useCallback(async () => {
     if (!cwd) return;
-    const gen = statusGen.next();
+    const gen = gens.status.next();
     try {
       const next = await scmStatus(cwd);
-      if (!statusGen.isCurrent(gen)) return;
+      if (!gens.status.isCurrent(gen)) return;
       setStatus(next);
       if (next) {
         const count = next.staged.length + next.unstaged.length + next.untracked.length + next.conflicted.length;
@@ -147,10 +147,10 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
         lastCount.current = count;
       }
     } catch (e) {
-      if (!statusGen.isCurrent(gen)) return;
+      if (!gens.status.isCurrent(gen)) return;
       setError(isScmError(e) ? e : { kind: "git", message: String(e) });
     }
-  }, [cwd]);
+  }, [cwd, gens]);
 
   // Cambiar de workspace es otro repo: lo del anterior no puede verse ni un instante.
   useEffect(() => {
@@ -187,11 +187,11 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
 
   const loadLog = useCallback(() => {
     if (!root) return;
-    const gen = logGen.next();
+    const gen = gens.log.next();
     scmLog(root, logLimit, shownRefs)
-      .then((rows) => { if (logGen.isCurrent(gen)) setLog(rows); })
-      .catch(() => { if (logGen.isCurrent(gen)) setLog([]); });
-  }, [root, logLimit, shownRefs]);
+      .then((rows) => { if (gens.log.isCurrent(gen)) setLog(rows); })
+      .catch(() => { if (gens.log.isCurrent(gen)) setLog([]); });
+  }, [root, logLimit, shownRefs, gens]);
 
   useEffect(() => { if (logOpen) loadLog(); }, [logOpen, loadLog]);
 
