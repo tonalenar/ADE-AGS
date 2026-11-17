@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.79.0
+version: 1.80.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -146,13 +146,14 @@ ags tab create --cwd /repo/api --agent codex --pre "conda environment" --pre "nv
 ```
 
 `--pre` repeats with **no limit**, and each value can be either the **name of a saved
-command** (as `ags prelaunch` reports it) or a **literal command**. If the text matches a
-saved name it wins; otherwise it runs as written. The order is semantic, not cosmetic:
-`nvm use 18` has to run before anything that depends on npm.
+command** (as `ags prelaunch` reports it) or a **literal command**. Only the **person** and
+the **orchestrator of the canvas the tab sits on** may pass a literal command. A team member
+gets an error for it, even when the text matches a saved name: use `--pre-preset <name>`
+instead. The order is semantic, not cosmetic: `nvm use 18` has to run before anything that
+depends on npm.
 
-`--pre-preset <name>` is the explicit form: it *requires* a saved command and errors if
-there is none. Use it only when a saved command happens to be named like something you
-would otherwise want to run literally.
+`--pre-preset <name>` runs a saved command and errors if there is none. It is the form a
+team member uses for its prelaunch steps.
 
 If a step fails, the agent does not start — the tab shows the shell error instead. That is
 deliberate: starting outside the requested environment is worse than not starting.

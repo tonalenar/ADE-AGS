@@ -47,7 +47,7 @@ TABS
   tab create <caminho> --agent <id>           Abre uma tab nova
              [--skills a,b]                   · skills a anexar, por nome
              [--account <nome>]               · conta dessa TUI (veja `accounts`)
-             [--pre <comando|salvo>]          · a executar ANTES do agente; repetível
+             [--pre <comando|salvo>]          · a executar ANTES do agente; repetível (comando digitado: só a pessoa ou o orquestrador do canvas)
              [--pre-preset <nome>]            · força que seja um item salvo, não um comando
              [--initprompt \"...\"]             · prompt inicial, enviado com Enter
              [--window <label>]                 quando a TUI terminou de iniciar
@@ -436,7 +436,7 @@ deixa a original recebendo atualizações. `--copy` força essa cópia também p
 skill própria. `--file` é lido a partir do diretório onde você roda o comando.
 Sem --account, a tab usa a conta principal (a de sempre).
 --pre se repete sem limite e seus valores rodam NA ORDEM ESCRITA; se um falhar, o
-agente não inicia. Cada valor pode ser o nome de um item salvo ou um comando literal:
+agente não inicia. Cada valor pode ser o nome de um item salvo ou um comando literal (este só a pessoa ou o orquestrador do canvas; o integrante usa --pre-preset):
   ags tab create --cwd . --agent claude-code --pre \"ambiente conda\" --pre \"nvm use\"
 
 A saída é sempre uma linha JSON no stdout (exceto `mcp`, que fala JSON-RPC). Em `tab output`,

@@ -28,6 +28,8 @@ use crate::terminal::Principal;
 pub(crate) enum Target {
     /// Uma aba (id em `args[arg]`): é a própria, uma ligada no canvas ou uma que quem chama abriu. Tarefa da Frota não tem aba.
     Tab(&'static str),
+    /// Uma aba (id em `args[arg]`) que quem chama abriu (`ags tab create`): só ela. Fora do app (a pessoa) fecha qualquer uma.
+    OpenedTab(&'static str),
     /// Uma conversa do modo chat (id em `args[arg]`, que vira `thread:<id>`), com o mesmo alcance de uma aba. Sem o argumento
     /// (`optional`), só quem roda fora de toda árvore do ADE vê todas; um agente tem de dizer qual.
     Thread { arg: &'static str, optional: bool },
@@ -66,6 +68,7 @@ pub(crate) enum Class {
 use Class::{Free, Person, PersonOrScope, Scope};
 
 const TAB: Class = Scope(Target::Tab("tab"));
+const TAB_OPENED: Class = Scope(Target::OpenedTab("tab"));
 const THREAD: Class = Scope(Target::Thread { arg: "thread", optional: false });
 const CALLER: Class = Scope(Target::Caller);
 const CALLER_OR_OUTSIDE: Class = Scope(Target::CallerOrOutside);
@@ -119,7 +122,7 @@ pub(crate) const METHODS: &[(&str, Class)] = &[
     // Abas: a própria, as ligadas no canvas e as que o agente abriu.
     ("tab.output", TAB),
     ("tab.send", TAB),
-    ("tab.close", TAB),
+    ("tab.close", TAB_OPENED),
     ("tab.state", TAB),
     ("watch.add", TAB),
     ("watch.remove", TAB),
@@ -456,7 +459,9 @@ fn scope(
         // Fora de toda árvore do ADE, sem identidade: a pessoa num terminal próprio (ou CI). O acesso de sempre.
         (Target::Outside, Principal::Outside) => Ok(args.clone()),
         (Target::Outside, _) => Err(only_person(command)),
-        (Target::Tab(_) | Target::Thread { .. } | Target::Fleet | Target::Mission { .. } | Target::CallerOrOutside, Principal::Outside) => Ok(args.clone()),
+        (Target::Tab(_) | Target::OpenedTab(_) | Target::Thread { .. } | Target::Fleet | Target::Mission { .. } | Target::CallerOrOutside, Principal::Outside) => {
+            Ok(args.clone())
+        }
         (Target::Caller | Target::Task, Principal::Outside) => Err(not_in_ade(command)),
         (_, Principal::Unknown) => Err(tcp_unknown(command)),
 
@@ -482,19 +487,22 @@ fn scope(
             }
             Ok(args.clone())
         }
+        (Target::OpenedTab(arg), Principal::Tab(me)) => {
+            claims_match(args, &me)?;
+            let Some(tab) = text(args, arg) else { return Err(format!("`{command}` precisa do alvo (--{arg}).")) };
+            if opened_by(tab).as_deref() == Some(me.as_str()) {
+                Ok(args.clone())
+            } else {
+                Err(format!(
+                    "A aba `{tab}` não é uma que você abriu: `{command}` só fecha a aba que você criou (`ags tab create`). \
+Peça à pessoa para fechar o resto."
+                ))
+            }
+        }
         (Target::Tab(arg), Principal::Tab(me)) => {
             claims_match(args, &me)?;
             let Some(tab) = text(args, arg) else { return Err(format!("`{command}` precisa do alvo (--{arg}).")) };
-            if command == "tab.close" {
-                if opened_by(tab).as_deref() == Some(me.as_str()) {
-                    Ok(args.clone())
-                } else {
-                    Err(format!(
-                        "A aba `{tab}` não é uma que você abriu: `{command}` só fecha a aba que você criou (`ags tab create`). \
-Peça à pessoa para fechar o resto."
-                    ))
-                }
-            } else if crate::ipc::guard::in_reach(&boards(), &me, tab, opened_by(tab).as_deref()) {
+            if crate::ipc::guard::in_reach(&boards(), &me, tab, opened_by(tab).as_deref()) {
                 Ok(args.clone())
             } else {
                 Err(out_of_reach(command, "aba", tab))
@@ -556,7 +564,7 @@ fn extra_rule(command: &str, args: &Value, me: &str, boards: &Boards) -> Result<
         },
         // `--pre` / `command` digitado roda shell cru antes do agente. Só a pessoa e o orquestrador do próprio canvas.
         "tab.create" if typed_prelaunch(args) => {
-            if crate::canvas::is_orchestrator(boards, me) {
+            if crate::canvas::is_orchestrator_here(boards, me) {
                 Ok(())
             } else {
                 Err(

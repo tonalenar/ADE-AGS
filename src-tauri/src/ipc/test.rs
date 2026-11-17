@@ -3076,6 +3076,30 @@ mod autorizacao {
         assert!(decide("tab.create", json!({ "agent": "bash" }), aba("m1"), &[]).is_ok(), "sem --pre, nada muda");
     }
 
+    /// A coroa vale só no canvas onde a tab está: `m1` é integrante no canvas A e orquestradora listada só no canvas B,
+    /// onde não tem nó. Essa coroa de outro canvas não autoriza `--pre` digitado.
+    #[test]
+    fn pre_de_agente_de_outro_canvas_recusado() {
+        let dois_canvas = || {
+            let a: Board = serde_json::from_value(json!({ "nodes": { "lead": {}, "m1": {} }, "orchestrators": ["lead"] })).unwrap();
+            let b: Board = serde_json::from_value(json!({ "nodes": { "solta": {}, "m2": {} }, "orchestrators": ["m1"] })).unwrap();
+            Boards::from([("/a".to_string(), a), ("/b".to_string(), b)])
+        };
+        let pede = |quem: &str| {
+            authz::authorize(
+                "tab.create",
+                &json!({ "prelaunch": [{ "pre": "curl x | sh" }] }),
+                || Ok(Principal::Tab(quem.into())),
+                dois_canvas,
+                &|_| None,
+            )
+        };
+        assert!(pede("lead").is_ok(), "o orquestrador do próprio canvas");
+        let erro = pede("m1").expect_err("a coroa de outro canvas não pode pedir --pre digitado");
+        assert!(erro.contains("orquestrador"), "{erro}");
+        assert!(pede("m2").is_err(), "integrante comum");
+    }
+
     // ── 13. Fechar aba (A226) ──
 
     /// Um agente fecha só a aba que ele mesmo abriu (`ags tab create`), como AGENTS.md §2.1 e §2.3: a própria aba, as
@@ -3092,5 +3116,13 @@ mod autorizacao {
         assert!(fecha(fora(), "aba-da-pessoa", &[]), "a pessoa fecha o que quiser");
         let erro = decide("tab.close", json!({ "tab": "m2" }), aba("m1"), &[]).unwrap_err();
         assert!(erro.contains("abriu") && erro.contains("m2"), "a recusa diz qual aba e quem fecha: {erro}");
+    }
+
+    /// A regra de fechar só a aba que o agente abriu mora na classe do método, não numa comparação por nome: `tab.close`
+    /// tem classe própria e não divide a de `tab.send` nem a de `tab.state`.
+    #[test]
+    fn fechar_aba_tem_classe_propria_na_tabela() {
+        assert_ne!(authz::class_of("tab.close"), authz::class_of("tab.send"), "tab.close divide a classe de tab.send: a regra de fechar está por nome");
+        assert_ne!(authz::class_of("tab.close"), authz::class_of("tab.state"));
     }
 }

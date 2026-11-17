@@ -369,6 +369,11 @@ pub fn is_orchestrator(boards: &Boards, tab: &str) -> bool {
     boards.values().any(|b| b.orchestrators.iter().any(|o| o == tab))
 }
 
+/// ¿Es `tab` orquestadora **del canvas donde está** (marcada como coroa y con nodo en ese mismo canvas)?
+pub fn is_orchestrator_here(boards: &Boards, tab: &str) -> bool {
+    boards.values().any(|b| b.orchestrators.iter().any(|o| o == tab) && b.nodes.as_object().is_some_and(|nodes| nodes.contains_key(tab)))
+}
+
 /// El equipo de `tab`: todas las tabs a las que se llega desde ella siguiendo conexiones,
 /// en cualquier cantidad de pasos. Sin ella misma.
 pub fn team_of(boards: &Boards, tab: &str) -> BTreeSet<String> {
