@@ -130,7 +130,8 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
     const mark = addPending(key, text, items);
     sendToThread(thread.id, text, () => dropPending(key, mark));
   }, [items, key, thread.id]);
-  const answer = useCallback((choice: string) => { if (request) answerRequest(thread.id, request.id, choice); }, [request, thread.id]);
+  // Responde o pedido aberto. Resolve `true` só quando o backend aceita (a caixa usa isso para limpar ou manter o texto).
+  const answer = useCallback((choice: string): Promise<boolean> => (request ? answerRequest(thread.id, request.id, choice) : Promise.resolve(false)), [request, thread.id]);
   const timelineAfter = useMemo(() => side ? null : <><TeamThreadFeed conversation={card} cards={cards} /><HarnessRunFeed threadId={thread.id} /></>, [side, card, cards, thread.id]);
   const handleGoalAction = (action: "show" | "set" | "pause" | "resume" | "clear", objective?: string) => {
     void runThreadGoalAction(thread.id, action, objective);
@@ -208,7 +209,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
             ? t(queueHintKey(thread.agentId, followUpBehavior, steerCapability.support, interruptCapability.support), { key: QUEUE_KEY })
             : team?.placeholder ?? (side ? t("chat.sideChat.placeholder") : t("chat.composer.reply"))}
           onSubmit={async (text, attachments) => {
-            if (question) { requestTimelineFollow(key); answer(text); return true; }
+            if (question) { requestTimelineFollow(key); return answer(text); }
             const planCommand = extractSlashCommand(text, "plan");
             if (planCommand.found && text.trim().toLowerCase() === "/plan" && attachments.length === 0) {
               if (locked) {
