@@ -189,10 +189,10 @@ export function BotPanel() {
     <div className="ags-hq ags-hq__backdrop" role="dialog" aria-modal="true" aria-label={t("botPanel.title")} onClick={() => setOpen(false)}>
       <div className="ags-hq__screen" onClick={(e) => e.stopPropagation()}>
         <div className="ags-hq__bar">
-          <span className="ags-hq__title">AGS·BOT <span className="ags-hq__sl">//</span> {t("botPanel.title")}</span>
+          <span className="ags-hq__title">{t("botPanel.brand")} <span className="ags-hq__sl">//</span> {t("botPanel.title")}</span>
           <span className="ags-hq__blink">_</span>
-          <span className="ags-hq__score"><span>HI-SCORE</span><b>{scoreDigits(pet.xp, 9)}</b></span>
-          <button type="button" className="ags-hq__close" onClick={() => setOpen(false)}>ESC</button>
+          <span className="ags-hq__score"><span>{t("botPanel.hiScore")}</span><b>{scoreDigits(pet.xp, 9)}</b></span>
+          <button type="button" className="ags-hq__close" onClick={() => setOpen(false)}>{t("botPanel.esc")}</button>
         </div>
 
         <div className="shrink-0 px-4 pb-2 empty:hidden"><AutomationResumeBar compact /></div>
@@ -201,17 +201,17 @@ export function BotPanel() {
             <div className="ags-hq__stage">
               <Pet level={pet.level} state={busy > 0 ? "working" : "idle"} size={150} />
             </div>
-            <div className="ags-hq__level">LV <LevelNumber level={pet.level} /></div>
+            <div className="ags-hq__level">{t("botPanel.lv")} <LevelNumber level={pet.level} /></div>
             <div className="ags-hq__rank">{t(rankKey(pet.level))}</div>
             <div className="ags-hq__stat ags-hq__stat--exp">
-              <div className="ags-hq__stat-row"><span>EXP</span><b>{formatTokens(pet.xp)}</b></div>
+              <div className="ags-hq__stat-row"><span>{t("botPanel.exp")}</span><b>{formatTokens(pet.xp)}</b></div>
               <Meter value={pet.progress} color="linear-gradient(var(--hq-yellow), var(--hq-orange))" glow="rgba(255, 180, 70, 0.45)" blocks={20} />
               <div className="ags-hq__stat-row">
-                <span>{t("botPanel.next")}</span><b>{pet.toNext > 0 ? formatTokens(pet.toNext) : "MAX"}</b>
+                <span>{t("botPanel.next")}</span><b>{pet.toNext > 0 ? formatTokens(pet.toNext) : t("botPanel.max")}</b>
               </div>
             </div>
             <div className="ags-hq__stat ags-hq__stat--pwr">
-              <div className="ags-hq__stat-row"><span>PWR</span><b>{tier > 0 ? t("botPanel.phase", { n: tier }) : t("botPanel.resting")}</b></div>
+              <div className="ags-hq__stat-row"><span>{t("botPanel.pwr")}</span><b>{tier > 0 ? t("botPanel.phase", { n: tier }) : t("botPanel.resting")}</b></div>
               <Meter value={tier / 4} color="var(--hq-cyan)" glow="rgba(62, 230, 255, 0.45)" busy={busy > 0} blocks={20} />
               <div className="ags-hq__stat-row">
                 <span>{t("botPanel.agentsNow")}</span><b>{busy}</b>
@@ -236,7 +236,7 @@ export function BotPanel() {
             {view === "live" && (
               <div className="ags-hq__hud">
                 <span><b>AGS // {t("botPanel.tab.live")}</b>{current && <span className="ags-hq__hud-name"> {current.title}</span>}</span>
-                {runningMissions.length > 0 && <span className="ags-hq__live">LIVE</span>}
+                {runningMissions.length > 0 && <span className="ags-hq__live">{t("botPanel.liveBadge")}</span>}
               </div>
             )}
             <div className="ags-hq__view">
