@@ -333,8 +333,28 @@ pub fn run_git(path: &Path, args: &[String]) -> Result<String, String> {
 fn repo_gate(path: &Path) -> Arc<Mutex<()>> {
     static GATES: std::sync::LazyLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
         std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+    let key = gate_key(path);
     let mut gates = GATES.lock().unwrap_or_else(|err| err.into_inner());
-    gates.entry(path.to_path_buf()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+    gates.entry(key).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+}
+
+// Canonicaliza o maior prefixo que já existe e mantém o resto: o mesmo diretório tem a mesma
+// chave antes e depois de ser criado, e por link simbólico (/var → /private/var no macOS).
+fn gate_key(path: &Path) -> PathBuf {
+    let mut existing = path;
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(canonical) = std::fs::canonicalize(existing) {
+            return rest.iter().rev().fold(canonical, |acc, part: &std::ffi::OsString| acc.join(part));
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
 }
 
 /// Serializa publish e a reescrita do purge no mesmo diretório.

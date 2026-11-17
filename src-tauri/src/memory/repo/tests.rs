@@ -199,3 +199,29 @@ fn git_recusa_rodar_com_o_mutex_do_banco_preso_nesta_thread() {
     assert!(err.contains("mutex do banco"), "{err}");
     assert!(!called.load(std::sync::atomic::Ordering::SeqCst), "publish chamou git com o banco preso");
 }
+
+#[cfg(unix)]
+#[test]
+fn repo_gate_trata_o_mesmo_diretorio_por_outro_caminho_como_um_so() {
+    let base = std::env::temp_dir().join(format!("cc-gate-{}", uuid::Uuid::new_v4()));
+    let real = base.join("real");
+    let link = base.join("link");
+    std::fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let travado_pelo_outro = with_repo_gate(&real, || repo_gate(&link).try_lock().is_err());
+    let _ = std::fs::remove_dir_all(&base);
+    assert!(travado_pelo_outro, "o mesmo diretório por outro caminho ganhou um gate diferente");
+}
+
+#[cfg(unix)]
+#[test]
+fn repo_gate_nao_muda_de_chave_quando_o_diretorio_e_criado() {
+    let base = std::env::temp_dir().join(format!("cc-gate-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&base).unwrap();
+    let dir = base.join("novo");
+    let antes = repo_gate(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let depois = repo_gate(&dir);
+    let _ = std::fs::remove_dir_all(&base);
+    assert!(Arc::ptr_eq(&antes, &depois), "o gate do diretório mudou quando ele foi criado");
+}
