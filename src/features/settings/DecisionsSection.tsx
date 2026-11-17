@@ -209,7 +209,7 @@ export function DecisionsSection() {
     () => isDirty(settings, saved) || keyDraft.trim() !== "" || secondaryKeyDraft.trim() !== "",
     [settings, saved, keyDraft, secondaryKeyDraft],
   );
-  dirtyRef.current = dirty;
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
   const providerLabel = (id: DecisionProviderId) => t(`settings.decisions.provider.${id === "laya_local" ? "layaLocal" : id === "laya_studio" ? "layaStudio" : id}`);
   const active = settings.enabled && settings.provider !== "none";
   const secondaryOn = settings.secondaryProvider !== "none";

@@ -7,6 +7,7 @@ import { useSkillsStore } from "@/features/skills/store";
 import { SettingsSidebar } from "@/features/settings/SettingsSidebar";
 import { SettingsPageBody } from "@/features/settings/SettingsPages";
 import { RestoreDeviceDefaultsButton } from "@/features/settings/RestoreDeviceDefaultsButton";
+import { AlertaToast } from "@/shared/ui/alerts";
 import { SETTINGS_PAGE_LABEL_KEYS, settingsPageDescKey, type SettingsPageId } from "@/features/settings/settingsNav";
 import { useSettingsTargetStore } from "@/features/settings/settingsTarget";
 
@@ -69,9 +70,14 @@ export function SettingsPage() {
   useScrollToTarget(section, scrollRef);
 
   useEffect(() => {
-    void loadSkillsDir().catch(console.error);
-    loadCustomAgents().catch(console.error);
-  }, [loadSkillsDir, loadCustomAgents]);
+    void loadSkillsDir().catch((error) => {
+      void AlertaToast(t("settings.skillsDir"), t("settings.skillsDir.readError"), "error", 6000);
+      console.error(error);
+    });
+    loadCustomAgents().catch((error) => {
+      void AlertaToast(t("settings.agents"), String(error), "error", 6000);
+    });
+  }, [loadSkillsDir, loadCustomAgents, t]);
 
   return (
     <div className="@container flex h-full min-h-0 w-full bg-white dark:bg-surface-deep">
