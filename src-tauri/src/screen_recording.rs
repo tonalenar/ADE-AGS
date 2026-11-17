@@ -558,20 +558,23 @@ impl Registry {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "Outra gravação está começando agora.".to_string())?;
         let _starting = FlagGuard(&self.starting);
-        if self.stopping.load(Ordering::Acquire) {
-            return Err("A gravação anterior ainda está sendo finalizada.".into());
-        }
         let id = format!("{kind}:{target}");
-        if let Some(recording) = self
-            .active
-            .lock()
-            .map_err(|_| "O estado de gravação ficou indisponível.")?
-            .as_ref()
+        // `stopping` e `active` se conferem sob o mesmo lock: `tomar_para_parar` liga a flag antes de soltar a
+        // gravação. Quem chega no meio da parada vê "ainda sendo finalizada" e não começa outra captura por cima.
         {
-            return Err(format!(
-                "Já existe uma gravação ativa ({}) — pare-a antes de iniciar outra.",
-                recording.id
-            ));
+            let active = self
+                .active
+                .lock()
+                .map_err(|_| "O estado de gravação ficou indisponível.")?;
+            if self.stopping.load(Ordering::Acquire) {
+                return Err("A gravação anterior ainda está sendo finalizada.".into());
+            }
+            if let Some(recording) = active.as_ref() {
+                return Err(format!(
+                    "Já existe uma gravação ativa ({}) — pare-a antes de iniciar outra.",
+                    recording.id
+                ));
+            }
         }
         let label = match kind {
             "iphone" => "iPhone",
@@ -628,23 +631,28 @@ impl Registry {
     /// Para a gravação, finaliza o MP4 e devolve o caminho local. Qualquer que seja o resultado, a gravação deixa
     /// de estar ativa: antes, uma falha deixava o botão preso em "gravando" até reiniciar a ADE.
     pub(crate) fn stop(&self, id: &str) -> Result<String, String> {
-        let recording = {
-            let mut current = self
-                .active
-                .lock()
-                .map_err(|_| "O estado de gravação ficou indisponível.")?;
-            match current.as_ref() {
-                None => return Err("Não há gravação ativa.".into()),
-                Some(recording) if recording.id != id => {
-                    return Err("A gravação ativa pertence a outra tela.".into());
-                }
-                Some(_) => current.take().expect("gravação ativa conferida acima"),
-            }
-        };
+        let (recording, _stopping) = self.tomar_para_parar(id)?;
         // O mutex já foi solto: esperar a ferramenta fechar o arquivo não trava o `status` (que roda na thread da UI).
-        self.stopping.store(true, Ordering::Release);
-        let _stopping = FlagGuard(&self.stopping);
         finish(recording)
+    }
+
+    /// Tira a gravação da lista e liga `stopping` no mesmo lock. O guarda devolvido solta a flag só quando a
+    /// finalização acaba: não existe instante em que `start` veja "nada ativo e nada parando".
+    fn tomar_para_parar(&self, id: &str) -> Result<(ActiveRecording, FlagGuard<'_>), String> {
+        let mut current = self
+            .active
+            .lock()
+            .map_err(|_| "O estado de gravação ficou indisponível.")?;
+        match current.as_ref() {
+            None => Err("Não há gravação ativa.".into()),
+            Some(recording) if recording.id != id => Err("A gravação ativa pertence a outra tela.".into()),
+            Some(_) => {
+                self.stopping.store(true, Ordering::Release);
+                let guarda = FlagGuard(&self.stopping);
+                let gravacao = current.take().expect("gravação ativa conferida acima");
+                Ok((gravacao, guarda))
+            }
+        }
     }
 }
 
@@ -925,6 +933,29 @@ pub fn stop_all() {
     if let Some(id) = id {
         let _ = stop(&id);
     }
+}
+
+/// Teto da parada das gravações na saída do app. A thread principal não espera mais que isto: o que não
+/// terminou nesse prazo fica para trás e acompanha o processo até ele sair.
+pub const STOP_ALL_DEADLINE: Duration = Duration::from_secs(3);
+
+/// Para as gravações na saída, com teto de [`STOP_ALL_DEADLINE`]. Antes, a parada era síncrona no
+/// `RunEvent::Exit` e podia segurar a thread principal por até ~29 s (`finish_process` + `kill_and_wait`).
+pub fn stop_all_with_deadline() {
+    if !encerrar_dentro_do_teto(stop_all, STOP_ALL_DEADLINE) {
+        eprintln!("[ade-ags] a gravação de tela ainda estava finalizando ao sair; a saída seguiu sem esperar");
+    }
+}
+
+/// Roda `acao` numa thread e espera no máximo `teto`. Devolve `true` se ela terminou no prazo. Quem chama volta
+/// de qualquer jeito: a thread que estourou não é cancelada, só deixada para trás.
+fn encerrar_dentro_do_teto(acao: impl FnOnce() + Send + 'static, teto: Duration) -> bool {
+    let (feito, pronto) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        acao();
+        let _ = feito.send(());
+    });
+    pronto.recv_timeout(teto).is_ok()
 }
 
 #[tauri::command(async)]

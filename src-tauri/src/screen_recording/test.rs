@@ -363,4 +363,48 @@ mod espelho {
         let chamadas = env.chamadas.lock().unwrap();
         assert!(chamadas.devicectl.is_empty() && chamadas.espelho.is_empty());
     }
+
+    /// Um pedido de parada que já tirou a gravação da lista, mas ainda não terminou, segura o início de
+    /// outra: `stopping` tem que estar ligado antes de a gravação sair da lista (sem a janela de corrida).
+    #[test]
+    fn parar_marca_a_finalizacao_antes_de_soltar_a_gravacao() {
+        struct Parado;
+        impl MirrorHandle for Parado {
+            fn stop(self: Box<Self>) -> Result<(), String> {
+                Ok(())
+            }
+        }
+        let env = falso(None);
+        let registro = Registry::new();
+        *registro.active.lock().unwrap() = Some(ActiveRecording {
+            id: "iphone:ALVO".into(),
+            kind: "iphone".into(),
+            backend: Backend::Mirror(Box::new(Parado)),
+            path: env.dir.join("antiga.mp4"),
+        });
+        let (_tirada, _freio) = registro.tomar_para_parar("iphone:ALVO").unwrap();
+        assert!(registro.status().is_none());
+        let erro = registro.start(&env, "android", "serial").unwrap_err();
+        assert!(erro.contains("ainda está sendo finalizada"), "{erro}");
+    }
+}
+
+/// O teto da parada na saída: quem chama volta no máximo no prazo, mesmo que a parada não termine.
+#[test]
+fn parada_que_estoura_o_teto_devolve_o_controle_sem_esperar() {
+    // A parada fica presa até o teste soltá-la: com teto zero, quem chamou tem que voltar na hora.
+    let (soltar, preso) = std::sync::mpsc::channel::<()>();
+    let terminou = encerrar_dentro_do_teto(
+        move || {
+            let _ = preso.recv();
+        },
+        Duration::ZERO,
+    );
+    assert!(!terminou);
+    let _ = soltar.send(());
+}
+
+#[test]
+fn parada_que_termina_dentro_do_teto_conta_como_terminada() {
+    assert!(encerrar_dentro_do_teto(|| {}, Duration::from_secs(5)));
 }

@@ -27,6 +27,12 @@ pub(crate) fn usable_size(width: Option<i32>, height: Option<i32>) -> Option<(u3
     }
 }
 
+/// Pura: há alguma janela nova do workspace que está abrindo? Sem nenhuma, as janelas antigas não podem fechar:
+/// a última a sair leva o app inteiro embora (`ExitRequested` sem janelas, em `app::run`).
+pub(crate) fn tem_janela_nova(criadas: usize) -> bool {
+    criadas > 0
+}
+
 /// Recrea ventanas nativas a partir de filas guardadas en SQLite (posición, tamaño).
 /// Usada tanto al arrancar la app (restaura todo lo que estaba `is_open = 1`) como al
 /// abrir un workspace guardado en caliente desde la UI.
@@ -45,8 +51,10 @@ pub(crate) fn usable_size(width: Option<i32>, height: Option<i32>) -> Option<(u3
 /// buscando por su propio label nativo, así que renombrar la fila es suficiente.
 ///
 /// Las filas sin tabs guardadas se omiten para no resucitar ventanas vacías.
-pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) -> Result<(), String> {
+pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) -> Result<usize, String> {
     let db = app.state::<DbConnection>();
+    // Quantas janelas novas subiram (a `reuse_main` não conta). Quem troca de workspace checa isso antes de fechar as antigas.
+    let mut criadas = 0usize;
     // Mutable: los labels que se generan dentro del loop se van agregando, para que dos
     // filas restauradas en la misma pasada no puedan pisarse entre sí.
     let mut live_labels: std::collections::HashSet<String> =
@@ -100,7 +108,10 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
         // layout: antes el `?` abortaba el loop entero y las filas que faltaban por
         // procesar no se restauraban ni quedaban marcadas como abiertas.
         match builder.build() {
-            Ok(_) => database::mark_window_open(&db, &w.id)?,
+            Ok(_) => {
+                database::mark_window_open(&db, &w.id)?;
+                criadas += 1;
+            }
             Err(e) => {
                 eprintln!("[restore_windows] no se pudo recrear la ventana '{label}': {e}");
                 live_labels.remove(&label);
@@ -121,7 +132,7 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
         }
     }
 
-    Ok(())
+    Ok(criadas)
 }
 
 /// A moldura de cada sistema. No macOS, a nativa com a barra de título `Overlay` e sem título: o conteúdo vai
@@ -214,21 +225,18 @@ pub async fn open_workspace(
         Vec::new()
     };
 
-    restore_windows(&app, rows, false)?;
+    // Primeiro o workspace novo; só depois as antigas saem. Se nenhuma janela nova subiu (o workspace não tinha
+    // filas úteis, ou todas falharam), abre uma em branco antes. Se ela também falhar, o `?` sai com as antigas
+    // ainda abertas: antes elas fechavam antes dessa checagem, e a última a sair deixava o app sem janela.
+    let criadas = restore_windows(&app, rows, false)?;
+    if !tem_janela_nova(criadas) {
+        spawn_blank_window(&app, &db, &workspace_id)?;
+    }
 
     for label in previously_open {
         if let Some(win) = app.get_webview_window(&label) {
             let _ = super::close_guard::close_now(&win);
         }
-    }
-
-    // Si el workspace no tenía filas (0 ventanas guardadas) o todas sus filas eran
-    // filas vacías que `restore_windows` se saltó, no quedó ninguna ventana viva
-    // para este workspace pese a haberlo "abierto" — se le abre una en blanco en vez de
-    // dejar al usuario sin nada visible.
-    let live_now = database::db_get_workspace_windows(workspace_id.clone(), app.state::<DbConnection>())?;
-    if live_now.is_empty() {
-        spawn_blank_window(&app, &db, &workspace_id)?;
     }
 
     let _ = app.emit("cc-workspace-changed", ());
@@ -345,7 +353,7 @@ pub fn restore_deferred_windows(app: tauri::AppHandle) -> Result<(), String> {
     if rows.is_empty() {
         return Ok(());
     }
-    restore_windows(&app, rows, true)
+    restore_windows(&app, rows, true).map(|_| ())
 }
 
 /// Abre una nueva ventana nativa de Tauri.
@@ -404,5 +412,18 @@ mod bounds_test {
         assert_eq!(usable_position(Some(-1920), Some(3)), Some((-1920, 3)));
         assert_eq!(usable_size(Some(1400), Some(860)), Some((1400, 860)));
         assert_eq!(usable_position(None, Some(5)), None);
+    }
+}
+
+#[cfg(test)]
+mod abertura_test {
+    use super::tem_janela_nova;
+
+    /// Sem nenhuma janela criada, não há janela nova: a abertura tem que abrir a em branco antes de fechar as antigas.
+    #[test]
+    fn sem_janela_criada_nao_ha_janela_nova() {
+        assert!(!tem_janela_nova(0));
+        assert!(tem_janela_nova(1));
+        assert!(tem_janela_nova(3));
     }
 }

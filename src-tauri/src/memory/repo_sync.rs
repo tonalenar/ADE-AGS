@@ -761,9 +761,11 @@ fn dirty_workspaces(conn: &rusqlite::Connection) -> Result<Vec<String>, String> 
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
-pub fn install(app: &tauri::App) {
+/// Sem pasta do usuário a memória não tem onde morar: o erro sobe para o `setup` (ver `app::run`),
+/// que mostra o aviso de boot, em vez de um `expect` que fecharia o app sem mensagem.
+pub fn install(app: &tauri::App) -> Result<(), String> {
     let db = app.state::<DbConnection>().inner().clone();
-    let root = repo::default_root().expect("home unavailable");
+    let root = repo::default_root()?;
     let sync = RepoSync::new(db, root);
     let handle = app.handle().clone();
     sync.set_notifier(Arc::new(move |status: &RepoSyncStatus| {
@@ -772,6 +774,7 @@ pub fn install(app: &tauri::App) {
     sync.spawn();
     sync.reconcile_pending();
     app.manage(sync);
+    Ok(())
 }
 
 #[tauri::command]
