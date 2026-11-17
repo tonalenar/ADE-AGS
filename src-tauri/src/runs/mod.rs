@@ -991,6 +991,18 @@ pub(crate) fn isolate_task_from(
     task: &Task,
     start: &str,
 ) -> Result<Task, String> {
+    isolate_task_from_with(base, db, task, start, &|| {})
+}
+
+// `antes_do_io` roda logo antes da gravação do worktree, com o banco solto (os testes usam
+// para simular a outra isolação que chega primeiro).
+pub(crate) fn isolate_task_from_with(
+    base: &std::path::Path,
+    db: &DbConnection,
+    task: &Task,
+    start: &str,
+    antes_do_io: &dyn Fn(),
+) -> Result<Task, String> {
     let project = std::path::Path::new(&task.cwd);
     let skills_dir = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -1005,6 +1017,7 @@ pub(crate) fn isolate_task_from(
         worktrees::link_skills(&project_links, &task_links, &skills_dir);
     }
 
+    antes_do_io();
     let persisted = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::set_worktree_if_status(

@@ -1192,6 +1192,8 @@ pub fn set_worktree(
     Ok(())
 }
 
+/// Só grava se a tarefa segue no estado esperado e ainda não tem worktree: duas isolações
+/// concorrentes não sobrescrevem uma à outra (a que chega depois recebe `false`).
 pub fn set_worktree_if_status(
     conn: &Connection,
     task_id: &str,
@@ -1202,7 +1204,7 @@ pub fn set_worktree_if_status(
 ) -> Result<bool, String> {
     let changed = conn
         .execute(
-            "UPDATE tasks SET cwd = ?1, worktree_path = ?2, branch = ?3 WHERE id = ?4 AND status = ?5",
+            "UPDATE tasks SET cwd = ?1, worktree_path = ?2, branch = ?3 WHERE id = ?4 AND status = ?5 AND worktree_path IS NULL",
             rusqlite::params![cwd, root, branch, task_id, expected_status],
         )
         .map_err(|e| e.to_string())?;
