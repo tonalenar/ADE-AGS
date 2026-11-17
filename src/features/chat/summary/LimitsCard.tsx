@@ -116,12 +116,15 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
 
   // Atualiza somente as contas desta conversa/time. As demais ficam visíveis com o último valor local conhecido.
   const keys = entries.map((e) => e.key).join("|");
+  // Só a identidade das contas em uso conta: trocar de aba ou de integrante sem trocar de conta não relê a cota.
+  const usedKey = used.map((u) => u.key).join("|");
+  const usesAgy = used.some((entry) => entry.agentId === "antigravity" && !entry.accountId);
   useEffect(() => {
     let alive = true;
     const run = async () => {
       if (!loaded) await useAccountsStore.getState().load().catch(() => undefined);
       const { refresh, refreshAgy } = useUsageStore.getState();
-      if (used.some((entry) => entry.agentId === "antigravity" && !entry.accountId)) void refreshAgy(false);
+      if (usesAgy) void refreshAgy(false);
       for (const entry of entries.filter((candidate) => candidate.who.length > 0)) {
         if (entry.account && MEASURED_AGENTS.has(entry.agentId) && !(entry.agentId === "antigravity" && !entry.accountId)) void refresh(entry.account as AgentAccount, false);
       }
@@ -130,7 +133,7 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
     };
     void run();
     return () => { alive = false; };
-  }, [keys, turnEnds, used]); // eslint-disable-line react-hooks/exhaustive-deps -- `entries` muda com `keys`; `loaded` só vale na primeira vez
+  }, [keys, turnEnds, usedKey]); // eslint-disable-line react-hooks/exhaustive-deps -- `entries` muda com `keys`; `loaded` só vale na primeira vez
 
   // O pool da conversa: relido junto com a cota (a troca acontece no fim de um turno).
   const threadId = threadIdOf(conversation.tabId);

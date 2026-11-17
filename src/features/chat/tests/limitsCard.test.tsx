@@ -161,6 +161,13 @@ describe("atualização: ao abrir e no fim de cada turno, sem polling", () => {
     expect(refreshes).toEqual([["system:claude-code", false]]);
   });
 
+  it("uma mudança nas abas que não troca a conta em uso não relê a cota", async () => {
+    await mount();
+    const first = refreshes.length;
+    await act(async () => { useTabsStore.setState({ tabs: [tab()] } as never); });
+    expect(refreshes).toHaveLength(first);
+  });
+
   it("pede de novo quando o turno termina, e só então", async () => {
     await mount();
     const first = refreshes.length;
