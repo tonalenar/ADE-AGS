@@ -16,6 +16,8 @@ import { useTabsStore } from "@/features/tabs/store";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { appConfirm } from "@/shared/ui/appConfirm";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
+import { shouldUpsertComparison } from "./attachOutcome";
 import { tuiMessage } from "@/features/chat/attachments/send";
 import type { Attachment } from "@/features/chat/attachments/attachModel";
 
@@ -67,13 +69,13 @@ export async function startComparison(input: StartInput): Promise<Comparison> {
     return { entry, tabId };
   });
 
-  let saved = cmp;
+  let saved: typeof cmp | null = null;
   try {
     saved = await compareAttach(cmp.id, opened.map((o) => ({ pick: o.entry.pick, tabId: o.tabId })));
   } catch (e) {
-    console.error(e);
+    AlertaToast(t("compare.title"), uiErrorText(e), "error", 7000);
   }
-  upsertComparison(saved);
+  if (shouldUpsertComparison(saved)) upsertComparison(saved);
 
   const key = compareBoardKey(input.cwd, cmp.id);
   canvasActions.buildComparison(key, titleIdOf(cmp.id), t("compare.groupTitle", { title: cmp.title }), opened.map((o) => ({ tabId: o.tabId, label: o.entry.label })));
@@ -89,7 +91,7 @@ export async function startComparison(input: StartInput): Promise<Comparison> {
       onStalled: () => setPending(tabId, false),
     });
   }
-  return saved;
+  return saved ?? cmp;
 }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
