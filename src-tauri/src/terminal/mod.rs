@@ -21,6 +21,9 @@ pub(crate) mod recorder;
 mod pty_manager;
 mod session;
 mod write_queue;
+#[cfg(unix)]
+mod pty_io;
+pub(crate) use write_queue::Passo;
 #[cfg(windows)]
 mod win_conpty;
 pub use pty_manager::*;

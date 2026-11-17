@@ -1,5 +1,7 @@
 use super::containment::ProcessGroup;
-use super::write_queue::WriteQueue;
+use super::write_queue::{EnvioReservado, Passo, WriteQueue};
+#[cfg(unix)]
+use std::os::fd::RawFd;
 use portable_pty::{CommandBuilder, MasterPty, PtySize};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
@@ -10,7 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
-struct PtySession {
+pub(crate) struct PtySession {
     master: Box<dyn MasterPty + Send>,
     /// Escrita do PTY, com thread própria (ver `write_queue`): escrever numa TUI que parou de ler não
     /// prende o registro nem um worker do runtime.
@@ -1085,9 +1087,7 @@ pub async fn pty_create(
         scrub_secrets,
         extra_args,
     };
-    tokio::task::spawn_blocking(move || criar_pty(args, app))
-        .await
-        .map_err(|e| format!("Falha ao criar o terminal: {e}"))?
+    executar_fora_do_runtime(move || criar_pty(args, app)).await
 }
 
 /// Corpo bloqueante de `pty_create`: o que é feito com os argumentos depois que chegam.
@@ -1361,33 +1361,24 @@ fn criar_pty(args: PtyCreateArgs, app: AppHandle) -> Result<u32, String> {
 
     // A escrita ganha thread própria (ver `write_queue`): quem escreve só enfileira. Soltar a fila mata o
     // processo, e assim o escravo fecha e um `write_all` preso volta com erro. Uma queda avisa o terminal.
-    let mut matador = child.clone_killer();
     let evento_aviso = format!("pty-data-{id}");
     let app_aviso = app.clone();
-    let queue = match pair.master.take_writer().map_err(|e| format!("Failed to get PTY writer: {e}")) {
-        Ok(writer) => match WriteQueue::new(
-            writer,
-            Box::new(move || {
-                let _ = matador.kill();
-            }),
-            Box::new(move |falha| {
-                let texto = format!("\r\n[ade-ags] o terminal não recebeu {} entrada(s): {}\r\n", falha.perdidas, falha.motivo);
-                let _ = app_aviso.emit(&evento_aviso, PtyDataPayload { data: texto, end: None });
-            }),
-        ) {
-            Ok(queue) => queue,
-            Err(e) => {
-                let _ = child.kill();
-                return Err(format!("Falha ao criar a fila de escrita: {e}"));
-            }
-        },
+    let queue = match fila_de_escrita(
+        pair.master.as_ref(),
+        child.clone_killer(),
+        Box::new(move |falha| {
+            let texto = format!("\r\n[ade-ags] o terminal não recebeu {} entrada(s): {}\r\n", falha.perdidas, falha.motivo);
+            let _ = app_aviso.emit(&evento_aviso, PtyDataPayload { data: texto, end: None });
+        }),
+    ) {
+        Ok(queue) => queue,
         Err(e) => {
             let _ = child.kill();
-            return Err(e);
+            return Err(format!("Falha ao criar a fila de escrita: {e}"));
         }
     };
 
-    let mut reader = match pair.master.try_clone_reader() {
+    let mut reader = match leitor_do_mestre(pair.master.as_ref()) {
         Ok(reader) => reader,
         Err(e) => {
             let _ = child.kill();
@@ -1421,35 +1412,32 @@ fn criar_pty(args: PtyCreateArgs, app: AppHandle) -> Result<u32, String> {
     // já está vivo fica, e o processo recém-lançado é encerrado (ele ainda não escreveu nada na aba). Quem
     // chamou nunca perde o terminal que já estava rodando: antes, este lançamento matava o vivo (A080).
     // A checagem e a inserção são sob a mesma trava: duas chamadas simultâneas não criam dois terminais.
+    let sessao = PtySession {
+        master: pair.master,
+        queue,
+        killer: child,
+        group,
+        tab_id: tab_id.clone(),
+        cwd: cwd.clone(),
+        session_token: session_token.clone(),
+        codex_profile,
+        ai_memory_settings: memory.settings_file.take(),
+    };
     {
         let mut reg = registry();
-        let entrada = entrada_da_aba(reg.iter().map(|(k, s)| (*k, s.tab_id.as_deref())), tab_id.as_deref());
-        match entrada {
-            EntradaDaAba::Reaproveitar(existente) => {
-                drop(reg);
-                group.kill_all();
-                let _ = child.kill();
-                let _ = child.wait();
-                if let Some(path) = &codex_profile {
-                    let _ = std::fs::remove_file(path);
-                }
-                return Ok(existente);
-            }
-            EntradaDaAba::Criar => {
+        match registrar_sessao(&mut reg, id, tab_id.as_deref(), sessao) {
+            Ok(()) => {
                 if let (Some(tab), Some(token), Some(pid)) = (tab_id.as_deref(), session_token.as_deref(), root_pid) {
                     super::publish_token(tab, token, pid);
                 }
-                reg.insert(id, PtySession {
-                    master: pair.master,
-                    queue,
-                    killer: child,
-                    group,
-                    tab_id: tab_id.clone(),
-                    cwd: cwd.clone(),
-                    session_token: session_token.clone(),
-                    codex_profile,
-                    ai_memory_settings: memory.settings_file.take(),
-                });
+            }
+            Err((existente, mut nova)) => {
+                drop(reg);
+                nova.group.kill_all();
+                let _ = nova.killer.kill();
+                let _ = nova.killer.wait();
+                forget_session(&nova);
+                return Ok(existente);
             }
         }
     }
@@ -1590,6 +1578,147 @@ pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {
     sessao.queue.enqueue(data.as_bytes()).map_err(|e| e.to_string())
 }
 
+// ── Rodada 2: escrita e leitura do mestre, envio composto, remoção e aba viva ──
+
+/// A fila de escrita de uma sessão. Soltá-la fecha o lado mestre (o cancelamento acorda a escrita presa) e mata o
+/// processo. Uma queda de escrita avisa por `avisar`.
+pub(crate) fn fila_de_escrita(
+    mestre: &dyn MasterPty,
+    matador: Box<dyn portable_pty::ChildKiller + Send + Sync>,
+    avisar: Box<dyn FnOnce(super::write_queue::FalhaEscrita) + Send>,
+) -> Result<WriteQueue, String> {
+    let mut matador = matador;
+    let matar: Box<dyn FnOnce() + Send> = Box::new(move || {
+        let _ = matador.kill();
+    });
+    #[cfg(unix)]
+    {
+        let fd = mestre.as_raw_fd().ok_or_else(|| "o mestre do PTY não tem descritor".to_string())?;
+        fila_sobre_fd_com(fd, Some(matar), avisar)
+    }
+    #[cfg(not(unix))]
+    {
+        let writer = mestre.take_writer().map_err(|e| e.to_string())?;
+        WriteQueue::new(writer, matar, avisar).map_err(|e| e.to_string())
+    }
+}
+
+/// A fila sobre um descritor: não bloqueante, com a espera que acorda com o cancelamento. `fechar_extra` roda junto
+/// com o cancelamento (ao soltar a fila).
+#[cfg(unix)]
+pub(crate) fn fila_sobre_fd_com(
+    fd: RawFd,
+    fechar_extra: Option<Box<dyn FnOnce() + Send>>,
+    avisar: Box<dyn FnOnce(super::write_queue::FalhaEscrita) + Send>,
+) -> Result<WriteQueue, String> {
+    super::pty_io::tornar_nao_bloqueante(fd).map_err(|e| e.to_string())?;
+    let dono = super::pty_io::duplicar(fd).map_err(|e| e.to_string())?;
+    let (cancela_leitura, cancela_escrita) = std::os::unix::net::UnixStream::pair().map_err(|e| e.to_string())?;
+    let escritor = super::pty_io::EscritorCancelavel::novo(dono, cancela_leitura);
+    let fechar: Box<dyn FnOnce() + Send> = Box::new(move || {
+        let mut cancela = cancela_escrita;
+        let _ = std::io::Write::write_all(&mut cancela, &[1]);
+        if let Some(extra) = fechar_extra {
+            extra();
+        }
+    });
+    WriteQueue::new(Box::new(escritor), fechar, avisar).map_err(|e| e.to_string())
+}
+
+/// A fila sobre um descritor sem matar processo nenhum (usada onde não há filho a encerrar).
+#[cfg(all(test, unix))]
+pub(crate) fn fila_sobre_fd(
+    fd: RawFd,
+    avisar: Box<dyn FnOnce(super::write_queue::FalhaEscrita) + Send>,
+) -> Result<WriteQueue, String> {
+    fila_sobre_fd_com(fd, None, avisar)
+}
+
+/// O leitor da saída do mestre. No unix é não bloqueante (ver `pty_io`); nos outros sistemas, o do portable-pty.
+pub(crate) fn leitor_do_mestre(mestre: &dyn MasterPty) -> Result<Box<dyn Read + Send>, String> {
+    #[cfg(unix)]
+    {
+        let fd = mestre.as_raw_fd().ok_or_else(|| "o mestre do PTY não tem descritor".to_string())?;
+        let dono = super::pty_io::duplicar(fd).map_err(|e| e.to_string())?;
+        Ok(Box::new(super::pty_io::LeitorNaoBloqueante::novo(dono)))
+    }
+    #[cfg(not(unix))]
+    {
+        mestre.try_clone_reader().map_err(|e| e.to_string())
+    }
+}
+
+/// Decisão e inserção de uma sessão nova, sob a trava do registro. Se a aba já tem terminal vivo, a sessão nova volta
+/// para quem chamou (que a encerra), e o id do vivo é devolvido. Sem terminal vivo, a sessão entra.
+pub(crate) fn registrar_sessao(
+    reg: &mut HashMap<u32, PtySession>,
+    id: u32,
+    tab_id: Option<&str>,
+    sessao: PtySession,
+) -> Result<(), (u32, Box<PtySession>)> {
+    let entrada = entrada_da_aba(reg.iter().map(|(k, s)| (*k, s.tab_id.as_deref())), tab_id);
+    match entrada {
+        EntradaDaAba::Reaproveitar(existente) => Err((existente, Box::new(sessao))),
+        EntradaDaAba::Criar => {
+            reg.insert(id, sessao);
+            Ok(())
+        }
+    }
+}
+
+/// Roda o trabalho bloqueante do lançamento numa thread de bloqueio. Ele nunca ocupa um worker do runtime (A084).
+pub(crate) async fn executar_fora_do_runtime<T: Send + 'static>(
+    trabalho: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(trabalho)
+        .await
+        .map_err(|e| format!("Falha ao executar o lançamento do terminal: {e}"))?
+}
+
+/// Uma sessão de teste: um `sleep` real numa pty, sem leitor.
+#[cfg(all(test, unix))]
+pub(crate) fn sessao_de_teste(id: u32, tab: Option<&str>) -> PtySession {
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    let pair = native_pty_system()
+        .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+        .unwrap();
+    let mut comando = CommandBuilder::new("sh");
+    comando.arg("-c");
+    comando.arg("sleep 30");
+    let child = pair.slave.spawn_command(comando).unwrap();
+    let mut group = ProcessGroup::new(id);
+    group.adopt(&*child);
+    let writer = pair.master.take_writer().unwrap();
+    let queue = WriteQueue::new(writer, Box::new(|| {}), Box::new(|_| {})).unwrap();
+    PtySession {
+        master: pair.master,
+        queue,
+        killer: child,
+        group,
+        tab_id: tab.map(str::to_string),
+        cwd: "/tmp".into(),
+        session_token: None,
+        codex_profile: None,
+        ai_memory_settings: None,
+    }
+}
+
+/// Escreve passos (texto, pausa e Enter) como um pedido só: a thread os executa sem intercalar outros pedidos, e o
+/// pedido entra inteiro ou não entra (achado 3, canal).
+pub fn write_passos_to_pty(id: u32, passos: Vec<Passo>) -> Result<(), String> {
+    let registro = registry();
+    let sessao = registro.get(&id).ok_or_else(|| format!("PTY session {id} not found"))?;
+    sessao.queue.enqueue_composto(passos).map_err(|e| e.to_string())
+}
+
+/// Reserva o texto junto com a vaga do Enter: quem chama manda o Enter depois, com `enter`, e ele não é recusado por
+/// falta de espaço (achado 3, submit_prompt).
+pub fn write_reserved_to_pty(id: u32, text: &str) -> Result<EnvioReservado, String> {
+    let registro = registry();
+    let sessao = registro.get(&id).ok_or_else(|| format!("PTY session {id} not found"))?;
+    sessao.queue.reservar_envio(text.as_bytes()).map_err(|e| e.to_string())
+}
+
 /// Escreve uma linha (texto e Enter) como um pedido só: ou entra inteira, ou não entra. Assim o Enter nunca
 /// fica sem o texto, nem o texto sem o Enter, quando a fila enche no meio.
 pub fn write_line_to_pty(id: u32, text: &str) -> Result<(), String> {
@@ -1676,6 +1805,9 @@ fn stop_session(mut session: PtySession) -> Result<(), String> {
     // No Windows o Job Object já levou o processo, e `TerminateProcess` num processo morto
     // falha com "acesso negado". Falhar ao matar só é erro se ele continua vivo.
     let killed = session.killer.kill();
+    // A escrita presa, se houver, volta com erro ao encerrar a fila. Esperar a thread sair garante que o mestre não é
+    // solto enquanto ela ainda escreve.
+    session.queue.encerrar_e_esperar(KILL_WAIT);
     // Se reclama el status para que el hijo no quede zombie, mas com prazo: um processo que
     // não sai não pode travar quem chamou (o "Atualizar" ficava parado em 8%).
     let deadline = std::time::Instant::now() + KILL_WAIT;

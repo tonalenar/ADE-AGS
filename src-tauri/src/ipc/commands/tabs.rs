@@ -506,7 +506,10 @@ pub(super) fn submit_prompt_seen(pty_id: u32, text: &str, author: &str) -> Resul
     // o envio; sem repositório git ou sem mudança desde o último, não faz nada).
     crate::tab_checkpoints::on_submit(pty_id, text, author);
 
-    crate::terminal::write_to_pty(pty_id, text)?;
+    // O texto entra com a vaga do Enter reservada: o Enter só é mandado depois da observação, mas nunca fica sem
+    // espaço (achado 3). Uma espera observada entre texto e Enter não cabe num pedido fixo, e um pedido assim
+    // travaria a fila (e a digitação) enquanto a TUI carrega.
+    let mut envio = crate::terminal::write_reserved_to_pty(pty_id, text)?;
     wait_until_quiet(pty_id, ECHO_QUIET, ECHO_MAX, false);
     // Uma TUI que ainda carregava (o OpenCode na tela inicial) joga fora o que chega: o texto nem aparece, e
     // não há o que enviar. Espera ela assentar e escreve de novo — só se NENHUM pedaço dele está na tela, para
@@ -519,14 +522,15 @@ pub(super) fn submit_prompt_seen(pty_id: u32, text: &str, author: &str) -> Resul
         if text_on_screen(pty_id, text) {
             break;
         }
-        crate::terminal::write_to_pty(pty_id, text)?;
+        drop(envio);
+        envio = crate::terminal::write_reserved_to_pty(pty_id, text)?;
         wait_until_quiet(pty_id, ECHO_QUIET, ECHO_MAX, false);
     }
     // O rodapé de trabalho só vale se apareceu DEPOIS do Enter: nos últimos KB da saída ainda estão os quadros do
     // spinner do turno anterior, e um Enter engolido logo depois de um turno curto era dado por enviado (achado
     // pelo replay, fixture `claude-ocioso`).
     let enter_at = crate::terminal::output_total(pty_id).unwrap_or(0);
-    crate::terminal::write_to_pty(pty_id, "\r")?;
+    envio.enter().map_err(|e| e.to_string())?;
     // Um pegado grande vira "[Pasted Content 3904 chars]" e pode engolir o Enter: a mensagem
     // fica escrita e ninguém a recebe. O Hermes e o OpenCode não usam o marcador: o texto fica
     // inteiro na caixa (e, ainda "starting agent…", eles engolem o Enter). Enquanto a TUI não mostra

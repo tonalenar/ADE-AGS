@@ -968,6 +968,199 @@ fn lancamentos_antigos_saem_e_os_recentes_ficam() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// ── Rodada 2: composto, vaga reservada do Enter, remoção com descendente, aba viva e runtime ──
+
+#[test]
+fn composto_entra_inteiro_ou_e_recusado_inteiro() {
+    use super::write_queue::{Passo, PtyWriteError, WriteQueue};
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
+
+    let (portao_tx, portao_rx) = mpsc::channel();
+    let (escrito_tx, escrito_rx) = mpsc::channel();
+    let saida = Arc::new(Mutex::new(Vec::new()));
+    let escritor = EscritorTravado { portao: portao_rx, escrito: escrito_tx, saida: saida.clone() };
+    let fila = WriteQueue::new(Box::new(escritor), Box::new(|| {}), Box::new(|_| {})).unwrap();
+
+    // 255 pedidos ocupam quase tudo. O composto (texto, pausa, Enter) cabe inteiro na última vaga.
+    let mut esperado = String::new();
+    for i in 0..255 {
+        let pedaco = format!("{i:03}");
+        esperado.push_str(&pedaco);
+        fila.enqueue(pedaco.as_bytes()).unwrap();
+    }
+    let composto = vec![Passo::Escreve(b"ls".to_vec()), Passo::Pausa(Duration::ZERO), Passo::Escreve(b"\r".to_vec())];
+    assert_eq!(fila.enqueue_composto(composto), Ok(()), "o composto inteiro cabe na última vaga");
+    esperado.push_str("ls\r");
+
+    // Agora a fila está cheia: o próximo composto é recusado por inteiro, sem nenhum pedaço dele.
+    let outro = vec![Passo::Escreve(b"x".to_vec()), Passo::Escreve(b"\r".to_vec())];
+    assert_eq!(fila.enqueue_composto(outro), Err(PtyWriteError::Full));
+
+    // 255 pedidos de um passo, mais os 2 passos do composto: 257 escritas.
+    for _ in 0..257 {
+        portao_tx.send(()).unwrap();
+    }
+    for _ in 0..257 {
+        escrito_rx.recv().unwrap();
+    }
+    let escrito = String::from_utf8(saida.lock().unwrap().clone()).unwrap();
+    assert_eq!(escrito, esperado, "texto e Enter saem juntos, em ordem, e o composto recusado não saiu");
+}
+
+#[test]
+fn texto_aceito_leva_a_vaga_do_enter_reservada() {
+    use super::write_queue::{PtyWriteError, WriteQueue};
+    use std::sync::{mpsc, Arc, Mutex};
+
+    let (portao_tx, portao_rx) = mpsc::channel();
+    let (escrito_tx, escrito_rx) = mpsc::channel();
+    let saida = Arc::new(Mutex::new(Vec::new()));
+    let escritor = EscritorTravado { portao: portao_rx, escrito: escrito_tx, saida: saida.clone() };
+    let fila = WriteQueue::new(Box::new(escritor), Box::new(|| {}), Box::new(|_| {})).unwrap();
+
+    // 254 pedidos. O texto e a vaga do Enter cabem nas duas últimas.
+    let mut esperado = String::new();
+    for i in 0..254 {
+        let pedaco = format!("{i:03}");
+        esperado.push_str(&pedaco);
+        fila.enqueue(pedaco.as_bytes()).unwrap();
+    }
+    let envio = fila.reservar_envio(b"ls").expect("o texto e a vaga do Enter cabem juntos");
+    esperado.push_str("ls");
+
+    // Com a vaga do Enter reservada, nem outro envio nem outro pedido cabe: a fila está cheia.
+    assert_eq!(fila.reservar_envio(b"x").err(), Some(PtyWriteError::Full));
+    assert_eq!(fila.enqueue(b"y"), Err(PtyWriteError::Full));
+    // O Enter da vaga reservada nunca é recusado por falta de espaço.
+    assert_eq!(envio.enter(), Ok(()));
+    esperado.push_str("\r");
+
+    // 254 pedidos, o texto e o Enter: 256 escritas.
+    for _ in 0..256 {
+        portao_tx.send(()).unwrap();
+    }
+    for _ in 0..256 {
+        escrito_rx.recv().unwrap();
+    }
+    let escrito = String::from_utf8(saida.lock().unwrap().clone()).unwrap();
+    assert_eq!(escrito, esperado);
+}
+
+/// Espera o descritor deixar de aceitar bytes (buffer cheio): sinal de que a escrita da fila já começou e está presa.
+#[cfg(unix)]
+fn fd_cheio(fd: std::os::fd::RawFd) -> bool {
+    for _ in 0..100_000 {
+        let mut pfd = libc::pollfd { fd, events: libc::POLLOUT, revents: 0 };
+        // SAFETY: `pfd` é um `pollfd` válido e vive durante a chamada; `nfds` é 1.
+        if unsafe { libc::poll(&mut pfd, 1, 0) } == 0 {
+            return true;
+        }
+        std::thread::yield_now();
+    }
+    false
+}
+
+/// A escrita presa num pipe cheio é solta ao remover a fila. O mecanismo (poll com cancelamento) é o mesmo do
+/// PTY, e um pipe trava em qualquer unix, então o teste roda no macOS e no Linux.
+#[cfg(unix)]
+#[test]
+fn remover_a_fila_libera_escrita_presa_num_pipe() {
+    use super::pty_manager::fila_sobre_fd;
+    use std::os::fd::AsRawFd;
+    use std::time::Duration;
+
+    let (leitura, escrita) = std::io::pipe().unwrap();
+    let mut fila = fila_sobre_fd(escrita.as_raw_fd(), Box::new(|_| {})).unwrap();
+    // Mais que o buffer do pipe: a escrita trava, porque ninguém lê a outra ponta.
+    fila.enqueue(&vec![b'x'; 1024 * 1024]).unwrap();
+    assert!(fd_cheio(escrita.as_raw_fd()), "a escrita grande não chegou a travar");
+    assert!(
+        fila.encerrar_e_esperar(Duration::from_secs(2)),
+        "a thread de escrita não terminou ao remover a fila"
+    );
+    drop(leitura);
+}
+
+/// A remoção de uma sessão precisa soltar a escrita presa, mesmo com um descendente segurando o escravo. Matar só o
+/// filho não basta: o `sleep` do descendente mantém o escravo aberto e o `write_all` continuaria preso. Só o Linux
+/// trava uma escrita num pty sem leitor: o macOS aceitou 256 MB sem travar (medido), por isso o teste é restrito.
+#[cfg(target_os = "linux")]
+#[test]
+fn remover_a_sessao_libera_escrita_presa_por_descendente() {
+    use super::pty_manager::fila_de_escrita;
+    use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+    use std::io::Read;
+    use std::time::Duration;
+
+    let pair = native_pty_system()
+        .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+        .unwrap();
+    // O filho larga um descendente que herda o escravo e só então escreve "pronto". Nenhum dos dois lê a entrada.
+    let mut comando = CommandBuilder::new("sh");
+    comando.arg("-c");
+    comando.arg("sleep 5 & echo pronto; sleep 5");
+    let filho = pair.slave.spawn_command(comando).unwrap();
+    // Lê a saída até "pronto": o descendente já existe quando a fila começa a escrever.
+    let mut saida = pair.master.try_clone_reader().unwrap();
+    let mut visto = Vec::new();
+    while !String::from_utf8_lossy(&visto).contains("pronto") {
+        let mut buf = [0u8; 256];
+        let n = saida.read(&mut buf).unwrap();
+        assert!(n > 0, "o filho saiu antes de avisar");
+        visto.extend_from_slice(&buf[..n]);
+    }
+
+    let mut fila = fila_de_escrita(pair.master.as_ref(), filho.clone_killer(), Box::new(|_| {})).unwrap();
+    // Mais que o buffer do tty: a escrita trava, porque ninguém lê a entrada do escravo.
+    fila.enqueue(&vec![b'x'; 512 * 1024]).unwrap();
+    assert!(fd_cheio(pair.master.as_raw_fd().unwrap()), "a escrita grande não chegou a travar");
+
+    // Remover a sessão: o lado mestre fecha e a escrita presa volta com erro, mesmo com o descendente vivo.
+    assert!(
+        fila.encerrar_e_esperar(Duration::from_secs(2)),
+        "a thread de escrita não terminou ao remover a sessão"
+    );
+}
+
+/// Uma aba que já tem terminal vivo não perde esse terminal para um lançamento concorrente.
+#[cfg(unix)]
+#[test]
+fn aba_com_terminal_vivo_nao_perde_o_terminal_para_um_lancamento_concorrente() {
+    use super::pty_manager::{registrar_sessao, sessao_de_teste};
+    use std::collections::HashMap;
+
+    let mut reg = HashMap::new();
+    // A aba já tem um terminal vivo (id 1). Um lançamento concorrente da mesma aba chega depois.
+    assert!(registrar_sessao(&mut reg, 1, Some("aba-a"), sessao_de_teste(1, Some("aba-a"))).is_ok());
+    match registrar_sessao(&mut reg, 2, Some("aba-a"), sessao_de_teste(2, Some("aba-a"))) {
+        Err((existente, _nao_inserida)) => assert_eq!(existente, 1),
+        Ok(()) => panic!("a aba já tinha terminal vivo: o lançamento concorrente não devia entrar"),
+    }
+    assert_eq!(reg.keys().copied().collect::<Vec<_>>(), vec![1], "o terminal vivo continua o único da aba");
+    // Outra aba, sem terminal vivo, registra normalmente.
+    assert!(registrar_sessao(&mut reg, 3, Some("aba-b"), sessao_de_teste(3, Some("aba-b"))).is_ok());
+    assert!(reg.contains_key(&3));
+}
+
+/// O lançamento bloqueante roda fora do runtime: outra tarefa do mesmo runtime progride enquanto ele espera.
+#[tokio::test(flavor = "current_thread")]
+async fn lancamento_bloqueante_nao_prende_o_runtime() {
+    use super::pty_manager::executar_fora_do_runtime;
+    use std::time::Duration;
+
+    let (liberar_tx, liberar_rx) = std::sync::mpsc::channel::<()>();
+    // O lançamento fica bloqueado até outra tarefa do mesmo runtime liberá-lo. Se ele rodasse no worker, essa
+    // tarefa nunca chegaria a rodar.
+    let lancamento = tokio::spawn(executar_fora_do_runtime(move || {
+        liberar_rx.recv_timeout(Duration::from_secs(5)).map_err(|e| e.to_string())?;
+        Ok(7u32)
+    }));
+    let liberou = tokio::spawn(async move { liberar_tx.send(()).is_ok() });
+    assert!(liberou.await.unwrap(), "a outra tarefa não rodou enquanto o lançamento esperava");
+    assert_eq!(lancamento.await.unwrap(), Ok(7));
+}
+
 /// Destino de teste: guarda os pedaços e os fins, na ordem em que chegam.
 #[derive(Default)]
 struct Gravador {
