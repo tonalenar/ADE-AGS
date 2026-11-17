@@ -6,35 +6,52 @@
 //! dados (`logs/inicializacao.log`, quando a pasta existe) e para uma caixa nativa
 //! (`MessageBoxW` no Windows, `osascript` no macOS). Depois, o processo sai com código 1.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Título e corpo do aviso. `log` é o arquivo onde a falha ficou, se a pasta de dados existe.
-/// Separado para testar o texto sem abrir janela.
-pub(crate) fn startup_failure_text(error: &str, log: Option<&Path>) -> (&'static str, String) {
+/// Onde a falha de boot ficou registrada. Diz ao aviso o que a pessoa pode fazer com ela.
+#[derive(Debug, PartialEq)]
+pub(crate) enum LogEstado {
+    /// Sem pasta de dados não há log: o detalhe só saiu no terminal.
+    SemPasta,
+    /// A falha foi acrescentada ao arquivo de log.
+    Gravado(PathBuf),
+    /// A pasta existe, mas gravar falhou (permissão, disco cheio): o motivo vai para o aviso.
+    Falhou(String),
+}
+
+/// Título e corpo do aviso. Separado para testar o texto sem abrir janela.
+pub(crate) fn startup_failure_text(error: &str, log: &LogEstado) -> (&'static str, String) {
     let detalhe = match log {
-        Some(log) => format!("O detalhe técnico ficou em:\n{}", log.display()),
-        None => "O detalhe técnico só saiu no terminal: a pasta de dados do ADE AGS não está disponível.".to_string(),
+        LogEstado::Gravado(caminho) => format!("O detalhe técnico ficou em:\n{}", caminho.display()),
+        LogEstado::Falhou(motivo) => format!("Não foi possível gravar o log: {motivo}."),
+        LogEstado::SemPasta => {
+            "O detalhe técnico só saiu no terminal: a pasta de dados do ADE AGS não está disponível.".to_string()
+        }
     };
     ("ADE AGS não pôde iniciar", format!("{error}\n\n{detalhe}"))
 }
 
+/// Acrescenta a falha ao log de inicialização e diz onde ela ficou, ou por que não ficou.
+///
+pub(crate) fn estado_do_log(dir: Option<&Path>, error: &str) -> LogEstado {
+    match dir {
+        None => LogEstado::SemPasta,
+        Some(dir) => match registrar_falha(dir, error) {
+            Ok(caminho) => LogEstado::Gravado(caminho),
+            Err(erro) => LogEstado::Falhou(erro.to_string()),
+        },
+    }
+}
+
 /// Acrescenta a falha ao log de inicialização da pasta de dados e devolve o caminho do arquivo.
-/// Quem chama ignora o erro de I/O: ele não pode esconder a falha original.
 pub(crate) fn registrar_falha(dir: &Path, error: &str) -> std::io::Result<PathBuf> {
-    let logs = dir.join("logs");
-    std::fs::create_dir_all(&logs)?;
-    let caminho = logs.join("inicializacao.log");
-    let mut arquivo = std::fs::OpenOptions::new().create(true).append(true).open(&caminho)?;
-    writeln!(arquivo, "[{}] {error}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))?;
-    Ok(caminho)
+    crate::util::datadir::anexar_log_em(dir, "inicializacao.log", error)
 }
 
 /// Mostra o aviso e encerra. Não volta.
 pub(crate) fn exit_with_startup_error(error: &str) -> ! {
-    // O log só existe se a pasta de dados existe; sem ela, o detalhe fica só no terminal.
-    let log = crate::util::datadir::ags_home().and_then(|dir| registrar_falha(&dir, error).ok());
-    let (title, body) = startup_failure_text(error, log.as_deref());
+    let log = estado_do_log(crate::util::datadir::ags_home().as_deref(), error);
+    let (title, body) = startup_failure_text(error, &log);
     eprintln!("[ade-ags] {title}: {body}");
     show_native(title, &body);
     std::process::exit(1);
@@ -70,12 +87,13 @@ fn show_native(_title: &str, _body: &str) {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use super::{LogEstado, estado_do_log};
+    use std::path::PathBuf;
 
     #[test]
     fn o_aviso_leva_a_frase_do_erro() {
         let msg = "Este banco é de uma versão mais nova do ADE AGS (v99)";
-        let (title, body) = super::startup_failure_text(msg, None);
+        let (title, body) = super::startup_failure_text(msg, &LogEstado::SemPasta);
         assert!(title.contains("ADE AGS"));
         assert!(body.contains("versão mais nova do ADE AGS (v99)"), "{body}");
     }
@@ -83,17 +101,33 @@ mod tests {
     /// Com a pasta de dados disponível, o aviso aponta o arquivo de log para a pessoa ter onde olhar.
     #[test]
     fn o_aviso_aponta_o_caminho_do_log() {
-        let log = Path::new("/dados/logs/inicializacao.log");
-        let (_, body) = super::startup_failure_text("falha", Some(log));
+        let log = LogEstado::Gravado(PathBuf::from("/dados/logs/inicializacao.log"));
+        let (_, body) = super::startup_failure_text("falha", &log);
         assert!(body.contains("/dados/logs/inicializacao.log"), "{body}");
     }
 
     /// Sem pasta de dados não há log: o aviso diz onde o detalhe saiu, sem inventar um caminho.
     #[test]
     fn sem_log_o_aviso_diz_que_o_detalhe_ficou_no_terminal() {
-        let (_, body) = super::startup_failure_text("falha", None);
+        let (_, body) = super::startup_failure_text("falha", &LogEstado::SemPasta);
         assert!(body.contains("terminal"), "{body}");
         assert!(!body.contains("inicializacao.log"), "{body}");
+    }
+
+    /// A pasta existe mas não grava (aqui, um arquivo ocupa o lugar dela, como um disco cheio ou sem permissão).
+    /// O aviso tem que dizer a causa e manter o erro original, em vez de fingir que a pasta não existe.
+    #[test]
+    fn log_que_nao_grava_diz_a_causa() {
+        let root = std::env::temp_dir().join(format!("ade-fatal-falha-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let ocupado = root.join("arquivo");
+        std::fs::write(&ocupado, b"nao e pasta").unwrap();
+        let estado = estado_do_log(Some(ocupado.as_path()), "falha de boot");
+        assert!(matches!(estado, LogEstado::Falhou(_)), "{estado:?}");
+        let (_, body) = super::startup_failure_text("falha de boot", &estado);
+        assert!(body.contains("Não foi possível gravar o log"), "{body}");
+        assert!(body.contains("falha de boot"), "o erro original continua no aviso: {body}");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

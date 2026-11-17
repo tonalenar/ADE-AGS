@@ -256,7 +256,14 @@ mod boot_tests {
     /// tipado: antes era `expect`, que fechava o app sem nenhuma mensagem.
     #[test]
     fn boot_sem_data_dir_devolve_erro_tipado() {
-        let err = db_path_in(None).expect_err("sem pasta de dados não há base");
+        // `catch_unwind` separa o caso: a versão com `expect` entra em pânico, e a falha aparece como
+        // "devolve Err" na asserção, não como abort do teste.
+        let resultado = std::panic::catch_unwind(|| db_path_in(None));
+        let err = match resultado {
+            Ok(Err(err)) => err,
+            Ok(Ok(caminho)) => panic!("sem pasta de dados não há base, e veio {caminho:?}"),
+            Err(_) => panic!("boot entrou em pânico em vez de devolver Err"),
+        };
         assert!(matches!(err, BootError::SemDiretorioDeDados), "{err:?}");
         assert!(err.to_string().contains("pasta de dados"), "{err}");
     }
