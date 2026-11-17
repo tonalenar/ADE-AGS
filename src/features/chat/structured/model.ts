@@ -61,8 +61,7 @@ export function threadCards(threads: ThreadRow[], groups: RepoGroup[], labelOf: 
 
 export interface ThreadLive {
   items: TimelineItem[];
-  /** Os pedidos abertos. `errorKey`: a última resposta a este pedido falhou (chave i18n do aviso; ver `answerRequest`). */
-  requests: (RequestRow & { errorKey?: string })[];
+  requests: RequestRow[];
   phase: "working" | "idle";
   /** O texto (e o raciocínio) do agente chegando, por item, antes do item completo. */
   drafts: Draft[];
@@ -74,6 +73,20 @@ export interface ThreadLive {
 }
 
 export const EMPTY_LIVE: ThreadLive = { items: [], requests: [], phase: "idle", drafts: [], error: null, providerCommands: [], providerConfig: null };
+
+/**
+ * Os avisos de falha de resposta (`answerErrors`, por id de pedido, fora de `requests`) somem quando o pedido sai da
+ * caixa: respondido, ou fechado pelo agente. Enquanto o pedido estiver na lista, o aviso fica, mesmo que o fio seja
+ * relido. Devolve o mesmo mapa quando nada saiu. Pura.
+ */
+export function forgetGoneAnswerErrors(before: ThreadLive, after: ThreadLive, errors: Record<string, string>): Record<string, string> {
+  const kept = new Set(after.requests.map((r) => r.id));
+  const gone = before.requests.filter((r) => !kept.has(r.id) && r.id in errors).map((r) => r.id);
+  if (gone.length === 0) return errors;
+  const next = { ...errors };
+  for (const id of gone) delete next[id];
+  return next;
+}
 
 /** Um evento `cc-chat-thread` (ver `conversa::codex`). */
 export type ThreadEvent =

@@ -12,7 +12,7 @@ import { createFrameBatcher } from "../timeline/streaming";
 import { unsnoozeConversation } from "../shelf";
 import { dispatchSkillMentions } from "../skillMentions";
 import { useAgentSkillsStore } from "@/features/skills/agentSkillsStore";
-import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, isLocalAcpAgent, threadKey, type ThreadEvent, type ThreadLive } from "./model";
+import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, forgetGoneAnswerErrors, isLocalAcpAgent, threadKey, type ThreadEvent, type ThreadLive } from "./model";
 import { addLogFailure, dismissLogFailure, parseLogFailure, type LogFailure } from "./logFailureModel";
 
 /** O sinal da janela quando uma gravação do log de execução falha de vez (ver `runs/execution_log.rs`). */
@@ -32,9 +32,11 @@ interface StructuredState {
   hydrated: Record<string, boolean>;
   /** Falhas de gravação do log, por conversa, até a pessoa dispensá-las. Não entram no chat. */
   logFailures: Record<string, LogFailure[]>;
+  /** Avisos de falha de resposta, por id de pedido. Ficam fora de `live.requests`: uma releitura do fio não os apaga. */
+  answerErrors: Record<string, string>;
 }
 
-export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, logFailures: {} }));
+export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, logFailures: {}, answerErrors: {} }));
 
 /** Um sinal de falha do log entra na conversa afetada, sem repetir o mesmo aviso. Sinal sem conversa é ignorado. */
 export function recordLogFailure(raw: unknown): void {
@@ -55,7 +57,12 @@ export function dismissThreadLogFailure(threadId: string, key: string): void {
 const liveOf = (id: string) => useStructured.getState().live[id] ?? EMPTY_LIVE;
 
 function patchLive(id: string, fn: (live: ThreadLive) => ThreadLive): void {
-  useStructured.setState((s) => ({ live: { ...s.live, [id]: fn(s.live[id] ?? EMPTY_LIVE) } }));
+  useStructured.setState((s) => {
+    const before = s.live[id] ?? EMPTY_LIVE;
+    const after = fn(before);
+    // Quando um pedido sai da caixa (respondido, ou fechado pelo agente), o seu aviso sai junto.
+    return { live: { ...s.live, [id]: after }, answerErrors: forgetGoneAnswerErrors(before, after, s.answerErrors) };
+  });
 }
 
 function upsertThread(row: ThreadRow): void {
@@ -266,6 +273,16 @@ export async function runThreadGoalAction(id: string, action: "show" | "set" | "
  * Responde um pedido do protocolo. O pedido só sai da tela depois de o backend confirmar: se ele recusar (o agente
  * fechou o pedido, ou o IPC falhou), o pedido fica e o erro aparece. Devolve `true` quando o backend confirmou.
  */
+/** Uma falha de resposta: o pedido fica na conversa, e o aviso vai ao mapa `answerErrors`, fora de `requests`. */
+function failAnswer(requestId: string): void {
+  useStructured.setState((s) => ({ answerErrors: { ...s.answerErrors, [requestId]: "chat.permission.answerFailed" } }));
+}
+
+/**
+ * Responde um pedido do protocolo. O pedido só sai da tela depois de o backend confirmar. Falha (erro, ou `false` do
+ * backend, que é "o pedido já não está aberto") não é sucesso: o pedido fica na conversa e o aviso vai ao mapa
+ * `answerErrors`, que sobrevive a uma releitura do fio. Devolve `true` quando o backend confirmou.
+ */
 export async function answerRequest(threadId: string, requestId: string, choice: string): Promise<boolean> {
   unsnoozeConversation(threadKey(threadId));
   let confirmed: boolean;
@@ -273,17 +290,14 @@ export async function answerRequest(threadId: string, requestId: string, choice:
     confirmed = await chatRequestAnswer(requestId, choice);
   } catch (e) {
     patchLive(threadId, (live) => ({ ...live, error: String(e) }));
+    failAnswer(requestId);
     return false;
   }
-  // `false` do backend: o pedido já não está aberto para resposta. Não é sucesso: o pedido fica na conversa e leva a
-  // chave de erro. A store não traduz (não importa i18n, que lê o localStorage ao carregar): o cartão traduz e mostra.
   if (confirmed !== true) {
-    patchLive(threadId, (live) => ({
-      ...live,
-      requests: live.requests.map((r) => (r.id === requestId ? { ...r, errorKey: "chat.permission.answerFailed" } : r)),
-    }));
+    failAnswer(requestId);
     return false;
   }
+  // Confirmada: o pedido sai da lista, e `patchLive` tira o aviso junto (ver `forgetGoneAnswerErrors`).
   patchLive(threadId, (live) => ({ ...live, requests: live.requests.filter((r) => r.id !== requestId) }));
   return true;
 }

@@ -228,6 +228,7 @@ export function alwaysAllow(ask: PendingAsk, pattern: string): void {
 export function usePendingAsks(): PendingAsk[] {
   const threads = useStructured((s) => s.threads);
   const live = useStructured((s) => s.live);
+  const answerErrors = useStructured((s) => s.answerErrors);
   const tui = usePermissions((s) => s.tui);
   const answered = usePermissions((s) => s.answered);
   const tabs = useTabsStore((s) => s.tabs);
@@ -240,7 +241,7 @@ export function usePendingAsks(): PendingAsk[] {
     const label = (id: string) => detected.find((a) => a.id === id)?.label ?? id;
     const fromThreads = threads.filter((th) => th.state === "active").flatMap((th) => {
       const l = live[th.id] ?? EMPTY_LIVE;
-      return threadAsks(th, l.requests, l.items, label);
+      return threadAsks(th, l.requests, l.items, label, answerErrors);
     });
     const fromTui = tui.flatMap((item) => {
       const tab = tabs.find((t) => t.id === item.tabId);
@@ -251,7 +252,7 @@ export function usePendingAsks(): PendingAsk[] {
     });
     const fromFleet = approvals.map((a) => fleetAsk(a, tasks.find((t) => t.id === a.taskId), label));
     return sortAsks([...fromThreads, ...fromTui, ...fromFleet].filter((a) => !answered[a.id]));
-  }, [threads, live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks]);
+  }, [threads, live, answerErrors, tui, answered, tabs, detected, turns, awaiting, approvals, tasks]);
 }
 
 /** O aviso do sistema de um pedido novo (só aparece com o app sem foco; ver `notifier.rs`). */
