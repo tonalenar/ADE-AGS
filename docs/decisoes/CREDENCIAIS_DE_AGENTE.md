@@ -8,9 +8,10 @@ Chaves de API de contas Claude Code e Codex ficam no keyring do sistema. O PTY n
 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` nem `OPENAI_API_KEY`. Quando o CLI precisa da
 chave, chama um helper local `ags credential`; o helper pede a credencial ao IPC da ADE.
 
-O broker registra uma concessão em memória por sessão viva, associada à conta e ao PID raiz
-do agente. O servidor verifica que o PID que fez a chamada descende de uma sessão aberta
-pelo app antes de consultar o keyring. A autorização dura até o fechamento da sessão e não
+O broker registra uma concessão em memória por sessão viva, associada à conta e à identidade
+da raiz do agente (PID e horário de início). O servidor verifica a cadeia de PID e início de
+cada processo até essa raiz, antes de consultar o keyring; PID reutilizado não herda a sessão.
+Se a mesma chamada combinar com mais de uma sessão, o broker recusa a ambiguidade. A autorização dura até o fechamento da sessão e não
 tem limite de uso, para permitir renovações do helper. A resposta contém apenas o segredo
 bruto no stdout do helper, sem JSON nem newline; o comando e os arquivos de perfil não
 contêm a chave. O servidor e a CLI apagam suas cópias de transporte assim que possível.

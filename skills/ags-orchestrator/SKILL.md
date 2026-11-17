@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.83.0
+version: 1.84.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -103,8 +103,8 @@ you get when you omit `--account`.
 
 API-key accounts keep their key in the OS keyring. Claude Code and Codex retrieve it through
 the app's local credential broker when the launched agent asks for authentication. The
-internal `ags credential` helper takes only `--account` and checks the caller's PID against
-a live agent session launched by ADE. The same session can refresh the credential more than
+internal `ags credential` helper takes only `--account` and checks the caller's process
+identity (PID and start time, including each ancestor) against a live agent session launched by ADE. PID reuse and calls that match more than one session are refused. The same session can refresh the credential more than
 once, and its descendants can request it while the session remains open. Do not invoke it
 manually or copy its output.
 
