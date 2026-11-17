@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AnimateSpin, Button, CheckCircleIcon, FolderIcon, Input, InfoIcon,
@@ -163,10 +163,13 @@ export function GraphifySection() {
   const [target, setTarget] = useState<string | null>(null);
   const [runs, setRuns] = useState<Record<string, StepRun>>({});
   const [error, setError] = useState("");
+  const loadGen = useRef(0);
 
   const load = useCallback(async () => {
+    const gen = ++loadGen.current;
     try {
       const fresh = await graphifyPlan(cwd, scope);
+      if (gen !== loadGen.current) return;
       setPlan(fresh);
       // Solo la primera vez. Esto se recarga al cambiar de alcance y después de cada paso,
       // y sembrar de nuevo pisaría lo que la persona acaba de escribir o de elegir.
@@ -175,6 +178,7 @@ export function GraphifySection() {
       );
       setError("");
     } catch (e) {
+      if (gen !== loadGen.current) return;
       setError(String(e));
     }
   }, [cwd, scope]);
@@ -426,6 +430,7 @@ export function GraphifySection() {
             onClick={() => {
               setCommands(Object.fromEntries((plan?.defaults ?? []).map((s) => [s.id, s.command])));
               setTarget(null);
+              setExtras([]);
             }}
           >
             {t("settings.graphify.reset")}

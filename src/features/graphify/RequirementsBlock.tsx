@@ -26,6 +26,7 @@ export function RequirementsBlock({ onRun, running }: {
   const [items, setItems] = useState<GraphifyRequirement[] | null>(null);
   const [commands, setCommands] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [runNote, setRunNote] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     const fresh = await graphifyRequirements().catch(() => []);
@@ -44,9 +45,11 @@ export function RequirementsBlock({ onRun, running }: {
   const run = async (id: string) => {
     setBusy(id);
     try {
-      await onRun(commands[id] ?? "");
-      // Instalar uno cambia lo que hay en el PATH: se vuelve a sondear todo.
+      const result = await onRun(commands[id] ?? "");
+      setRunNote((prev) => ({ ...prev, [id]: result.output.trim() || (result.ok ? t("settings.graphify.run") : t("settings.graphify.req.missing")) }));
       await refresh();
+    } catch (e) {
+      setRunNote((prev) => ({ ...prev, [id]: String(e) }));
     } finally {
       setBusy(null);
     }
@@ -101,7 +104,7 @@ export function RequirementsBlock({ onRun, running }: {
                       variant="outline"
                       size="sm"
                       disabled={running || busy !== null || !command.trim()}
-                      onClick={() => run(item.id)}
+                      onClick={() => void run(item.id)}
                       leftIcon={busy === item.id ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
                     >
                       {t("settings.graphify.run")}
@@ -128,6 +131,9 @@ export function RequirementsBlock({ onRun, running }: {
                   {t("settings.graphify.req.download")}
                 </p>
               )
+            )}
+            {runNote[item.id] && (
+              <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-words text-[10.5px] text-gray-500 dark:text-white/45">{runNote[item.id]}</pre>
             )}
           </div>
         );
