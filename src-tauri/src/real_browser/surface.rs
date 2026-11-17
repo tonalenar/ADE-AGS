@@ -112,3 +112,9 @@ pub(super) fn empty_clip_visibility(empty_count: &mut u8, hidden: &mut bool, emp
 pub(super) fn effective_zoom(zoom: f64, last: Option<f64>) -> f64 {
     if zoom > 0.0 && zoom.is_finite() { zoom } else { last.unwrap_or(1.0) }
 }
+
+/// A bomba do CEF só se reagenda enquanto há navegador aberto. Sem nenhum, ela não acorda a thread principal à toa
+/// a cada 33 ms: o próprio CEF pede trabalho quando precisa (`on_schedule_message_pump_work`).
+pub(super) fn keeps_pumping(open_browsers: usize) -> bool {
+    open_browsers > 0
+}

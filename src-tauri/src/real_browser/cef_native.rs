@@ -29,7 +29,7 @@ use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 use tokio::sync::oneshot;
 
-use super::surface::{diff_place, effective_zoom, empty_clip_visibility, outline, rounded_parts, PathStep, PlaceState, RoundedPart};
+use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, outline, rounded_parts, PathStep, PlaceState, RoundedPart};
 use super::{emit, on_binding};
 
 const CEF_FRAMEWORK_BUNDLE: &str = "Chromium Embedded Framework.framework";
@@ -367,9 +367,11 @@ fn pump() {
     PUMPING.with(|pumping| pumping.set(false));
     // Sem pedido novo durante o trabalho, garante a próxima volta no teto de espera.
     let generation = PUMP_GENERATION.load(Ordering::SeqCst);
-    let _ = dispatch2::DispatchQueue::main().after(dispatch2::DispatchTime::NOW.time(MAX_PUMP_DELAY_MS * 1_000_000), move || {
-        if PUMP_GENERATION.load(Ordering::SeqCst) == generation { pump(); }
-    });
+    if keeps_pumping(OPEN_BROWSERS.load(Ordering::SeqCst)) {
+        let _ = dispatch2::DispatchQueue::main().after(dispatch2::DispatchTime::NOW.time(MAX_PUMP_DELAY_MS * 1_000_000), move || {
+            if PUMP_GENERATION.load(Ordering::SeqCst) == generation { pump(); }
+        });
+    }
 }
 
 wrap_browser_process_handler! {
@@ -548,6 +550,8 @@ wrap_life_span_handler! {
         fn on_after_created(&self, browser: Option<&mut Browser>) {
             cef_trace!("on_after_created {}", self.id);
             OPEN_BROWSERS.fetch_add(1, Ordering::SeqCst);
+            // Com o primeiro navegador a bomba volta a rodar (ela para quando não há nenhum).
+            schedule_pump(0);
             let Some(browser) = browser else { return };
             PORTALS.with(|portals| {
                 if let Some(portal) = portals.borrow_mut().get_mut(&self.id) {

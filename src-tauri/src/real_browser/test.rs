@@ -1,7 +1,7 @@
 //! Testes da superfície nativa do navegador (o Portal): o contrato do `Place` que chega do front e a lógica pura
 //! que decide o que mudou, o que a máscara desenha e quando a vista é escondida.
 
-use super::surface::{diff_place, effective_zoom, empty_clip_visibility, outline, rounded_parts, PathStep, PlaceChanges, PlaceState};
+use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, outline, rounded_parts, PathStep, PlaceChanges, PlaceState};
 use super::{Place, Rect};
 use serde_json::json;
 
@@ -89,4 +89,12 @@ fn zoom_zero_mantem_o_ultimo_zoom_valido() {
     assert_eq!(effective_zoom(0.0, Some(0.8)), 0.8);
     assert_eq!(effective_zoom(0.0, None), 1.0);
     assert_eq!(effective_zoom(0.5, Some(0.8)), 0.5);
+}
+
+#[test]
+fn bomba_do_cef_so_roda_com_navegador_aberto() {
+    // Sem nenhum navegador aberto, a bomba não se reagenda; com um, segue.
+    assert!(!keeps_pumping(0));
+    assert!(keeps_pumping(1));
+    assert!(keeps_pumping(3));
 }
