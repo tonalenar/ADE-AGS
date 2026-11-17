@@ -50,21 +50,33 @@ function parseIdentity(raw: unknown): ChatProjectIdentity {
   };
 }
 
+/** A última leitura, pelo texto guardado: cada badge lê a identidade do seu projeto, e o JSON não é reanalisado a cada um. */
+let lastRaw: string | null = null;
+let lastAll: Record<string, ChatProjectIdentity> = {};
+
+/** Devolve o que está guardado. Quem muda o mapa tem de copiá-lo (`{ ...readAll() }`), porque o devolvido é o cache. */
 function readAll(): Record<string, ChatProjectIdentity> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const result: Record<string, ChatProjectIdentity> = {};
-    for (const [cwd, value] of Object.entries(parsed as Record<string, unknown>)) {
-      const identity = parseIdentity(value);
-      if (cwd && (identity.known || identity.pinned || identity.archived || identity.icon)) result[normalizeProjectPath(cwd)] = identity;
-    }
-    return result;
+    if (raw === lastRaw) return lastAll;
+    lastAll = parseAll(raw);
+    lastRaw = raw;
+    return lastAll;
   } catch {
     return {};
   }
+}
+
+function parseAll(raw: string | null): Record<string, ChatProjectIdentity> {
+  if (!raw) return {};
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const result: Record<string, ChatProjectIdentity> = {};
+  for (const [cwd, value] of Object.entries(parsed as Record<string, unknown>)) {
+    const identity = parseIdentity(value);
+    if (cwd && (identity.known || identity.pinned || identity.archived || identity.icon)) result[normalizeProjectPath(cwd)] = identity;
+  }
+  return result;
 }
 
 export function chatProjectIdentity(cwd: string): ChatProjectIdentity {
@@ -73,7 +85,7 @@ export function chatProjectIdentity(cwd: string): ChatProjectIdentity {
 
 export function setChatProjectIdentity(cwd: string, patch: Partial<ChatProjectIdentity>): void {
   try {
-    const all = readAll();
+    const all = { ...readAll() };
     const key = normalizeProjectPath(cwd);
     const current = all[key] ?? EMPTY;
     const next = parseIdentity({ ...current, ...patch });
@@ -90,7 +102,7 @@ export function setChatProjectIdentity(cwd: string, patch: Partial<ChatProjectId
 /** Remove a identidade local quando a pessoa escolhe esquecer o workspace fechado. */
 export function forgetChatProjectIdentity(cwd: string): void {
   try {
-    const all = readAll();
+    const all = { ...readAll() };
     delete all[normalizeProjectPath(cwd)];
     if (Object.keys(all).length) localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
     else localStorage.removeItem(STORAGE_KEY);
