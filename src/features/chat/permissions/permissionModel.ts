@@ -39,6 +39,8 @@ export interface PendingAsk {
   /** A TUI oferece "permitir nesta sessão" / a conversa aceita `allowSession`. */
   canSession: boolean;
   atMs: number;
+  /** Chave i18n do aviso quando a última resposta a este pedido falhou (o pedido segue na caixa). */
+  errorKey?: string;
 }
 
 /** O comando por dentro: as partes, onde ele escreve e se tem algo que não se sabe interpretar com segurança. */

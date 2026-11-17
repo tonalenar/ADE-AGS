@@ -61,7 +61,8 @@ export function threadCards(threads: ThreadRow[], groups: RepoGroup[], labelOf: 
 
 export interface ThreadLive {
   items: TimelineItem[];
-  requests: RequestRow[];
+  /** Os pedidos abertos. `errorKey`: a última resposta a este pedido falhou (chave i18n do aviso; ver `answerRequest`). */
+  requests: (RequestRow & { errorKey?: string })[];
   phase: "working" | "idle";
   /** O texto (e o raciocínio) do agente chegando, por item, antes do item completo. */
   drafts: Draft[];

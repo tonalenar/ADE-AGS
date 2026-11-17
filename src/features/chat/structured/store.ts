@@ -275,9 +275,15 @@ export async function answerRequest(threadId: string, requestId: string, choice:
     patchLive(threadId, (live) => ({ ...live, error: String(e) }));
     return false;
   }
-  // `false` do backend: o pedido já não está aberto para resposta. Não é sucesso; o pedido continua na conversa
-  // (quem mostra o aviso é o fluxo de permissões; esta store não importa i18n, que lê o localStorage ao carregar).
-  if (confirmed !== true) return false;
+  // `false` do backend: o pedido já não está aberto para resposta. Não é sucesso: o pedido fica na conversa e leva a
+  // chave de erro. A store não traduz (não importa i18n, que lê o localStorage ao carregar): o cartão traduz e mostra.
+  if (confirmed !== true) {
+    patchLive(threadId, (live) => ({
+      ...live,
+      requests: live.requests.map((r) => (r.id === requestId ? { ...r, errorKey: "chat.permission.answerFailed" } : r)),
+    }));
+    return false;
+  }
   patchLive(threadId, (live) => ({ ...live, requests: live.requests.filter((r) => r.id !== requestId) }));
   return true;
 }

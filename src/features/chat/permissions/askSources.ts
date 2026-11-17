@@ -25,7 +25,7 @@ function toolOf(request: RequestRow): string | undefined {
 }
 
 /** Os pedidos de permissão de uma conversa por protocolo (perguntas e a saída do Plano ficam no composer). */
-export function threadAsks(thread: ThreadRow, requests: RequestRow[], items: TimelineItem[], label: Label): PendingAsk[] {
+export function threadAsks(thread: ThreadRow, requests: (RequestRow & { errorKey?: string })[], items: TimelineItem[], label: Label): PendingAsk[] {
   return requests.flatMap((r): PendingAsk[] => {
     const tool = toolOf(r);
     if (r.kind === "question" || tool === "ExitPlanMode" || tool === "AskUserQuestion") return [];
@@ -49,6 +49,7 @@ export function threadAsks(thread: ThreadRow, requests: RequestRow[], items: Tim
       cwd: thread.cwd,
       canSession: true,
       atMs: r.createdAt < 1e12 ? r.createdAt * 1000 : r.createdAt,
+      errorKey: r.errorKey,
     })];
   });
 }
