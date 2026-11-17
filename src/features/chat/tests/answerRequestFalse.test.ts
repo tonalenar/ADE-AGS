@@ -10,9 +10,11 @@ const mocks = vi.hoisted(() => ({
   threadStatus: vi.fn(),
   threadGoalGet: vi.fn(),
   threadProviderConfig: vi.fn(),
+  threads: vi.fn(),
+  threadEventHandler: undefined as ((event: { payload: any }) => void) | undefined,
 }));
 
-vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => undefined) }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: (_name: string, handler: (event: { payload: any }) => void) => { mocks.threadEventHandler = handler; return Promise.resolve(() => undefined); } }));
 vi.mock("@/features/chat/structured/ipc", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   chatRequestAnswer: mocks.requestAnswer,
@@ -21,13 +23,14 @@ vi.mock("@/features/chat/structured/ipc", async (importOriginal) => ({
   chatThreadStatus: mocks.threadStatus,
   chatThreadGoalGet: mocks.threadGoalGet,
   chatThreadProviderConfig: mocks.threadProviderConfig,
+  chatThreads: mocks.threads,
 }));
 vi.mock("@/features/chat/shelf", () => ({ unsnoozeConversation: vi.fn() }));
 
 import { threadAsks } from "@/features/chat/permissions/askSources";
 import { EMPTY_LIVE, forgetGoneAnswerErrors, type ThreadLive } from "@/features/chat/structured/model";
 import type { RequestRow } from "@/features/chat/structured/ipc";
-import { answerRequest, hydrateThread, removeDeletedSideChat, useStructured } from "@/features/chat/structured/store";
+import { answerRequest, hydrateThread, removeDeletedSideChat, startStructured, useStructured } from "@/features/chat/structured/store";
 
 const KEY = "chat.permission.answerFailed";
 const thread = { id: "th", agentId: "codex", title: "Chat", cwd: "/Users/ton/app", model: null } as never;
@@ -41,8 +44,14 @@ beforeEach(() => {
   mocks.threadStatus.mockResolvedValue({ alive: true, working: false });
   mocks.threadGoalGet.mockResolvedValue(null);
   mocks.threadProviderConfig.mockResolvedValue(null);
-  useStructured.setState({ live: { th: { ...EMPTY_LIVE, requests: [request()] } }, answerErrors: {}, hydrated: {} });
+  mocks.threads.mockResolvedValue([]);
+  useStructured.setState({ live: { th: { ...EMPTY_LIVE, requests: [request()] } }, answerErrors: {}, hydrated: {}, arrivalSeq: 0, requestArrivalSeq: {} });
+  startStructured();
 });
+
+function emitRequestEvent(row: RequestRow): void {
+  mocks.threadEventHandler?.({ payload: { type: "request", threadId: "th", request: row } });
+}
 
 describe("falha de resposta: o aviso fica fora do pedido (rodada 3)", () => {
   it("answerRequest_com_ipc_retornando_false_guarda_o_aviso_fora_do_pedido", async () => {
@@ -80,21 +89,45 @@ describe("falha de resposta: o aviso fica fora do pedido (rodada 3)", () => {
     expect(useStructured.getState().answerErrors.q).toBeUndefined();
   });
 
-  it("hydrateThread_preserva_pedido_recebido_por_evento_depois_do_inicio_da_leitura", async () => {
+  it("hydrateThread_preserva_evento_com_createdAt_anterior_ao_inicio_da_leitura", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1000);
     let resolveRequests!: (rows: RequestRow[]) => void;
     mocks.threadRequests.mockReturnValueOnce(new Promise((resolve) => { resolveRequests = resolve; }));
-    useStructured.setState({ live: { th: { ...EMPTY_LIVE } }, answerErrors: {} });
+    useStructured.setState({ live: { th: { ...EMPTY_LIVE } }, answerErrors: {}, arrivalSeq: 0, requestArrivalSeq: {} });
     useStructured.setState((s) => ({ hydrated: { ...s.hydrated, th: false } }));
 
     const hydration = hydrateThread("th");
-    useStructured.setState((s) => ({
-      live: { ...s.live, th: { ...s.live.th!, requests: [{ ...request("new-event"), createdAt: 1001 }] } },
-    }));
+    emitRequestEvent({ ...request("old-clock-event"), createdAt: 999 });
     resolveRequests([]);
     await hydration;
 
-    expect(useStructured.getState().live.th?.requests.map((row) => row.id)).toEqual(["new-event"]);
+    expect(useStructured.getState().live.th?.requests.map((row) => row.id)).toEqual(["old-clock-event"]);
+  });
+
+  it("hydrateThread_preserva_evento_no_mesmo_milissegundo_do_inicio_da_leitura", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1000);
+    let resolveRequests!: (rows: RequestRow[]) => void;
+    mocks.threadRequests.mockReturnValueOnce(new Promise((resolve) => { resolveRequests = resolve; }));
+    useStructured.setState({ live: { th: { ...EMPTY_LIVE } }, answerErrors: {}, arrivalSeq: 0, requestArrivalSeq: {} });
+    useStructured.setState((s) => ({ hydrated: { ...s.hydrated, th: false } }));
+
+    const hydration = hydrateThread("th");
+    emitRequestEvent({ ...request("same-clock-event"), createdAt: 1000 });
+    resolveRequests([]);
+    await hydration;
+
+    expect(useStructured.getState().live.th?.requests.map((row) => row.id)).toEqual(["same-clock-event"]);
+  });
+
+  it("hydrateThread_remove_pedido_que_ja_estava_antes_da_leitura_com_aviso", async () => {
+    emitRequestEvent(request("before-read"));
+    useStructured.setState((s) => ({ answerErrors: { ...s.answerErrors, "before-read": KEY }, hydrated: { ...s.hydrated, th: false } }));
+    mocks.threadRequests.mockResolvedValueOnce([]);
+
+    await hydrateThread("th");
+
+    expect(useStructured.getState().live.th?.requests).toEqual([]);
+    expect(useStructured.getState().answerErrors["before-read"]).toBeUndefined();
   });
 
   it("resposta_confirmada_depois_tira_o_aviso", async () => {

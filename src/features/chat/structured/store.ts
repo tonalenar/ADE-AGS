@@ -5,7 +5,7 @@ import { setComposing, useChatStore } from "../store";
 import { fastModeForThread } from "../fastMode";
 import {
   chatAccountSet, chatRequestAnswer, chatSideChatFork, chatThreadAutoCompactOnReturn, chatThreadClearContext, chatThreadCompactContext, chatThreadCreate, chatThreadGoalAction, chatThreadGoalGet, chatThreadInterrupt, chatThreadItems, chatThreadProviderConfig, chatThreadRequests, chatThreadRetune, chatThreadSend, chatThreadSwitchAgent,
-  chatThreadSettle, chatThreads, chatThreadStatus, type SideChatForkOutcome, type ThreadAccess, type ThreadRow,
+  chatThreadSettle, chatThreads, chatThreadStatus, type RequestRow, type SideChatForkOutcome, type ThreadAccess, type ThreadRow,
 } from "./ipc";
 import type { ThreadGoal } from "./ipc";
 import { createFrameBatcher } from "../timeline/streaming";
@@ -34,9 +34,13 @@ interface StructuredState {
   logFailures: Record<string, LogFailure[]>;
   /** Avisos de falha de resposta, por id de pedido. Ficam fora de `live.requests`: uma releitura do fio não os apaga. */
   answerErrors: Record<string, string>;
+  /** Contador local monotônico para ordenar pedidos recebidos por evento, independente do relógio do servidor. */
+  arrivalSeq: number;
+  /** Última chegada local de cada pedido, por conversa e id do pedido. */
+  requestArrivalSeq: Record<string, Record<string, number>>;
 }
 
-export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, logFailures: {}, answerErrors: {} }));
+export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, logFailures: {}, answerErrors: {}, arrivalSeq: 0, requestArrivalSeq: {} }));
 
 /** Um sinal de falha do log entra na conversa afetada, sem repetir o mesmo aviso. Sinal sem conversa é ignorado. */
 export function recordLogFailure(raw: unknown): void {
@@ -61,7 +65,45 @@ function patchLive(id: string, fn: (live: ThreadLive) => ThreadLive): void {
     const before = s.live[id] ?? EMPTY_LIVE;
     const after = fn(before);
     // Quando um pedido sai da caixa (respondido, ou fechado pelo agente), o seu aviso sai junto.
-    return { live: { ...s.live, [id]: after }, answerErrors: forgetGoneAnswerErrors(before, after, s.answerErrors) };
+    return {
+      live: { ...s.live, [id]: after },
+      answerErrors: forgetGoneAnswerErrors(before, after, s.answerErrors),
+      requestArrivalSeq: forgetGoneRequestArrivals(id, after, s.requestArrivalSeq),
+    };
+  });
+}
+
+/** Remove os marcos locais de pedidos que já saíram da caixa da conversa. */
+function forgetGoneRequestArrivals(threadId: string, live: ThreadLive, arrivals: Record<string, Record<string, number>>): Record<string, Record<string, number>> {
+  const byRequest = arrivals[threadId];
+  if (!byRequest) return arrivals;
+  const pending = new Set(live.requests.map((request) => request.id));
+  const gone = Object.keys(byRequest).filter((id) => !pending.has(id));
+  if (gone.length === 0) return arrivals;
+  const nextByRequest = { ...byRequest };
+  for (const id of gone) delete nextByRequest[id];
+  const next = { ...arrivals };
+  if (Object.keys(nextByRequest).length === 0) delete next[threadId];
+  else next[threadId] = nextByRequest;
+  return next;
+}
+
+/** Um pedido que entra pelo evento recebe ordem local; o carimbo do servidor não participa da concorrência. */
+export function recordThreadRequest(threadId: string, request: RequestRow): void {
+  useStructured.setState((s) => {
+    const before = s.live[threadId] ?? EMPTY_LIVE;
+    const after = applyThreadEvent(before, { type: "request", threadId, request });
+    const arrivalSeq = s.arrivalSeq + 1;
+    const arrivals = {
+      ...s.requestArrivalSeq,
+      [threadId]: { ...(s.requestArrivalSeq[threadId] ?? {}), [request.id]: arrivalSeq },
+    };
+    return {
+      arrivalSeq,
+      live: { ...s.live, [threadId]: after },
+      answerErrors: forgetGoneAnswerErrors(before, after, s.answerErrors),
+      requestArrivalSeq: forgetGoneRequestArrivals(threadId, after, arrivals),
+    };
   });
 }
 
@@ -80,6 +122,7 @@ export function removeDeletedSideChat(id: string): void {
     live: Object.fromEntries(Object.entries(state.live).filter(([threadId]) => threadId !== id)),
     hydrated: Object.fromEntries(Object.entries(state.hydrated).filter(([threadId]) => threadId !== id)),
     answerErrors: forgetGoneAnswerErrors(state.live[id] ?? EMPTY_LIVE, EMPTY_LIVE, state.answerErrors),
+    requestArrivalSeq: Object.fromEntries(Object.entries(state.requestArrivalSeq).filter(([threadId]) => threadId !== id)),
   }));
 }
 
@@ -140,6 +183,10 @@ export function startStructured(): void {
     }
     // Pedidos e falhas são pontos de atenção: tiram o fio do adiamento sem acordar turnos normais.
     if (event.type === "request" || event.type === "error") unsnoozeConversation(threadKey(event.threadId));
+    if (event.type === "request") {
+      recordThreadRequest(event.threadId, event.request);
+      return;
+    }
     patchLive(event.threadId, (live) => applyThreadEvent(live, event));
     if (event.type === "item") {
       useStructured.setState((s) => ({ threads: s.threads.map((t) => (t.id === event.threadId ? { ...t, updatedAt: Date.now() } : t)) }));
@@ -151,15 +198,16 @@ export function startStructured(): void {
 export function hydrateThread(id: string): Promise<void> {
   if (useStructured.getState().hydrated[id]) return Promise.resolve();
   useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: true } }));
-  const requestsReadAt = Date.now();
+  const readSeq = useStructured.getState().arrivalSeq;
   return Promise.all([chatThreadItems(id), chatThreadRequests(id), chatThreadStatus(id), chatThreadGoalGet(id), chatThreadProviderConfig(id)])
     .then(([items, requests, status, goal, providerConfig]) => {
+      const requestArrivals = useStructured.getState().requestArrivalSeq[id] ?? {};
       patchLive(id, (live) => ({
         ...live,
         // O que chegou por evento enquanto lia fica (é mais novo).
         items: [...items.filter((i) => !live.items.some((x) => x.id === i.id)), ...live.items],
-        // Uma caixa vazia confirma a resolução dos pedidos anteriores à leitura; eventos mais novos ainda prevalecem.
-        requests: requests.length > 0 ? requests : live.requests.filter((request) => request.createdAt > requestsReadAt),
+        // Uma caixa vazia confirma a resolução dos pedidos anteriores à leitura; eventos recebidos depois prevalecem.
+        requests: requests.length > 0 ? requests : live.requests.filter((request) => (requestArrivals[request.id] ?? 0) > readSeq),
         phase: status.working ? "working" : live.phase,
         providerConfig: providerConfig ?? live.providerConfig,
       }));
