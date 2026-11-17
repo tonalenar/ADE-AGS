@@ -206,12 +206,16 @@ export function ColorMenu({ session }: { session: AnnotationSession }) {
     return () => window.removeEventListener("pointerdown", close, { capture: true });
   }, [open]);
 
-  // A paleta é `fixed`, com a posição de quando abriu: se a barra rola com ela aberta, fecha (A191, como o seletor de agente).
+  // A paleta é `fixed`, com a posição de quando abriu: se a barra (um ancestral) rola com ela aberta, fecha. A rolagem de
+  // uma parte que não contém a paleta (o chat que escreve em streaming) não a fecha (A191, como o seletor de agente).
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
-    window.addEventListener("scroll", close, true);
-    return () => window.removeEventListener("scroll", close, true);
+    const onScroll = (event: Event) => {
+      const from = event.target;
+      if (from === document || (from instanceof Node && ref.current !== null && from.contains(ref.current))) setOpen(false);
+    };
+    window.addEventListener("scroll", onScroll, true);
+    return () => window.removeEventListener("scroll", onScroll, true);
   }, [open]);
 
   return (

@@ -36,11 +36,20 @@ describe("paleta de cores da anotação (A191)", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("rolar a barra com a paleta aberta a fecha", () => {
+  it("rolar a barra (um ancestral da paleta) com a paleta aberta a fecha", () => {
     act(() => root.render(<ColorMenu session={session} />));
     act(() => host.querySelector<HTMLButtonElement>("button")!.click());
     expect(host.querySelector("[role=group]")).not.toBeNull();
-    act(() => window.dispatchEvent(new Event("scroll")));
+    act(() => host.dispatchEvent(new Event("scroll")));
     expect(host.querySelector("[role=group]")).toBeNull();
+  });
+
+  it("rolagem de uma parte que não contém a paleta (o chat em streaming) não a fecha", () => {
+    act(() => root.render(<ColorMenu session={session} />));
+    act(() => host.querySelector<HTMLButtonElement>("button")!.click());
+    const transcript = document.createElement("div");
+    host.appendChild(transcript);
+    act(() => transcript.dispatchEvent(new Event("scroll")));
+    expect(host.querySelector("[role=group]")).not.toBeNull();
   });
 });

@@ -15,6 +15,11 @@ import { highlightAgent } from "./agentHighlight";
  * mismo que le prende la barra de arriba mientras está elegido o mientras se pasa el mouse
  * por su fila—, así que se elige mirando y no adivinando.
  */
+/** `true` se o retângulo já não cai dentro da janela (o botão rolou para fora): a lista não tem onde ficar. */
+function offscreen(r: DOMRect): boolean {
+  return r.bottom < 0 || r.right < 0 || r.top > window.innerHeight || r.left > window.innerWidth;
+}
+
 export function AgentPicker({ agents, value, onChange, compact }: {
   /** Los agentes de esta carpeta, en el orden de la barra de tabs. */
   agents: Tab[];
@@ -30,16 +35,34 @@ export function AgentPicker({ agents, value, onChange, compact }: {
   const list = useRef<HTMLDivElement>(null);
   const chosen = agents.find((a) => a.id === value) ?? null;
 
-  // A lista é `fixed` com a posição do momento em que abriu: se a página rola com ela aberta, ela fica solta do botão.
-  // Então fecha. A rolagem de dentro da própria lista não conta.
+  // Com a lista aberta, a posição acompanha o botão. A lista é `fixed`: se o botão se mexe e ela fica no lugar antigo, fica
+  // solta. Mexem o botão: a rolagem de um ancestral ou da página, redimensionar a janela, e um ancestral que muda de
+  // tamanho (o composer que cresce empurra o botão sem rolar a página). Se o botão sai da tela, a lista fecha.
   useEffect(() => {
     if (!open) return;
+    const follow = () => {
+      const current = box.current?.getBoundingClientRect();
+      if (!current || offscreen(current)) {
+        setOpen(false);
+        return;
+      }
+      setRect(current);
+    };
+    // Só a rolagem de um ancestral do botão, ou da página, o move. A rolagem da própria lista não conta, e a de uma
+    // parte que não contém o botão (o chat que escreve em streaming) tampouco.
     const onScroll = (event: Event) => {
-      if (list.current?.contains(event.target as Node)) return;
-      setOpen(false);
+      const from = event.target;
+      if (from === document || (from instanceof Node && box.current !== null && from.contains(box.current))) follow();
     };
     window.addEventListener("scroll", onScroll, true);
-    return () => window.removeEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", follow);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(follow);
+    for (let el: Element | null = box.current; el; el = el.parentElement) observer?.observe(el);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", follow);
+      observer?.disconnect();
+    };
   }, [open]);
 
   useEffect(() => {
