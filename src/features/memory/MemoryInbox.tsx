@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { useMissionsStore } from "@/features/missions/store";
+import { uiErrorText } from "@/shared/uiErrorText";
 import {
   approveBulk, asksHighPriority, flatten, inboxKeyAction, groupsFromWorkspaceReview, itemId, normalizeGroups, planBulk, rejectBulk, selectedItems, totalPending,
   type BulkOutcome, type MissionReviewGroup,
@@ -102,7 +103,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
       const live = new Set(flatten(next).map(itemId));
       setSelected((cur) => new Set([...cur].filter((id) => live.has(id))));
     } catch (e) {
-      setMessage(String(e));
+      setMessage(uiErrorText(e));
     } finally {
       setLoaded(true);
     }
