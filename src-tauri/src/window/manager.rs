@@ -346,10 +346,61 @@ pub fn focus_window(app: tauri::AppHandle, label: String) -> Result<(), String> 
 pub fn arm_deferred_deadline(app: &AppHandle) {
     let handle = app.clone();
     let prazo = super::startup::DEFERRED_RESTORE_DEADLINE;
-    std::thread::spawn(move || {
-        std::thread::sleep(prazo);
-        restaurar_adiadas_se_prazo(&handle, prazo, prazo);
+    armar_com_relogio(prazo, std::thread::sleep, move |decorrido| {
+        // A restauração cria WebViews: tem que correr no event loop, não na thread do relógio.
+        let principal = handle.clone();
+        if let Err(error) = handle.run_on_main_thread(move || restaurar_adiadas_se_prazo(&principal, decorrido, prazo)) {
+            eprintln!("[restore] não foi possível levar a restauração das janelas adiadas à thread principal: {error}");
+        }
     });
+}
+
+/// Espera `prazo` no relógio injetado e só então chama `ao_vencer`. O teste troca o relógio por um canal.
+fn armar_com_relogio(
+    prazo: Duration,
+    dormir: impl FnOnce(Duration) + Send + 'static,
+    ao_vencer: impl FnOnce(Duration) + Send + 'static,
+) {
+    std::thread::spawn(move || {
+        dormir(prazo);
+        ao_vencer(prazo);
+    });
+}
+
+#[cfg(test)]
+mod prazo_test {
+    use super::*;
+    use crate::window::startup::DEFERRED_RESTORE_DEADLINE;
+    use std::sync::mpsc;
+
+    #[test]
+    fn o_prazo_espera_o_relogio_e_so_depois_avisa() {
+        let (dormiu, rx_dormiu) = mpsc::channel();
+        let (venceu, rx_venceu) = mpsc::channel();
+        armar_com_relogio(
+            DEFERRED_RESTORE_DEADLINE,
+            move |tempo| {
+                let _ = dormiu.send(tempo);
+            },
+            move |decorrido| {
+                let _ = venceu.send(decorrido);
+            },
+        );
+        let tempo = rx_dormiu.recv().expect("o relógio injetado não foi usado");
+        assert_eq!(tempo, DEFERRED_RESTORE_DEADLINE);
+        let decorrido = rx_venceu.recv().expect("o prazo não avisou depois do relógio");
+        assert_eq!(decorrido, DEFERRED_RESTORE_DEADLINE);
+    }
+
+    #[test]
+    fn a_restauracao_do_prazo_vai_para_a_thread_principal() {
+        let fonte = include_str!("manager.rs");
+        let inicio = fonte.find("pub fn arm_deferred_deadline").expect("arm_deferred_deadline mudou de forma");
+        let resto = &fonte[inicio..];
+        let corpo = &resto[..resto.find("\n}\n").expect("fim de arm_deferred_deadline")];
+        assert!(corpo.contains("run_on_main_thread"), "o prazo restaura janelas fora do event loop");
+        assert!(corpo.contains("eprintln!"), "a falha ao despachar tem que ficar registrada");
+    }
 }
 
 fn restaurar_adiadas_se_prazo(app: &AppHandle, decorrido: Duration, prazo: Duration) {
