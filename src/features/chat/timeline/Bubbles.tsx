@@ -25,7 +25,7 @@ export function Collapsible({ children, innerClass = "" }: { children: React.Rea
   const [height, setHeight] = useState(0);
   const [open, setOpen] = useState(false);
   // A altura inicial é medida uma vez, na montagem. Medir a cada render forçava layout síncrono; o ResizeObserver abaixo
-  // já acompanha as mudanças (A120).
+  // já acompanha as mudanças.
   useLayoutEffect(() => {
     if (inner.current) setHeight(inner.current.offsetHeight);
   }, []);

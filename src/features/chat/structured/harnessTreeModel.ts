@@ -114,7 +114,7 @@ export interface GraphState {
 }
 
 /**
- * Igualdade estrutural de dois valores vindos do JSON, sem serializar cada nó a cada sincronização (A124). Campo
+ * Igualdade estrutural de dois valores vindos do JSON, sem serializar cada nó a cada sincronização. Campo
  * ausente e `undefined` contam como iguais, como no `JSON.stringify` que esta função substitui.
  */
 function sameValue(a: unknown, b: unknown): boolean {

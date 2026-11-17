@@ -23,7 +23,7 @@ function send(key: string, text: string): void {
 
 /**
  * O estado de uma conversa para a fila. `deadline` é quando a compactação em andamento expira (o TTL), para a fila
- * reavaliar sozinha (A114). Com o agente trabalhando, não se procura compactação: já é «ocupado» (A109). `full` pede o
+ * reavaliar sozinha. Com o agente trabalhando, não se procura compactação: já é «ocupado». `full` pede o
  * detalhe mesmo assim (o «enviar agora» precisa saber se está compactando).
  */
 function stateOf(key: string, full = false): { working: boolean; waiting: boolean; compacting: boolean; deadline: number | null } {
@@ -99,7 +99,7 @@ export function startQueueRunner(): void {
       }
       prev[key] = working;
     }
-    // Uma compactação em andamento expira pelo tempo, não por um evento: agenda a reavaliação para o prazo (A114).
+    // Uma compactação em andamento expira pelo tempo, não por um evento: agenda a reavaliação para o prazo.
     if (expiry !== null) clearTimeout(expiry);
     expiry = deadline === null ? null : setTimeout(check, Math.max(0, deadline - Date.now()) + 1);
   };

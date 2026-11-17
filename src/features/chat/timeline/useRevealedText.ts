@@ -86,7 +86,7 @@ export function useRevealedText(id: string, text: string, animate: boolean, live
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-    // O crescimento do texto não reinicia o quadro: o alvo novo entra em `progress` e o passo seguinte já o usa (A118).
+    // O crescimento do texto não reinicia o quadro: o alvo novo entra em `progress` e o passo seguinte já o usa.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, revealing]);
 

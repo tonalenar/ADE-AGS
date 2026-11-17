@@ -35,7 +35,7 @@ export function ChatMarkdownImageStrip({ content, className = "" }: { content: s
   return items.length > 0 ? <AttachmentStrip items={items} className={className} /> : null;
 }
 
-/** Indexa respostas e saídas de ferramentas mesmo quando uma linha antiga está recolhida. Conta por item, sem reler os outros (A107). */
+/** Indexa respostas e saídas de ferramentas mesmo quando uma linha antiga está recolhida. Conta por item, sem reler os outros. */
 export function ChatMarkdownMediaIndex({ items }: { items: readonly TimelineItem[] }) {
   const cwd = useContext(AttachCwdContext);
   const found = useMemo(() => mediaOfItems(items, cwd), [items, cwd]);

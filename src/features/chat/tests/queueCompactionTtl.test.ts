@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "zustand";
 
-import { COMPACTION_TTL_MS, isCompacting } from "../autocompact/model";
+import { COMPACTION_TTL_MS } from "../autocompact/model";
 import { startQueueRunner } from "../queueRunner";
 import { enqueueMessage, useChatStore } from "../store";
 

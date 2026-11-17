@@ -223,7 +223,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   const stashes = usePromptStash((s) => s.items);
   const stashLoaded = usePromptStash((s) => s.loaded);
   const hasStashContent = text.trim().length > 0 || attachments.list.length > 0 || quotes.length > 0;
-  // O rascunho do cofre só é serializado quando é comparado (ao guardar ou ao restaurar), e não a cada render (A122).
+  // O rascunho do cofre só é serializado quando é comparado (ao guardar ou ao restaurar), e não a cada render.
   const stashInputRef = useRef<Record<string, unknown>>({});
   stashInputRef.current = {
     text,

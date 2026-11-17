@@ -66,6 +66,15 @@ describe("a barra lateral só re-renderiza com o que ela mostra de cada conversa
     });
     expect(commits).toBe(0);
 
+    // Um pedido pendente numa conversa muda o que a barra mostra («precisa de você»): ela re-renderiza.
+    commits = 0;
+    await act(async () => {
+      useStructured.setState((s) => ({
+        live: { ...s.live, t2: { ...(s.live.t2 as ThreadLive), requests: [{ id: "r1", threadId: "t2", kind: "command", itemId: null, title: "rodar", detail: "", options: null, state: "pending", createdAt: 1 }] } },
+      }) as never);
+    });
+    expect(commits).toBeGreaterThan(0);
+
     // Controle: a mesma conversa mudando de fase (ficou trabalhando) é o que a barra mostra, então ela re-renderiza.
     commits = 0;
     await act(async () => {

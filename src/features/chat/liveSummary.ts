@@ -30,11 +30,6 @@ export interface LiveSummary {
   activity: Activity;
 }
 
-/**
- * O resumo ao vivo de uma conversa para a sidebar e o cabeçalho. Conversa por protocolo: os itens
- * que chegam pelo evento do agente. Aba (TUI): o estado do canal (fase, começo do turno e a
- * ferramenta pendente), sem ler a timeline de cada aba.
- */
 /** O resumo de uma conversa por protocolo, a partir dos registros dela. Pura. */
 function threadSummaryOf(thread: ThreadLive | undefined): LiveSummary {
   const waiting = (thread?.requests.length ?? 0) > 0;
@@ -66,6 +61,11 @@ function threadSummaryFields(thread: ThreadLive | undefined): ThreadSummaryField
   };
 }
 
+/**
+ * O resumo ao vivo de uma conversa para a sidebar e o cabeçalho. Conversa por protocolo: os itens
+ * que chegam pelo evento do agente. Aba (TUI): o estado do canal (fase, começo do turno e a
+ * ferramenta pendente), sem ler a timeline de cada aba.
+ */
 export function useLiveSummary(key: string): LiveSummary {
   const threadId = threadIdOf(key);
   // Por conversa, a linha assina só os campos primitivos do resumo, com igualdade rasa: o texto que chega numa conversa

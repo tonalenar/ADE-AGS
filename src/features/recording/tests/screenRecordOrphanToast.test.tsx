@@ -16,8 +16,8 @@ vi.mock("../ipc", () => ({
   openPrivacySettings: () => Promise.resolve(),
   screenRecordingStatus: () => Promise.resolve(rec.active),
   screenRecordingStart: (_kind: string, _target: string) => {
-    rec.started.push(`screen:${_target}`);
-    rec.active = `screen:${_target}`;
+    rec.started.push(`desktop:${_target}`);
+    rec.active = `desktop:${_target}`;
     return Promise.resolve();
   },
   screenRecordingStop: (id: string) => {
@@ -33,12 +33,14 @@ import { ScreenRecordButton } from "../ScreenRecordButton";
 let root: Root;
 let host: HTMLDivElement;
 const render = () => act(async () => {
-  root.render(<ScreenRecordButton kind="screen" target="main" label="Tela" composerTarget="conv-1" />);
+  root.render(<ScreenRecordButton kind="desktop" target="main" label="Tela" composerTarget="conv-1" />);
 });
 const orphanToasts = () => useBotToastStore.getState().toasts.filter((t) => t.sticky);
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  // A gravação de tela da tela principal é do macOS (o botão só aparece lá).
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
   rec.active = "";
   rec.started = [];
   rec.stopped = [];
@@ -52,7 +54,7 @@ afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(
 describe("a gravação que fica sem botão tem um aviso que some quando ela para", () => {
   it("parar pelo aviso fecha o aviso; ele não para uma gravação nova", async () => {
     // Uma gravação de tela em curso quando o botão sai da tela.
-    rec.active = "screen:main";
+    rec.active = "desktop:main";
     await render();
     await act(async () => { await Promise.resolve(); });
     await act(async () => { root.unmount(); });
@@ -62,12 +64,12 @@ describe("a gravação que fica sem botão tem um aviso que some quando ela para
 
     // Parar pelo aviso: a gravação para e o aviso some.
     await act(async () => { toast.onAction!(); await Promise.resolve(); });
-    expect(rec.stopped).toEqual(["screen:main"]);
+    expect(rec.stopped).toEqual(["desktop:main"]);
     expect(orphanToasts()).toHaveLength(0);
   });
 
   it("começar uma gravação nova tira o aviso antigo, que já não pode parar a nova", async () => {
-    rec.active = "screen:main";
+    rec.active = "desktop:main";
     await render();
     await act(async () => { await Promise.resolve(); });
     await act(async () => { root.unmount(); });
@@ -81,7 +83,7 @@ describe("a gravação que fica sem botão tem um aviso que some quando ela para
       host.querySelector("button")!.click();
       await Promise.resolve();
     });
-    expect(rec.started).toEqual(["screen:main"]);
+    expect(rec.started).toEqual(["desktop:main"]);
     expect(orphanToasts()).toHaveLength(0);
     // O aviso velho já não está na tela; se algo o chamar, não para a gravação nova.
     await act(async () => { stale.onAction?.(); await Promise.resolve(); });

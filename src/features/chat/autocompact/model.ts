@@ -147,7 +147,7 @@ export function compactionOf(item: TimelineItem): Compaction | null {
 
 /**
  * Quando a compactação em andamento deixa de contar (o prazo do TTL). `null` = não há uma em andamento com prazo. Pura.
- * A fila usa isso para reavaliar no prazo, sem depender de outra mudança na conversa (A114).
+ * A fila usa isso para reavaliar no prazo, sem depender de outra mudança na conversa.
  */
 export function compactionDeadline(items: readonly TimelineItem[]): number | null {
   for (let i = items.length - 1; i >= 0; i -= 1) {

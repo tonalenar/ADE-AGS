@@ -73,6 +73,21 @@ describe("a fala final fica no mesmo slot do corpo", () => {
     expect(host.textContent).toContain("Segundo parágrafo.");
   });
 
+  it("turno_com_erro_mantem_a_fala_final: um turno que acabou com erro mostra a fala no mesmo slot, sem remontar", async () => {
+    await draw([user, fala("Primeiro parágrafo.")]);
+    const primeiro = paragrafo();
+    const erro: TimelineItem = { kind: "turnEnd", id: "e", durationMs: 4000, text: "o processo caiu" };
+    await draw([user, fala("Primeiro parágrafo.")]);
+    await draw([user, fala("Primeiro parágrafo.")], false);
+    await draw([user, fala("Primeiro parágrafo."), erro], false);
+
+    expect(montagens("a1")).toBe(1);
+    expect(desmontagens("a1")).toBe(0);
+    expect(paragrafo()).toBe(primeiro);
+    // Com erro o turno fica aberto para mostrar o ponto em que parou (não recolhe sozinho).
+    expect(host.textContent).toContain("Primeiro parágrafo.");
+  });
+
   it("com uma imagem chegando no 2º pedaço, o texto também não remonta (a lacuna do lote 1c)", async () => {
     await draw([user, fala("Primeiro parágrafo.")]);
     const primeiro = paragrafo();

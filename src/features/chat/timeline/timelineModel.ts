@@ -219,7 +219,7 @@ export function timelineTurns(items: TimelineItem[]): Turn[] {
 /**
  * A mesma conta de `timelineTurns`, reaproveitando o que já estava pronto: os turnos antes do último ponto limpo que
  * ainda é igual (os mesmos itens, pela identidade) são os mesmos objetos, e só o resto é contado de novo. Assim, quando
- * chega um pedaço no fim da conversa, os turnos anteriores não são refeitos nem re-renderizados (A106). Pura.
+ * chega um pedaço no fim da conversa, os turnos anteriores não são refeitos nem re-renderizados. Pura.
  */
 export function timelineTurnsCached(prev: TurnsCache | null, items: TimelineItem[]): TurnsCache {
   const turns: Turn[] = [];

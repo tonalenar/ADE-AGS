@@ -4,7 +4,7 @@ import type { TimelineItem } from "./types";
 
 /**
  * As imagens que cada item cita (no texto e na saída), guardadas por item e por pasta. Um item que não mudou é lido uma
- * vez só: quando chega um pedaço no fim da conversa, os outros não passam de novo pela regex (A107). Pura sobre o item.
+ * vez só: quando chega um pedaço no fim da conversa, os outros não passam de novo pela regex. Pura sobre o item.
  */
 const cache = new WeakMap<TimelineItem, Map<string | null, MarkdownImageMedia[]>>();
 

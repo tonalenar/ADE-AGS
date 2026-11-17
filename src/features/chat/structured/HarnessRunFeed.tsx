@@ -120,7 +120,7 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
   const threads = useStructured((state) => state.threads);
   const lineageChats = useMemo(() => descendants(threadId, threads), [threadId, threads]);
   const lineageKey = lineageChats.map(({ thread }) => thread.id).sort().join("|");
-  // Só a fase, os pedidos e a falha das conversas da árvore re-renderizam o painel; o texto que chega numa delas não (A110).
+  // Só a fase, os pedidos e a falha das conversas da árvore re-renderizam o painel; o texto que chega numa delas não.
   const lineageIds = useMemo(() => lineageChats.map(({ thread }) => thread.id), [lineageKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const liveSignature = useStructured((state) => threadStatusSignature(state.live, lineageIds));
   const live = useStructured.getState().live;

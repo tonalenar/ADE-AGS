@@ -152,7 +152,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   const { t } = useTranslation();
   // "Chamadas de ferramenta no chat" (Configurações → Chat): o fold mostra só o que o modo deixa.
   const toolVisibility = useChatPrefs().toolCallVisibility;
-  // A conta dos turnos reaproveita o que já estava pronto (A106): o pedaço que chega no fim não refaz os turnos anteriores.
+  // A conta dos turnos reaproveita o que já estava pronto: o pedaço que chega no fim não refaz os turnos anteriores.
   const turnsCache = useRef<TurnsCache | null>(null);
   const allTurns = useMemo(() => {
     const next = timelineTurnsCached(turnsCache.current, items);
@@ -189,7 +189,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   }), [streaming, mountedAt, agentId, agentLabel, headers, voices]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Função estável: o `SelectionComment` a tem nas dependências dos listeners (ver A111).
+  // Função estável: o `SelectionComment` a tem nas dependências dos listeners.
   const scrollerOf = useCallback(() => scrollRef.current, []);
   const contentRef = useRef<HTMLDivElement>(null);
   const turnsHostRef = useRef<HTMLDivElement>(null);
@@ -338,7 +338,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     turnHeights.current.set(key, height);
     const scroller = scrollRef.current;
     if (scroller && index < visibleRangeRef.current.start && !stick.current) scroller.scrollTop += height - previous;
-    // A altura só serve à lista virtualizada. Fora dela, medir cada token não redesenha a conversa inteira (A108).
+    // A altura só serve à lista virtualizada. Fora dela, medir cada token não redesenha a conversa inteira.
     if (turnCountRef.current > VIRTUALIZE_AFTER_TURNS) setHeightRevision((revision) => revision + 1);
   }, []);
   const scrollToTurn = useCallback((index: number) => {
@@ -350,7 +350,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     stick.current = false;
     following.current = false;
     // Sem virtualização, todos os turnos estão na tela: a posição é a que o navegador mede agora. A soma das alturas
-    // guardadas só é refeita quando a lista é virtualizada (A108), então pode estar atrasada e levar a busca errado.
+    // guardadas só é refeita quando a lista é virtualizada, então pode estar atrasada e levar a busca errado.
     const key = turns[index]?.key;
     const rendered = !virtualized && key !== undefined ? contentRef.current?.querySelector<HTMLElement>(`[data-virtual-turn="${CSS.escape(key)}"]`) : null;
     if (rendered) {
@@ -881,6 +881,13 @@ const VERB: Record<ToolKind, string> = {
 function WorkGroup({ tools, active }: { tools: TimelineItem[]; active: boolean }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  // Uma ferramenta que vira resumo começa recolhida: o detalhe da linha aberta não vira uma lista aberta sem aviso.
+  const isSingle = tools.length === 1;
+  const [wasSingle, setWasSingle] = useState(isSingle);
+  if (wasSingle !== isSingle) {
+    setWasSingle(isSingle);
+    setOpen(false);
+  }
   // Uma ferramenta é a linha dela (o mesmo visual de sempre); duas ou mais viram o resumo recolhido. É sempre este
   // componente, e o botão da linha é o mesmo nó quando chega a segunda: não há remontagem (era o piscar do lote 1a).
   const single = tools.length === 1 ? tools[0]! : null;

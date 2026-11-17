@@ -132,8 +132,7 @@ export function startStructured(): void {
   });
 }
 
-/** Lê do banco a timeline e os pendentes de uma conversa (uma vez). */
-/** Quantas vezes a leitura de uma conversa por protocolo é tentada antes de desistir (A102). */
+/** Quantas vezes a leitura de uma conversa por protocolo é tentada antes de desistir. */
 const HYDRATE_ATTEMPTS = 3;
 
 function readThread(id: string) {

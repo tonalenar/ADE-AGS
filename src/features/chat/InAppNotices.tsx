@@ -49,7 +49,7 @@ export function InAppNotices() {
   const phase = useChatLive((s) => s.phase);
   const question = useChatLive((s) => s.question);
   const awaiting = useChatLive((s) => s.awaiting);
-  // Só a fase, os pedidos e a falha das conversas da central disparam o cálculo; o texto que chega numa delas não (A110).
+  // Só a fase, os pedidos e a falha das conversas da central disparam o cálculo; o texto que chega numa delas não.
   const threadIds = useMemo(() => conversations.map((c) => threadIdOf(c.ref)).filter((id): id is string => id !== null), [conversations]);
   const liveSignature = useStructured((s) => threadStatusSignature(s.live, threadIds));
   const states = useMemo(

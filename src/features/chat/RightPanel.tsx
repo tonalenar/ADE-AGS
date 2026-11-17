@@ -65,7 +65,7 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   // A aba à vista: o `panel` é a superfície dela (o `reconcileColumn` garante que existe uma aba para ele).
   const activeTab = useChatStore((s) => s.columnTabs.find((tab) => tab.id === s.columnActive && tab.kind === s.panel) ?? null);
   const contentRef = useRef<HTMLDivElement>(null);
-  // Função estável para o `SelectionComment` (A111): uma função nova a cada render reinstalava os listeners.
+  // Função estável para o `SelectionComment`: uma função nova a cada render reinstalava os listeners.
   const contentOf = useCallback(() => contentRef.current, []);
   const panelRef = useRef<HTMLElement>(null);
   useShareDevices();
