@@ -167,23 +167,21 @@ export function detectPermissionPrompt(lines: readonly string[] | null | undefin
   return { kind, title, detail, choices, signature };
 }
 
-/** O menu do Codex: o cursor é `›` e a opção de recusar termina em `(esc)`. O detector das missões não lê essas marcas. */
-const CODEX_CURSOR_RE = /^\s*›\s*1[.)]\s+\S/m;
-const CODEX_ESC_RE = /^\s*\d{1,2}[.)]\s+.*\(esc\)\s*$/m;
-
-/** O terminal está num modo de espera de resposta? O detector das missões, ou o menu do Codex. Pura. */
-function esperaResposta(lines: readonly string[]): boolean {
-  if (isWaitingForUser(lines)) return true;
-  const tail = lines.filter((l) => l.trim() !== "").slice(-TAIL_LINES).join("\n");
-  return CODEX_CURSOR_RE.test(tail) || CODEX_ESC_RE.test(tail);
-}
-
 /**
- * O pedido de permissão da tela AGORA, só quando o terminal está em modo de espera. Sem isso, a forma de um menu
- * impresso pelo agente bastaria para virar um cartão com botão de aprovar. Pura.
+ * O pedido de permissão da tela AGORA, só quando o detector de espera (`isWaitingForUser`, a mesma fonte do Vigia)
+ * reconhece um diálogo na tela. Sem isso, a forma de um menu impresso pelo agente bastaria para virar cartão de
+ * aprovação. Não há atalho fora do detector (rodada 1 do PR11). Pura.
  */
 export function promptDaTela(lines: readonly string[] | null | undefined): PermissionPrompt | null {
   if (!lines || lines.length === 0) return null;
-  if (!esperaResposta(lines)) return null;
+  if (!isWaitingForUser(lines)) return null;
   return detectPermissionPrompt(lines);
+}
+
+/**
+ * Os pedidos das chaves (aba + assinatura) que já estavam na tela no tick anterior e continuam nela agora. Só eles
+ * viram cartão: um menu que aparece e some no mesmo tick não é pedido, e o cursor precisa ficar parado (rodada 1).
+ */
+export function pedidosEstaveis(previous: ReadonlySet<string>, current: readonly string[]): string[] {
+  return current.filter((key) => previous.has(key));
 }

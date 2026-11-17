@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectPermissionPrompt, promptDaTela } from "../terminalPrompts";
+import { detectPermissionPrompt, pedidosEstaveis, promptDaTela } from "../terminalPrompts";
 
 const ESC = "\u001b";
 
@@ -180,5 +180,18 @@ describe("promptDaTela: o cartão só nasce de um prompt em modo de espera", () 
   it("tela sem menu nenhum não vira pedido", () => {
     expect(promptDaTela(["$ bun test", "ok 12 testes"])).toBeNull();
     expect(promptDaTela(null)).toBeNull();
+  });
+});
+
+describe("cartão: detector único e cursor parado (rodada 1)", () => {
+  it("marcas_do_codex_impressas_no_meio_da_saida_nao_viram_cartao", () => {
+    // Um agente que imprime o menu e depois continua imprimindo não cria pedido: o detector só aceita o menu no fim.
+    expect(promptDaTela([...CODEX_CMD, "$ bun test", "ok 12 testes"])).toBeNull();
+  });
+
+  it("pedido_so_vira_cartao_quando_se_repete_no_tick_seguinte", () => {
+    const key = "t1:sig";
+    expect(pedidosEstaveis(new Set(), [key])).toEqual([]);
+    expect(pedidosEstaveis(new Set([key]), [key])).toEqual([key]);
   });
 });
