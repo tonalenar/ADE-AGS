@@ -14,7 +14,7 @@ const foto = (id: string, src: string): TimelineItem => ({ kind: "assistant", id
 
 beforeEach(() => { vi.mocked(htmlImagesToMarkdown).mockClear(); });
 
-describe("as imagens citadas pela conversa são contadas uma vez por item (A107)", () => {
+describe("as imagens citadas pela conversa são contadas uma vez por item", () => {
   it("so_o_item_que_mudou_e_relido: um pedaço no fim não relê as imagens dos outros itens", () => {
     const items = Array.from({ length: 30 }, (_, i) => foto(`a${i}`, `AAAA${i}`));
     expect(mediaOfItems(items, "/p")).toHaveLength(30);

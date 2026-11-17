@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { create } from "zustand";
 
 import type { TimelineItem } from "./types";
@@ -88,10 +88,30 @@ export function dropPending(key: string, id: string): void {
 const EMPTY: PendingSend[] = [];
 
 /** Os envios da conversa que ainda esperam o eco, na ordem. */
+/** O próximo vencimento de um envio que ainda conta (depois de `now`), ou `null` se nenhum vence. Pura. */
+export function nextPendingExpiry(pending: PendingSend[], now: number): number | null {
+  let next: number | null = null;
+  for (const p of pending) {
+    const expiry = p.at + PENDING_TTL_MS;
+    if (expiry > now && (next === null || expiry < next)) next = expiry;
+  }
+  return next;
+}
+
 export function usePending(key: string, items: TimelineItem[], working = false): PendingSend[] {
   const all = usePendingSends((s) => s.byKey[key]) ?? EMPTY;
-  // Sem relógio no render: o TTL só vale no próximo redesenho (a timeline muda a cada mensagem).
-  // A lista só muda de identidade quando chega item novo ou a fase muda: o `memo` da timeline não refaz o turno.
+  // O prazo vence sem nenhuma mudança na conversa: um timer acorda a lista no próximo vencimento (não é polling; é um
+  // único alarme por vez). Quando o agente trabalha, o prazo não vale (ver `unreconciled`).
+  const [clock, setClock] = useState(0);
+  // A lista só muda de identidade quando chega item novo, a fase muda ou o prazo vence: o `memo` da timeline não refaz o turno.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => unreconciled(all, items, Date.now(), working), [all, items.length, working]);
+  const shown = useMemo(() => unreconciled(all, items, Date.now(), working), [all, items.length, working, clock]);
+  useEffect(() => {
+    if (working) return;
+    const next = nextPendingExpiry(all, Date.now());
+    if (next === null) return;
+    const timer = setTimeout(() => setClock((c) => c + 1), next - Date.now() + 1);
+    return () => clearTimeout(timer);
+  }, [all, working, clock]);
+  return shown;
 }

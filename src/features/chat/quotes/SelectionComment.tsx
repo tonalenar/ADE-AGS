@@ -85,7 +85,7 @@ export function SelectionComment({
     });
     actionsRef.current = actions;
     // A pílula é fixa na tela, no lugar onde a seleção estava. Quando o texto rola (o streaming segue o fim, ou a pessoa
-    // rola), ela é recalculada com a seleção atual; senão ficaria parada, longe do trecho (Important 7).
+    // rola), ela é recalculada com a seleção atual; senão ficaria parada, longe do trecho.
     const reposition = () => {
       if (!floatingRef.current) return;
       // Fora da janela a pílula sai (o observador dispensa o trecho); dentro dela, acompanha o trecho.
