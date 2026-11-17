@@ -228,3 +228,16 @@ fn os_nos_de_conversa_por_protocolo_sobrevivem_ao_salvar_e_canvas_antigo_abre_se
     let old: Boards = serde_json::from_value(serde_json::json!({ "main|/q": { "nodes": {} } })).unwrap();
     assert!(old["main|/q"].threads.is_null());
 }
+
+#[test]
+fn papeis_ilegivel_nao_e_regravado() {
+    let dir = std::env::temp_dir().join(format!("ags-roles-bad-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("canvas-roles.json");
+    std::fs::write(&path, "{").unwrap();
+    let original = std::fs::read(&path).unwrap();
+    let err = super::roles::read_custom_at(&path).unwrap_err();
+    assert!(err.contains("ilegível"), "{err}");
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    let _ = std::fs::remove_dir_all(&dir);
+}

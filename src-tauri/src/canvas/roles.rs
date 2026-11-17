@@ -52,8 +52,11 @@ fn file_path() -> Result<PathBuf, String> {
 }
 
 fn read_custom() -> Result<Vec<Role>, String> {
-    let path = file_path()?;
-    match std::fs::read_to_string(&path) {
+    read_custom_at(&file_path()?)
+}
+
+pub(crate) fn read_custom_at(path: &PathBuf) -> Result<Vec<Role>, String> {
+    match std::fs::read_to_string(path) {
         Ok(raw) => serde_json::from_str::<RolesFile>(&raw)
             .map(|f| f.roles)
             .map_err(|e| format!("O arquivo de papéis está ilegível e não foi regravado: {e}")),

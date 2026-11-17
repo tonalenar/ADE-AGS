@@ -255,3 +255,19 @@ pub async fn chat_project_agent_policy_clear(
         .await
         .map_err(|e| e.to_string())?
 }
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_cwd;
+
+    #[test]
+    fn normaliza_barra_e_caixa_no_windows() {
+        let unix = normalize_cwd("/Users/Ana/App").unwrap();
+        assert_eq!(unix, "/Users/Ana/App");
+        let win = normalize_cwd("C:\\Users\\Ana\\App").unwrap();
+        assert!(win.contains("C:"), "{win}");
+        assert!(!win.contains('\\'), "{win}");
+        #[cfg(windows)]
+        assert_eq!(win, "c:/users/ana/app");
+    }
+}

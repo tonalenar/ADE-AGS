@@ -40,6 +40,19 @@ fn le_duraciones_y_rechaza_lo_que_no_lo_es() {
 }
 
 #[test]
+fn rotina_ilegivel_nao_e_regravada() {
+    let dir = std::env::temp_dir().join(format!("ags-routines-bad-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("routines.json");
+    std::fs::write(&path, "{").unwrap();
+    let original = std::fs::read(&path).unwrap();
+    let err = super::read_file_at(&path).unwrap_err();
+    assert!(err.contains("ilegível"), "{err}");
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn le_horarios_y_dias() {
     assert_eq!(parse_time("09:00").unwrap(), (9, 0));
     assert_eq!(parse_time("9:30").unwrap(), (9, 30));

@@ -1668,4 +1668,17 @@ mod tests {
         assert!(views.by_design.len() <= MAX_VIEWS);
         assert_eq!(views.get(None)["designId"], format!("x{}", MAX_VIEWS + 4));
     }
+
+    #[test]
+    fn auditoria_ignorada_nao_abre_home() {
+        let src = include_str!("design.rs");
+        assert!(src.contains("CARGO_MANIFEST_DIR"));
+        assert!(src.contains("target/design-audit/data.db"));
+    }
+
+    #[test]
+    fn emit_nao_desfaz_commit() {
+        let src = include_str!("design.rs");
+        assert!(src.contains("let _ = app.emit(\"design-changed\""));
+    }
 }

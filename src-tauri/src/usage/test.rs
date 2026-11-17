@@ -649,3 +649,9 @@ fn un_transcript_se_lee_solo_en_lo_que_crecio() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn csi_com_parametro_enorme_nao_explode() {
+    let out = super::screen::render("\u{1b}[999999999Bhi");
+    assert!(out.contains("hi"), "{out}");
+}

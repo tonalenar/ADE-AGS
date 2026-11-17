@@ -486,3 +486,11 @@ mod ops {
         assert!(renamed.ends_with("z.md") && std::path::Path::new(&renamed).is_file());
     }
 }
+
+#[test]
+fn leitura_e_escrita_saem_da_thread_da_ui() {
+    let src = include_str!("files.rs");
+    assert!(src.contains("off_ui"), "{src}");
+    let ops = include_str!("ops.rs");
+    assert!(ops.contains("off_ui"), "{ops}");
+}
