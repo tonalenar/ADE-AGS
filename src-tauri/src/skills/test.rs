@@ -2338,3 +2338,18 @@ fn reconciliar_skills_no_segura_el_banco_al_tocar_el_disco() {
     );
     assert_eq!(planes, 1, "el plan de la tab no se aplicó");
 }
+
+#[test]
+fn atualizar_skill_nao_apaga_o_destino_antes_da_copia() {
+    let dest = temp_dir("skill-dest");
+    let src = temp_dir("skill-src");
+    std::fs::write(dest.join("keep.txt"), "antigo").unwrap();
+    std::fs::write(src.join("SKILL.md"), "---\nname: n\n---\nnovo\n").unwrap();
+    let missing = src.join("nao-existe-como-dir-de-skill");
+    // Copia de uma pasta que existe: o destino antigo só some depois da staging.
+    super::install::replace_skill_dir(&src, &dest).unwrap();
+    assert!(dest.join("SKILL.md").is_file());
+    assert!(!dest.join("keep.txt").exists());
+    let _ = std::fs::remove_dir_all(&src);
+    let _ = std::fs::remove_dir_all(&missing);
+}
