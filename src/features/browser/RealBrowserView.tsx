@@ -51,8 +51,8 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     floatingRect ? { x: floatingRect.left, y: floatingRect.top, width: floatingRect.width, height: floatingRect.height } : null,
   );
   const screenRadius = useContext(NativeCornerRadius);
-  const latest = useRef({ zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom, screenRadius });
-  latest.current = { zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom, screenRadius };
+  const latest = useRef({ zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom, screenRadius, projectPath });
+  latest.current = { zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom, screenRadius, projectPath };
 
   // A pílula da miniatura não fica presa visível de uma miniatura para a próxima.
   useEffect(() => {
@@ -102,13 +102,19 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       };
     };
 
+    // Sem área à vista (escondida: outra aba, a canvas do modo Abas), o nativo só esconde no segundo lugar vazio
+    // seguido (ver `empty_clip_visibility`). Por isso o lugar vazio vai duas vezes e depois a vista se cala.
+    let emptyPlaces = 0;
     const tick = () => {
       if (opened) {
         const place = measure();
         const now = performance.now();
-        if (!samePlace(sent, place) && !placeInFlight && now - lastPlaceAt >= PLACE_SYNC_INTERVAL_MS) {
+        const empty = place.visibleRect === null;
+        const due = !samePlace(sent, place) || (empty && emptyPlaces < 2);
+        if (due && !placeInFlight && now - lastPlaceAt >= PLACE_SYNC_INTERVAL_MS) {
           sent = place;
           lastPlaceAt = now;
+          emptyPlaces = empty ? emptyPlaces + 1 : 0;
           placeInFlight = true;
           realBrowserPlace(viewId, place).catch(() => undefined).finally(() => { placeInFlight = false; });
         }
@@ -117,7 +123,8 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     };
 
     sent = measure();
-    realBrowserOpen(viewId, url || "about:blank", sent, script, profileId, projectPath)
+    // A partição é escolhida na abertura: trocar a pasta da vista depois não recria a página.
+    realBrowserOpen(viewId, url || "about:blank", sent, script, profileId, latest.current.projectPath)
       .then(() => {
         if (closed) realBrowserClose(viewId).catch(() => undefined);
         opened = true;
@@ -153,7 +160,7 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       const closing = finalPlace ? realBrowserPlace(viewId, finalPlace).catch(() => undefined) : Promise.resolve();
       closing.finally(() => realBrowserClose(viewId).catch(() => undefined));
     };
-  }, [viewId, profileId, projectPath]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [viewId, profileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Transparente, não branco: sem tema, o branco aparece como um quadro enquanto a vista nativa não desenha.
   return <div ref={box} data-real-browser className="relative flex-1 h-full min-h-0 bg-transparent" />;

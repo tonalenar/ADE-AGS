@@ -21,12 +21,12 @@ vi.mock("../nativeSurface", async (importOriginal) => {
   const original = await importOriginal<typeof import("../nativeSurface")>();
   return { ...original, coversOf: (...args: Parameters<typeof original.coversOf>) => { coversSpy(); return original.coversOf(...args); } };
 });
-const placedPlaces: Array<{ visible: boolean; cornerRadius?: number }> = [];
+const placedPlaces: Array<{ visible: boolean; cornerRadius?: number; visibleRect?: unknown }> = [];
 const closed: string[] = [];
 vi.mock("../realBrowser", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../realBrowser")>()),
   realBrowserOpen: (id: string, _url: string, place: { cornerRadius?: number }) => { opened.push(id); openedPlaces.push(place); return Promise.resolve(); },
-  realBrowserPlace: (_id: string, place: { visible: boolean; cornerRadius?: number }) => { placedVisibility.push(place.visible); placedPlaces.push(place); return Promise.resolve(); },
+  realBrowserPlace: (_id: string, place: { visible: boolean; cornerRadius?: number; visibleRect?: unknown }) => { placedVisibility.push(place.visible); placedPlaces.push(place); return Promise.resolve(); },
   realBrowserClose: (id: string) => { closed.push(id); return Promise.resolve(); },
 }));
 
@@ -62,6 +62,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  vi.restoreAllMocks();
 });
 
 function render(props: Partial<Parameters<typeof RealBrowserView>[0]> = {}) {
@@ -152,6 +153,35 @@ describe("vista do navegador nativo", () => {
     document.dispatchEvent(new Event("pointerenter"));
     act(() => frames.shift()?.(0));
     expect(coversSpy).toHaveBeenCalled();
+  });
+
+  it("trocar_projeto_nao_reabre_a_pagina", async () => {
+    // A partição é escolhida na abertura: mudar a pasta da vista não fecha nem reabre a página nativa.
+    render({ projectPath: "/projeto-a" });
+    await act(async () => undefined);
+    render({ projectPath: "/projeto-b" });
+    await act(async () => undefined);
+
+    expect(opened).toEqual(["aba-1"]);
+    expect(closed).toEqual([]);
+  });
+
+  it("escondida_manda_o_lugar_vazio_duas_vezes_e_depois_cala", async () => {
+    // Escondida (outra aba, canvas no modo Abas): o nativo só esconde no segundo lugar vazio seguido. Depois disso a
+    // vista não manda mais nada enquanto continuar escondida.
+    let clock = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => (clock += 100));
+    vi.spyOn(HTMLElement.prototype, "checkVisibility").mockReturnValue(false);
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    render();
+    await act(async () => undefined);
+    // Um frame por vez, com a promessa do envio anterior resolvida entre eles, como no navegador.
+    for (let i = 0; i < 6; i++) await act(async () => { frames.shift()?.(0); });
+
+    expect(placedPlaces.filter((place) => place.visibleRect === null)).toHaveLength(2);
+    expect(placedPlaces.every((place) => place.visibleRect === null)).toBe(true);
   });
 
   it("trocar_forma_nao_reabre_superficie", async () => {
