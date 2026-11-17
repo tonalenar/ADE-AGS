@@ -69,7 +69,7 @@ describe("iframe_nao_navega_para_fora", () => {
     }
   });
 
-  it("ao sair da página por script, a prévia avisa o pai (beforeunload) para bloquear a troca do quadro", () => {
+  it("o guarda da prévia manda o aviso navigate-away ao pai no beforeunload; o bloqueio do quadro é do pai (visualReplyPreview.test.tsx)", () => {
     const { win } = runGuard(visualReplyDocument("<p>x</p>"));
     win.dispatchEvent(new Event("beforeunload"));
     expect(win.postMessage).toHaveBeenCalledWith({ source: "ags-visual-reply", kind: "navigate-away" }, "*");
