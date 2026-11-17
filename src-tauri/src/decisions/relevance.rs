@@ -21,7 +21,7 @@ use super::config;
 use super::http;
 use super::log::{self, LogRow};
 use super::points::{memory_secret, POINT_RELEVANCE};
-use super::protocol::{canonical, canonical_labels, primary_metrics, DecisionAnswer, DecisionRequest, Question};
+use super::protocol::{canonical, canonical_labels, primary_metrics, DecisionAnswer, DecisionRequest, Question, STATE_CHAR_BUDGET};
 
 /// Quantas memórias (no máximo) entram na consulta; as que passam disso não são consideradas.
 pub const MAX_CANDIDATES: usize = 30;
@@ -69,15 +69,19 @@ fn considered(candidates: &[Candidate]) -> Vec<&Candidate> {
 /// O pedido: o objetivo, a lista numerada e uma pergunta `sim`/`nao` por memória (`m0`, `m1`…). A
 /// heurística é `sim` quando a busca local apontou a chave. Pura.
 pub fn request_for(objective: &str, candidates: &[&Candidate], local_top: &[String]) -> DecisionRequest {
-    let mut state = format!("objetivo: {}\ncandidatas:", clip(objective, OBJECTIVE_CHARS));
+    let header = format!("objetivo: {}\ncandidatas:", clip(objective, OBJECTIVE_CHARS));
+    let leftover = STATE_CHAR_BUDGET.saturating_sub(header.chars().count());
+    let per = leftover / candidates.len().max(1);
+    let body_chars = BODY_CHARS.min(per.saturating_sub(24));
+    let mut state = header;
     let mut questions = BTreeMap::new();
     let mut heuristic = BTreeMap::new();
     for (i, candidate) in candidates.iter().enumerate() {
         state.push_str(&format!(
             "\n{i}. {} ({}): {}",
-            clip(&candidate.key, 200),
+            clip(&candidate.key, 40.min(per / 2).max(8)),
             candidate.kind,
-            clip(&candidate.body, BODY_CHARS)
+            clip(&candidate.body, body_chars)
         ));
         questions.insert(
             format!("m{i}"),
@@ -414,6 +418,7 @@ mod tests {
         assert_eq!(request.questions.len(), MAX_CANDIDATES);
         let body_line = request.state.lines().find(|l| l.starts_with("0. ")).unwrap();
         assert!(body_line.chars().count() < BODY_CHARS + 40);
+        assert!(request.state.chars().count() <= STATE_CHAR_BUDGET);
     }
 
     #[test]

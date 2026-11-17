@@ -10,7 +10,9 @@
 //! - cada consulta vira uma linha do log (`turn_routing`) com a sugestão local ao lado, para medir quem acerta.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
+use std::hash::{Hash, Hasher};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +35,27 @@ const QUESTION: &str = "destino";
 const ORCHESTRATOR: &str = "orquestrador";
 /// Rótulo do log quando a regra local não sugere ninguém.
 const NONE: &str = "nenhum";
+/// Duas pausas iguais na digitação não pagam o Jev de novo.
+const ROUTE_DEDUP: Duration = Duration::from_secs(2);
+
+struct RouteCache {
+    fingerprint: u64,
+    at: Instant,
+    route: Option<Route>,
+}
+
+static ROUTE_CACHE: Mutex<Option<RouteCache>> = Mutex::new(None);
+
+fn route_fingerprint(text: &str, members: &[Member], local: Option<&str>) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    local.hash(&mut hasher);
+    for member in members {
+        member.name.hash(&mut hasher);
+        member.role.hash(&mut hasher);
+    }
+    hasher.finish()
+}
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -184,7 +207,19 @@ pub fn route(db: &DbConnection, text: &str, members: &[Member], local: Option<&s
         return None;
     }
     let api_key = config::load_key();
-    route_with(db, &settings, api_key.as_deref(), text, members, local)
+    let fingerprint = route_fingerprint(text, members, local);
+    if let Ok(cache) = ROUTE_CACHE.lock() {
+        if let Some(hit) = cache.as_ref() {
+            if hit.fingerprint == fingerprint && hit.at.elapsed() < ROUTE_DEDUP {
+                return hit.route.clone();
+            }
+        }
+    }
+    let route = route_with(db, &settings, api_key.as_deref(), text, members, local);
+    if let Ok(mut cache) = ROUTE_CACHE.lock() {
+        *cache = Some(RouteCache { fingerprint, at: Instant::now(), route: route.clone() });
+    }
+    route
 }
 
 pub(super) fn route_with(
