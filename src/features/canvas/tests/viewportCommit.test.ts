@@ -1,12 +1,7 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { LIVE_MIN_ZOOM } from "../geometry";
-import { liveRectsOf, viewportNeedsRender } from "../viewportCommit";
-
-const VIEW = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../CanvasView.tsx");
+import { desktopRectsOf, liveRectsOf, viewportNeedsRender } from "../viewportCommit";
 
 describe("pan/zoom sem re-render do canvas", () => {
   it("um pan no mesmo zoom não pede estado React", () => {
@@ -27,10 +22,17 @@ describe("pan/zoom sem re-render do canvas", () => {
     expect(Object.keys(rects)).toEqual(["in"]);
   });
 
-  it("o pan não grava o viewport no estado React a cada quadro", () => {
-    const src = readFileSync(VIEW, "utf8");
-    expect(src).toContain("viewportNeedsRender");
-    expect(src).toContain("liveRectsOf");
-    expect(src).not.toMatch(/onViewportChange=\{setVp\}/);
+  it("o overlay Gemini muda com o pan no mesmo viewport dos liveRects", () => {
+    const start = { x: 40, y: 40, zoom: 1 };
+    const panned = { x: 80, y: 40, zoom: 1 };
+    expect(viewportNeedsRender(start, panned)).toBe(false);
+    const portals = [{ id: "g", box: { x: 0, y: 0, w: 1000, h: 700 } }];
+    const size = { width: 1400, height: 900 };
+    const before = desktopRectsOf(portals, start, size);
+    const after = desktopRectsOf(portals, panned, size);
+    expect(before.g).toBeDefined();
+    expect(after.g).toBeDefined();
+    expect(after.g!.left).not.toBe(before.g!.left);
+    expect(after.g!.left - before.g!.left).toBe(40);
   });
 });

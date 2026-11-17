@@ -9,6 +9,7 @@ import { useMissionsStore } from "@/features/missions/store";
 import { useRunsStore } from "@/features/runs/store";
 import { activeTabIds, lastInputAt, lastOutputAt, sustainedTabIds, useAgentActivity } from "@/features/terminal/activity";
 import { screenOf } from "@/features/terminal/terminalRegistry";
+import { currentVisibleAgentTabIds } from "./layout/layoutStore";
 import { useTabsStore } from "./store";
 import type { MissionIndicatorSignals } from "./missionIndicator";
 import { collectMissionIndicatorSignals, stableMissionIndicatorSignals } from "./missionIndicatorSignals";
@@ -25,6 +26,7 @@ function refresh(): void {
   const { tasks, approvals } = useRunsStore.getState();
   const now = Date.now();
   const active = new Set(activeTabIds(now));
+  const visible = currentVisibleAgentTabIds();
   const next = stableMissionIndicatorSignals(snapshots, collectMissionIndicatorSignals({
     missions,
     tabs,
@@ -32,7 +34,7 @@ function refresh(): void {
     missionIndex: missionIndex(useCanvasStore.getState().boards, tabs),
     sustainedTabIds: sustainedTabIds(now),
     attentionTabIds: tabs.filter((tab) => {
-      if (tab.agentId === "bash" || active.has(tab.id)) return false;
+      if (!visible.has(tab.id) || tab.agentId === "bash" || active.has(tab.id)) return false;
       const lines = screenOf(tab.id, null, 8)?.lines ?? [];
       if (isWaitingForUser(lines)) return true;
       // Reuse Etapa 16's question recognizer and silence threshold, not every '?' in output.

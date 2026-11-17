@@ -1,11 +1,6 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { cachedStrokePath, strokePath } from "../board";
-
-const LAYER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../DrawingLayer.tsx");
+import { cachedStrokePath, strokePath, strokePathCacheHas } from "../board";
 
 describe("caminho SVG dos traços", () => {
   it("reusa o mesmo caminho enquanto o array de pontos não muda", () => {
@@ -18,9 +13,11 @@ describe("caminho SVG dos traços", () => {
     expect(cachedStrokePath("s1", moved)).not.toBe(first);
   });
 
-  it("o layer não recalcula strokePath a cada path do SVG", () => {
-    const src = readFileSync(LAYER, "utf8");
-    expect(src).toContain("cachedStrokePath");
-    expect(src).not.toMatch(/strokePath\(/);
+  it("o cache tem teto LRU e larga o traço mais antigo", () => {
+    const points = [0, 0, 10, 0, 20, 8, 30, 8];
+    cachedStrokePath("old", points);
+    expect(strokePathCacheHas("old")).toBe(true);
+    for (let i = 0; i < 80; i++) cachedStrokePath(`n${i}`, [0, 0, 10, 0, 20, 8, 30, 8, i]);
+    expect(strokePathCacheHas("old")).toBe(false);
   });
 });

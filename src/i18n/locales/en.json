@@ -3415,6 +3415,8 @@
   "canvas.design.newDesign": "New design: {{title}}",
   "canvas.design.open": "Open",
   "canvas.design.unseen": "New design not opened yet",
+  "canvas.design.reloadFailed": "Could not refresh the artboards. The ones already on screen stay.",
+  "canvas.design.retry": "Try again",
   "canvas.design.owner": "Owner: {{name}}",
   "canvas.design.ownerHint": "Who receives the comments and messages for this design",
   "canvas.design.noOwnerBadge": "No owner",

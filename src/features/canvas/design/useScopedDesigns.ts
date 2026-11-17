@@ -14,6 +14,7 @@ export function useScopedDesigns(scope: DesignScope) {
   const [details, setDetails] = useState<DesignDetail[]>([]);
   const [notice, setNotice] = useState<Design | null>(null);
   const [unseen, setUnseen] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const known = useRef<Set<string> | null>(null);
   const seq = useRef(0);
   const scopeKey = `${scope.missionId ?? ""}|${scope.cwd ?? ""}`;
@@ -35,8 +36,10 @@ export function useScopedDesigns(scope: DesignScope) {
         }
       }
       known.current = new Set(list.map((d) => d.id));
+      setLoadError(null);
     } catch {
-      // Erro transitório: conserva as pranchetas que já estão na tela.
+      // Erro transitório: conserva as pranchetas que já estão na tela e avisa.
+      setLoadError("canvas.design.reloadFailed");
     }
   }, []);
 
@@ -44,14 +47,15 @@ export function useScopedDesigns(scope: DesignScope) {
     known.current = null; // o primeiro carregamento de um canvas só semeia: não avisa dos designs que já existiam
     setNotice(null);
     setUnseen(false);
+    setLoadError(null);
     setDetails([]);
     void reload();
   }, [scopeKey, reload]);
   useEffect(() => onDesignChanged(() => { void reload(); }), [reload]);
 
   return {
-    details, reload, notice, unseen,
-    dismissNotice: () => setNotice(null),
+    details, reload, notice, unseen, loadError,
+    dismissNotice: () => { setNotice(null); setLoadError(null); },
     markSeen: () => { setNotice(null); setUnseen(false); },
   };
 }

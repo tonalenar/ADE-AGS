@@ -3415,6 +3415,8 @@
   "canvas.design.newDesign": "Nuevo diseño: {{title}}",
   "canvas.design.open": "Abrir",
   "canvas.design.unseen": "Nuevo diseño aún sin abrir",
+  "canvas.design.reloadFailed": "No se pudieron actualizar las pizarras. Las que ya estaban en pantalla siguen.",
+  "canvas.design.retry": "Intentar de nuevo",
   "canvas.design.owner": "Dueño: {{name}}",
   "canvas.design.ownerHint": "Quién recibe los comentarios y mensajes de este diseño",
   "canvas.design.noOwnerBadge": "Sin dueño",

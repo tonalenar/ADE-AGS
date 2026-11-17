@@ -33,7 +33,7 @@ import { DrawingLayer } from "./DrawingLayer";
 import { ImageNode, TextNode, type ImageFlowNode, type TextFlowNode } from "./ExtraNodes";
 import { DeviceNode } from "./DeviceNode";
 import { GeminiDesktopNode } from "@/features/desktopApps/GeminiDesktopNode";
-import { focusGeminiViewport, geminiCanvasRect } from "@/features/desktopApps/geometry";
+import { focusGeminiViewport } from "@/features/desktopApps/geometry";
 import { SimulatorNode } from "@/features/simulator/SimulatorNode";
 import { DEFAULT_SCREEN, nodeSize, SIM_SCALE } from "@/features/simulator/geometry";
 import { refreshDevices, useSimulatorStore } from "@/features/simulator/store";
@@ -41,9 +41,9 @@ import { FolderNode, baseName, type FolderFlowNode } from "./FolderNode";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
   HEADER_H, NOTE_HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, PHOTO_MAX_ZOOM, facingSides, focusViewport, intersects, isLive, revealViewport, safeViewport,
-  type Box, type Rect, type Viewport,
+  type Box, type Viewport,
 } from "./geometry";
-import { liveRectsOf, viewportNeedsRender } from "./viewportCommit";
+import { desktopRectsOf, liveRectsOf, viewportNeedsRender } from "./viewportCommit";
 import { CanvasDock, type DockPanel } from "./CanvasDock";
 import { useUiStore } from "@/app/uiStore";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
@@ -231,17 +231,6 @@ function CanvasInner() {
 
   // Dónde va cada terminal viva. Fuera del área no se dibuja: una terminal que nadie ve no
   // tiene por qué repintar.
-  useEffect(() => {
-    const desktopRects: Record<string, Rect> = {};
-    for (const [id, portal] of Object.entries(board.portals)) {
-      if (portal.kind !== "gemini") continue;
-      const rect = geminiCanvasRect(portal.box,vp,size);
-      if (rect) desktopRects[id] = rect;
-    }
-    useCanvasStore.setState({ desktopRects });
-  }, [board.portals, vp, size]);
-  useEffect(() => () => { useCanvasStore.setState({ desktopRects: {} }); }, []);
-
   const publishLiveRects = useCallback((view: Viewport) => {
     canvasActions.setLiveRects(liveRectsOf(
       tabs.flatMap((tab) => {
@@ -252,12 +241,28 @@ function CanvasInner() {
       size,
     ));
   }, [board.nodes, tabs, size]);
+  const publishDesktopRects = useCallback((view: Viewport) => {
+    useCanvasStore.setState({
+      desktopRects: desktopRectsOf(
+        Object.entries(board.portals).flatMap(([id, portal]) => (
+          portal.kind === "gemini" ? [{ id, box: portal.box }] : []
+        )),
+        view,
+        size,
+      ),
+    });
+  }, [board.portals, size]);
   const onViewportChange = useCallback((next: Viewport) => {
     const view = safeViewport(next, vpRef.current);
     vpRef.current = view;
     publishLiveRects(view);
+    publishDesktopRects(view);
     setVpRaw((prev) => (viewportNeedsRender(prev, view) || Math.abs(prev.zoom - view.zoom) >= 0.001 ? view : prev));
-  }, [publishLiveRects]);
+  }, [publishLiveRects, publishDesktopRects]);
+  useEffect(() => {
+    publishDesktopRects(vpRef.current);
+  }, [publishDesktopRects]);
+  useEffect(() => () => { useCanvasStore.setState({ desktopRects: {} }); }, []);
   useEffect(() => {
     publishLiveRects(vpRef.current);
   }, [live, publishLiveRects]);
@@ -889,6 +894,14 @@ function CanvasInner() {
         {panel === "routines" && <CanvasSchedulesPanel onClose={() => setPanel(null)} />}
         {panel === "design" && design.details.length > 0 && (
           <DesignPanel details={design.details} reload={design.reload} initial={designFocus} onClose={() => { setPanel(null); setDesignFocus(null); }} />
+        )}
+        {design.loadError && (
+          <div role="alert" className="pointer-events-auto absolute right-3 bottom-[7.5rem] flex items-center gap-2 rounded-lg border border-amber-500/40
+            bg-white/95 dark:bg-surface-raised/95 shadow-lg px-3 py-2 text-[12.5px] text-gray-800 dark:text-gray-100">
+            <span>{t("canvas.design.reloadFailed")}</span>
+            <Button variant="custom" className="cc-t h-7 px-2.5 rounded-md bg-accent-500/15 text-accent-600 dark:text-accent-300 text-[11.5px] font-medium"
+              onClick={() => void design.reload()}>{t("canvas.design.retry")}</Button>
+          </div>
         )}
         {design.notice && (
           <div role="status" className="pointer-events-auto absolute right-3 bottom-[4.75rem] flex items-center gap-2 rounded-lg border border-accent-500/40

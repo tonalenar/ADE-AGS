@@ -33,6 +33,12 @@ interface Frame {
   height: number;
 }
 
+/** Timer do aviso "iniciando" o AVD: o caller limpa no unmount. */
+export function armStartingTimeout(onDone: () => void, ms = 20_000): () => void {
+  const id = window.setTimeout(onDone, ms);
+  return () => window.clearTimeout(id);
+}
+
 /** Cada cuánto se vuelve a pedir la pantalla: `screencap` tarda, no tiene sentido pedir más rápido. */
 const FRAME_EVERY_MS = 700;
 /** Cada cuánto se vuelve a mirar qué dispositivos hay. */
@@ -88,6 +94,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
   const [starting, setStarting] = useState(false);
   const img = useRef<HTMLImageElement>(null);
   const nodeRef = useRef<HTMLDivElement>(null);
+  const stopStarting = useRef<(() => void) | undefined>(undefined);
   const [onScreen, setOnScreen] = useState(true);
   useEffect(() => {
     const el = nodeRef.current;
@@ -165,10 +172,14 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
       fail(e);
     } finally {
       // El emulador tarda en aparecer: el aviso de "iniciando" se apaga solo cuando hay dispositivo.
-      window.setTimeout(() => setStarting(false), 20000);
+      stopStarting.current?.();
+      stopStarting.current = armStartingTimeout(() => setStarting(false), 20_000);
     }
   };
-  useEffect(() => () => { setStarting(false); }, []);
+  useEffect(() => () => {
+    stopStarting.current?.();
+    setStarting(false);
+  }, []);
   useEffect(() => {
     if (ready.length > 0) setStarting(false);
   }, [ready.length]);
