@@ -29,7 +29,7 @@ use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 use tokio::sync::oneshot;
 
-use super::surface::{diff_place, effective_zoom, visibility_change, ClipState, keeps_pumping, outline, rounded_parts, CreationState, PathStep, PlaceState, RoundedPart};
+use super::surface::{diff_place, effective_zoom, open_step, visibility_change, ClipState, keeps_pumping, OpenStep, outline, rounded_parts, CreationState, PathStep, PlaceState, RoundedPart};
 use super::{emit, on_binding};
 
 const CEF_FRAMEWORK_BUNDLE: &str = "Chromium Embedded Framework.framework";
@@ -135,9 +135,9 @@ struct Portal {
     _observer: Option<DevToolsMessageObserver>,
     _registration: Option<Registration>,
     pending: PendingCdp,
-    /// Avisa `create` quando o CEF entrega o browser (a criação é assíncrona: o perfil do runtime
-    /// Chrome só fica pronto depois).
-    ready: Option<oneshot::Sender<()>>,
+    /// Quem espera a criação do browser: o `create` que a iniciou e os pedidos que chegaram com o Portal ainda em
+    /// preparo. Todos são avisados quando o CEF entrega o browser (a criação é assíncrona).
+    waiters: Vec<oneshot::Sender<()>>,
     /// O último `place` recebido: o que já foi aplicado à vista e ao navegador, para não refazer o que não mudou.
     last_place: Option<PlaceState>,
     /// Visibilidade da vista: quadros seguidos sem recorte, e se ela está escondida (ver `visibility_change`).
@@ -577,7 +577,7 @@ wrap_life_span_handler! {
                         view.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), bounds.size));
                     }
                 }
-                if let Some(ready) = portal.ready.take() { let _ = ready.send(()); }
+                for waiter in portal.waiters.drain(..) { let _ = waiter.send(()); }
                 if let Some(host) = browser.host() {
                     let mut observer = ADEDevToolsObserver::new(self.id.clone(), app_handle_for_portal(&self.id), portal.pending.clone());
                     let registration = host.add_dev_tools_message_observer(Some(&mut observer));
@@ -655,7 +655,7 @@ fn prepare_popup(opener: &str, url: &str) -> Option<(String, Retained<ADEPortalH
     PORTALS.with(|portals| {
         portals.borrow_mut().insert(popup.clone(), Portal {
             host_view: host.clone(), browser: None, _observer: None, _registration: None,
-            pending: Arc::new(Mutex::new(HashMap::new())), ready: None, last_place: None, clip: ClipState { empty_count: 0, hidden: true }, creation: CreationState::new(generation),
+            pending: Arc::new(Mutex::new(HashMap::new())), waiters: Vec::new(), last_place: None, clip: ClipState { empty_count: 0, hidden: true }, creation: CreationState::new(generation),
         });
     });
     Some((popup, host, app, generation))
@@ -856,7 +856,7 @@ pub async fn wait_ready(app: &AppHandle, id: &str) -> Result<(), String> {
         PORTALS.with(|portals| {
             let mut portals = portals.borrow_mut();
             let portal = portals.get_mut(&id).ok_or("O pop-up já foi fechado.")?;
-            if portal.browser.is_some() { let _ = ready.send(()); } else { portal.ready = Some(ready); }
+            if portal.browser.is_some() { let _ = ready.send(()); } else { portal.waiters.push(ready); }
             Ok::<_, String>(())
         })?;
         Ok(created)
@@ -871,16 +871,25 @@ fn create_on_main(app: &AppHandle, parent: *mut AnyObject, id: &str, profile: Pa
     let _mtm = MainThreadMarker::new().ok_or("A vista CEF precisa ser criada na thread principal do macOS.")?;
     load_cef(false)?;
     initialize_cef(Some(app.clone()))?;
-    // Um Portal que já existe: pronto, a criação já deu certo; ainda preparando, não é sucesso (devolver `Ok` aqui
-    // fazia o chamador achar que havia navegador).
-    if let Some((attached, generation)) = PORTALS.with(|portals| {
+    // Um Portal com o mesmo id já existe: pronto, o pedido é atendido; ainda preparando, o pedido espera a mesma
+    // criação (a fila `waiters`). Nenhum dos dois cria um segundo navegador.
+    let existing = PORTALS.with(|portals| {
         portals.borrow().get(id).map(|portal| (portal.browser.is_some(), portal.creation.generation()))
-    }) {
-        if attached {
+    });
+    match open_step(existing.is_some(), existing.is_some_and(|(attached, _)| attached)) {
+        OpenStep::Create => {}
+        OpenStep::Attached => {
             let _ = ready.send(());
-            return Ok(generation);
+            return Ok(existing.map_or(0, |(_, generation)| generation));
         }
-        return Err("O navegador deste Portal ainda está preparando a página.".into());
+        OpenStep::Join => {
+            PORTALS.with(|portals| {
+                if let Some(portal) = portals.borrow_mut().get_mut(id) {
+                    portal.waiters.push(ready);
+                }
+            });
+            return Ok(existing.map_or(0, |(_, generation)| generation));
+        }
     }
     let context = request_context(&profile)?;
     let root: &NSView = unsafe { &*parent.cast() };
@@ -890,7 +899,7 @@ fn create_on_main(app: &AppHandle, parent: *mut AnyObject, id: &str, profile: Pa
     let generation = NEXT_PORTAL_GENERATION.fetch_add(1, Ordering::SeqCst);
     PORTAL_APPS.with(|apps| { apps.borrow_mut().insert(id.to_string(), app.clone()); });
     PORTALS.with(|portals| {
-        portals.borrow_mut().insert(id.to_string(), Portal { host_view: host.clone(), browser: None, _observer: None, _registration: None, pending: pending.clone(), ready: Some(ready), last_place: None, clip: ClipState::default(), creation: CreationState::new(generation) });
+        portals.borrow_mut().insert(id.to_string(), Portal { host_view: host.clone(), browser: None, _observer: None, _registration: None, pending: pending.clone(), waiters: vec![ready], last_place: None, clip: ClipState::default(), creation: CreationState::new(generation) });
     });
 
     let mut client = ADEClient::new(id.to_string(), app.clone(), generation);

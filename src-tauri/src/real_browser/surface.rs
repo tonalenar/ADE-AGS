@@ -161,3 +161,22 @@ pub(super) fn visibility_change(state: &mut ClipState, empty: bool, explicitly_h
     let hidden = empty_clip_visibility(&mut state.empty_count, &mut state.hidden, empty, explicitly_hidden);
     (hidden != before).then_some(hidden)
 }
+
+/// O que um pedido de criação de Portal faz, dado o que já existe com o mesmo id.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum OpenStep {
+    /// Não há Portal: cria.
+    Create,
+    /// O Portal já está pronto: o pedido é atendido sem criar outro.
+    Attached,
+    /// O Portal ainda está preparando a página: o pedido espera a mesma criação, em vez de erro.
+    Join,
+}
+
+pub(super) fn open_step(exists: bool, attached: bool) -> OpenStep {
+    match (exists, attached) {
+        (true, true) => OpenStep::Attached,
+        (true, false) => OpenStep::Join,
+        (false, _) => OpenStep::Create,
+    }
+}

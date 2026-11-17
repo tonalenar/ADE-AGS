@@ -1,7 +1,7 @@
 //! Testes da superfície nativa do navegador (o Portal): o contrato do `Place` que chega do front e a lógica pura
 //! que decide o que mudou, o que a máscara desenha e quando a vista é escondida.
 
-use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, outline, rounded_parts, visibility_change, ClipState, CreationState, PathStep, PlaceChanges, PlaceState};
+use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, open_step, outline, rounded_parts, visibility_change, ClipState, CreationState, OpenStep, PathStep, PlaceChanges, PlaceState};
 use super::{Place, Rect};
 use serde_json::json;
 
@@ -127,4 +127,13 @@ fn visibilidade_so_muda_na_transicao() {
     assert_eq!(visibility_change(&mut state, false, false), Some(false), "volta a ter recorte: mostra");
     assert_eq!(visibility_change(&mut state, false, true), Some(true), "desmontagem: esconde na hora");
     assert_eq!(visibility_change(&mut state, false, true), None);
+}
+
+#[test]
+fn abrir_portal_em_preparo_aguarda_a_criacao() {
+    // Sem Portal, cria; com um Portal pronto, atende; com um Portal ainda preparando, espera a mesma criação
+    // (antes, o segundo pedido recebia erro e a página não abria).
+    assert_eq!(open_step(false, false), OpenStep::Create);
+    assert_eq!(open_step(true, true), OpenStep::Attached);
+    assert_eq!(open_step(true, false), OpenStep::Join);
 }
