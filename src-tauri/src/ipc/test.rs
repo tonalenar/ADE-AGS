@@ -1979,10 +1979,14 @@ mod provas {
 // ── F-03: limites antes da autenticação ──────────────────────────────────────────────────────
 
 mod entrada {
-    use super::super::intake::{read_request, Intake, Slots, MAX_REQUEST_BYTES, TOKEN_DEADLINE_MS, REQUEST_DEADLINE_MS, TOKEN_WINDOW};
+    use super::super::intake::{
+        read_request, try_reserve_inflight_bytes, InFlightBytes, Intake, Slots, MAX_IN_FLIGHT_BYTES, MAX_REQUEST_BYTES, REQUEST_DEADLINE_MS,
+        TOKEN_DEADLINE_MS, TOKEN_WINDOW,
+    };
     use std::cell::Cell;
-    use std::io::{BufReader, Read};
+    use std::io::{BufRead, BufReader, Read};
     use std::rc::Rc;
+    use std::sync::Mutex;
 
     const TOKEN: &str = "0e6f2c1a-3c2b-4e7d-9a53-1f0d5b8c7a21";
 
@@ -2013,7 +2017,11 @@ mod entrada {
         autenticou: Cell<u32>,
     }
 
+    /// O orçamento de bytes em voo é global ao processo: quem o enche não pode correr junto de quem lê pedidos.
+    static ORCAMENTO: Mutex<()> = Mutex::new(());
+
     fn ler(dados: Vec<u8>, chunk: usize, tick_ms: u64) -> (Intake, Cena) {
+        let _trava = ORCAMENTO.lock().unwrap_or_else(|e| e.into_inner());
         let cena = Cena { relogio: Rc::new(Cell::new(0)), lidos: Rc::new(Cell::new(0)), autenticou: Cell::new(0) };
         let origem = Gotejando { dados, pos: 0, chunk, tick_ms, relogio: cena.relogio.clone(), lidos: cena.lidos.clone() };
         let mut leitor = BufReader::with_capacity(chunk.max(16), origem);
@@ -2023,6 +2031,23 @@ mod entrada {
         let mut budget = super::super::intake::InFlightBytes::empty();
         let resultado = read_request(&mut leitor, TOKEN, &mut agora, &mut marca, &mut budget);
         (resultado, cena)
+    }
+
+    /// Como [`ler`], com `reserva` bytes do orçamento global já tomados por outras conexões. Devolve também o que
+    /// sobrou no leitor depois do resultado: o que não foi copiado para a linha continua lá.
+    fn ler_com_reserva(dados: Vec<u8>, chunk: usize, reserva: usize) -> (Intake, Vec<u8>, u32) {
+        let _trava = ORCAMENTO.lock().unwrap_or_else(|e| e.into_inner());
+        let _outras = try_reserve_inflight_bytes(reserva).expect("a reserva cabe no teto");
+        let relogio = Rc::new(Cell::new(0));
+        let origem = Gotejando { dados, pos: 0, chunk, tick_ms: 0, relogio: relogio.clone(), lidos: Rc::new(Cell::new(0)) };
+        let mut leitor = BufReader::with_capacity(chunk.max(16), origem);
+        let mut agora = move || relogio.get();
+        let autenticou = Cell::new(0);
+        let mut marca = || autenticou.set(autenticou.get() + 1);
+        let mut budget = InFlightBytes::empty();
+        let resultado = read_request(&mut leitor, TOKEN, &mut agora, &mut marca, &mut budget);
+        let resto = leitor.fill_buf().map(<[u8]>::to_vec).unwrap_or_default();
+        (resultado, resto, autenticou.get())
     }
 
     fn pedido(token: &str, args: &str) -> Vec<u8> {
@@ -2085,17 +2110,28 @@ mod entrada {
     /// autenticado extra é recusado e não aumenta o orçamento.
     #[test]
     fn orcamento_global_recusa_excesso() {
-        use super::super::intake::{try_reserve_inflight_bytes, MAX_IN_FLIGHT_BYTES};
-        let _cheio = try_reserve_inflight_bytes(MAX_IN_FLIGHT_BYTES).expect("o teto cabe numa reserva");
-        let (resultado, cena) = ler(pedido(TOKEN, "{}"), 256, 0);
+        let (resultado, _, autenticou) = ler_com_reserva(pedido(TOKEN, "{}"), 256, MAX_IN_FLIGHT_BYTES);
         assert!(
             matches!(&resultado, Intake::Refused(m) if m.contains("64 MB")),
             "com o orçamento cheio o pedido tem de ser recusado: {resultado:?}"
         );
-        assert_eq!(cena.autenticou.get(), 0, "não autentica um pedido que estourou o orçamento global");
-        drop(_cheio);
-        let (depois, _) = ler(pedido(TOKEN, "{}"), 256, 0);
+        assert_eq!(autenticou, 0, "não autentica um pedido que estourou o orçamento global");
+        let (depois, _, _) = ler_com_reserva(pedido(TOKEN, "{}"), 256, 0);
         assert!(matches!(depois, Intake::Line(_)), "soltar a reserva reabre o orçamento: {depois:?}");
+    }
+
+    /// A225: o orçamento confere os bytes **antes** de copiá-los para a linha. Com 2 KiB livres no teto global, um
+    /// pedido de 8 MiB é recusado, e o trecho que não coube continua no leitor (não foi copiado nem consumido).
+    #[test]
+    fn orcamento_quase_cheio_nao_copia_o_pedido() {
+        let dados = pedido(TOKEN, &format!("\"{}\"", "b".repeat(MAX_REQUEST_BYTES as usize)));
+        let (resultado, resto, _) = ler_com_reserva(dados.clone(), 4096, MAX_IN_FLIGHT_BYTES - 2048);
+        assert!(matches!(&resultado, Intake::Refused(m) if m.contains("64 MB")), "{resultado:?}");
+        assert!(
+            resto == dados[TOKEN_WINDOW..4096],
+            "o trecho que estourou o orçamento foi copiado para a linha antes da conferência (sobraram {} bytes no leitor)",
+            resto.len()
+        );
     }
 
     #[test]

@@ -209,11 +209,12 @@ pub(super) fn read_request(
         let chunk = &available[..available.len().min(room)];
         let newline = chunk.iter().position(|b| *b == b'\n');
         let take = newline.map_or(chunk.len(), |at| at + 1);
-        line.extend_from_slice(&chunk[..take]);
-        reader.consume(take);
+        // Reserva antes de copiar: o que não cabe no teto global nunca entra na linha nem sai do leitor.
         if budget.add(take).is_none() {
             return Intake::Refused("Orçamento global de IPC esgotado (máximo 64 MB em voo)".into());
         }
+        line.extend_from_slice(&chunk[..take]);
+        reader.consume(take);
         if !authenticated && newline.is_some() && line.iter().all(u8::is_ascii_whitespace) {
             return Intake::Closed;
         }
