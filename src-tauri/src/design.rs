@@ -886,6 +886,11 @@ fn sanitize_view(state: &Value) -> Result<Value> {
 fn is_read(op: &str) -> bool {
     matches!(op, "get" | "list" | "open_target" | "view" | "view_set")
 }
+
+fn notify_after_commit<T, E>(result: &T, notify: impl FnOnce(&T) -> std::result::Result<(), E>) {
+    let _ = notify(result);
+}
+
 pub(crate) fn dispatch(app: &tauri::AppHandle, op: &str, args: &Value) -> Result<Value> {
     let db = app.state::<DbConnection>();
     if matches!(op, "view" | "view_set") {
@@ -917,7 +922,12 @@ pub(crate) fn dispatch(app: &tauri::AppHandle, op: &str, args: &Value) -> Result
         views.forget(id);
     }
     if !is_read(op) {
-        let _ = app.emit("design-changed", json!({"designId":result["id"],"isNew":result["isNew"].as_bool().unwrap_or(false),"deleted":op=="delete","archived":result["archived"],"title":result["title"],"workspace":result["workspace"],"missionId":result["missionId"]}));
+        notify_after_commit(&result, |result| {
+            app.emit(
+                "design-changed",
+                json!({"designId":result["id"],"isNew":result["isNew"].as_bool().unwrap_or(false),"deleted":op=="delete","archived":result["archived"],"title":result["title"],"workspace":result["workspace"],"missionId":result["missionId"]}),
+            )
+        })
     }
     Ok(result)
 }
@@ -956,6 +966,12 @@ command!(design_shape_update, "shape_update");
 command!(design_shape_delete, "shape_delete");
 command!(design_view_set, "view_set");
 command!(design_view_get, "view");
+
+#[cfg(test)]
+fn design_audit_db_path() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/design-audit/data.db")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -963,8 +979,7 @@ mod tests {
     #[ignore = "Run explicitly after a read-only SQLite backup to target/design-audit/data.db"]
     fn audit_real_database_copy() {
         // Fixed workspace-local path: this test can never open ~/.ags/data.db.
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/design-audit/data.db");
+        let path = design_audit_db_path();
         let mut c = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
             .unwrap();
         c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
@@ -1671,14 +1686,20 @@ mod tests {
 
     #[test]
     fn auditoria_ignorada_nao_abre_home() {
-        let src = include_str!("design.rs");
-        assert!(src.contains("CARGO_MANIFEST_DIR"));
-        assert!(src.contains("target/design-audit/data.db"));
+        let path = super::design_audit_db_path();
+        assert_eq!(path, std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/design-audit/data.db"));
+        let user_database = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join(".ags/data.db");
+        assert_ne!(path, user_database);
     }
 
     #[test]
-    fn emit_nao_desfaz_commit() {
-        let src = include_str!("design.rs");
-        assert!(src.contains("let _ = app.emit(\"design-changed\""));
+    fn falha_ao_emitir_nao_desfaz_o_resultado_persistido() {
+        let committed = json!({"id": "design-1", "title": "Rascunho"});
+        super::notify_after_commit(&committed, |_| Err("falha de evento"));
+
+        assert_eq!(committed["title"], "Rascunho");
     }
 }

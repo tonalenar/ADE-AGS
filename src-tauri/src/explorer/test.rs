@@ -487,10 +487,9 @@ mod ops {
     }
 }
 
-#[test]
-fn leitura_e_escrita_saem_da_thread_da_ui() {
-    let src = include_str!("files.rs");
-    assert!(src.contains("off_ui"), "{src}");
-    let ops = include_str!("ops.rs");
-    assert!(ops.contains("off_ui"), "{ops}");
+#[tokio::test]
+async fn trabalho_de_arquivo_roda_fora_da_thread_chamadora() {
+    let caller = std::thread::current().id();
+    let worker = super::off_ui(|| Ok(std::thread::current().id())).await.unwrap();
+    assert_ne!(worker, caller);
 }
