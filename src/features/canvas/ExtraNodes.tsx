@@ -110,6 +110,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<I
       .catch(() => alive && setFailed(true));
     return () => {
       alive = false;
+      loaded.delete(image.asset);
     };
   }, [image.asset]);
 

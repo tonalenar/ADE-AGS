@@ -16,6 +16,8 @@ export const DRAG_THRESHOLD = 5;
  * caracteres que un shell separaría, y con un espacio al final para seguir escribiendo.
  */
 export function pathForTerminal(path: string): string {
+  // Aspas simples: bash e PowerShell não expandem `$(…)`.
+  if (/['$`]/.test(path)) return `'${path.replace(/'/g, "'\\''")}' `;
   const needsQuotes = /[\s"'`$&|;<>()*?[\]{}!#~^]/.test(path);
   const quoted = needsQuotes ? `"${path.replace(/(["`$])/g, "\\$1")}"` : path;
   return `${quoted} `;

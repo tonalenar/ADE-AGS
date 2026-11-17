@@ -177,7 +177,8 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
   const toggleVigia = useVigiaSwitch((s) => s.toggle);
   const automationPaused = useAutomation(hasPaused);
   useEffect(() => ensureAutomation(), []);
-  useEffect(() => startUsagePolling(accounts), [accounts]);
+  const accountSig = accounts.map((a) => a.id).join("|");
+  useEffect(() => startUsagePolling(accounts), [accountSig]); // ids: troca de conta, não identidade do array
   const [usageOpen, setUsageOpen] = useState(readUsageOpen);
   useEffect(() => writeUsageOpen(usageOpen), [usageOpen]);
   const toggleUsage = () => setUsageOpen((v) => !v);

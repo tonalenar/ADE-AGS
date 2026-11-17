@@ -41,10 +41,15 @@ export function useTeamMessages(missionId: string | null): TeamMessage[] {
         });
     };
     pull();
-    const off = listen("cc-peer-message", () => setTimeout(pull, 150));
+    let delayed: ReturnType<typeof setTimeout> | undefined;
+    const off = listen("cc-peer-message", () => {
+      if (delayed !== undefined) clearTimeout(delayed);
+      delayed = setTimeout(pull, 150);
+    });
     const timer = window.setInterval(pull, 5000);
     return () => {
       alive = false;
+      if (delayed !== undefined) clearTimeout(delayed);
       window.clearInterval(timer);
       void off.then((fn) => fn());
     };

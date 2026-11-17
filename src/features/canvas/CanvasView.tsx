@@ -1,6 +1,6 @@
 import "@xyflow/react/dist/style.css";
 
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Background, BackgroundVariant, ConnectionMode, NodeResizer,
@@ -40,15 +40,16 @@ import { refreshDevices, useSimulatorStore } from "@/features/simulator/store";
 import { FolderNode, baseName, type FolderFlowNode } from "./FolderNode";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
-  HEADER_H, NOTE_HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, PHOTO_MAX_ZOOM, facingSides, focusViewport, intersects, isLive, revealViewport, safeViewport, terminalRect,
+  HEADER_H, NOTE_HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, PHOTO_MAX_ZOOM, facingSides, focusViewport, intersects, isLive, revealViewport, safeViewport,
   type Box, type Rect, type Viewport,
 } from "./geometry";
+import { liveRectsOf, viewportNeedsRender } from "./viewportCommit";
 import { CanvasDock, type DockPanel } from "./CanvasDock";
 import { useUiStore } from "@/app/uiStore";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ChatPanel } from "./ChatPanel";
 import { agentAccent, agentTile, nodeFrame } from "@/features/agents/agentTile";
-import { activeTabIds } from "@/features/terminal/activity";
+import { activeTabIds, useAgentActivity } from "@/features/terminal/activity";
 import { PeerQueueBadge } from "@/features/peerQueue/PeerQueueBadge";
 import { TeamNodeBadge } from "@/features/chat/team/TeamNodeBadge";
 import { CORD_MAGNET, CordConnectionLine, CordEdge, CordPort, cordColor, flashNode } from "./cords";
@@ -218,7 +219,14 @@ function CanvasInner() {
   const [vp, setVpRaw] = useState<Viewport>(() => safeViewport(board.viewport));
   // Un NaN en la vista (guardada como `null`) dejaba el zoom en "NaN%" y el canvas sin moverse: se descarta.
   const setVp = useCallback((next: Viewport) => setVpRaw((prev) => safeViewport(next, prev)), []);
-  useEffect(() => { setVp(safeViewport(useCanvasStore.getState().boards[key ?? ""]?.viewport, emptyBoard().viewport)); }, [key, setVp]);
+  const vpRef = useRef(vp);
+  vpRef.current = vp;
+  useEffect(() => {
+    const view = safeViewport(useCanvasStore.getState().boards[key ?? ""]?.viewport, emptyBoard().viewport);
+    vpRef.current = view;
+    setVp(view);
+    void rf.setViewport(view);
+  }, [key, setVp, rf]);
   const live = isLive(vp.zoom);
 
   // Dónde va cada terminal viva. Fuera del área no se dibuja: una terminal que nadie ve no
@@ -234,20 +242,25 @@ function CanvasInner() {
   }, [board.portals, vp, size]);
   useEffect(() => () => { useCanvasStore.setState({ desktopRects: {} }); }, []);
 
+  const publishLiveRects = useCallback((view: Viewport) => {
+    canvasActions.setLiveRects(liveRectsOf(
+      tabs.flatMap((tab) => {
+        const box = board.nodes[tab.id];
+        return box ? [{ id: tab.id, box }] : [];
+      }),
+      view,
+      size,
+    ));
+  }, [board.nodes, tabs, size]);
+  const onViewportChange = useCallback((next: Viewport) => {
+    const view = safeViewport(next, vpRef.current);
+    vpRef.current = view;
+    publishLiveRects(view);
+    setVpRaw((prev) => (viewportNeedsRender(prev, view) || Math.abs(prev.zoom - view.zoom) >= 0.001 ? view : prev));
+  }, [publishLiveRects]);
   useEffect(() => {
-    if (!live || size.width === 0) {
-      canvasActions.setLiveRects({});
-      return;
-    }
-    const rects: Record<string, Rect> = {};
-    for (const tab of tabs) {
-      const box = board.nodes[tab.id];
-      if (!box) continue;
-      const rect = terminalRect(box, vp);
-      if (intersects(rect, size.width, size.height)) rects[tab.id] = rect;
-    }
-    canvasActions.setLiveRects(rects);
-  }, [live, vp, board.nodes, tabs, size]);
+    publishLiveRects(vpRef.current);
+  }, [live, publishLiveRects]);
 
   useEffect(() => () => canvasActions.setLiveRects({}), []);
 
@@ -813,9 +826,14 @@ function CanvasInner() {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         connectionMode={ConnectionMode.Loose}
-        viewport={vp}
-        onViewportChange={setVp}
-        onMoveEnd={(_, v) => key && canvasActions.setViewport(key, v)}
+        defaultViewport={vp}
+        onViewportChange={onViewportChange}
+        onMoveEnd={(_, v) => {
+          const view = safeViewport(v, vpRef.current);
+          vpRef.current = view;
+          setVp(view);
+          if (key) canvasActions.setViewport(key, view);
+        }}
         minZoom={MIN_ZOOM}
         maxZoom={MAX_ZOOM}
         colorMode={theme === "dark" ? "dark" : "light"}
@@ -1041,13 +1059,11 @@ function rolePill(role: string): string {
 
 /** A bolinha de status do terminal: verde enquanto o agente escreve, cinza parado. */
 function NodeStatus({ tabId }: { tabId: string }) {
-  const [on, setOn] = useState(false);
-  useEffect(() => {
-    const read = () => setOn(activeTabIds(Date.now()).includes(tabId));
-    read();
-    const timer = window.setInterval(read, 1500);
-    return () => window.clearInterval(timer);
-  }, [tabId]);
+  const on = useSyncExternalStore(
+    (cb) => useAgentActivity.subscribe(cb),
+    () => activeTabIds().includes(tabId),
+    () => false,
+  );
   return (
     <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${on
       ? "bg-[#30d158] shadow-[0_0_0_3px_rgba(48,209,88,0.18)]"
@@ -1077,10 +1093,12 @@ function Preview({ tabId, rows, onOpen }: { tabId: string; rows: number; onOpen:
   const { t } = useTranslation();
   const [lines, setLines] = useState<string[]>(() => screenOf(tabId, null, rows)?.lines ?? []);
   useEffect(() => {
-    const read = () => setLines(screenOf(tabId, null, rows)?.lines ?? []);
+    const read = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      setLines(screenOf(tabId, null, rows)?.lines ?? []);
+    };
     read();
-    const timer = window.setInterval(read, 1500);
-    return () => window.clearInterval(timer);
+    return useAgentActivity.subscribe(read);
   }, [tabId, rows]);
 
   return (

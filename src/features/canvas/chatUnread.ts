@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { loadChatHistory } from "./chatHistory";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 
@@ -176,6 +176,16 @@ export const useUnreadStore = create<UnreadState>((set, get) => ({
   },
 }));
 
+export function pruneSeen(seen: Record<string, number>, tabIds: Iterable<string>): Record<string, number> {
+  const live = new Set(tabIds);
+  const next: Record<string, number> = {};
+  for (const [k, at] of Object.entries(seen)) {
+    const tab = k.slice(0, k.indexOf("|"));
+    if (live.has(tab)) next[k] = at;
+  }
+  return next;
+}
+
 function persist(seen: Record<string, number>) {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(seen));
@@ -202,8 +212,16 @@ export function useChatUnreadWatcher() {
 
   const agentIds = useTabsStore((s) => s.tabs.filter((t) => t.agentId !== "bash").map((t) => t.id).join(","));
   useEffect(() => {
+    const ids = agentIds.split(",").filter(Boolean);
+    const pruned = pruneSeen(useUnreadStore.getState().seen, ids);
+    if (Object.keys(pruned).length !== Object.keys(useUnreadStore.getState().seen).length) {
+      persist(pruned);
+      useUnreadStore.setState({ seen: pruned });
+    }
+  }, [agentIds]);
+  useEffect(() => {
     const ingest = (tabId: string, baseline: boolean) =>
-      invoke<{ messages: Msg[] }>("chat_history", { tabId })
+      loadChatHistory<{ messages: Msg[] }>(tabId)
         .then((c) => useUnreadStore.getState().ingest(tabId, c.messages, baseline))
         .catch(() => undefined);
     for (const id of agentIds.split(",").filter(Boolean)) void ingest(id, true);

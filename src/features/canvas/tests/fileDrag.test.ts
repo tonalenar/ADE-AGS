@@ -13,7 +13,8 @@ describe("ruta para la terminal", () => {
     expect(pathForTerminal("/p/a&b.ts")).toBe('"/p/a&b.ts" ');
     // Dentro de las comillas dobles se escapan las comillas, el $ y la tilde grave.
     const bs = String.fromCharCode(92);
-    expect(pathForTerminal("/p/$HOME.ts")).toBe('"/p/' + bs + '$HOME.ts" ');
+    expect(pathForTerminal("/p/$HOME.ts")).toBe("'/p/$HOME.ts' ");
+    expect(pathForTerminal("/p/$(Get-Date).ts")).toBe("'/p/$(Get-Date).ts' ");
     expect(pathForTerminal('/p/dice "hola".ts')).toBe('"/p/dice ' + bs + '"hola' + bs + '".ts" ');
   });
 });
