@@ -333,11 +333,11 @@ fn helper_autoriza_sessoes_vivas_renova_e_revoga_no_fechamento() {
             },
         )
         .unwrap();
-    let parent = |pid| match pid {
+    let parent = |pid| Ok(match pid {
         43 => Some(42),
         53 => Some(52),
         _ => None,
-    };
+    });
     let start_of = |pid| match pid {
         42 => Some(1_000),
         43 => Some(1_001),
@@ -399,7 +399,7 @@ fn redeem_de_pid_com_inicio_adulterado_e_recusado() {
             },
         )
         .unwrap();
-    let parent = |pid| (pid == 43).then_some(42);
+    let parent = |pid| Ok((pid == 43).then_some(42));
     let start_adulterado = |pid| match pid {
         42 => Some(9_999),
         43 => Some(1_001),

@@ -108,7 +108,7 @@ impl Broker {
         &self,
         account_id: &str,
         caller_pid: u32,
-        parent: impl FnMut(u32) -> Option<u32> + Copy,
+        parent: impl FnMut(u32) -> Result<Option<u32>, String> + Copy,
         start_of: impl FnMut(u32) -> Option<u64> + Copy,
         load_key: impl FnOnce(&str) -> Option<String>,
     ) -> Result<String, BrokerError> {
