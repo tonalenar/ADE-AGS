@@ -154,7 +154,7 @@ describe("as funções da barra (Fixadas, renomear, lida, menu, teclado)", () =>
     const headers = [...host.querySelectorAll("section > div > button[aria-expanded]")];
     expect(headers.map((h) => h.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("ADE-AGS"), expect.stringContaining("Outro")]));
     await click(headers.find((h) => h.textContent?.includes("Outro"))!);
-    expect(useShelf.getState().collapsed).toEqual(["project:Outro"]);
+    expect(useShelf.getState().collapsed).toEqual(["project:/p/Outro"]);
     expect(host.textContent).not.toContain("Segunda conversa");
   });
 
@@ -262,7 +262,7 @@ describe("a hierarquia da barra do Claude Code (uma linha, filhas, menus restaur
     const labels = items();
     for (const wanted of ["chat.sidebar.group.collapseAll", "skills.scope.workspaceAction", "workspaces.close"]) expect(labels.some((l) => l.includes(wanted))).toBe(true);
     await click([...document.querySelectorAll("button, [role=menuitem]")].find((b) => b.textContent?.includes("chat.sidebar.group.collapseAll")) ?? null);
-    expect(useShelf.getState().collapsed.sort()).toEqual(["project:ADE-AGS", "project:Outro"]);
+    expect(useShelf.getState().collapsed.sort()).toEqual(["project:/p/ADE-AGS", "project:/p/Outro"]);
   });
 
   it("o ··· Mais mostra a contagem rodando/iniciando", async () => {

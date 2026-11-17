@@ -8,7 +8,7 @@ import { normalizeProjectPath } from "../chatProjectPrefs";
 import { DEFAULT_PROJECT_ORDER_PREFS, orderProjects, type ProjectOrderPrefs } from "./projectOrder";
 
 export interface SessionSection {
-  /** `pinned`, `needs`, `working` ou `project:<nome>` (é também o que se guarda para lembrar a seção recolhida). */
+  /** `pinned`, `needs`, `working` ou `project:<pasta>`, a raiz do repositório (é também o que se guarda para lembrar a seção recolhida). */
   id: string;
   kind: "pinned" | "needs" | "working" | "project";
   label: string;
@@ -19,7 +19,8 @@ export interface SessionSection {
 export const PINNED_ID = "pinned";
 export const NEEDS_ID = "needs";
 export const WORKING_ID = "working";
-export const projectSectionId = (project: string) => `project:${project}`;
+/** O id da seção de um projeto é a pasta (a raiz do repositório), não o nome: o rótulo pode mudar com a busca ou o arquivo. */
+export const projectSectionId = (folder: string) => `project:${folder}`;
 
 /**
  * A seção Trabalhando (Configurações → Geral → Barra lateral). Ligada, a seção vai ao fim da lista com as
@@ -128,16 +129,16 @@ export function buildSections(cards: ConversationCard[], opts: SectionOptions): 
       const project = labelOf(items);
       return {
         project,
-        items: ordered(items, projectSectionId(project)),
+        items: ordered(items, projectSectionId(normalizeProjectPath(items[0]!.repoKey ?? items[0]!.cwd))),
         // Agrupada por repositório, a identidade da seção é a raiz dele, e não a pasta da primeira conversa.
         key: normalizeProjectPath(items[0]!.repoKey ?? items[0]!.cwd),
         latest: newest(items),
       };
     }),
     opts.projectOrder ?? DEFAULT_PROJECT_ORDER_PREFS,
-  ).map(({ project, items }) => ({ project, items }));
-  for (const { project, items } of projects) {
-    const id = projectSectionId(project);
+  ).map(({ project, items, key }) => ({ project, items, key }));
+  for (const { project, items, key } of projects) {
+    const id = projectSectionId(key);
     sections.push({ id, kind: "project", label: project, items, collapsed: opts.collapsed.includes(id) });
   }
   if (shelfOn) {
