@@ -47,8 +47,11 @@ pub struct Candidate {
 /// Colapsa espaços, corta em `max` caracteres e marca o corte. Pura.
 fn clip(text: &str, max: usize) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if max == 0 {
+        return String::new();
+    }
     if flat.chars().count() > max {
-        flat.chars().take(max).collect::<String>() + "…"
+        flat.chars().take(max.saturating_sub(1)).collect::<String>() + "…"
     } else {
         flat
     }
@@ -72,17 +75,22 @@ pub fn request_for(objective: &str, candidates: &[&Candidate], local_top: &[Stri
     let header = format!("objetivo: {}\ncandidatas:", clip(objective, OBJECTIVE_CHARS));
     let leftover = STATE_CHAR_BUDGET.saturating_sub(header.chars().count());
     let per = leftover / candidates.len().max(1);
-    let body_chars = BODY_CHARS.min(per.saturating_sub(24));
     let mut state = header;
     let mut questions = BTreeMap::new();
     let mut heuristic = BTreeMap::new();
     for (i, candidate) in candidates.iter().enumerate() {
-        state.push_str(&format!(
-            "\n{i}. {} ({}): {}",
-            clip(&candidate.key, 40.min(per / 2).max(8)),
+        let key = clip(&candidate.key, 40.min(per / 2).max(8));
+        let line_fixed = format!("\n{i}. {key} ({}): ", candidate.kind).chars().count();
+        let body_chars = BODY_CHARS.min(per.saturating_sub(line_fixed));
+        let line = format!(
+            "\n{i}. {key} ({}): {}",
             candidate.kind,
             clip(&candidate.body, body_chars)
-        ));
+        );
+        if state.chars().count() + line.chars().count() > STATE_CHAR_BUDGET {
+            break;
+        }
+        state.push_str(&line);
         questions.insert(
             format!("m{i}"),
             Question::choice(
@@ -419,6 +427,17 @@ mod tests {
         let body_line = request.state.lines().find(|l| l.starts_with("0. ")).unwrap();
         assert!(body_line.chars().count() < BODY_CHARS + 40);
         assert!(request.state.chars().count() <= STATE_CHAR_BUDGET);
+    }
+
+    #[test]
+    fn trinta_chaves_longas_cabem_no_orcamento_de_4kib() {
+        let all: Vec<Candidate> = (0..30)
+            .map(|i| cand(&format!("{}-{}", "k".repeat(80), i), &"corpo ".repeat(80)))
+            .collect();
+        let refs: Vec<&Candidate> = considered(&all);
+        let request = request_for(&"objetivo ".repeat(40), &refs, &[]);
+        assert!(request.state.chars().count() <= STATE_CHAR_BUDGET, "{}", request.state.chars().count());
+        assert!(request.wire().is_ok());
     }
 
     #[test]

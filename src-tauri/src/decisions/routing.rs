@@ -208,18 +208,28 @@ pub fn route(db: &DbConnection, text: &str, members: &[Member], local: Option<&s
     }
     let api_key = config::load_key();
     let fingerprint = route_fingerprint(text, members, local);
-    if let Ok(cache) = ROUTE_CACHE.lock() {
-        if let Some(hit) = cache.as_ref() {
-            if hit.fingerprint == fingerprint && hit.at.elapsed() < ROUTE_DEDUP {
-                return hit.route.clone();
-            }
-        }
+    if let Some(hit) = lookup_route_cache(fingerprint, Instant::now()) {
+        return hit;
     }
     let route = route_with(db, &settings, api_key.as_deref(), text, members, local);
-    if let Ok(mut cache) = ROUTE_CACHE.lock() {
-        *cache = Some(RouteCache { fingerprint, at: Instant::now(), route: route.clone() });
-    }
+    store_route_cache(fingerprint, Instant::now(), route.clone());
     route
+}
+
+fn lookup_route_cache(fingerprint: u64, now: Instant) -> Option<Option<Route>> {
+    let cache = ROUTE_CACHE.lock().ok()?;
+    let hit = cache.as_ref()?;
+    if hit.fingerprint == fingerprint && now.duration_since(hit.at) < ROUTE_DEDUP {
+        Some(hit.route.clone())
+    } else {
+        None
+    }
+}
+
+fn store_route_cache(fingerprint: u64, at: Instant, route: Option<Route>) {
+    if let Ok(mut cache) = ROUTE_CACHE.lock() {
+        *cache = Some(RouteCache { fingerprint, at, route });
+    }
 }
 
 pub(super) fn route_with(
@@ -277,4 +287,21 @@ pub async fn decision_route_turn(
     tauri::async_runtime::spawn_blocking(move || route(&db, &text, &members, local.as_deref()))
         .await
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn o_cache_de_rota_reusa_em_menos_de_dois_segundos() {
+        let fingerprint = 42;
+        let route = Some(Route { target: "Ana".into(), confidence: Some(0.8), probability: Some(0.7) });
+        let at = Instant::now();
+        store_route_cache(fingerprint, at, route.clone());
+        assert_eq!(lookup_route_cache(fingerprint, at + Duration::from_millis(500)), Some(route.clone()));
+        assert_eq!(lookup_route_cache(fingerprint, at + Duration::from_secs(2)), None);
+        assert_eq!(lookup_route_cache(99, at + Duration::from_millis(10)), None);
+        *ROUTE_CACHE.lock().unwrap() = None;
+    }
 }
