@@ -347,7 +347,7 @@ fn ligado_pelo_agente_sem_tela_fica_fora_de_vista_e_hiberna() {
 #[test]
 fn monitor_so_hiberna_quem_continua_fora_de_vista_na_hora_de_desligar() {
     // O monitor decide com o uso de agora: quem a pessoa abriu depois do começo do ciclo não é desligado com a tela aberta.
-    use super::lifecycle::{booted_entry, claim_due};
+    use super::lifecycle::{booted_entry, claim_due, confirm_hibernation};
     use std::collections::HashMap;
     use std::time::{Duration, Instant};
     let now = Instant::now();
@@ -362,7 +362,66 @@ fn monitor_so_hiberna_quem_continua_fora_de_vista_na_hora_de_desligar() {
 
     mapa.insert("esquecido".to_string(), booted_entry(now, false));
     assert!(claim_due(&mut mapa, "esquecido", depois, prazo));
-    assert!(!mapa.contains_key("esquecido"), "reivindicado, o aparelho sai do mapa na mesma trava");
+    assert!(confirm_hibernation(&mapa, "esquecido"), "marcado e sem tela: pode desligar");
+}
+
+#[test]
+fn claim_seen_desligar_nao_acontece() {
+    // Entre a marca e o desligamento, uma tela que abre cancela: o aparelho não é desligado com a tela aberta.
+    use super::lifecycle::{booted_entry, claim_due, confirm_hibernation, seen_in};
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+    let now = Instant::now();
+    let depois = now + Duration::from_secs(600);
+    let prazo = Some(Duration::from_secs(600));
+    let mut mapa = HashMap::new();
+    mapa.insert("a".to_string(), booted_entry(now, false));
+    assert!(claim_due(&mut mapa, "a", depois, prazo));
+    assert!(confirm_hibernation(&mapa, "a"), "marcado: a confirmação antes do desligamento passa");
+    seen_in(&mut mapa, "a", true);
+    assert!(!confirm_hibernation(&mapa, "a"), "a tela abriu depois da marca: não desliga");
+    assert!(mapa.contains_key("a"), "quem foi visto segue no ciclo");
+}
+
+#[test]
+fn tela_que_abre_durante_o_desligamento_religa_o_aparelho() {
+    use super::lifecycle::{booted_entry, claim_due, confirm_hibernation, finish_hibernation, seen_in};
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+    let now = Instant::now();
+    let depois = now + Duration::from_secs(600);
+    let prazo = Some(Duration::from_secs(600));
+    let mut mapa = HashMap::new();
+    mapa.insert("a".to_string(), booted_entry(now, false));
+    assert!(claim_due(&mut mapa, "a", depois, prazo));
+    assert!(confirm_hibernation(&mapa, "a"));
+    // A tela abre enquanto o `shutdown` roda: a marca cai, mas o desligamento já saiu.
+    seen_in(&mut mapa, "a", true);
+    assert!(finish_hibernation(&mut mapa, "a", true), "desligou com a tela aberta: tem que religar");
+    assert!(mapa.contains_key("a"), "continua no ciclo, à vista");
+}
+
+#[test]
+fn desligamento_concluido_sai_do_ciclo_e_falha_mantem_o_aparelho() {
+    use super::lifecycle::{booted_entry, claim_due, confirm_hibernation, finish_hibernation};
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+    let now = Instant::now();
+    let depois = now + Duration::from_secs(600);
+    let prazo = Some(Duration::from_secs(600));
+    let mut mapa = HashMap::new();
+    mapa.insert("a".to_string(), booted_entry(now, false));
+    assert!(claim_due(&mut mapa, "a", depois, prazo));
+    assert!(confirm_hibernation(&mapa, "a"));
+    assert!(!finish_hibernation(&mut mapa, "a", true), "desligado, sem tela: não religa");
+    assert!(!mapa.contains_key("a"), "desligado de fato, sai do ciclo");
+
+    // Falha no desligamento: o aparelho segue ligado e no ciclo, e pode ser marcado de novo.
+    mapa.insert("b".to_string(), booted_entry(now, false));
+    assert!(claim_due(&mut mapa, "b", depois, prazo));
+    assert!(!finish_hibernation(&mut mapa, "b", false));
+    assert!(mapa.contains_key("b"));
+    assert!(!confirm_hibernation(&mapa, "b"), "a marca caiu com a falha");
 }
 
 #[test]

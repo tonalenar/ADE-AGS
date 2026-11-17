@@ -44,6 +44,9 @@ pub(super) struct Usage {
     pub(super) last_seen: Instant,
     pub(super) visible: bool,
     pub(super) priority: PriorityState,
+    /// Marcado para hibernar: o registro fica no mapa até o desligamento terminar. Uma tela ou um agente que chegar
+    /// antes do `shutdown` tira a marca, e o desligamento não acontece (ver `hibernate_marked`).
+    pub(super) hibernating: bool,
 }
 
 /// Estado puro das aplicações: uma restauração enfileirada cobre todas as ações até terminar.
@@ -108,18 +111,38 @@ pub fn due(now: Instant, last_seen: Instant, visible: bool, after: Option<Durati
 /// O registro de um aparelho que acabou de ligar. Ligado da tela (`from_screen`), já nasce à vista. Ligado pelo agente,
 /// sem nó no canvas, nasce fora de vista: antes nascia à vista e nunca hibernava.
 pub(super) fn booted_entry(now: Instant, from_screen: bool) -> Usage {
-    Usage { last_used: None, last_seen: now, visible: from_screen, priority: PriorityState::default() }
+    Usage { last_used: None, last_seen: now, visible: from_screen, priority: PriorityState::default(), hibernating: false }
 }
 
-/// Reivindica um aparelho para hibernar: só se ele ainda estiver devido agora, olhando o uso atual. Tira o aparelho do
-/// mapa na mesma trava, então um `seen` que chegar depois não o religa no meio do desligamento.
+/// Marca um aparelho para hibernar: só se ele ainda estiver devido agora, olhando o uso atual. O registro fica no mapa;
+/// quem chegar antes do desligamento cancela a marca (ver `seen_in` e `used`).
 pub(super) fn claim_due(map: &mut HashMap<String, Usage>, udid: &str, now: Instant, after: Option<Duration>) -> bool {
-    let Some(u) = map.get(udid) else { return false };
+    let Some(u) = map.get_mut(udid) else { return false };
     if !due(now, u.last_seen, u.visible, after) {
         return false;
     }
-    map.remove(udid);
+    u.hibernating = true;
     true
+}
+
+/// A marca de hibernar ainda está de pé? Confere sob a trava, logo antes do `shutdown`.
+pub(super) fn confirm_hibernation(map: &HashMap<String, Usage>, udid: &str) -> bool {
+    map.get(udid).is_some_and(|u| u.hibernating)
+}
+
+/// Depois do desligamento. Se a marca caiu durante ele (uma tela ou um agente chegou), o aparelho tem que voltar:
+/// devolve `true` quando é preciso religá-lo. Desligado de fato e sem marca, sai do ciclo. Falha: fica no ciclo.
+pub(super) fn finish_hibernation(map: &mut HashMap<String, Usage>, udid: &str, off: bool) -> bool {
+    let Some(u) = map.get_mut(udid) else { return false };
+    if !u.hibernating {
+        return off;
+    }
+    if off {
+        map.remove(udid);
+    } else {
+        u.hibernating = false;
+    }
+    false
 }
 
 /// Pura: só reduz a prioridade fora de vista e após a carência da última ação do agente.
@@ -140,20 +163,41 @@ fn emit(udid: &str, state: &str, reason: &str) {
     }
 }
 
-/// Desliga um aparelho que já saiu do mapa e avisa os nós.
-fn shutdown_claimed(udid: &str, reason: &str) {
-    match ops::shutdown(udid) {
-        Ok(()) => emit(udid, "shutdown", reason),
-        Err(e) => eprintln!("[simulator] não hibernei {udid}: {e}"),
+/// Desliga um aparelho marcado para hibernar. Confere a marca sob a trava logo antes do desligamento: se uma tela ou
+/// um agente chegou depois da marca, o aparelho fica como está. Se chegou durante o desligamento, religa.
+fn hibernate_marked(udid: &str, reason: &str, light: bool) {
+    let confirmed = usage().lock().map(|map| confirm_hibernation(&map, udid)).unwrap_or(false);
+    if !confirmed {
+        return;
+    }
+    let off = match ops::shutdown(udid) {
+        Ok(()) => {
+            emit(udid, "shutdown", reason);
+            true
+        }
+        Err(e) => {
+            eprintln!("[simulator] não hibernei {udid}: {e}");
+            false
+        }
+    };
+    let reopen = usage().lock().map(|mut map| finish_hibernation(&mut map, udid, off)).unwrap_or(false);
+    if reopen {
+        match ops::boot(udid, light) {
+            Ok(()) => emit(udid, "booted", "reopened"),
+            Err(e) => eprintln!("[simulator] não religuei {udid}, que foi pedido durante o desligamento: {e}"),
+        }
     }
 }
 
-/// Desliga um aparelho por economia e avisa os nós.
+/// Desliga um aparelho por economia (a regra "um por vez"), pela mesma marca e confirmação do monitor.
 fn hibernate(udid: &str, reason: &str) {
+    let light = settings().lock().map(|s| s.light).unwrap_or(true);
     if let Ok(mut map) = usage().lock() {
-        map.remove(udid);
+        if let Some(u) = map.get_mut(udid) {
+            u.hibernating = true;
+        }
     }
-    shutdown_claimed(udid, reason);
+    hibernate_marked(udid, reason, light);
 }
 
 /// A ADE acabou de ligar `udid` (`from_screen`: pela tela, não por um agente). Com "um por vez", hiberna os outros.
@@ -178,21 +222,24 @@ pub fn booted(app: &AppHandle, udid: &str, from_screen: bool) {
 /// A tela de `udid` está (ou deixou de estar) à vista. Quando entra à vista com prioridade baixa, restaura a
 /// prioridade normal na hora (fora da thread da interface) sem esperar os 20 s do monitor.
 pub fn seen(udid: &str, visible: bool) {
-    let mut restore_now = false;
-    if let Ok(mut map) = usage().lock() {
-        if let Some(u) = map.get_mut(udid) {
-            if visible || u.visible {
-                u.last_seen = Instant::now();
-            }
-            u.visible = visible;
-            if visible {
-                restore_now = u.priority.queue_restore();
-            }
-        }
-    }
+    let restore_now = usage().lock().map(|mut map| seen_in(&mut map, udid, visible)).unwrap_or(false);
     if restore_now {
         restore_priority(udid);
     }
+}
+
+/// `seen` sobre o mapa. Uma tela à vista cancela a marca de hibernar. Devolve se a prioridade precisa voltar já.
+pub(super) fn seen_in(map: &mut HashMap<String, Usage>, udid: &str, visible: bool) -> bool {
+    let Some(u) = map.get_mut(udid) else { return false };
+    if visible || u.visible {
+        u.last_seen = Instant::now();
+    }
+    u.visible = visible;
+    if visible {
+        u.hibernating = false;
+        return u.priority.queue_restore();
+    }
+    false
 }
 
 /// A pendência já foi marcada em usage(); ações repetidas não criam mais threads.
@@ -267,6 +314,8 @@ pub fn used(udid: &str) {
             let now = Instant::now();
             u.last_seen = now;
             u.last_used = Some(now);
+            // Um agente que mexe no aparelho cancela a hibernação marcada.
+            u.hibernating = false;
             restore_now = u.priority.queue_restore();
         }
     }
@@ -312,7 +361,7 @@ fn monitor() {
             // Decide com o uso de agora (sob a trava), não com uma cópia de antes do desligamento anterior.
             let claimed = usage().lock().map(|mut map| claim_due(&mut map, &udid, now, current.hibernate_after)).unwrap_or(false);
             if claimed {
-                shutdown_claimed(&udid, "hibernated");
+                hibernate_marked(&udid, "hibernated", current.light);
             } else {
                 apply_priority(&udid, false);
             }
