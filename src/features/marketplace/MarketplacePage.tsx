@@ -10,6 +10,7 @@ import { useSkillReadme } from "./useSkillReadme";
 import { flatOrder, groupByRegistry, keyOf } from "./palette";
 import { moveSelection, reconcileSelection, useSelectionVisible } from "@/shared/ui/paletteNav";
 import { RegistryFilterSidebar, type RegistryFilter } from "./RegistryFilterSidebar";
+import { skipInitialEmptySkillsLoad } from "./marketplaceQuery";
 
 export function MarketplacePage() {
   const { t } = useTranslation();
@@ -47,7 +48,7 @@ export function MarketplacePage() {
   useEffect(() => {
     if (skipFirstQuery.current) {
       skipFirstQuery.current = false;
-      if (!query) return;
+      if (skipInitialEmptySkillsLoad(true, query)) return;
     }
     const handle = setTimeout(() => loadSkills(query), 250);
     return () => clearTimeout(handle);

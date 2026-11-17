@@ -15,6 +15,10 @@ export class SkillReadmeCache {
   set(registryId: string, skillId: string, content: string): void {
     this.values.set(this.key(registryId, skillId), content);
   }
+
+  clear(): void {
+    this.values.clear();
+  }
 }
 
 export const skillReadmeCache = new SkillReadmeCache();

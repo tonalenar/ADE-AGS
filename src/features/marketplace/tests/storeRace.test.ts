@@ -14,6 +14,7 @@ const ipc = vi.hoisted(() => ({
 }));
 
 vi.mock("../ipc", () => ipc);
+vi.mock("@/shared/ui/alerts", () => ({ AlertaToast: vi.fn() }));
 
 import { useMarketplaceStore } from "../store";
 import type { MarketplaceSkillEntry } from "../types";
@@ -51,6 +52,7 @@ describe("marketplace loadSkills", () => {
       searchingRemote: false,
       refreshingId: null,
       installingKey: null,
+      error: null,
     });
   });
 
@@ -71,5 +73,11 @@ describe("marketplace loadSkills", () => {
     second.resolve([skill("new")]);
     await b;
     expect(useMarketplaceStore.getState().skills.map((row) => row.id)).toEqual(["new"]);
+  });
+
+  it("grava o erro da listagem para a página mostrar", async () => {
+    ipc.listMarketplaceSkills.mockRejectedValueOnce(new Error("rede"));
+    await useMarketplaceStore.getState().loadSkills("abc");
+    expect(useMarketplaceStore.getState().error).toContain("rede");
   });
 });
