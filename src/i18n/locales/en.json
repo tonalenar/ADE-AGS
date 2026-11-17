@@ -5749,6 +5749,8 @@
   "chat.summary.limits.reason.noWindows": "the agent reported no windows",
   "chat.summary.limits.reason.noQuotaSource": "no quota source",
   "chat.summary.limits.reason.noSource": "this agent does not expose its quota",
+  "chat.summary.limits.reason.unresolved": "the account in use is no longer connected",
+  "chat.summary.limits.unresolvedAccount": "account not found",
   "chat.summary.limits.renewsIn": "renews in {{time}}",
   "chat.summary.limits.renewsAt": "renews {{when}}",
   "chat.summary.limits.renewsText": "renews {{when}}",

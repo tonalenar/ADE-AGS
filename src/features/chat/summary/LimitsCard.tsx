@@ -157,7 +157,7 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
     // O Antigravity sem perfil é o login local do `agy`: a mesma leitura do canvas.
     if (entry.agentId === "antigravity" && !entry.accountId) return readAgy(agy, true, now);
     const account = entry.account;
-    if (!account) return { state: "unmeasured", reason: loaded ? "noSource" : "loading" };
+    if (!account) return { state: "unmeasured", reason: !loaded ? "loading" : entry.accountId ? "unresolved" : "noSource" };
     if (entry.agentId === "claude-code") return readClaude(claude[account.id] ?? null, account.loggedIn, now);
     if (entry.agentId === "codex") return readCodex(codex[account.id], account.loggedIn, now);
     return readAntigravity(antigravity[account.id], account.loggedIn, now);
@@ -199,7 +199,7 @@ function AccountBlock({ entry, reading, budget, now, poolNote = null }: { entry:
     <div className="flex flex-col gap-2">
       <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45 truncate" title={entry.who.join(", ")}>
         <span className="font-medium text-gray-800 dark:text-white/85">{agentName(entry.agentId)}</span>
-        {" · "}{accountName(entry.account, t)}
+        {" · "}{reading.state === "unmeasured" && reading.reason === "unresolved" ? t("chat.summary.limits.unresolvedAccount") : accountName(entry.account, t)}
         {entry.who.length > 0 && <span className="text-gray-400 dark:text-white/35">{" · "}{t("chat.summary.limits.usedBy", { who: entry.who.join(", ") })}</span>}
       </div>
       {poolNote && <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45">{poolNote}</div>}

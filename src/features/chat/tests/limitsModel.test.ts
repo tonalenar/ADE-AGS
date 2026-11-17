@@ -206,6 +206,13 @@ describe("as contas conectadas, todas (não só as da conversa)", () => {
     expect(connectedAccounts({ ...base, used: [], listedUnmeasured: new Set() }).map((e) => e.key)).not.toContain("system:cursor");
   });
 
+  it("a conta que a conversa usa e que não existe mais fica como ela mesma, não cai na conta principal", () => {
+    const used = usedAccounts([{ name: "Codex · Backend", agentId: "codex", accountId: "sumiu" }]);
+    const list = connectedAccounts({ ...base, used });
+    expect(list[0]).toMatchObject({ key: "sumiu", agentId: "codex", accountId: "sumiu", account: null, who: ["Codex · Backend"] });
+    expect(list.filter((e) => e.key === "system:codex")).toHaveLength(1);
+  });
+
   it("uma conversa com o Cursor não repete a conta: a da conversa vem primeiro", () => {
     const used = usedAccounts([{ name: "Cursor · Revisor", agentId: "cursor", accountId: null }]);
     const list = connectedAccounts({ ...base, used, listedUnmeasured: new Set(["cursor"]) });

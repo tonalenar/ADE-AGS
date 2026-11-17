@@ -5749,6 +5749,8 @@
   "chat.summary.limits.reason.noWindows": "o agente não informou janelas",
   "chat.summary.limits.reason.noQuotaSource": "sem fonte de cota",
   "chat.summary.limits.reason.noSource": "este agente não expõe a cota",
+  "chat.summary.limits.reason.unresolved": "a conta usada não está mais conectada",
+  "chat.summary.limits.unresolvedAccount": "conta não encontrada",
   "chat.summary.limits.renewsIn": "renova em {{time}}",
   "chat.summary.limits.renewsAt": "renova {{when}}",
   "chat.summary.limits.renewsText": "renova {{when}}",
