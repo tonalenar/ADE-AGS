@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::Serialize;
 
 /// Quantos escopos uma tarefa declara, no máximo, e o tamanho de cada um.
@@ -20,14 +20,28 @@ pub const MAX_SCOPES: usize = 20;
 const MAX_SCOPE_CHARS: usize = 200;
 
 /// Os rótulos aceitos no começo da linha (sem acento e sem maiúsculas).
-const LABELS: [&str; 6] = ["escopo", "escopos", "escopo de escrita", "write scopes", "writescopes", "write_scopes"];
+const LABELS: [&str; 6] = [
+    "escopo",
+    "escopos",
+    "escopo de escrita",
+    "write scopes",
+    "writescopes",
+    "write_scopes",
+];
 
 /// Um prefixo de caminho relativo à raiz do repositório, sem `./`, sem barra no fim e com `/`. `""` é o
 /// repositório inteiro (`.` ou `*`). Recusa caminho absoluto e `..`. Pura.
 pub fn normalize(raw: &str) -> Result<String, String> {
-    let mut path = raw.trim().trim_matches(|c| c == '`' || c == '"' || c == '\'').replace('\\', "/");
+    let mut path = raw
+        .trim()
+        .trim_matches(|c| c == '`' || c == '"' || c == '\'')
+        .replace('\\', "/");
     // Um glob de diretório vale pelo prefixo: `src/**`, `src/*` → `src`.
-    while let Some(stripped) = path.strip_suffix("/**").or_else(|| path.strip_suffix("/*")).or_else(|| path.strip_suffix("**")) {
+    while let Some(stripped) = path
+        .strip_suffix("/**")
+        .or_else(|| path.strip_suffix("/*"))
+        .or_else(|| path.strip_suffix("**"))
+    {
         path = stripped.to_string();
     }
     if path == "*" || path == "." || path == "./" {
@@ -36,16 +50,24 @@ pub fn normalize(raw: &str) -> Result<String, String> {
     if path.starts_with('/') || path.chars().nth(1) == Some(':') || path.starts_with("~") {
         return Err(format!("'{raw}' não é relativo ao repositório"));
     }
-    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
+    let parts: Vec<&str> = path
+        .split('/')
+        .filter(|p| !p.is_empty() && *p != ".")
+        .collect();
     if parts.iter().any(|p| *p == "..") {
         return Err(format!("'{raw}' sai do repositório (..)"));
     }
     if parts.iter().any(|p| p.contains('*')) {
-        return Err(format!("'{raw}': use um prefixo de pasta ou arquivo, sem curinga no meio"));
+        return Err(format!(
+            "'{raw}': use um prefixo de pasta ou arquivo, sem curinga no meio"
+        ));
     }
     let normal = parts.join("/");
     if normal.chars().count() > MAX_SCOPE_CHARS {
-        return Err(format!("'{}…' passa de {MAX_SCOPE_CHARS} caracteres", normal.chars().take(40).collect::<String>()));
+        return Err(format!(
+            "'{}…' passa de {MAX_SCOPE_CHARS} caracteres",
+            normal.chars().take(40).collect::<String>()
+        ));
     }
     Ok(normal)
 }
@@ -100,14 +122,23 @@ pub fn prompt_with_scopes(prompt: &str, scopes: &[String]) -> String {
     if scopes.is_empty() {
         return prompt.to_string();
     }
-    let shown: Vec<&str> = scopes.iter().map(|s| if s.is_empty() { "." } else { s.as_str() }).collect();
+    let shown: Vec<&str> = scopes
+        .iter()
+        .map(|s| if s.is_empty() { "." } else { s.as_str() })
+        .collect();
     format!("{}\n\nEscopo: {}", prompt.trim_end(), shown.join(", "))
 }
 
 /// `a` e `b` se sobrepõem: um é o outro ou está dentro dele, por componente (`src/a` não cobre `src/ab`).
 /// `""` (o repositório inteiro) cobre tudo. Pura.
 pub fn overlap(a: &str, b: &str) -> bool {
-    let inside = |outer: &str, inner: &str| outer.is_empty() || inner == outer || inner.strip_prefix(outer).is_some_and(|rest| rest.starts_with('/'));
+    let inside = |outer: &str, inner: &str| {
+        outer.is_empty()
+            || inner == outer
+            || inner
+                .strip_prefix(outer)
+                .is_some_and(|rest| rest.starts_with('/'))
+    };
     inside(a, b) || inside(b, a)
 }
 
@@ -142,14 +173,24 @@ pub fn overlaps(works: &[Scoped]) -> Vec<Overlap> {
             for x in &a.scopes {
                 for y in b.scopes.iter().filter(|y| overlap(x, y)) {
                     let deeper = if x.len() >= y.len() { x } else { y };
-                    let shown = if deeper.is_empty() { ".".to_string() } else { deeper.clone() };
+                    let shown = if deeper.is_empty() {
+                        ".".to_string()
+                    } else {
+                        deeper.clone()
+                    };
                     if !paths.contains(&shown) {
                         paths.push(shown);
                     }
                 }
             }
             if !paths.is_empty() {
-                out.push(Overlap { a: a.owner.clone(), a_task: a.task.clone(), b: b.owner.clone(), b_task: b.task.clone(), paths });
+                out.push(Overlap {
+                    a: a.owner.clone(),
+                    a_task: a.task.clone(),
+                    b: b.owner.clone(),
+                    b_task: b.task.clone(),
+                    paths,
+                });
             }
         }
     }
@@ -183,18 +224,35 @@ pub fn in_progress(messages: &[Message]) -> Vec<Scoped> {
         let scopes = parse(&m.text);
         if scopes.is_empty() {
             // Só uma tarefa nova encerra a anterior: um "ok" ou uma pergunta solta não diz nada do escopo.
-            if m.text.lines().any(|l| l.trim_start().starts_with("Tarefa:")) {
+            if m.text
+                .lines()
+                .any(|l| l.trim_start().starts_with("Tarefa:"))
+            {
                 open.remove(&m.to);
             }
             continue;
         }
-        let owner = if m.to_name.trim().is_empty() { m.to.clone() } else { m.to_name.clone() };
+        let owner = if m.to_name.trim().is_empty() {
+            m.to.clone()
+        } else {
+            m.to_name.clone()
+        };
         if !order.contains(&m.to) {
             order.push(m.to.clone());
         }
-        open.insert(m.to.clone(), Scoped { owner, task: crate::peer_queue::store::task_gist(&m.text), scopes });
+        open.insert(
+            m.to.clone(),
+            Scoped {
+                owner,
+                task: crate::peer_queue::store::task_gist(&m.text),
+                scopes,
+            },
+        );
     }
-    order.iter().filter_map(|to| open.get(to).cloned()).collect()
+    order
+        .iter()
+        .filter_map(|to| open.get(to).cloned())
+        .collect()
 }
 
 /// As mensagens trocadas entre as abas da missão (as que ela registrou), em ordem.
@@ -214,13 +272,26 @@ fn mission_messages(conn: &Connection, mission_id: &str) -> Result<Vec<Message>,
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([mission_id], |r| Ok(Message { kind: r.get(0)?, to: r.get::<_, Option<String>>(1)?.unwrap_or_default(), to_name: r.get(2)?, from: r.get(3)?, text: r.get(4)? }))
+        .query_map([mission_id], |r| {
+            Ok(Message {
+                kind: r.get(0)?,
+                to: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                to_name: r.get(2)?,
+                from: r.get(3)?,
+                text: r.get(4)?,
+            })
+        })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// As tarefas da frota de um run (ou de todos os runs de uma missão) que ainda vão rodar ou rodam.
-fn fleet_work(conn: &Connection, run_id: Option<&str>, mission_id: Option<&str>) -> Result<Vec<Scoped>, String> {
+fn fleet_work(
+    conn: &Connection,
+    run_id: Option<&str>,
+    mission_id: Option<&str>,
+) -> Result<Vec<Scoped>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT t.title, t.prompt FROM tasks t JOIN runs r ON r.id = t.run_id
@@ -229,14 +300,20 @@ fn fleet_work(conn: &Connection, run_id: Option<&str>, mission_id: Option<&str>)
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params![run_id, mission_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .query_map(params![run_id, mission_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
         .map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for row in rows {
         let (title, prompt) = row.map_err(|e| e.to_string())?;
         let scopes = parse(&prompt);
         if !scopes.is_empty() {
-            out.push(Scoped { owner: title.clone(), task: title, scopes });
+            out.push(Scoped {
+                owner: title.clone(),
+                task: title,
+                scopes,
+            });
         }
     }
     Ok(out)
@@ -259,13 +336,27 @@ pub fn warning_text(found: &[Overlap]) -> String {
     if found.is_empty() {
         return String::new();
     }
-    let lines: Vec<String> = found.iter().map(|o| format!("- {} e {}: {}", o.a, o.b, o.paths.join(", "))).collect();
-    format!("Aviso: tarefas em andamento com escopos de escrita sobrepostos (só aviso, nada foi bloqueado; combine quem mexe onde ou serialize):\n{}", lines.join("\n"))
+    let lines: Vec<String> = found
+        .iter()
+        .map(|o| format!("- {} e {}: {}", o.a, o.b, o.paths.join(", ")))
+        .collect();
+    format!(
+        "Aviso: tarefas em andamento com escopos de escrita sobrepostos (só aviso, nada foi bloqueado; combine quem mexe onde ou serialize):\n{}",
+        lines.join("\n")
+    )
 }
 
 #[tauri::command]
-pub fn mission_scope_overlaps(db: tauri::State<'_, crate::database::DbConnection>, mission_id: String) -> Result<Vec<Overlap>, String> {
-    mission_overlaps(&*db.lock().map_err(|e| e.to_string())?, &mission_id)
+pub async fn mission_scope_overlaps(
+    db: tauri::State<'_, crate::database::DbConnection>,
+    mission_id: String,
+) -> Result<Vec<Overlap>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        mission_overlaps(&*db.lock().map_err(|e| e.to_string())?, &mission_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -278,16 +369,29 @@ mod test {
 
     #[test]
     fn normaliza_prefixos_e_recusa_o_que_sai_do_repo() {
-        assert_eq!(normalize("./src/features/chat/").unwrap(), "src/features/chat");
+        assert_eq!(
+            normalize("./src/features/chat/").unwrap(),
+            "src/features/chat"
+        );
         assert_eq!(normalize("src\\chat\\**").unwrap(), "src/chat");
-        assert_eq!(normalize("`src-tauri/src/chat_team/*`").unwrap(), "src-tauri/src/chat_team");
+        assert_eq!(
+            normalize("`src-tauri/src/chat_team/*`").unwrap(),
+            "src-tauri/src/chat_team"
+        );
         assert_eq!(normalize(".").unwrap(), "");
         assert!(normalize("/etc/passwd").is_err());
         assert!(normalize("C:/x").is_err());
         assert!(normalize("src/../../x").is_err());
         assert!(normalize("src/*/test").is_err());
         assert_eq!(validate(&s(&["src/a/", "src/a"])).unwrap(), s(&["src/a"]));
-        assert!(validate(&(0..=MAX_SCOPES).map(|n| format!("d{n}")).collect::<Vec<_>>()).is_err());
+        assert!(
+            validate(
+                &(0..=MAX_SCOPES)
+                    .map(|n| format!("d{n}"))
+                    .collect::<Vec<_>>()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -295,35 +399,82 @@ mod test {
         assert!(overlap("src/a", "src/a"));
         assert!(overlap("src/a", "src/a/b.ts"));
         assert!(overlap("src/a/b.ts", "src/a"));
-        assert!(!overlap("src/a", "src/ab"), "prefixo de texto não é prefixo de pasta");
+        assert!(
+            !overlap("src/a", "src/ab"),
+            "prefixo de texto não é prefixo de pasta"
+        );
         assert!(!overlap("src/a", "src/b"));
-        assert!(overlap("", "qualquer/coisa"), "o repositório inteiro cobre tudo");
+        assert!(
+            overlap("", "qualquer/coisa"),
+            "o repositório inteiro cobre tudo"
+        );
     }
 
     #[test]
     fn le_a_linha_de_escopo_da_delegacao() {
         let text = "Tarefa: corrigir o login\nEscopo: src/features/auth/, src-tauri/src/auth.rs\nPrazo: hoje";
-        assert_eq!(parse(text), s(&["src/features/auth", "src-tauri/src/auth.rs"]));
-        assert_eq!(parse("- **Write scopes**: docs/ ; README.md"), s(&["docs", "README.md"]));
-        assert_eq!(parse("Escopos: /abs, ok/"), s(&["ok"]), "o que não normaliza fica de fora");
+        assert_eq!(
+            parse(text),
+            s(&["src/features/auth", "src-tauri/src/auth.rs"])
+        );
+        assert_eq!(
+            parse("- **Write scopes**: docs/ ; README.md"),
+            s(&["docs", "README.md"])
+        );
+        assert_eq!(
+            parse("Escopos: /abs, ok/"),
+            s(&["ok"]),
+            "o que não normaliza fica de fora"
+        );
         assert!(parse("Tarefa: sem escopo").is_empty());
-        assert_eq!(prompt_with_scopes("Faça X.", &s(&["src/a", ""])), "Faça X.\n\nEscopo: src/a, .");
-        assert_eq!(parse(&prompt_with_scopes("Faça X.", &s(&["src/a"]))), s(&["src/a"]), "ida e volta");
+        assert_eq!(
+            prompt_with_scopes("Faça X.", &s(&["src/a", ""])),
+            "Faça X.\n\nEscopo: src/a, ."
+        );
+        assert_eq!(
+            parse(&prompt_with_scopes("Faça X.", &s(&["src/a"]))),
+            s(&["src/a"]),
+            "ida e volta"
+        );
         assert_eq!(prompt_with_scopes("Faça X.", &[]), "Faça X.");
     }
 
     #[test]
     fn avisa_so_tarefas_em_andamento_de_donos_diferentes() {
-        let tell = |to: &str, text: &str| Message { kind: "tell".into(), to: to.into(), to_name: to.to_uppercase(), from: "lead".into(), text: text.into() };
-        let deliver = |from: &str| Message { kind: "handoff".into(), to: "lead".into(), to_name: String::new(), from: from.into(), text: "ENTREGA #1".into() };
+        let tell = |to: &str, text: &str| Message {
+            kind: "tell".into(),
+            to: to.into(),
+            to_name: to.to_uppercase(),
+            from: "lead".into(),
+            text: text.into(),
+        };
+        let deliver = |from: &str| Message {
+            kind: "handoff".into(),
+            to: "lead".into(),
+            to_name: String::new(),
+            from: from.into(),
+            text: "ENTREGA #1".into(),
+        };
         let messages = vec![
             tell("ana", "Tarefa: chat\nEscopo: src/features/chat"),
-            tell("bia", "Tarefa: chat e sidebar\nEscopo: src/features/chat/team, src/features/sessions"),
+            tell(
+                "bia",
+                "Tarefa: chat e sidebar\nEscopo: src/features/chat/team, src/features/sessions",
+            ),
             tell("caio", "Tarefa: backend\nEscopo: src-tauri/src"),
             tell("ana", "ok, segue"),
         ];
         let found = overlaps(&in_progress(&messages));
-        assert_eq!(found, vec![Overlap { a: "ANA".into(), a_task: "chat".into(), b: "BIA".into(), b_task: "chat e sidebar".into(), paths: s(&["src/features/chat/team"]) }]);
+        assert_eq!(
+            found,
+            vec![Overlap {
+                a: "ANA".into(),
+                a_task: "chat".into(),
+                b: "BIA".into(),
+                b_task: "chat e sidebar".into(),
+                paths: s(&["src/features/chat/team"])
+            }]
+        );
         // Ana entregou: a sobreposição some.
         let mut done = messages.clone();
         done.push(deliver("ana"));
@@ -345,9 +496,26 @@ mod test {
         )
         .unwrap();
         let run = crate::runs::store::create_run(&conn, "w", "o", "/p").unwrap();
-        conn.execute("UPDATE runs SET mission_id = 'm' WHERE id = ?1", [&run.id]).unwrap();
-        for (title, prompt) in [("API", "Faça.\n\nEscopo: src-tauri/src/api"), ("Docs", "Escreva.\n\nEscopo: docs"), ("Mais API", "Escopo: src-tauri/src/api/login.rs")] {
-            crate::runs::store::create_task(&conn, &crate::runs::store::NewTask { run_id: &run.id, title, prompt, agent_id: "claude-code", cwd: "/p", queued: true, ..Default::default() }).unwrap();
+        conn.execute("UPDATE runs SET mission_id = 'm' WHERE id = ?1", [&run.id])
+            .unwrap();
+        for (title, prompt) in [
+            ("API", "Faça.\n\nEscopo: src-tauri/src/api"),
+            ("Docs", "Escreva.\n\nEscopo: docs"),
+            ("Mais API", "Escopo: src-tauri/src/api/login.rs"),
+        ] {
+            crate::runs::store::create_task(
+                &conn,
+                &crate::runs::store::NewTask {
+                    run_id: &run.id,
+                    title,
+                    prompt,
+                    agent_id: "claude-code",
+                    cwd: "/p",
+                    queued: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         }
         let found = run_overlaps(&conn, &run.id).unwrap();
         assert_eq!(found.len(), 1);
@@ -355,6 +523,10 @@ mod test {
         let mut pair = [found[0].a.as_str(), found[0].b.as_str()];
         pair.sort();
         assert_eq!(pair, ["API", "Mais API"]);
-        assert_eq!(mission_overlaps(&conn, "m").unwrap(), found, "sem mensagens, só a frota");
+        assert_eq!(
+            mission_overlaps(&conn, "m").unwrap(),
+            found,
+            "sem mensagens, só a frota"
+        );
     }
 }

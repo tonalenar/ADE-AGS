@@ -33,14 +33,22 @@ pub struct VigiaAction {
 
 /// O fim da tela de uma aba, legível. Vazio se a aba não tem terminal vivo.
 fn screen_tail(tab_id: &str) -> String {
-    let Some(pty) = crate::terminal::pty_for_tab(tab_id.to_string()) else { return String::new() };
-    let Some(text) = crate::terminal::tail_of(pty, SCREEN_CHARS * 4) else { return String::new() };
+    let Some(pty) = crate::terminal::pty_for_tab(tab_id.to_string()) else {
+        return String::new();
+    };
+    let Some(text) = crate::terminal::tail_of(pty, SCREEN_CHARS * 4) else {
+        return String::new();
+    };
     tail_lines(&crate::orchestrator::digest::strip_ansi(&text))
 }
 
 /// As últimas linhas com texto, até o limite de caracteres. Pura.
 pub(crate) fn tail_lines(screen: &str) -> String {
-    let lines: Vec<&str> = screen.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
+    let lines: Vec<&str> = screen
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.trim().is_empty())
+        .collect();
     let mut out: Vec<&str> = lines.iter().rev().take(SCREEN_LINES).copied().collect();
     out.reverse();
     let joined = out.join("\n");
@@ -63,7 +71,10 @@ IGNORE a caixa de digitação do prompt (a linha depois de \">\" ou do cursor) e
 é rascunho do usuário ou sugestão da própria ferramenta, nunca é motivo para agir nem para citar.\n\n"
     );
     for (name, screen) in screens {
-        text.push_str(&format!("=== TELA DE \"{name}\" ===\n{}\n\n", if screen.is_empty() { "(vazia)" } else { screen }));
+        text.push_str(&format!(
+            "=== TELA DE \"{name}\" ===\n{}\n\n",
+            if screen.is_empty() { "(vazia)" } else { screen }
+        ));
     }
     text.push_str(&format!(
         "Responda SÓ com um array JSON, sem texto antes ou depois. Cada item: {{\"to\": \"<nome>\", \"message\": \"<curta, em português>\"}}.\n\
@@ -78,23 +89,39 @@ Ninguém ocioso de fato: responda []. No máximo 3 itens. Nunca invente tarefas.
 
 /// O array JSON da resposta, mesmo com texto em volta; só destinatários conhecidos. Pura.
 pub(crate) fn parse_actions(output: &str, known: &[String]) -> Vec<VigiaAction> {
-    let (Some(start), Some(end)) = (output.find('['), output.rfind(']')) else { return Vec::new() };
+    let (Some(start), Some(end)) = (output.find('['), output.rfind(']')) else {
+        return Vec::new();
+    };
     if end < start {
         return Vec::new();
     }
-    let Ok(actions) = serde_json::from_str::<Vec<VigiaAction>>(&output[start..=end]) else { return Vec::new() };
+    let Ok(actions) = serde_json::from_str::<Vec<VigiaAction>>(&output[start..=end]) else {
+        return Vec::new();
+    };
     actions
         .into_iter()
-        .filter(|a| !a.message.trim().is_empty() && (a.to == "usuario" || known.iter().any(|k| k == &a.to)))
+        .filter(|a| {
+            !a.message.trim().is_empty() && (a.to == "usuario" || known.iter().any(|k| k == &a.to))
+        })
         .take(3)
         .collect()
 }
 
 /// Uma chamada headless ao modelo barato. Devolve o texto da resposta.
-fn call_model(agent_id: &str, model: &str, effort: &str, cwd: &str, prompt: &str) -> Result<String, String> {
+fn call_model(
+    agent_id: &str,
+    model: &str,
+    effort: &str,
+    cwd: &str,
+    prompt: &str,
+) -> Result<String, String> {
     let (program, args, last_message) = match agent_id {
         "codex" => {
-            let file = std::env::temp_dir().join(format!("ags-vigia-{}-{}.txt", std::process::id(), crate::util::now_ts_ms()));
+            let file = std::env::temp_dir().join(format!(
+                "ags-vigia-{}-{}.txt",
+                std::process::id(),
+                crate::util::now_ts_ms()
+            ));
             let args = vec![
                 "exec".to_string(),
                 "--skip-git-repo-check".into(),
@@ -124,19 +151,24 @@ fn call_model(agent_id: &str, model: &str, effort: &str, cwd: &str, prompt: &str
             ("claude", args, None)
         }
     };
-    let path = crate::util::find_program(program).ok_or_else(|| format!("'{program}' não está instalado"))?;
+    let path = crate::util::find_program(program)
+        .ok_or_else(|| format!("'{program}' não está instalado"))?;
     let mut cmd = crate::util::external_command(&path, &args).map_err(|e| e.to_string())?;
     cmd.current_dir(cwd);
     let out = crate::util::spawn::output(&mut cmd, CALL_TIMEOUT).map_err(|e| e.to_string())?;
     let text = match &last_message {
-        Some(file) => std::fs::read_to_string(file).unwrap_or_else(|_| String::from_utf8_lossy(&out.stdout).into_owned()),
+        Some(file) => std::fs::read_to_string(file)
+            .unwrap_or_else(|_| String::from_utf8_lossy(&out.stdout).into_owned()),
         None => String::from_utf8_lossy(&out.stdout).into_owned(),
     };
     if let Some(file) = last_message {
         let _ = std::fs::remove_file(file);
     }
     if !out.status.success() && text.trim().is_empty() {
-        return Err(String::from_utf8_lossy(&out.stderr).chars().take(300).collect());
+        return Err(String::from_utf8_lossy(&out.stderr)
+            .chars()
+            .take(300)
+            .collect());
     }
     Ok(text)
 }
@@ -153,7 +185,10 @@ pub async fn vigia_check(
     idle: Vec<VigiaTab>,
 ) -> Result<Vec<VigiaAction>, String> {
     tokio::task::spawn_blocking(move || {
-        let mut screens: Vec<(String, String)> = idle.iter().map(|t| (t.name.clone(), screen_tail(&t.tab_id))).collect();
+        let mut screens: Vec<(String, String)> = idle
+            .iter()
+            .map(|t| (t.name.clone(), screen_tail(&t.tab_id)))
+            .collect();
         if !idle.iter().any(|t| t.tab_id == lead.tab_id) {
             screens.push((lead.name.clone(), screen_tail(&lead.tab_id)));
         }
@@ -189,10 +224,13 @@ fn vigia_report_now(app: AppHandle, tab_id: String, text: String) -> Result<(), 
     let boards = crate::canvas::load_boards();
     let db = app.state::<crate::database::DbConnection>();
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let name: String = conn.query_row(
-        "SELECT COALESCE(NULLIF(title, ''), agent_label) FROM tabs WHERE id=?1",
-        [&tab_id], |r| r.get(0),
-    ).unwrap_or_else(|_| tab_id.clone());
+    let name: String = conn
+        .query_row(
+            "SELECT COALESCE(NULLIF(title, ''), agent_label) FROM tabs WHERE id=?1",
+            [&tab_id],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| tab_id.clone());
     crate::missions::messages::record_vigia(&conn, &boards, (&tab_id, &name), &text, now * 1000)?;
     Ok(())
 }
@@ -206,7 +244,10 @@ pub(crate) fn user_notice(kind: &str, mission_title: &str, body: &str) -> Option
             format!("Equipe entregou — {title}"),
             "Todos reportaram e estão parados. Revise e finalize a missão em Missões.".into(),
         )),
-        "user_decision" => Some((format!("Decisão pendente — {title}"), crate::chat::preview(body, 180))),
+        "user_decision" => Some((
+            format!("Decisão pendente — {title}"),
+            crate::chat::preview(body, 180),
+        )),
         _ => None,
     }
 }
@@ -218,27 +259,38 @@ pub(crate) fn user_notice(kind: &str, mission_title: &str, body: &str) -> Option
 /// só com a app sem foco) e, na entrega, o span `team_delivered`, que separa no tempo da missão o
 /// trabalho da equipe da espera pelo clique. Devolve se o aviso do sistema apareceu.
 #[tauri::command]
-pub fn vigia_notify_user(app: AppHandle, mission_id: Option<String>, mission_title: String, kind: String, body: Option<String>) -> Result<bool, String> {
-    let Some((title, text)) = user_notice(&kind, &mission_title, body.as_deref().unwrap_or("")) else {
-        return Err(format!("Aviso desconhecido '{kind}'."));
-    };
-    if kind == "team_delivered" {
-        if let Some(mission_id) = mission_id.as_deref().filter(|id| !id.starts_with("c:")) {
-            let now = crate::util::now_ts() * 1000;
-            let db = app.state::<crate::database::DbConnection>();
-            let conn = db.lock().map_err(|e| e.to_string())?;
-            let span = super::timings::NewSpan {
-                kind: "team_delivered".into(),
-                actor: "Vigia".into(),
-                target: String::new(),
-                started_ms: now,
-                ended_ms: now,
-                detail: String::new(),
-            };
-            super::timings::add(&conn, mission_id, &span)?;
+pub async fn vigia_notify_user(
+    app: AppHandle,
+    mission_id: Option<String>,
+    mission_title: String,
+    kind: String,
+    body: Option<String>,
+) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some((title, text)) = user_notice(&kind, &mission_title, body.as_deref().unwrap_or(""))
+        else {
+            return Err(format!("Aviso desconhecido '{kind}'."));
+        };
+        if kind == "team_delivered" {
+            if let Some(mission_id) = mission_id.as_deref().filter(|id| !id.starts_with("c:")) {
+                let now = crate::util::now_ts() * 1000;
+                let db = app.state::<crate::database::DbConnection>();
+                let conn = db.lock().map_err(|e| e.to_string())?;
+                let span = super::timings::NewSpan {
+                    kind: "team_delivered".into(),
+                    actor: "Vigia".into(),
+                    target: String::new(),
+                    started_ms: now,
+                    ended_ms: now,
+                    detail: String::new(),
+                };
+                super::timings::add(&conn, mission_id, &span)?;
+            }
         }
-    }
-    Ok(crate::notifier::show_custom(&app, &title, &text))
+        Ok(crate::notifier::show_custom(&app, &title, &text))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -270,10 +322,17 @@ mod tests {
 
     #[test]
     fn a_tela_vai_curta_e_o_pedido_cita_todos() {
-        let screen = (0..100).map(|i| format!("linha {i}")).collect::<Vec<_>>().join("\n\n");
+        let screen = (0..100)
+            .map(|i| format!("linha {i}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
         let tail = tail_lines(&screen);
         assert!(tail.ends_with("linha 99") && !tail.contains("linha 10\n"));
         let text = prompt("M", "Orquestrador", &[("Backend".into(), "ok".into())]);
-        assert!(text.contains("TELA DE \"Backend\"") && text.contains("array JSON") && text.contains("\"Orquestrador\""));
+        assert!(
+            text.contains("TELA DE \"Backend\"")
+                && text.contains("array JSON")
+                && text.contains("\"Orquestrador\"")
+        );
     }
 }
