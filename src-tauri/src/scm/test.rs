@@ -591,9 +591,9 @@ fn con_token_en_el_entorno_git_no_corre_hooks_del_repo() {
     super::git::network_with(&root, &commit, &token, super::git::LOCAL).unwrap();
     assert!(!marker.exists(), "el hook del repo corrió con el token en el entorno");
 
-    // Sin token es el git de siempre: el hook corre (y prueba que el de arriba era real).
+    // Sem token também: o git da ADE isola `core.hooksPath` para não herdar o do repo.
     super::git::network_with(&root, &commit, &[], super::git::LOCAL).unwrap();
-    assert!(marker.exists(), "sin token el hook del repo tendría que correr");
+    assert!(!marker.exists(), "o git local da ADE também isola hooksPath");
 
     let _ = std::fs::remove_file(&marker);
     std::fs::remove_dir_all(dir).ok();
