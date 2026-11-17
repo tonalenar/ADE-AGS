@@ -320,16 +320,16 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     expect(qaTerm.pastes).toHaveLength(1);
     expect(qaTerm.pastes[0]).toContain("QA");
 
-    // Spans de start_briefing registrados
-    const briefingSpans = recordedSpans.filter((s) => s.span.kind === "start_briefing");
-    expect(briefingSpans.map((s) => s.span.actor)).toEqual(["Orquestrador", "Backend", "Frontend", "QA"]);
-
     // 5. Após 80ms, o primeiro Enter (\r) é disparado pelo pasteIntoTab
     vi.advanceTimersByTime(80);
     expect(leadTerm.inputs).toContain("\r");
     expect(backendTerm.inputs).toContain("\r");
     expect(frontendTerm.inputs).toContain("\r");
     expect(qaTerm.inputs).toContain("\r");
+
+    // Spans de start_briefing: registrados quando o Enter sai (PR08: o envio conta, não só a colagem).
+    const briefingSpans = recordedSpans.filter((s) => s.span.kind === "start_briefing");
+    expect(briefingSpans.map((s) => s.span.actor)).toEqual(["Orquestrador", "Backend", "Frontend", "QA"]);
 
     // Simulação do comportamento das TUIs:
     // - Lead: aceitou o Enter imediatamente e começou a trabalhar
@@ -413,7 +413,8 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     const qaInputsBeforeCheck = qaTerm.inputs.length;
     const leadPastesBeforeCheck = leadTerm.pastes.length;
 
-    vi.advanceTimersByTime(START_CHECK_MS - 4900);
+    // O relógio do início começa no Enter (80 ms depois da colagem, PR08): o limite vale a partir dele.
+    vi.advanceTimersByTime(START_CHECK_MS - 4900 + 80);
 
     // Backend e Frontend tiveram atividade detectada após ECHO_MS -> NÃO foram dados como stalled!
     // QA NUNCA arrancou:

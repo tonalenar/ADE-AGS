@@ -5,21 +5,7 @@ import { GAP } from "@/features/canvas/geometry";
 import { boardKey, boardKeyOfTab, missionBoardKey, missionOfKey, missionOfTab, useCanvasStore } from "@/features/canvas/store";
 import type { FunctionalRole, Squad } from "@/features/squads/types";
 
-import { entryTab, finishedMissionTabs, missionIndex, tabsByMission } from "../groups";
-
-describe("finishedMissionTabs", () => {
-  const missions = [
-    { id: "vivo", status: "running" },
-    { id: "feito", status: "done" },
-    { id: "cancelado", status: "cancelled" },
-    { id: "rascunho", status: "draft" },
-  ];
-  const index = { a: "vivo", b: "feito", c: "cancelado", d: "rascunho" };
-  it("só devolve as abas de missões terminadas, nunca as vivas nem as soltas", () => {
-    const tabs = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }, { id: "solta" }];
-    expect(finishedMissionTabs(missions, index, tabs)).toEqual(["b", "c"]);
-  });
-});
+import { entryTab, missionIndex, tabsByMission } from "../groups";
 import { LEAD_NAME, MAX_EXTRA_TERMINALS, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, memoryEnvelope, qaOf, subagentDefaultBriefing, teamOf, uniqueNames, workspaceFor, type TeamWorkspace } from "../terminals";
 
 describe("isolamento e início rápido", () => {

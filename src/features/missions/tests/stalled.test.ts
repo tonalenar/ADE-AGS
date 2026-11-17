@@ -238,3 +238,10 @@ describe("diagnóstico do silêncio e a interface atrasada", () => {
     expect(uiBehindUntil(undefined, undefined, 5000, false, 5000)).toBeUndefined();
   });
 });
+
+describe("stallMessage: o nome da aba sai como rótulo limpo (A162)", () => {
+  it("aspas e ângulos do nome não quebram a frase do aviso", () => {
+    const text = stallMessage('QA "x" <y>', { tabId: "a", fromTabId: "l", sinceTaskMs: 1, quietMs: 1, worked: false, lastLine: "" });
+    expect(text).toContain('O agente "QA x y"');
+  });
+});

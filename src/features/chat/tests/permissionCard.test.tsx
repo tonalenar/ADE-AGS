@@ -79,11 +79,16 @@ describe("cartão de permissão no fio", () => {
     expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "deny", "use o pnpm");
   });
 
-  it("N nega e ⏎ permite com o foco fora de um campo", async () => {
+  it("N nega de fora de um campo; ⏎ só permite com o foco dentro do cartão (A161)", async () => {
     await render(<PermissionCard ask={ask} terminal />);
     await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true })); });
     expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "deny");
+    // Foco no corpo da página: ⏎ não aprova (quem aperta pode nem estar vendo o pedido).
     await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    expect(store.answerAsk).not.toHaveBeenCalledWith(ask, "allow");
+    // Foco dentro do cartão: ⏎ permite.
+    const card = host.querySelector("[data-permission-dock]") as HTMLElement;
+    await act(async () => { card.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
     expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "allow");
   });
 

@@ -4,7 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 
 import { useCanvasStore } from "@/features/canvas/store";
 import { activeTabIds, activitySnapshot, lastInputAt, lastOutputAt, outputCount, sustainedTabIds as sustainedNow } from "@/features/terminal/activity";
-import { onPromptSubmitted, pasteIntoTab, screenOf } from "@/features/terminal/terminalRegistry";
+import { onPromptSubmitted, screenOf } from "@/features/terminal/terminalRegistry";
+import { mostraResultado, writeToAgent } from "@/features/terminal/safeWrite";
 import { startStructuredState, workingWith } from "@/features/terminal/structuredState";
 import { useTabsStore } from "@/features/tabs/store";
 
@@ -12,7 +13,7 @@ import { isFinalDelivery, noteDelivery, noteSustained } from "../bot/arcadeSigna
 import { sustainedTabIds } from "@/features/terminal/activity";
 import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
 import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking, tickMs } from "./activeTime";
-import { finishedMissionTabs, missionIndex, useMissionIndex } from "./groups";
+import { missionIndex, useMissionIndex } from "./groups";
 import { STALL_CHECK_MS, applyMessage, parseStallMs, findStalls, isWorking, markAlerted, stallMessage, uiBehindUntil, type PeerMessage, type PendingTasks } from "./stalled";
 import { useMissionsStore } from "./store";
 import { LEAD_NAME } from "./terminals";
@@ -50,7 +51,6 @@ export function useMissionWatcher(): void {
   // O estado lido dos transcripts (Claude Code/Codex), para o Vigia e os detectores de parado.
   useEffect(() => startStructuredState(), []);
   const workspaceId = useTabsStore((s) => s.workspaceId);
-  const tabs = useTabsStore((s) => s.tabs);
   const missions = useMissionsStore((s) => s.missions);
   const load = useMissionsStore((s) => s.load);
   const index = useMissionIndex();
@@ -116,6 +116,9 @@ export function useMissionWatcher(): void {
   useEffect(() => {
     let pending: PendingTasks = new Map();
     let asks: PendingAsks = new Map();
+    // Avisos já enviados à guarda e ainda sem resposta: o tic seguinte não os repete.
+    const leadInFlight = new Set<string>();
+    const alertInFlight = new Set<string>();
     const published = new Set<string>();
     const leadOf = (tabId: string) => useTabsStore.getState().tabs.find((t) => t.id === tabId);
     const isLead = (tabId: string) => leadOf(tabId)?.title === LEAD_NAME;
@@ -173,15 +176,22 @@ export function useMissionWatcher(): void {
       };
       asks = addAsks(asks, findScreenAsks(members, asks, probe));
       const stalls = findLeadStalls(asks, probe, waitMs);
-      const sent = stalls.filter((s) => {
+      for (const s of stalls) {
         // No se interrumpe al orquestador a mitad de un turno: se reintenta en el próximo tic.
-        if (active.has(s.leadTabId)) return false;
-        const ok = pasteIntoTab(s.leadTabId, leadStallMessage(titleOf(s.memberTabId), s), true);
+        if (active.has(s.leadTabId) || leadInFlight.has(s.memberTabId)) continue;
+        leadInFlight.add(s.memberTabId);
         const ask = asks.get(s.memberTabId);
-        if (ok && ask) record(s.memberTabId, leadStallSpan(ask, now, "alerted", titleOf(s.memberTabId), titleOf(s.leadTabId)));
-        return ok;
-      });
-      if (sent.length > 0) asks = markLeadAlerted(asks, sent);
+        // A guarda confere a tela do orquestador antes do Enter: numa pergunta de aprovação o aviso não sai e tenta no próximo tic.
+        void writeToAgent(s.leadTabId, leadStallMessage(titleOf(s.memberTabId), s), { submit: true, source: "stalled" })
+          .then((result) => {
+            mostraResultado(s.leadTabId, "stalled", result);
+            if (result !== "sent") return;
+            if (ask) record(s.memberTabId, leadStallSpan(ask, now, "alerted", titleOf(s.memberTabId), titleOf(s.leadTabId)));
+            asks = markLeadAlerted(asks, [s]);
+          })
+          .catch((error: unknown) => console.error("[aviso de parado] falha ao enviar ao orquestrador", error))
+          .finally(() => leadInFlight.delete(s.memberTabId));
+      }
     };
     // Nosso lado atrasado (janela escondida, tic que chegou tarde): o silêncio só conta depois disso.
     let behindUntil: number | undefined;
@@ -220,13 +230,19 @@ export function useMissionWatcher(): void {
         outputCount,
         uiBehindUntil: behindUntil,
       }, stallMs);
-      const sent = stalls.filter((s) => {
+      for (const s of stalls) {
         // No se interrumpe al orquestador a mitad de un turno: se reintenta en el próximo tic.
-        if (active.has(s.fromTabId)) return false;
+        if (active.has(s.fromTabId) || alertInFlight.has(s.tabId)) continue;
         const name = openTabs.find((t) => t.id === s.tabId)?.title ?? s.tabId;
-        return pasteIntoTab(s.fromTabId, stallMessage(name, s), true);
-      });
-      if (sent.length > 0) pending = markAlerted(pending, sent);
+        alertInFlight.add(s.tabId);
+        void writeToAgent(s.fromTabId, stallMessage(name, s), { submit: true, source: "stalled" })
+          .then((result) => {
+            mostraResultado(s.fromTabId, "stalled", result);
+            if (result === "sent") pending = markAlerted(pending, [s]);
+          })
+          .catch((error: unknown) => console.error("[aviso de parado] falha ao enviar ao orquestrador", error))
+          .finally(() => alertInFlight.delete(s.tabId));
+      }
     }, STALL_CHECK_MS);
     return () => {
       clearInterval(timer);
@@ -276,12 +292,8 @@ export function useMissionWatcher(): void {
     };
   }, []);
 
-  // Barrido de las pestañas de misiones terminadas.
-  useEffect(() => {
-    if (missions.length === 0) return;
-    const { closeTab } = useTabsStore.getState();
-    finishedMissionTabs(missions, index, tabs).forEach((id) => closeTab(id));
-  }, [missions, index, tabs]);
+  // Sem barrido de abas de missões terminadas (A163): fechar uma aba mata o PTY e o rascunho sem pedido da pessoa.
+  // A aba de uma missão que acabou fica aberta até a própria pessoa fechá-la.
 
   // O espelho da missão no chat sai quando ela fecha (só a linha; o motor e os agentes são da missão).
   const mirrors = useTeamStore((s) => s.missionTeams);

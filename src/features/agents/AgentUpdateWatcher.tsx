@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
@@ -137,6 +137,9 @@ export async function runAgentUpdate(t: TFunction, info: AgentUpdateInfo): Promi
 export function AgentUpdateWatcher() {
   const { t } = useTranslation();
   const setDetectedAgents = useTabsStore((s) => s.setDetectedAgents);
+  // O idioma muda `t` sem mudar a checagem: o efeito lê o `t` atual por esta ref e não roda de novo (A174).
+  const tRef = useRef<TFunction>(t);
+  useEffect(() => { tRef.current = t; }, [t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,9 +148,12 @@ export function AgentUpdateWatcher() {
     const notified = new Set([...dismissed].map(([agentId, version]) => `${agentId}@${version}`));
 
     const runUpdate = async (info: AgentUpdateInfo) => {
-      const result = await agentUpdate(info.agentId);
+      // Falha de IPC aparece para a pessoa, não só no console (A173).
+      const result = await agentUpdate(info.agentId).catch((error: unknown): AgentUpdateResult => ({
+        agentId: info.agentId, ok: false, output: String(error), newVersion: null, error: "failed",
+      }));
       if (cancelled) return;
-      announceResult(t, info.label, result);
+      announceResult(tRef.current, info.label, result);
       if (result.ok) detectAgents(true).then(setDetectedAgents).catch(() => {});
     };
 
@@ -175,7 +181,7 @@ export function AgentUpdateWatcher() {
           let updateRun: Promise<unknown> | null = null;
           showBotToast({
             title: info.label,
-            text: t("agents.update.available", { label: info.label, version: versionLine(info.currentVersion, info.latestVersion) }),
+            text: tRef.current("agents.update.available", { label: info.label, version: versionLine(info.currentVersion, info.latestVersion) }),
             // O aviso persiste mesmo se houver mais de três notificações ou clicarem em Atualizar.
             sticky: true,
             keepOpenOnAction: true,
@@ -187,10 +193,10 @@ export function AgentUpdateWatcher() {
                 // O aviso continua dispensado nesta sessão mesmo se o armazenamento local falhar.
               }
             },
-            actionLabel: t("agents.update.action"),
+            actionLabel: tRef.current("agents.update.action"),
             onAction: () => {
               if (updateRun) return;
-              updateRun = runAgentUpdate(t, info).catch(console.error).finally(() => { updateRun = null; });
+              updateRun = runAgentUpdate(tRef.current, info).catch(console.error).finally(() => { updateRun = null; });
             },
           });
         }
@@ -208,7 +214,7 @@ export function AgentUpdateWatcher() {
       clearTimeout(first);
       clearInterval(timer);
     };
-  }, [t, setDetectedAgents]);
+  }, [setDetectedAgents]);
 
   return null;
 }

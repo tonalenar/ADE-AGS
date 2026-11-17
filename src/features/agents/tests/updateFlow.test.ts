@@ -131,3 +131,15 @@ describe("updateAgentRestarting", () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe("updateAgentRestarting: reinício da app que rejeita (A167)", () => {
+  it("reabre as terminais fechadas e mantém a atualização como feita", async () => {
+    const { deps, calls } = world();
+    deps.restartApp = async () => { calls.push("restartApp"); throw new Error("sem permissão"); };
+    const out = await updateAgentRestarting("codex", deps);
+    expect(out.result.ok).toBe(true);
+    expect(out.appRestarting).toBe(false);
+    expect(out.reopened).toBe(2);
+    expect(calls).toEqual(["kill:11", "kill:12", "update:true", "restartApp", "restart:t1", "restart:t2"]);
+  });
+});

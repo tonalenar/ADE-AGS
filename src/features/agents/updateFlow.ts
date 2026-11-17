@@ -103,9 +103,13 @@ export async function updateAgentRestarting(agentId: string, deps: UpdateFlowDep
 
   if (result.ok) {
     deps.onStage?.("restarting", killed.length);
-    // La app guarda el estado, cierra y vuelve a abrir; las pestañas se restauran solas.
-    await deps.restartApp();
-    return { result, reopened: 0, appRestarting: true };
+    try {
+      // La app guarda el estado, cierra y vuelve a abrir; las pestañas se restauran solas.
+      await deps.restartApp();
+      return { result, reopened: 0, appRestarting: true };
+    } catch {
+      // Sin reinicio, nada relanza las pestañas cerradas: se relanzan aquí (A167). La actualización sí quedó hecha.
+    }
   }
   if (killed.length > 0) deps.onStage?.("reopening", killed.length);
   for (const id of killed) deps.restartAgent(id);

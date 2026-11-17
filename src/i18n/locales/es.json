@@ -6384,5 +6384,8 @@
   "providers.method.cursor.login": "Login de Cursor Agent",
   "providers.method.unavailable.agy": "agy 1.5.5 solo entra por login de Google e ignora claves de API por variable (medido). Ese modo existe en el runtime ACP de T3, no en agy.",
   "providers.method.unavailable.os": "Las cuentas separadas de Antigravity solo están verificadas en macOS.",
-  "providers.method.unavailable.cursor": "Ejecuta cursor-agent login en una terminal: ADE no aísla cuentas de Cursor."
+  "providers.method.unavailable.cursor": "Ejecuta cursor-agent login en una terminal: ADE no aísla cuentas de Cursor.",
+  "terminal.write.blockedTitle": "Mensaje no enviado",
+  "terminal.write.blockedWaiting": "{{name}} está esperando tu respuesta en un diálogo. No se le envió nada.",
+  "terminal.write.blockedBusy": "{{name}} está trabajando. No lo envié ahora; intenta de nuevo cuando se detenga."
 }

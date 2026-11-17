@@ -52,7 +52,7 @@ function PresetForm({
           value={command}
           onChange={(e) => setCommand(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && valid) submit();
+            if (e.key === "Enter" && valid && !saving) submit();
           }}
           placeholder={t("prelaunch.commandPlaceholder")}
           className="flex-1 font-mono text-xs"

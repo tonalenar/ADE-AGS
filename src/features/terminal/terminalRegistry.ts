@@ -50,6 +50,20 @@ function tabPtyState(tabId: string): "missing" | "idle" | "live" {
   return tab.ptyId != null ? "live" : "idle";
 }
 
+/** O bloqueio que a conferência devolve: a TUI está numa pergunta de aprovação, ou trabalhando. */
+export type SubmitBlock = "blocked-waiting-user" | "blocked-busy";
+
+/**
+ * A conferência de quem manda Enter sem a pessoa digitar (ver `safeWrite.ts`). `gate` roda antes de colar e antes
+ * de cada Enter (o do envio, os reenvios e o da cutucada inicial); `null` = pode. `onBlocked` diz que nada mais
+ * sai desta mensagem; `onSubmitted`, que o primeiro Enter saiu.
+ */
+export interface SubmitPolicy {
+  gate: () => SubmitBlock | null;
+  onBlocked?: (block: SubmitBlock) => void;
+  onSubmitted?: () => void;
+}
+
 /** Avisos de tiempo de un mensaje con `sendWhenReady`, para el cronómetro de la misión. */
 export interface SendTimings {
   /** El mensaje se pegó (la TUI ya había arrancado). */
@@ -71,6 +85,11 @@ export interface SendTimings {
   guard?: () => boolean;
   /** O `guard` disse não: nada foi colado. */
   onSkipped?: () => void;
+  /**
+   * Conferência de quem manda sem a pessoa digitar (`safeWrite.ts`): roda antes de colar e antes de cada Enter.
+   * Sem ela, o envio é ação da pessoa e segue como antes.
+   */
+  policy?: SubmitPolicy;
 }
 
 const queuedTimings = new Map<string, SendTimings>();
@@ -131,7 +150,7 @@ function watchStart(tabId: string, term: Terminal, timings: SendTimings): void {
   });
   window.setTimeout(() => {
     if (worked || terminals.get(tabId) !== term) return;
-    term.input("\r");
+    if (!pressEnter(term, timings.policy, false)) return;
     timings.onRetry?.(Date.now());
   }, EARLY_NUDGE_MS);
   // El Enter ya fue a los `EARLY_NUDGE_MS`: acá solo se avisa que no arrancó.
@@ -140,6 +159,31 @@ function watchStart(tabId: string, term: Terminal, timings: SendTimings): void {
     timings.onStalled?.();
   }, START_CHECK_MS);
   window.setTimeout(() => sub.dispose(), START_DEADLINE_MS);
+}
+
+/**
+ * O `gate` da política, com falha fechada (se lança, conta como bloqueado). Devolve o bloqueio, se houve. `avisa`:
+ * se o bloqueio deve ser comunicado (`onBlocked`). Um reenvio cancelado depois do Enter já enviado não avisa.
+ */
+function gateOf(policy: SubmitPolicy, avisa = true): SubmitBlock | null {
+  let block: SubmitBlock | null;
+  try {
+    block = policy.gate();
+  } catch {
+    block = "blocked-busy";
+  }
+  if (block && avisa) policy.onBlocked?.(block);
+  return block;
+}
+
+/**
+ * O único Enter que sai do registro. Com `policy`, a conferência roda antes; sem ela, é ação da pessoa (chat,
+ * "Rodar", resposta a um menu) e segue como antes. Devolve se o Enter saiu.
+ */
+function pressEnter(term: Terminal, policy?: SubmitPolicy, avisa = true): boolean {
+  if (policy && gateOf(policy, avisa)) return false;
+  term.input("\r");
+  return true;
 }
 
 /** O `guard` de quem manda; se ele falha, não cola (falha fechada). */
@@ -167,10 +211,41 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
       timings.onSkipped?.();
       return;
     }
-    pasteIntoTab(tabId, text, !timings?.draft, timings?.onRetry);
-    timings?.onSent?.(Date.now());
-    if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
-    if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);
+    const started = () => {
+      timings?.onSent?.(Date.now());
+      if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
+      if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);
+    };
+    const policy = timings?.policy;
+    if (!policy) {
+      pasteIntoTab(tabId, text, !timings?.draft, timings?.onRetry);
+      started();
+      return;
+    }
+    // Com política, a conferência roda antes de colar. `onSent` só vale quando o Enter sai (no rascunho, quando colou).
+    if (gateOf(policy)) {
+      timings?.onSkipped?.();
+      return;
+    }
+    if (timings?.draft) {
+      pasteIntoTab(tabId, text, false);
+      started();
+      return;
+    }
+    let submitted = false;
+    pasteIntoTab(tabId, text, true, timings?.onRetry, {
+      gate: policy.gate,
+      onBlocked: (block) => {
+        // Bloqueado antes do Enter: a mensagem não saiu, e quem chama a conta como pulada.
+        if (!submitted) timings?.onSkipped?.();
+        policy.onBlocked?.(block);
+      },
+      onSubmitted: () => {
+        submitted = true;
+        policy.onSubmitted?.();
+        started();
+      },
+    });
   };
   const sub = term.onWriteParsed(() => {
     sawOutput = true;
@@ -259,14 +334,14 @@ export function runInTerminal(tabId: string, text: string): boolean {
   const term = terminals.get(tabId);
   if (!term || tabPtyState(tabId) !== "live") return false;
   term.paste(text);
-  setTimeout(() => term.input("\r"), 80);
+  setTimeout(() => pressEnter(term), 80);
   term.focus();
   return true;
 }
 
 /** Pega `text` en la terminal de la tab y, con `submit`, lo manda. `false` si la tab no
  *  tiene una terminal viva. */
-export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRetry?: (at: number) => void): boolean {
+export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRetry?: (at: number) => void, policy?: SubmitPolicy): boolean {
   const term = terminals.get(tabId);
   if (!term) return false;
   if (tabPtyState(tabId) === "idle") {
@@ -278,18 +353,28 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRet
   // El Enter va aparte y un momento después: algunas TUIs todavía están procesando el
   // pegado cuando llega, y lo toman como parte de él en vez de como "enviar".
   if (submit) {
-    setTimeout(() => term.input("\r"), 80);
+    let stopped = false;
+    // Um Enter só sai se a política deixa. Bloqueado antes do primeiro Enter, nenhum reenvio desta mensagem sai.
+    const enter = (avisa: boolean): boolean => {
+      if (stopped) return false;
+      if (pressEnter(term, policy, avisa)) return true;
+      stopped = true;
+      return false;
+    };
+    setTimeout(() => {
+      if (enter(true)) policy?.onSubmitted?.();
+    }, 80);
     // Un pegado grande (Codex: "[Pasted Content 3904 chars]") puede tragarse ese Enter y dejar el
     // briefing escrito sin enviar: el agente nunca arranca. Se mira la pantalla y se reintenta. O Hermes e o
     // OpenCode não trocam o colado por um marcador: o texto fica inteiro na caixa, com o cursor no fim dele
     // (`typedTextPending`). Ainda "starting agent…", eles também engolem o Enter.
     SUBMIT_RETRY_MS.forEach((delay) =>
       setTimeout(() => {
-        if (terminals.get(tabId) !== term) return;
+        if (terminals.get(tabId) !== term || stopped) return;
         const screen = screenOf(tabId, null, 12);
         if ((screen && pasteStillPending(screen.lines)) || typedTextPending(beforeCursor(term), text)) {
-          term.input("\r");
-          onRetry?.(Date.now());
+          // Reenvio depois do Enter que já saiu: se a tela virou pergunta, cancela sem avisar (a mensagem já foi enviada).
+          if (enter(false)) onRetry?.(Date.now());
         }
       }, delay),
     );
