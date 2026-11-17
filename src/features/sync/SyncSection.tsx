@@ -121,7 +121,7 @@ export function SyncSection() {
               </span>
             </SettingsRow>
             <SettingsRow label={t("sync.auto")} hint={t("sync.autoHint")}>
-              <Switch checked={status.auto} onChange={(v) => setAuto(v)} />
+              <Switch checked={status.auto} onChange={(v) => { void setAuto(v).catch(() => undefined); }} />
             </SettingsRow>
             {report && <Report report={report} />}
             <div className="flex justify-end">
@@ -167,7 +167,7 @@ export function SyncSection() {
           footer={
             <>
               <Button variant="outline" onClick={() => setConfirmOff(false)}>{t("btn.cancel")}</Button>
-              <Button variant="danger" onClick={() => { setConfirmOff(false); disconnect().catch(console.error); }}>
+              <Button variant="danger" onClick={() => { setConfirmOff(false); disconnect().catch(() => undefined); }}>
                 {t("sync.disconnect")}
               </Button>
             </>

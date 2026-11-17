@@ -57,13 +57,23 @@ export const useSyncStore = create<SyncState>()((set, get) => ({
   },
 
   disconnect: async () => {
-    await ipc.syncDisconnect();
-    set({ report: null, error: null });
-    await get().load();
+    try {
+      await ipc.syncDisconnect();
+      set({ report: null, error: null });
+      await get().load();
+    } catch (e) {
+      set({ error: String(e) });
+      throw e;
+    }
   },
 
   setAuto: async (auto) => {
-    await ipc.syncSetAuto(auto);
-    await get().load();
+    try {
+      await ipc.syncSetAuto(auto);
+      await get().load();
+    } catch (e) {
+      set({ error: String(e) });
+      throw e;
+    }
   },
 }));
