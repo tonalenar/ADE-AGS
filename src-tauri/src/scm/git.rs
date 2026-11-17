@@ -56,7 +56,9 @@ pub(crate) fn classify_failure(stderr: &str) -> ScmError {
 fn base(root: &str, args: &[&str]) -> Command {
     let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(root);
-    cmd.args(["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"]);
+    // fsmonitor off: um hook de monitor no `.git/config` compartilhado não deve pausar o painel.
+    // hooksPath só some nos comandos com token (`credentialed_overrides`): commit local corre os hooks do usuário.
+    cmd.args(["-c", "core.fsmonitor=false"]);
     cmd.args(args);
     // Si git necesita un usuario y contraseña, que falle en vez de preguntarlos: acá no
     // hay nadie mirando una terminal, y un proceso esperando input se ve como la app

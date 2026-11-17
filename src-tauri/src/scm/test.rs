@@ -591,10 +591,19 @@ fn con_token_en_el_entorno_git_no_corre_hooks_del_repo() {
     super::git::network_with(&root, &commit, &token, super::git::LOCAL).unwrap();
     assert!(!marker.exists(), "el hook del repo corrió con el token en el entorno");
 
-    // Sem token também: o git da ADE isola `core.hooksPath` para não herdar o do repo.
-    super::git::network_with(&root, &commit, &[], super::git::LOCAL).unwrap();
-    assert!(!marker.exists(), "o git local da ADE também isola hooksPath");
+    let _ = std::fs::remove_file(&marker);
+    std::fs::remove_dir_all(dir).ok();
+}
 
+#[test]
+fn commit_local_sem_token_corre_os_hooks_do_repo() {
+    let dir = temp_repo("local-hooks");
+    let root = dir.to_string_lossy().to_string();
+    let marker = std::env::temp_dir().join(format!("cc-scm-hook-local-{}", std::process::id()));
+    let _ = std::fs::remove_file(&marker);
+    hook_que_marca(&dir, "pre-commit", &marker);
+    super::git::run(&root, &["commit", "--allow-empty", "-q", "-m", "x"], super::git::LOCAL).unwrap();
+    assert!(marker.exists(), "o commit local da ADE tem que correr os hooks do usuário");
     let _ = std::fs::remove_file(&marker);
     std::fs::remove_dir_all(dir).ok();
 }
