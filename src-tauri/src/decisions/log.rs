@@ -11,6 +11,9 @@ use super::points::blind_labels;
 pub const RETAIN_DAYS: i64 = 30;
 pub const RETAIN_ROWS: i64 = 50_000;
 pub const DEDUPE_SECS: i64 = 3_600;
+/// O `fleet_gate` só repete a pergunta de um mesmo estado depois de um dia. Com a janela de 1 h, uma tarefa parada
+/// (o estado não muda enquanto ela espera) pagava o provedor a cada hora, sem limite.
+pub const DEDUPE_FLEET_SECS: i64 = 86_400;
 /// Abaixo disso, a concordância de um ponto ainda não diz nada.
 pub const MIN_SAMPLE: i64 = 30;
 const MAX_PAIRS: usize = 12;
@@ -208,10 +211,11 @@ pub fn recent(
     now: i64,
 ) -> Result<bool, String> {
     migrate(conn).map_err(|error| error.to_string())?;
+    let window = if point == super::points::POINT_FLEET { DEDUPE_FLEET_SECS } else { DEDUPE_SECS };
     let found: Option<i64> = conn
         .query_row(
             "SELECT 1 FROM decision_shadow_log WHERE point = ?1 AND state_hash = ?2 AND provider = ?3 AND ts >= ?4 LIMIT 1",
-            rusqlite::params![point, state_hash, provider, now.saturating_sub(DEDUPE_SECS)],
+            rusqlite::params![point, state_hash, provider, now.saturating_sub(window)],
             |row| row.get(0),
         )
         .optional()
