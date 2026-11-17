@@ -359,10 +359,8 @@ pub async fn mission_start(
     let force_val = force.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || {
         let db = db_of(&app)?;
-        {
-            let c = db.lock().map_err(|e| e.to_string())?;
-            crate::usage::require_budget(&c, &mission_id)?;
-        }
+        // Os transcripts do orçamento são lidos sem o mutex do banco preso.
+        crate::usage::require_budget_db(&db, &mission_id)?;
         mark_test_now(&app, &mission_id, is_test)?;
         start_now_with_force(&app, &mission_id, force_val)
     })
@@ -577,10 +575,7 @@ fn mission_start_terminals_sync(
 ) -> Result<Mission, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
     let db = db_of(&app)?;
-    {
-        let c = db.lock().map_err(|e| e.to_string())?;
-        crate::usage::require_budget(&c, &mission_id)?;
-    }
+    crate::usage::require_budget_db(&db, &mission_id)?;
     check_launch_now(&db, &mission_id, true)?;
     if !force.unwrap_or(false) {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -839,10 +834,16 @@ pub fn mission_timings(app: AppHandle, mission_id: String) -> Result<MissionTimi
 
 /// Eficiência de uma missão e medianas recentes, agrupadas pela quantidade de agentes.
 #[tauri::command]
-pub fn mission_efficiency(app: AppHandle, mission_id: String) -> Result<MissionEfficiency, String> {
-    let db = db_of(&app)?;
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    efficiency::get(&conn, &mission_id)
+pub async fn mission_efficiency(app: AppHandle, mission_id: String) -> Result<MissionEfficiency, String> {
+    // Fora da thread principal. O cálculo é só SQL (sem disco nem git), mas ainda segura o
+    // mutex durante as consultas: ver a pendência de conexão de leitura em PR03.
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = db_of(&app)?;
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        efficiency::get(&conn, &mission_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ── Checagem do que já existe ───────────────────────────────────────

@@ -588,7 +588,19 @@ pub fn accept(
     mission_id: &str,
     task_id: &str,
 ) -> Result<MergeOutcome, String> {
-    let (mission, task, existing) = {
+    accept_verificando(db, worktrees_base, mission_id, task_id, dirty)
+}
+
+/// Como `accept`, com a checagem de árvore suja injetada. Ela roda `git status` no worktree
+/// da tarefa, então só é chamada depois que o mutex do banco foi solto.
+pub(crate) fn accept_verificando(
+    db: &crate::database::DbConnection,
+    worktrees_base: &Path,
+    mission_id: &str,
+    task_id: &str,
+    verificar_sujeira: impl FnOnce(&Path, &[PathBuf]) -> Result<Vec<String>, String>,
+) -> Result<MergeOutcome, String> {
+    let (mission, task, existing, arvore) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let mission = super::store::get(&conn, mission_id)?.ok_or("a missão não existe mais")?;
         let task =
@@ -609,18 +621,23 @@ pub fn accept(
                     .into(),
             );
         }
-        if let (Some(root), false) = (&task.worktree_path, task.worktree_removed) {
-            let pending = dirty(Path::new(root), &managed_links(&conn, &task))?;
-            if !pending.is_empty() {
-                return Err(format!(
-                    "a tarefa deixou mudanças sem commit ({}): elas não estão na branch dela. Peça que ela faça o commit ou descarte antes de aceitar",
-                    pending.join(", ")
-                ));
-            }
-        }
+        // Só as leituras ficam aqui; o `git status` da árvore da tarefa roda depois.
+        let arvore = match (&task.worktree_path, task.worktree_removed) {
+            (Some(root), false) => Some((PathBuf::from(root), managed_links(&conn, &task))),
+            _ => None,
+        };
         let existing = integration_path(&conn, mission_id)?;
-        (mission, task, existing)
+        (mission, task, existing, arvore)
     };
+    if let Some((root, managed)) = arvore {
+        let pending = verificar_sujeira(&root, &managed)?;
+        if !pending.is_empty() {
+            return Err(format!(
+                "a tarefa deixou mudanças sem commit ({}): elas não estão na branch dela. Peça que ela faça o commit ou descarte antes de aceitar",
+                pending.join(", ")
+            ));
+        }
+    }
     let branch = task
         .branch
         .clone()

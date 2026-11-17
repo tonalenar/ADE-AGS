@@ -1588,6 +1588,27 @@ fn no_se_acepta_una_entrega_con_cambios_sin_commitear() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// `git status` do worktree da tarefa roda sem o mutex do banco. A sonda confere o mutex na
+/// mesma thread, no instante da checagem: try_lock só passa se ele estiver solto.
+#[test]
+fn aceitar_nao_segura_o_banco_durante_o_git_status() {
+    let tmp = std::env::temp_dir().join(format!("cc-review-lock-{}", uuid::Uuid::new_v4()));
+    let base = tmp.join("worktrees");
+    let (db, project, run_id) = mision_en_repo(&tmp);
+    let task_id = tarea_aislada(&db, &run_id, &project, &base, "t", "c.txt", "c\n");
+    let probe = db.clone();
+    let mut verificado = false;
+    let err = super::review::accept_verificando(&db, &base, "m1", &task_id, |_, _| {
+        assert!(probe.try_lock().is_ok(), "git status rodou com o banco preso");
+        verificado = true;
+        Ok(vec!["olvidado.txt".into()])
+    })
+    .unwrap_err();
+    assert!(verificado, "a checagem de sujeira não rodou");
+    assert!(err.contains("olvidado.txt"), "{err}");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 // ── En terminales: sin run ──────────────────────────────────────
 
 #[test]
