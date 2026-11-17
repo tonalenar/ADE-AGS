@@ -43,8 +43,7 @@ fn out(p: &Path) -> String {
     p.to_string_lossy().to_string()
 }
 
-#[tauri::command]
-pub fn explorer_create_file(dir: String, name: String) -> Result<String, String> {
+pub(crate) fn create_file(dir: String, name: String) -> Result<String, String> {
     let path = child(&dir, &name)?;
     // `create_new` falla si ya existe, en el mismo syscall: no hay carrera entre mirar y
     // crear en la que un agente pueda escribir el archivo y perderlo.
@@ -57,14 +56,22 @@ pub fn explorer_create_file(dir: String, name: String) -> Result<String, String>
 }
 
 #[tauri::command]
-pub fn explorer_create_dir(dir: String, name: String) -> Result<String, String> {
+pub async fn explorer_create_file(dir: String, name: String) -> Result<String, String> {
+    super::off_ui(move || create_file(dir, name)).await
+}
+
+pub(crate) fn create_dir(dir: String, name: String) -> Result<String, String> {
     let path = child(&dir, &name)?;
     fs::create_dir(&path).map_err(|e| format!("no se pudo crear {}: {e}", path.display()))?;
     Ok(out(&path))
 }
 
 #[tauri::command]
-pub fn explorer_rename(path: String, name: String) -> Result<String, String> {
+pub async fn explorer_create_dir(dir: String, name: String) -> Result<String, String> {
+    super::off_ui(move || create_dir(dir, name)).await
+}
+
+pub(crate) fn rename(path: String, name: String) -> Result<String, String> {
     let from = PathBuf::from(&path);
     let parent = from.parent().ok_or("no se puede renombrar la raíz")?;
     let to = child(&parent.to_string_lossy(), &name)?;
@@ -79,6 +86,11 @@ pub fn explorer_rename(path: String, name: String) -> Result<String, String> {
     }
     fs::rename(&from, &to).map_err(|e| format!("no se pudo renombrar: {e}"))?;
     Ok(out(&to))
+}
+
+#[tauri::command]
+pub async fn explorer_rename(path: String, name: String) -> Result<String, String> {
+    super::off_ui(move || rename(path, name)).await
 }
 
 /// `a.ts` → `a copy.ts` → `a copy 2.ts`… El primero libre en `dir`. Las carpetas y los
@@ -162,8 +174,7 @@ fn target_dir(dir: &str) -> Result<PathBuf, String> {
 
 /// Copia `path` adentro de `dir`. Pegar en la misma carpeta es duplicar: el nombre libre
 /// que le toca es `x copy`.
-#[tauri::command]
-pub fn explorer_copy(path: String, dir: String) -> Result<String, String> {
+pub(crate) fn copy(path: String, dir: String) -> Result<String, String> {
     let (from, name) = source(&path)?;
     let dir = target_dir(&dir)?;
     if from.is_dir() && is_within(&dir, &from) {
@@ -178,10 +189,14 @@ pub fn explorer_copy(path: String, dir: String) -> Result<String, String> {
     Ok(out(&to))
 }
 
+#[tauri::command]
+pub async fn explorer_copy(path: String, dir: String) -> Result<String, String> {
+    super::off_ui(move || copy(path, dir)).await
+}
+
 /// Mueve `path` adentro de `dir`, con el mismo nombre. Si ya hay algo con ese nombre
 /// falla: mover es arrastrar, y un arrastre no debería reemplazar nada sin preguntar.
-#[tauri::command]
-pub fn explorer_move(path: String, dir: String) -> Result<String, String> {
+pub(crate) fn move_path(path: String, dir: String) -> Result<String, String> {
     let (from, name) = source(&path)?;
     let dir = target_dir(&dir)?;
     if from.parent() == Some(dir.as_path()) {
@@ -208,13 +223,22 @@ pub fn explorer_move(path: String, dir: String) -> Result<String, String> {
     Ok(out(&to))
 }
 
+#[tauri::command]
+pub async fn explorer_move(path: String, dir: String) -> Result<String, String> {
+    super::off_ui(move || move_path(path, dir)).await
+}
+
 /// A la papelera del sistema (Papelera de reciclaje en Windows, Papelera en macOS, la de
 /// freedesktop en Linux), no un borrado definitivo.
-#[tauri::command]
-pub fn explorer_trash(paths: Vec<String>) -> Result<(), String> {
+pub(crate) fn trash(paths: Vec<String>) -> Result<(), String> {
     let existing: Vec<&String> = paths.iter().filter(|p| exists(Path::new(p))).collect();
     if existing.is_empty() {
         return Ok(());
     }
     trash::delete_all(existing).map_err(|e| format!("no se pudo mandar a la papelera: {e}"))
+}
+
+#[tauri::command]
+pub async fn explorer_trash(paths: Vec<String>) -> Result<(), String> {
+    super::off_ui(move || trash(paths)).await
 }

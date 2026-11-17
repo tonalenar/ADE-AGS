@@ -282,7 +282,7 @@ fn una_linea_enorme_se_recorta_alrededor_de_la_coincidencia() {
 
 // ── Tabs de archivo ──────────────────────────────────────────────
 
-use super::files::{explorer_read_file, explorer_write_file, FileContent, WriteOutcome, ABSENT};
+use super::files::{read_file as explorer_read_file, write_file as explorer_write_file, FileContent, WriteOutcome, ABSENT};
 
 #[test]
 fn guardar_no_pisa_lo_que_otro_escribio_despues_de_abrir() {
@@ -359,7 +359,7 @@ fn o_token_de_versao_muda_com_o_conteudo_e_nao_com_a_leitura() {
         panic!("salvo")
     };
     assert_ne!(a, c);
-    assert_eq!(super::files::explorer_file_stat(path).unwrap().unwrap().version, c);
+    assert_eq!(super::files::file_stat(path).unwrap().unwrap().version, c);
     std::fs::remove_dir_all(dir).ok();
 }
 
@@ -392,7 +392,10 @@ fn un_binario_no_se_abre_como_texto() {
 mod ops {
     use std::fs;
 
-    use super::super::ops::*;
+    use super::super::ops::{
+        copy as explorer_copy, create_dir as explorer_create_dir, create_file as explorer_create_file, free_name,
+        move_path as explorer_move, rename as explorer_rename,
+    };
 
     /// Una carpeta propia por test, que se borra al soltarla.
     struct Tmp(std::path::PathBuf);
