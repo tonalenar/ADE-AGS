@@ -3,6 +3,31 @@ use std::collections::HashMap;
 use super::git::{mark_from_xy, parse_porcelain_v2, parse_status_z, repo_info_from_probes, FileMark};
 use super::tree::{is_noisy, sort_entries, DirEntry};
 
+#[test]
+fn renomear_so_caixa_em_volume_sensivel_nao_sobrescreve() {
+    let root = std::env::temp_dir().join(format!("ags-explorer-case-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let from = root.join("readme.md");
+    let to = root.join("README.md");
+    std::fs::write(&from, "origem").unwrap();
+    if std::fs::write(&to, "destino").is_err() {
+        // volume insensível: cenário não se aplica
+        let _ = std::fs::remove_dir_all(&root);
+        return;
+    }
+    if std::fs::canonicalize(&from).unwrap() == std::fs::canonicalize(&to).unwrap() {
+        // volume insensível: cenário não se aplica
+        let _ = std::fs::remove_dir_all(&root);
+        return;
+    }
+
+    let result = super::ops::explorer_rename(from.to_string_lossy().into_owned(), "README.md".into());
+    assert!(result.is_err(), "renomear não pode substituir o arquivo de destino");
+    assert_eq!(std::fs::read(&from).unwrap(), b"origem");
+    assert_eq!(std::fs::read(&to).unwrap(), b"destino");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 fn entry(name: &str, is_dir: bool) -> DirEntry {
     DirEntry {
         name: name.to_string(),

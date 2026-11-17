@@ -43,6 +43,35 @@ fn out(p: &Path) -> String {
     p.to_string_lossy().to_string()
 }
 
+fn same_file(from: &Path, to: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return match (fs::metadata(from), fs::metadata(to)) {
+            (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+            _ => false,
+        };
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        return match (fs::metadata(from), fs::metadata(to)) {
+            (Ok(a), Ok(b)) => match (a.volume_serial_number(), a.file_index(), b.volume_serial_number(), b.file_index()) {
+                (Some(av), Some(ai), Some(bv), Some(bi)) => av == bv && ai == bi,
+                _ => false,
+            },
+            _ => false,
+        };
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        match (from.canonicalize(), to.canonicalize()) {
+            (Ok(from), Ok(to)) => from == to,
+            _ => false,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn explorer_create_file(dir: String, name: String) -> Result<String, String> {
     let path = child(&dir, &name)?;
@@ -71,10 +100,8 @@ pub fn explorer_rename(path: String, name: String) -> Result<String, String> {
     if to == from {
         return Ok(path);
     }
-    // Cambiar solo mayúsculas (`readme.md` → `README.md`) en un disco que no las distingue
-    // (Windows, macOS) hace que `to` "exista": es el mismo archivo, y se deja pasar.
-    let same_file = to.to_string_lossy().to_lowercase() == from.to_string_lossy().to_lowercase();
-    if exists(&to) && !same_file {
+    // Só é o mesmo arquivo quando os metadados confirmam que identidade e inode coincidem.
+    if exists(&to) && !same_file(&from, &to) {
         return Err(format!("ya existe {}", to.display()));
     }
     fs::rename(&from, &to).map_err(|e| format!("no se pudo renombrar: {e}"))?;
