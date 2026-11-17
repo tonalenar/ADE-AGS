@@ -189,7 +189,7 @@ pub fn start_avd(name: &str) -> Result<(), String> {
 
 /// Entrega o emulador a uma thread que o espera. A thread é criada antes de o processo ser entregue: se ela não nasce,
 /// o emulador é encerrado e o erro volta. Antes, o erro era engolido e o filho ficava sem `wait`.
-fn watch_child(mut child: std::process::Child, spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<()>) -> Result<(), String> {
+fn watch_child(child: std::process::Child, spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<()>) -> Result<(), String> {
     let (tx, rx) = std::sync::mpsc::channel::<std::process::Child>();
     let job: Box<dyn FnOnce() + Send> = Box::new(move || {
         if let Ok(mut owned) = rx.recv() {
@@ -197,6 +197,7 @@ fn watch_child(mut child: std::process::Child, spawn: impl FnOnce(Box<dyn FnOnce
         }
     });
     if let Err(error) = spawn(job) {
+        let mut child = child;
         let _ = child.kill();
         let _ = child.wait();
         return Err(format!("emulator: não consegui acompanhar o processo ({error})"));
