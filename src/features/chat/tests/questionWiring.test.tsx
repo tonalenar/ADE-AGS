@@ -79,22 +79,23 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); });
 
 const option = (label: string) => [...host.querySelectorAll("button")].find((b) => b.textContent === label) as HTMLButtonElement | undefined;
+const render = () => act(async () => {
+  root.render(<StructuredConversationView card={card} thread={thread} cards={[card]} />);
+});
 
 describe("a conversa por protocolo liga a resposta ao cartão da pergunta", () => {
-  it("com pergunta esperando, o clique responde o pedido aberto; sem pergunta as opções não enviam", async () => {
+  it("com pergunta esperando, o clique responde o pedido aberto", async () => {
     invokeMock.on("chat_request_answer", true);
-    await act(async () => {
-      root.render(<StructuredConversationView card={card} thread={thread} cards={[card]} />);
-    });
+    await render();
     await act(async () => { option(OPTIONS[0]!)!.click(); });
     expect(invokeMock.calls("chat_request_answer")).toEqual([{ requestId: "q1", choice: OPTIONS[0] }]);
+  });
 
+  it("sem pergunta as opções somem", async () => {
     useStructured.setState({
       live: { th: { ...EMPTY_LIVE, items: [{ kind: "user", id: "u", text: "monte" }, ask], requests: [], phase: "idle" } },
     });
-    await act(async () => {
-      root.render(<StructuredConversationView card={card} thread={thread} cards={[card]} />);
-    });
+    await render();
     expect(option(OPTIONS[0]!)).toBeUndefined();
   });
 });

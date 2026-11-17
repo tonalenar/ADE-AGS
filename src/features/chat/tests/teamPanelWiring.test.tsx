@@ -66,7 +66,7 @@ beforeEach(() => {
   document.body.appendChild(host);
   root = createRoot(host);
   useChatStore.setState({
-    panel: "team", surfaces: ["team"], lastPanel: null, composing: true, thread: null, summaryOpen: false, summaryPinned: false, panelMaximized: false,
+    panel: null, surfaces: [], lastPanel: null, composing: true, thread: null, summaryOpen: false, summaryPinned: false, panelMaximized: false,
   });
   useTeamDraft.setState({ members: [], lead: null, adding: false, editing: null });
   useStructured.setState({ threads: [], live: {}, hydrated: {}, goals: {}, goalNotices: {}, logFailures: {} });
@@ -82,25 +82,26 @@ const mount = () => act(async () => {
 });
 
 describe("trocar de conversa não mexe na aba do painel direito", () => {
-  it("ligar uma conversa não reabre o Time: o efeito só corre na tela de conversa nova", async () => {
+  it("ligar uma conversa não reabre o Time", async () => {
     await mount();
     expect(useChatStore.getState().panel).toBeNull();
 
     useStructured.setState({ threads: [thread] });
     await act(async () => {
-      useChatStore.setState({ composing: false, thread: "th", panel: "ios", surfaces: ["ios"] });
+      useChatStore.setState({ composing: false, thread: "th" });
     });
     await mount();
-    expect(useChatStore.getState().panel).toBe("ios");
+    expect(useChatStore.getState().panel).toBeNull();
   });
 
-  it("entrar numa conversa nova tira o Time do painel (só com o rascunho vazio)", async () => {
+  it("transitar de conversa ligada para rascunho preenchido mantém o Time", async () => {
+    useStructured.setState({ threads: [thread] });
+    useChatStore.setState({ composing: false, thread: "th", panel: "team", surfaces: ["team"] });
     await mount();
-    expect(useChatStore.getState().panel).toBeNull();
 
     await act(async () => {
-      useChatStore.setState({ panel: "team", surfaces: ["team"] });
       useTeamDraft.setState({ members: [{ id: "d1" }] as never });
+      useChatStore.setState({ composing: true });
     });
     await mount();
     expect(useChatStore.getState().panel).toBe("team");
