@@ -190,7 +190,7 @@ export function CloneRepoDialog({ onClose, onCloned }: {
                     <span className="truncate text-[12px] font-medium text-gray-800 dark:text-gray-100" title={r.fullName}>{r.fullName}</span>
                     {r.private && <Badge variant="neutral" size="sm">{t("forge.clone.private")}</Badge>}
                     {r.archived && <Badge variant="warning" size="sm">{t("forge.clone.archived")}</Badge>}
-                    {r.fork && <Badge variant="outline" size="sm">fork</Badge>}
+                    {r.fork && <Badge variant="outline" size="sm">{t("forge.clone.fork")}</Badge>}
                   </span>
                   {r.description && (
                     <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35" title={r.description}>{r.description}</span>

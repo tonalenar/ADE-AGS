@@ -5,6 +5,7 @@ import { AddIcon, ArrowLeftIcon, Badge, Button, EmptyState, Skeleton, Tooltip } 
 import { ExternalIcon, RefreshIcon, TagIcon } from "@/app/icons";
 import { Markdown } from "@/shared/ui/Markdown";
 import { openExternalUrl } from "@/shared/openExternalUrl";
+import { dateLocale } from "@/i18n/dateLocale";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
 
 import { CreateReleaseDialog } from "./CreateReleaseDialog";
@@ -81,7 +82,7 @@ export function ReleasesView({ cwd, target }: { cwd: string; target: RepoTarget 
               <span className="flex items-center gap-1 font-mono"><TagIcon className="w-3 h-3" />{open.tag}</span>
               <ReleaseBadges r={open} />
               {open.author && <span>· @{open.author}</span>}
-              {open.createdAt && <span>· {new Date(open.createdAt).toLocaleString()}</span>}
+              {open.createdAt && <span>· {new Date(open.createdAt).toLocaleString(dateLocale())}</span>}
             </div>
             <div className="rounded-xl border border-gray-200 dark:border-white/8 px-4 py-3 text-[13px]">
               {open.body ? <Markdown content={open.body} loadImage={(src) => forgeImage(cwd, resolveForgeImage(src, open.webUrl))} /> : (

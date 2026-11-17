@@ -32,7 +32,7 @@ function MethodCard({ selected, title, description, onClick, disabled }: {
         selected
           ? "bg-accent-500/12 shadow-[inset_0_0_0_1.5px_rgba(10,132,255,0.6)]"
           : "bg-black/[0.04] dark:bg-white/[0.05] hover:bg-black/[0.07] dark:hover:bg-white/[0.08]"}`}>
-      <span className="text-[12.5px] font-semibold text-gray-900 dark:text-[#f5f5f7]">{title}</span>
+      <span className="text-[12.5px] font-semibold text-gray-900 dark:text-gray-50">{title}</span>
       <span className="text-[11px] leading-[14px] text-gray-500 dark:text-white/55">{description}</span>
     </button>
   );
@@ -262,7 +262,7 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
         ) : (
           <div className="flex items-center gap-2 rounded-lg bg-black/[0.04] px-3 py-2 dark:bg-white/[0.05]">
             <span className="text-[11.5px] text-gray-500 dark:text-white/50">{t("forge.add.host")}</span>
-            <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-gray-900 dark:text-[#f5f5f7]" title={host}>{host || "—"}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-gray-900 dark:text-gray-50" title={host}>{host || "—"}</span>
             {!fixedHost && (
               <button type="button" disabled={hostLocked} onClick={() => setEditHost(true)}
                 className="shrink-0 text-[11.5px] text-accent-600 hover:underline disabled:opacity-50 dark:text-accent-400">
@@ -326,7 +326,7 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
                   <div className="flex items-center gap-2">
                     <div className="min-w-0 flex-1">
                       <span className="block text-[11px] text-gray-500 dark:text-white/50">{t("forge.connect.app.title")}</span>
-                      <span className="block truncate text-[12.5px] font-medium text-gray-900 dark:text-[#f5f5f7]" title={app.clientId}>{appName}</span>
+                      <span className="block truncate text-[12.5px] font-medium text-gray-900 dark:text-gray-50" title={app.clientId}>{appName}</span>
                     </div>
                     {app.custom && (
                       <button type="button" onClick={() => void saveApp(null)} className="shrink-0 text-[11.5px] text-gray-500 hover:underline dark:text-white/55">{t("forge.connect.app.reset")}</button>
