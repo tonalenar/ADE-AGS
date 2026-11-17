@@ -569,20 +569,22 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
       // O texto só sai da caixa depois de o envio ser aceito: se o backend recusar, ele continua aqui para tentar de novo.
       const sentText = text;
       const sentAttachments = attachments.list;
+      const sentQuotes = quotes;
       if ((await send(withQuotes(sentText, quotes), sentAttachments)) !== true) return false;
       historyDraft.current = null;
       setHistoryIndex(null);
-      // Enquanto o IPC ia, a pessoa pode ter digitado ou anexado mais na mesma caixa. Só limpa o que foi enviado: se o
-      // conteúdo mudou, a edição nova fica (como o cofre faz em `stashContentOf`).
-      const typedMeanwhile = (ref.current?.value ?? sentText) !== sentText;
-      const attachedMeanwhile = attachmentsNowRef.current !== sentAttachments;
-      if (typedMeanwhile || attachedMeanwhile) return true;
-      setText("");
-      setRestoredCaptureNotice(null);
+      // Limpa por campo, como o cofre: o texto sai só se ainda for o enviado; anexos e citações saem só os que foram
+      // enviados (por identidade). O que a pessoa acrescentou no meio do envio fica na caixa.
+      if ((ref.current?.value ?? sentText) === sentText) {
+        setText("");
+        setRestoredCaptureNotice(null);
+      }
+      const stillInBox = attachmentsNowRef.current;
+      const sentStillInBox = sentAttachments.filter((item) => stillInBox.includes(item));
       // Pode rodar depois de a conversa já ter trocado (o envio cria a conversa): o registro sai aqui, não no efeito.
-      forgetPendingCaptures(eventTarget, sentAttachments.map((item) => item.path));
-      attachments.clear();
-      if (quoteKey) clearQuotesFor(quoteKey);
+      forgetPendingCaptures(eventTarget, sentStillInBox.map((item) => item.path));
+      for (const item of sentStillInBox) attachments.remove(item.id);
+      if (quoteKey) for (const quote of sentQuotes) removeQuoteFor(quoteKey, quote.id);
       return true;
     } catch {
       /* quem envia mostra o erro; o texto fica para tentar de novo */
