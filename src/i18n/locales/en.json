@@ -1112,6 +1112,8 @@
   "app.routeError.body": "The rest of the app keeps working. Go home or reload the screen.",
   "app.routeError.home": "Go home",
   "app.routeError.reload": "Reload",
+  "app.panelError.title": "This panel hit an error",
+  "app.panelError.retry": "Try again",
   "rail.workspaces": "Workspaces",
   "workspaces.changed": "{{n}} uncommitted",
   "workspaces.new": "Open a new agent",

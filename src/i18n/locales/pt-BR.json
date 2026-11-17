@@ -1112,6 +1112,8 @@
   "app.routeError.body": "O resto do app continua funcionando. Volte ao início ou recarregue a tela.",
   "app.routeError.home": "Ir para o início",
   "app.routeError.reload": "Recarregar",
+  "app.panelError.title": "Este painel encontrou um erro",
+  "app.panelError.retry": "Tentar de novo",
   "rail.workspaces": "Espaços de trabalho",
   "workspaces.changed": "{{n}} não confirmado",
   "workspaces.new": "Abra um novo agente",

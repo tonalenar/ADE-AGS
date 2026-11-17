@@ -15,6 +15,7 @@ import { useTabCheckpointsCapture } from "@/features/tabCheckpoints/useTabCheckp
 import { TabBar } from "@/features/tabs/TabBar";
 import { PanelButtons } from "@/features/sidePanel/PanelButtons";
 import { RouteModal } from "@/app/RouteModal";
+import { PanelBoundary } from "@/app/PanelBoundary";
 import { WindowControls } from "@/app/WindowLights";
 import { PAGE_HOST_ID } from "@/shared/ui/pageHost";
 import { EditorArea } from "@/features/tabs/EditorArea";
@@ -280,7 +281,7 @@ export function AppShell() {
       <AgentUpdateWatcher />
       <BotToastHost />
       <AppConfirmHost />
-      <BotPanel />
+      <PanelBoundary name="bot"><BotPanel /></PanelBoundary>
       {/* Los avisos de la esquina, apilados: un permiso pendiente arriba de la versión
           nueva, sin taparse entre ellos. */}
       <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2 pointer-events-none
@@ -291,7 +292,7 @@ export function AppShell() {
       </div>
       {/* Encima de todo y fuera de las rutas: lo pregunta un agente que está esperando, y
           no puede depender de en qué pantalla esté parado el usuario. */}
-      <Suspense fallback={null}><AskDialog /></Suspense>
+      <PanelBoundary name="ask"><Suspense fallback={null}><AskDialog /></Suspense></PanelBoundary>
 
       {/* Fila 0: encabezado del lateral (controles de ventana + nombre) y, a partir de
           donde ese lateral termina, las tabs de agente. Nada más — lo que antes vivía a
@@ -310,7 +311,7 @@ export function AppShell() {
             archivos es el panel secundario y va del otro lado. */}
         <div className={chat ? "hidden" : "contents"}>
           <ActivityRail agentCount={tabs.length} width={RAIL_W} />
-          {!workspacesCollapsed && <Suspense fallback={null}><AppSessionsSidebar groups={groups} width={PANEL_W} /></Suspense>}
+          {!workspacesCollapsed && <PanelBoundary name="sessions"><Suspense fallback={null}><AppSessionsSidebar groups={groups} width={PANEL_W} /></Suspense></PanelBoundary>}
         </div>
 
         <div className="relative flex-1 min-w-0 overflow-hidden">
@@ -336,7 +337,7 @@ export function AppShell() {
               el medio). Un scroll acá afuera además reservaría su carril a la derecha de
               TODAS las páginas, incluidas las que no lo necesitan. */}
           {/* No chat as telas cheias (Configurações, Missões…) abrem dentro da casca, no lugar da conversa. */}
-          {chat && <Suspense fallback={null}><ChatShell groups={groups} page={fullPage && !settingsRoute ? <Outlet context={{ groups } satisfies ShellOutletContext} /> : null} /></Suspense>}
+          {chat && <PanelBoundary name="chat"><Suspense fallback={null}><ChatShell groups={groups} page={fullPage && !settingsRoute ? <Outlet context={{ groups } satisfies ShellOutletContext} /> : null} /></Suspense></PanelBoundary>}
 
           {!chat && !isWorkspace && !fullPage && (
             <div className="absolute inset-0 z-10 overflow-hidden">
@@ -364,15 +365,15 @@ export function AppShell() {
           />
 
           {/* Arquivos, busca e git: uma gaveta por cima do conteúdo, aberta pelos botões do topo. */}
-          <Suspense fallback={null}><ExplorerDrawer
+          <PanelBoundary name="explorer"><Suspense fallback={null}><ExplorerDrawer
             cwd={activeTab?.cwd ?? null}
             repo={activeRepo}
             title={activeRepo?.branch ?? activeTab?.cwd.split(/[\\/]/).filter(Boolean).pop() ?? ""}
-          /></Suspense>
+          /></Suspense></PanelBoundary>
 
           {/* O painel da sessão do agente ativo (ambiente, contexto, conectores, alterações, tarefas):
               cartões flutuando no canto de cima, sem coluna — o conteúdo fica com a largura toda. */}
-          {!chat && !sidePanelHidden && isWorkspace && activeTab && <Suspense fallback={null}><SessionPanel tab={activeTab} repo={activeRepo} /></Suspense>}
+          {!chat && !sidePanelHidden && isWorkspace && activeTab && <PanelBoundary name="session-panel"><Suspense fallback={null}><SessionPanel tab={activeTab} repo={activeRepo} /></Suspense></PanelBoundary>}
         </div>
 
         {/* Onde as telas cheias se montam (ver `pageHost`): tudo à direita do riel, por cima
@@ -383,12 +384,12 @@ export function AppShell() {
       </div>
 
       <div className={chat ? "hidden" : "contents"}>
-        <Suspense fallback={null}><StatusBar repo={activeRepo} /></Suspense>
+        <PanelBoundary name="status-bar"><Suspense fallback={null}><StatusBar repo={activeRepo} /></Suspense></PanelBoundary>
       </div>
 
-      <Suspense fallback={null}><CommandPalette /></Suspense>
-      <Suspense fallback={null}><ArchivedMessagePreviewHost /></Suspense>
-      <Suspense fallback={null}><CompareHost /></Suspense>
+      <PanelBoundary name="palette"><Suspense fallback={null}><CommandPalette /></Suspense></PanelBoundary>
+      <PanelBoundary name="archived-preview"><Suspense fallback={null}><ArchivedMessagePreviewHost /></Suspense></PanelBoundary>
+      <PanelBoundary name="compare"><Suspense fallback={null}><CompareHost /></Suspense></PanelBoundary>
     </div>
   );
 }
