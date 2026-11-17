@@ -261,6 +261,27 @@ pub async fn run_start_task(
     let db = db_of(&app)?;
     let request = route_request(agent_id, model, complexity, account_id, auto_account);
     let assignment = assign(&db, request).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        run_start_task_now(&app, &db, assignment, workspace_id, cwd, title, prompt, complexity, budget_usd, isolate)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// Tudo o que é síncrono no lançamento (banco, git do worktree, supervisor) roda fora do runtime async.
+#[allow(clippy::too_many_arguments)]
+fn run_start_task_now(
+    app: &AppHandle,
+    db: &DbConnection,
+    assignment: routing::Assignment,
+    workspace_id: String,
+    cwd: String,
+    title: String,
+    prompt: String,
+    complexity: Option<routing::Complexity>,
+    budget_usd: Option<f64>,
+    isolate: bool,
+) -> Result<Task, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
     let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
 
@@ -1235,13 +1256,14 @@ pub async fn run_reroute_task(
     account_id: Option<String>,
     reason: Option<String>,
 ) -> Result<Task, String> {
-    let complexity = {
-        let db = db_of(&app)?;
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        store::task_by_id(&conn, &task_id)?
+    let db = db_of(&app)?;
+    let lookup_id = task_id.clone();
+    let complexity = crate::database::blocking_db(&db, move |conn| {
+        Ok(store::task_by_id(conn, &lookup_id)?
             .and_then(|t| t.complexity)
-            .and_then(|c| routing::Complexity::parse(&c))
-    };
+            .and_then(|c| routing::Complexity::parse(&c)))
+    })
+    .await?;
     let request = routing::RouteRequest {
         agent_id,
         model: model.filter(|m| !m.trim().is_empty()),
