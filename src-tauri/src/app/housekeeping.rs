@@ -21,7 +21,12 @@ pub fn spawn_housekeeping(app: AppHandle) {
     if STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
-    arrancar_com(lanzar_hilo, move || run(app));
+    let app_run = app.clone();
+    let app_aviso = app;
+    arrancar_com(lanzar_hilo, move || run(app_run), move |error| {
+        let _ = app_aviso.emit(SWEPT, ());
+        let _ = app_aviso.emit("cc-housekeeping-failed", error.to_string());
+    });
 }
 
 type Corpo = Box<dyn FnOnce() + Send>;
@@ -30,10 +35,17 @@ fn lanzar_hilo(nome: &str, corpo: Corpo) -> std::io::Result<()> {
     std::thread::Builder::new().name(nome.into()).spawn(corpo).map(|_| ())
 }
 
-/// Falha de thread é de ambiente: o app abre sem a limpeza em segundo plano, e o erro vai para o stderr.
-fn arrancar_com(lanzar: impl Fn(&str, Corpo) -> std::io::Result<()>, principal: impl FnOnce() + Send + 'static) {
+/// Falha de thread é de ambiente: o app abre sem a limpeza em segundo plano.
+/// Sem a thread, o sweep nunca rodaria: liberamos o gate da frota e avisamos.
+fn arrancar_com(
+    lanzar: impl Fn(&str, Corpo) -> std::io::Result<()>,
+    principal: impl FnOnce() + Send + 'static,
+    ao_falhar_principal: impl FnOnce(&std::io::Error),
+) {
     if let Err(error) = lanzar("startup-housekeeping", Box::new(principal)) {
         eprintln!("[housekeeping] não foi possível iniciar a puesta a punto: {error}");
+        SWEEP_DONE.store(true, Ordering::SeqCst);
+        ao_falhar_principal(&error);
     }
     if !SECRET_CLEANER_STARTED.swap(true, Ordering::SeqCst) {
         let expiracion = lanzar(

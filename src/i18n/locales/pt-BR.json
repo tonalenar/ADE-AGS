@@ -1320,6 +1320,8 @@
   "settings.accounts.add.titleFor": "Nova conta {{agent}}",
   "sidebar.fleet": "Frota",
   "fleet.title": "Frota",
+  "runs.housekeepingFailedTitle": "Limpeza de arranque não subiu",
+  "runs.housekeepingFailed": "A varredura de tarefas órfãs não começou: {{error}}. A frota foi liberada mesmo assim.",
   "fleet.search": "Encontre um agente",
   "fleet.count": "Agentes {{n}}",
   "fleet.spent": "${{usd}}",

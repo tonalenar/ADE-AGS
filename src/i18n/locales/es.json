@@ -1320,6 +1320,8 @@
   "settings.accounts.add.titleFor": "Nueva cuenta de {{agent}}",
   "sidebar.fleet": "Flota",
   "fleet.title": "Flota",
+  "runs.housekeepingFailedTitle": "La limpieza de arranque no subió",
+  "runs.housekeepingFailed": "El barrido de tareas huérfanas no empezó: {{error}}. La flota se liberó igual.",
   "fleet.search": "Buscar agente",
   "fleet.count": "{{n}} agentes",
   "fleet.spent": "${{usd}}",

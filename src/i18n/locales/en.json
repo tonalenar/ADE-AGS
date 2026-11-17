@@ -1320,6 +1320,8 @@
   "settings.accounts.add.titleFor": "New {{agent}} account",
   "sidebar.fleet": "Fleet",
   "fleet.title": "Fleet",
+  "runs.housekeepingFailedTitle": "Startup cleanup did not start",
+  "runs.housekeepingFailed": "The orphan-task sweep did not start: {{error}}. The fleet was released anyway.",
   "fleet.search": "Find an agent",
   "fleet.count": "{{n}} agents",
   "fleet.spent": "${{usd}}",
