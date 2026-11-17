@@ -170,7 +170,14 @@ pub async fn vigia_check(
 /// toast que some. Sai como resposta do agente e SEM aviso do sistema: é registro, não pedido de
 /// atenção (o `ags say` é que pede atenção).
 #[tauri::command]
-pub fn vigia_report(app: AppHandle, tab_id: String, text: String) -> Result<(), String> {
+pub async fn vigia_report(app: AppHandle, tab_id: String, text: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || vigia_report_now(app, tab_id, text))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Corpo de `vigia_report`: lê o canvas e grava no chat e no banco, fora da thread principal.
+fn vigia_report_now(app: AppHandle, tab_id: String, text: String) -> Result<(), String> {
     let text = crate::chat::clean_text(&text)?;
     let now = crate::util::now_ts();
     crate::chat::update(&tab_id, |conv| {
