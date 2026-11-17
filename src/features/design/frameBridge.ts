@@ -244,6 +244,11 @@ addEventListener("message",function(e){
   if(d.kind==="highlight"&&typeof d.selector==="string"){var hl=q(d.selector);if(hl)try{hl.scrollIntoView({block:"nearest",inline:"nearest"});}catch(_){}}
   if(d.kind==="editText"&&typeof d.selector==="string")editText(d.selector);
   if(d.kind==="locate"&&Array.isArray(d.items)){want=d.items.filter(function(x){return x&&typeof x.id==="string"&&typeof x.selector==="string";}).slice(0,200);locate();}
+  if(d.kind==="replaceHtml"&&typeof d.html==="string"){
+    var tmp=document.createElement("template");tmp.innerHTML=d.html;
+    document.body.replaceChildren.apply(document.body,Array.prototype.slice.call(tmp.content.childNodes));
+    later();
+  }
 });
 later();
 })();`;
@@ -366,7 +371,8 @@ export type HostMessage =
   | { kind: "highlight"; selector: string | null }
   | { kind: "editText"; selector: string }
   /** A seleção desta prancheta: `active` = a prancheta está selecionada (clicar escolhe elementos). */
-  | { kind: "selection"; active: boolean; selectors: string[] };
+  | { kind: "selection"; active: boolean; selectors: string[] }
+  | { kind: "replaceHtml"; html: string };
 
 export function postToFrame(frame: HTMLIFrameElement | null, msg: HostMessage): void {
   // A origem do iframe é opaca: "*" é o único alvo possível; o script confere `e.source === parent`.
