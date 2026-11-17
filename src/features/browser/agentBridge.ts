@@ -31,7 +31,7 @@ import {
 } from "./ipc";
 import { detailForAgent, detailFromPage, detailFromProxy } from "./networkDetail";
 import { egressOriginFor, isLocalOrigin, redactForAgent, untrustedData } from "./egressPolicy";
-import { askPersonAboutReset } from "./dialogPolicy";
+import { askPersonAboutReset, tellPersonAboutResetFailure } from "./dialogPolicy";
 import type { AnnotatedCapture } from "./composeMessage";
 import {
   batchHeader, formatElement, formatMarked, type DescribedElement, type MarkedEntry,
@@ -421,7 +421,7 @@ async function marksText(
   const target = host.targetOrigin();
   const display = (url: string) => (proxy && target && url.startsWith(proxy) ? target + url.slice(proxy.length) : url);
   // Lo que la página tiene escrito (nombres, textos, valores) es dato no confiable, nunca instrucción.
-  return untrustedData(inServerTerms(host, formatMarked(entries, captures, note, display, prefix)));
+  return inServerTerms(host, formatMarked(entries, captures, note, display, prefix));
 }
 
 /** Un envío del usuario, descrito en la tab donde lo marcó (si sigue abierta). */
@@ -736,17 +736,42 @@ async function execute(
       // Começar do zero no site aberto: cookies, localStorage e sessionStorage da página atual e o livro-razão dos `act`
       // deste portal. É o que o bench faz antes de cada rodada (J1): sem isso o carrinho da rodada anterior continuava lá e
       // o «adicionar ao carrinho» da SauceDemo nunca era medido (0 de 32 rodadas). Destrói estado, não lê: nada sai daqui.
-      // Apagar a sessão é decisão da pessoa (AGENTS.md §2.3): ela confirma na app antes de qualquer apagamento.
-      if (!(await askPersonAboutReset(host.targetOrigin()))) return "Reset cancelado: a pessoa não confirmou. Nada foi apagado.";
-      const page = await host.channel.run({ op: "cookies", action: "list" }) as { cookies: { name: string }[] };
-      for (const cookie of page.cookies ?? []) {
-        await host.channel.run({ op: "cookies", action: "delete", name: cookie.name }).catch(() => undefined);
+      // Apagar a sessão de um site de verdade é decisão da pessoa (AGENTS.md §2.3): ela confirma na app antes.
+      // Num servidor local não se pergunta: o bench roda reset a cada rodada, e lá não há sessão do usuário.
+      if (isRealSite(host) && !(await askPersonAboutReset(host.targetOrigin()))) {
+        return "Reset cancelado: a pessoa não confirmou. Nada foi apagado.";
+      }
+      // Cada etapa registra o próprio erro: um reset que falhou não pode parecer um reset que deu certo.
+      const failures: string[] = [];
+      let cookieCount = 0;
+      try {
+        const page = await host.channel.run({ op: "cookies", action: "list" }) as { cookies: { name: string }[] };
+        cookieCount = page.cookies?.length ?? 0;
+        for (const cookie of page.cookies ?? []) {
+          try {
+            await host.channel.run({ op: "cookies", action: "delete", name: cookie.name });
+          } catch (cause) {
+            failures.push(`cookie ${cookie.name}: ${errorText(cause)}`);
+          }
+        }
+      } catch (cause) {
+        failures.push(`lista de cookies: ${errorText(cause)}`);
       }
       for (const area of ["local", "session"] as const) {
-        await inPage(host, { op: "storage", action: "clear", area }, false).catch(() => undefined);
+        try {
+          await inPage(host, { op: "storage", action: "clear", area }, false);
+        } catch (cause) {
+          failures.push(`${area}Storage: ${errorText(cause)}`);
+        }
       }
       forgetLedger(host.viewId);
-      return `Portal zerado: ${page.cookies?.length ?? 0} cookie(s), localStorage, sessionStorage e o histórico dos act. Recarregue a página (navigate) para o site começar do zero.`;
+      if (failures.length > 0) {
+        const detail = failures.join("; ");
+        // A pessoa fica sabendo na app; o agente recebe o mesmo texto. Não se espera o clique: o agente não fica preso a um aviso.
+        void tellPersonAboutResetFailure(detail);
+        return `Reset incompleto: ${detail}. O que deu certo foi zerado; o site pode ter restado parcialmente logado.`;
+      }
+      return `Portal zerado: ${cookieCount} cookie(s), localStorage, sessionStorage e o histórico dos act. Recarregue a página (navigate) para o site começar do zero.`;
     }
     case "act": {
       const goal = required(request, "goal");
@@ -798,14 +823,24 @@ export async function runBrowserRequest(
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
     throw new Error("The browser for this project has no page loaded. Use browser_navigate with the project URL.");
   }
-  const text = await execute(cwd, host, request, opened, owner);
-  // Lo que devuelve la página (su texto, su DOM, sus pedidos y consola) llega al agente marcado como dato no confiable.
-  // Las ops que solo dicen algo de la propia app no llevan la marca.
-  return OWN_TEXT_OPS.has(request.op) ? text : untrustedData(text);
+  return forAgent(request.op, await execute(cwd, host, request, opened, owner));
 }
 
-/** Ops cuyo texto lo escribe la app, no la página: no se marcan como dato no confiable. */
-const OWN_TEXT_OPS = new Set(["resize", "touch", "reset"]);
+/** Ops cuyo texto lo escribe la app, no la página: no se marcan como dato no confiable. (`reset` sí: nombra cookies del sitio.) */
+const OWN_TEXT_OPS = new Set(["resize", "touch"]);
+
+/**
+ * Lo que devuelve `execute` sale hacia el agente marcado como dato de la página (su texto, su DOM, sus pedidos,
+ * su consola). Se marca UNA vez, aquí, en la frontera: `marksText` y `markedBatchText` no marcan por su cuenta.
+ */
+function forAgent(op: string, text: string): string {
+  return OWN_TEXT_OPS.has(op) ? text : untrustedData(text);
+}
+
+/** El mensaje de un error de cualquier forma que llegue (un `Error`, o un texto del canal). */
+function errorText(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
 
 /**
  * Lo que un agente puede hacerle a un portal (un navegador del canvas). Una lista corta a
@@ -1012,5 +1047,5 @@ export async function runPortalRequest(
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
     throw new Error("O portal não tem nenhuma página carregada. Comece com `ags portal navigate <portal> <url>`.");
   }
-  return execute(cwd, host, request, false, owner, portalId);
+  return forAgent(request.op, await execute(cwd, host, request, false, owner, portalId));
 }

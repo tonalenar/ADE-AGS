@@ -6,7 +6,7 @@
  * Lógica pura, probada en `tests/networkDetail.test.ts`.
  */
 import { formatBytes, typeOf, type LoggedRequest, type RequestType } from "./debugLog";
-import { redactForAgent, redactUrlQuery } from "./egressPolicy";
+import { isSensitiveHeader, redactForAgent, redactUrlQuery } from "./egressPolicy";
 import type { ProxyRequestDetail } from "./ipc";
 import type { NetBody, NetErrorKind, NetHeader } from "./protocol";
 
@@ -209,9 +209,6 @@ export function curlCommand(detail: RequestDetail): string {
 
 const MAX_AGENT_BODY = 6000;
 
-/** Cabeceras que llevan la sesión o una credencial: en un sitio real su valor sale redigido (ver `egressPolicy.ts`). */
-const SECRET_HEADER = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-csrf-token)$/i;
-
 /** El cuerpo tal como puede salir hacia el agente: redigido si el origen es real (lo que decide `origin`). */
 function bodyFor(body: NetBody, origin: string | null | undefined, kind: "request-body" | "response-body"): NetBody {
   return {
@@ -257,8 +254,8 @@ function headersForAgent(title: string, headers: NetHeader[], origin: string | n
       : h.note === "removed" ? "   (la vista previa lo quita)"
         : h.note === "kept" ? "   (stored in the preview's cookie jar; the page never receives this header)"
           : "";
-  // El valor de una cabecera de sesión se redige; el nombre y el resto se dejan para diagnosticar.
-  const value = (h: NetHeader) => (SECRET_HEADER.test(h.name) ? redactForAgent("header", origin, h.value) : h.value);
+  // El valor de una cabecera sensible (por nombre o por valor, ver `isSensitiveHeader`) se redige; el nombre se deja para diagnosticar.
+  const value = (h: NetHeader) => (isSensitiveHeader(h.name, h.value) ? redactForAgent("header", origin, h.value) : h.value);
   return [`${title}:`, ...headers.map((h) => `  ${h.name}: ${value(h)}${note(h)}`)];
 }
 

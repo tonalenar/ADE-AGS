@@ -35,6 +35,21 @@ export async function askPersonAboutDialog(ask: DialogAsk, allow: (key: string) 
   });
 }
 
+/**
+ * Conta à pessoa que um reset falhou em parte. Só informa: não espera resposta, para o agente não ficar preso
+ * num aviso que ninguém leu. O agente recebe o mesmo texto no resultado.
+ */
+export function tellPersonAboutResetFailure(detail: string): Promise<boolean> {
+  return appConfirm({
+    title: i18n.t("browser.agentReset.title"),
+    lead: i18n.t("browser.agentReset.failed", { detail }),
+    note: i18n.t("browser.agentDialog.infoNote"),
+    confirmLabel: i18n.t("browser.agentDialog.ok"),
+    cancelLabel: i18n.t("btn.close"),
+    tone: "danger",
+  });
+}
+
 /** Pede à pessoa que confirme o reset da sessão de um site. `false` = nada é apagado. */
 export function askPersonAboutReset(target: string | null): Promise<boolean> {
   return appConfirm({

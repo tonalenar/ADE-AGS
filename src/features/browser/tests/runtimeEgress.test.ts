@@ -10,7 +10,8 @@ interface DialogLog { seen: { type: string; message: string; answer: string }[] 
 const asked = (sent: PageMessage[]) => sent.filter((m) => m.type === "dialog:asked");
 
 describe("runtime: o que sai da página para o agente", () => {
-  it("storage_list_sem_valores_em_site_real", async () => {
+  // Só o runtime: sem `values`, ele omite o valor. A decisão de QUAL origem pede isso está em `agentEgress.test.ts`.
+  it("runtime_storage_list_omite_valor_sem_flag", async () => {
     const h = await loadRuntime("<p>x</p>");
     localStorage.setItem("token", "eyJsegredo.abc.def");
     // Sem `values` (o que o app manda num site real), a lista traz só as chaves e o tamanho.

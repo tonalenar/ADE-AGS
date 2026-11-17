@@ -1590,6 +1590,7 @@
   "browser.agentReset.targetUnknown": "o site aberto",
   "browser.agentReset.note": "Nada é apagado até você confirmar.",
   "browser.agentReset.confirm": "Apagar a sessão",
+  "browser.agentReset.failed": "O reset não terminou por completo. {{detail}}",
   "browser.invalidUrl": "Digite uma URL HTTP ou HTTPS válida ou termos para pesquisar.",
   "browser.back": "Voltar",
   "browser.forward": "Avançar",

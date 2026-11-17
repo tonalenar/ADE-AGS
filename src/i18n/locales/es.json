@@ -1590,6 +1590,7 @@
   "browser.agentReset.targetUnknown": "el sitio abierto",
   "browser.agentReset.note": "No se borra nada hasta que confirmes.",
   "browser.agentReset.confirm": "Borrar la sesión",
+  "browser.agentReset.failed": "El reinicio no terminó del todo. {{detail}}",
   "browser.invalidUrl": "Introduce una URL HTTP o HTTPS válida o términos de búsqueda.",
   "browser.back": "Atrás",
   "browser.forward": "Adelante",

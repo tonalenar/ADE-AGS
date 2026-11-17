@@ -1590,6 +1590,7 @@
   "browser.agentReset.targetUnknown": "the open site",
   "browser.agentReset.note": "Nothing is deleted until you confirm.",
   "browser.agentReset.confirm": "Clear session",
+  "browser.agentReset.failed": "The reset did not finish completely. {{detail}}",
   "browser.invalidUrl": "Enter a valid HTTP or HTTPS URL, or search terms.",
   "browser.back": "Back",
   "browser.forward": "Forward",
