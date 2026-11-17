@@ -180,7 +180,10 @@ function loadLocalImage(env: PreviewEnv, src: string): Promise<string | null> {
         }
         return null;
       })
-      .catch(() => null);
+      .catch(() => {
+        env.images.delete(absolute);
+        return null;
+      });
     env.images.set(absolute, pending);
   }
   return pending;
