@@ -1,4 +1,7 @@
+import i18n from "i18next";
 import { useEffect, useState } from "react";
+
+import { showBotToast } from "@/shared/brand/botToastStore";
 
 import { normalizeProjectPath } from "./chatProjectPrefs";
 
@@ -95,7 +98,8 @@ export function setChatProjectIdentity(cwd: string, patch: Partial<ChatProjectId
     else localStorage.removeItem(STORAGE_KEY);
     window.dispatchEvent(new Event(CHANGE_EVENT));
   } catch {
-    // Identidade visual e organização não bloqueiam conversas se o armazenamento local falhar.
+    // Identidade visual e organização não bloqueiam conversas se o armazenamento local falhar, mas a pessoa é avisada.
+    showBotToast({ title: i18n.t("chat.project.identity.saveFailedTitle"), text: i18n.t("chat.project.identity.saveFailed"), tone: "warning" });
   }
 }
 

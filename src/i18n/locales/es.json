@@ -5610,6 +5610,8 @@
   "chat.project.pin": "Fijar proyecto",
   "chat.project.unpin": "Desfijar proyecto",
   "chat.project.archive": "Archivar proyecto",
+  "chat.project.identity.saveFailedTitle": "Identidad no guardada",
+  "chat.project.identity.saveFailed": "No se pudo guardar el nombre o el ícono del proyecto: el almacenamiento local lo rechazó. El cambio no se guardó.",
   "chat.project.restore": "Restaurar proyecto",
   "chat.project.changeIcon": "Cambiar icono del proyecto",
   "chat.project.pinnedProjects": "Proyectos fijados",

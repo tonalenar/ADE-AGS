@@ -5610,6 +5610,8 @@
   "chat.project.pin": "Pin project",
   "chat.project.unpin": "Unpin project",
   "chat.project.archive": "Archive project",
+  "chat.project.identity.saveFailedTitle": "Identity not saved",
+  "chat.project.identity.saveFailed": "Could not save the project name or icon: local storage refused it. The change was not saved.",
   "chat.project.restore": "Restore project",
   "chat.project.changeIcon": "Change project icon",
   "chat.project.pinnedProjects": "Pinned projects",
