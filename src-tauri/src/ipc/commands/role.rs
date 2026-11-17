@@ -28,7 +28,7 @@ pub(super) fn role_show(_app: &AppHandle, args: &Value) -> Result<Value, String>
 /// Quem cria ou edita tem que ser orquestrador.
 fn require_orchestrator(args: &Value) -> Result<(), String> {
     let from = caller(args)?;
-    if canvas::is_orchestrator(&canvas::load_boards(), &from) {
+    if canvas::is_orchestrator(&canvas::load_boards().unwrap_or_default(), &from) {
         Ok(())
     } else {
         Err("Só um orquestrador cria ou edita papéis. O usuário marca um agente como orquestrador no canvas (coroa no cabeçalho do nó).".into())

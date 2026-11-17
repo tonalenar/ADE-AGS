@@ -56,7 +56,7 @@ pub(super) fn lead_of(app: &AppHandle, tab: &str) -> Option<String> {
     {
         return (view.team.led() && view.team.orchestrator != tab).then(|| crate::chat_team::api::orchestrator_peer_name(&conn, &view.team));
     }
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     if crate::canvas::is_orchestrator(&boards, tab) {
         return None;
     }

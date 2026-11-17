@@ -314,7 +314,7 @@ fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, dev
 
 /// Os agentes (abas) ligados ao nó `node` no canvas `key`.
 fn agents_of(key: &str, node: &str) -> Vec<String> {
-    let boards = canvas::load_boards();
+    let boards = canvas::load_boards().unwrap_or_default();
     let Some(board) = boards.get(key) else { return Vec::new() };
     board
         .edges

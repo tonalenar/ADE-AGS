@@ -37,7 +37,7 @@ pub(super) fn floor_list(app: &AppHandle, args: &Value) -> Result<Value, String>
 
 pub(super) fn floor_create(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let me = me(app, args)?;
-    if !crate::canvas::is_orchestrator(&crate::canvas::load_boards(), &me.id) {
+    if !crate::canvas::is_orchestrator(&crate::canvas::load_boards().unwrap_or_default(), &me.id) {
         return Err("Só um orquestrador cria andares. O usuário marca um agente como orquestrador no canvas (coroa no cabeçalho do nó).".into());
     }
     let floor = floors::create(&me.cwd, &arg_str(args, "name")?, arg_str_opt(args, "from").as_deref())?;

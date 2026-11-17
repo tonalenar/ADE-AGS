@@ -105,7 +105,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
             let text = |key: &str| args.get(key).and_then(Value::as_str);
             crate::terminal::principal_of(text("session"), &[text("from").unwrap_or(""), text("tabId").unwrap_or("")], text("taskId"), crate::ipc::current_client_pid())
         },
-        crate::canvas::load_boards,
+        || crate::canvas::load_boards().unwrap_or_default(),
         &crate::ipc::guard::opened_by,
     ) {
         Ok(patched) => patched,

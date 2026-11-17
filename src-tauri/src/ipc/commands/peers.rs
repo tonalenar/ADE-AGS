@@ -118,7 +118,7 @@ pub(super) fn open_tabs(app: &AppHandle) -> Result<Vec<OpenTab>, String> {
             })
         })
         .collect();
-    for (key, board) in crate::canvas::load_boards() {
+    for (key, board) in crate::canvas::load_boards().unwrap_or_default() {
         let Some((window, scope)) = key.split_once('|') else { continue };
         let cwd = scope.split("#m:").next().unwrap_or(scope);
         for (id, portal) in board.portals {
@@ -189,7 +189,7 @@ fn wait_for_gemini_reply(app: &AppHandle, target: &OpenTab, queued: Value, timeo
 #[tauri::command]
 pub async fn gemini_desktop_peer_send(app: AppHandle, window: tauri::WebviewWindow, from: String, to: String, text: String) -> Result<Value,String> {
     if text.trim().is_empty() || text.len()>65536 { return Err("Message must contain 1–65536 bytes".into()); }
-    let owned = crate::canvas::load_boards().iter().any(|(key,b)|key.starts_with(&format!("{}|",window.label())) && b.portals.get(&from).is_some_and(|p|p.kind.as_deref()==Some("gemini")));
+    let owned = crate::canvas::load_boards().unwrap_or_default().iter().any(|(key,b)|key.starts_with(&format!("{}|",window.label())) && b.portals.get(&from).is_some_and(|p|p.kind.as_deref()==Some("gemini")));
     if !owned { return Err("Gemini node does not belong to this window".into()); }
     tauri::async_runtime::spawn_blocking(move ||peer_tell(&app,&json!({"from":from,"to":to,"text":text}))).await.map_err(|e|e.to_string())?
 }
@@ -203,7 +203,7 @@ pub(super) fn caller(args: &Value) -> Result<String, String> {
 /// Las tabs que `from` alcanza y siguen abiertas: sus vecinas o, si es orquestadora, todo
 /// su equipo (ver `canvas::reachable`).
 pub(super) fn peers(app: &AppHandle, from: &str) -> Result<(Option<OpenTab>, Vec<OpenTab>), String> {
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     let ids = crate::canvas::reachable(&boards, from);
     let tabs = open_tabs(app)?;
     let me = tabs.iter().find(|t| t.id == from).cloned();
@@ -318,7 +318,7 @@ pub(crate) fn body_of(from_name: &str, envelope: &Envelope, free: Option<&str>) 
 
 /// Os tetos de quem envia: o orquestrador tem o fan-out maior.
 fn limits_for(from: &str) -> Limits {
-    Limits::for_sender(crate::canvas::is_orchestrator(&crate::canvas::load_boards(), from))
+    Limits::for_sender(crate::canvas::is_orchestrator(&crate::canvas::load_boards().unwrap_or_default(), from))
 }
 
 /// A linha curta para a interface: "X pediu a Y: <tarefa ou começo do texto>". Pura.
@@ -462,7 +462,7 @@ pub(crate) fn stale_note(waited: Duration) -> Option<String> {
 pub(super) fn peer_list(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let (me, list) = peers(app, &from)?;
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     let direct = crate::canvas::peers_of(&boards, &from);
     let flagged = |t: &OpenTab| {
         let mut v = describe(t);
@@ -487,7 +487,7 @@ pub(super) fn peer_list(app: &AppHandle, args: &Value) -> Result<Value, String> 
 /// (sumar un agente, conectar o desconectar) son solo suyas.
 fn orchestrator(app: &AppHandle, args: &Value) -> Result<OpenTab, String> {
     let from = caller(args)?;
-    if !crate::canvas::is_orchestrator(&crate::canvas::load_boards(), &from) {
+    if !crate::canvas::is_orchestrator(&crate::canvas::load_boards().unwrap_or_default(), &from) {
         return Err("Só um orquestrador pode fazer isso. O usuário marca um agente como orquestrador no canvas (coroa no cabeçalho do nó).".into());
     }
     open_tabs(app)?
@@ -499,7 +499,7 @@ fn orchestrator(app: &AppHandle, args: &Value) -> Result<OpenTab, String> {
 /// Con quiénes puede operar una orquestadora: su equipo y las demás tabs de su misma
 /// carpeta (así suma al equipo a un agente que el usuario ya tenía abierto).
 fn operable(app: &AppHandle, me: &OpenTab) -> Result<Vec<OpenTab>, String> {
-    let team = crate::canvas::team_of(&crate::canvas::load_boards(), &me.id);
+    let team = crate::canvas::team_of(&crate::canvas::load_boards().unwrap_or_default(), &me.id);
     Ok(open_tabs(app)?
         .into_iter()
         .filter(|t| t.id != me.id && (team.contains(&t.id) || t.cwd == me.cwd))
@@ -614,7 +614,7 @@ fn check_fast_agent(fast: bool, agent: &str) -> Result<(), String> {
 /// falha (sem missão, sem banco, sem Squad) é `None`: o recruit se comporta como sempre.
 fn squad_subagent_default(app: &AppHandle, orchestrator: &str) -> Option<crate::squads::SubagentDefault> {
     use tauri::Manager;
-    let mission = crate::canvas::mission_of_tab(&crate::canvas::load_boards(), orchestrator)?;
+    let mission = crate::canvas::mission_of_tab(&crate::canvas::load_boards().unwrap_or_default(), orchestrator)?;
     let db = app.try_state::<crate::database::DbConnection>()?.inner().clone();
     let conn = db.lock().ok()?;
     crate::squads::recruit::default_for_mission(&conn, &mission).ok().flatten()
@@ -646,7 +646,7 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
 
     // Profundidade monotônica e teto de ativos, antes de pedir orçamento ou abrir aba.
     let tabs = open_tabs(app)?;
-    let book = crate::squads::recruit::load_book();
+    let book = crate::squads::recruit::load_book()?;
     let open_ids: Vec<String> = tabs.iter().map(|t| t.id.clone()).collect();
     let recruiter_depth = crate::squads::recruit::effective_depth(book.get(&me.id).map(|r| r.depth), 0);
     let active = crate::squads::recruit::active_recruits(&book, &me.id, &open_ids);
@@ -663,7 +663,7 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         }
     };
 
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     let mission_id = crate::canvas::mission_of_tab(&boards, &me.id);
     if let Some(id) = &mission_id {
         crate::usage::confirm_spend(app, super::shared::db(app)?.inner(), id, "peer recruit")?;
@@ -842,7 +842,7 @@ enum TellBody {
 /// Conta uma devolução de correção no canvas. Sem missão, ou sem ser correção, o texto segue
 /// como chegou. No teto, a correção não é enviada ao integrante.
 fn prepare_canvas_tell(app: &AppHandle, from: &str, from_name: &str, target: &OpenTab, text: &str) -> Result<TellBody, String> {
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     let Some(mission_id) = crate::canvas::mission_of_tab(&boards, from)
         .or_else(|| crate::canvas::mission_of_tab(&boards, &target.id))
     else {
@@ -866,7 +866,7 @@ fn prepare_canvas_tell(app: &AppHandle, from: &str, from_name: &str, target: &Op
 /// Cola a escalação no terminal do Orquestrador, quando ele está entre os pares. Se quem
 /// mandou já é o Orquestrador, a resposta do comando é o que aparece na tela dele.
 fn notify_orchestrator(app: &AppHandle, from: &str, from_name: &str, peers: &[OpenTab], message: &str) {
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     let Some(lead) = peers.iter().find(|peer| peer.id != from && crate::canvas::is_orchestrator(&boards, &peer.id)) else {
         return;
     };
@@ -1086,7 +1086,7 @@ pub(super) fn peer_deliver(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let handoff = crate::runs::handoff::parse(&value).map_err(|e| format!("{e}. {HANDOFF_STATUS_RULES} Modelo:\n{HANDOFF_TEMPLATE}"))?;
     let (me, list) = peers(app, &from)?;
     let from_name = me.map(|m| m.name).unwrap_or_else(|| from.clone());
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     let target = match arg_str_opt(args, "to").filter(|t| !t.trim().is_empty()) {
         Some(to) => resolve_peer(&list, &to)?.clone(),
         None => list
@@ -1149,7 +1149,7 @@ pub(super) fn peer_handoff(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let db = super::shared::db(app)?;
     let conn = db.inner().lock().map_err(|e| e.to_string())?;
     let (mission, from_name, payload) = crate::missions::messages::handoff(&conn, id)?.ok_or_else(|| format!("Não existe a entrega #{id}."))?;
-    if crate::missions::messages::scope_of(&conn, &crate::canvas::load_boards(), &from).as_deref() != Some(mission.as_str()) {
+    if crate::missions::messages::scope_of(&conn, &crate::canvas::load_boards().unwrap_or_default(), &from).as_deref() != Some(mission.as_str()) {
         return Err(format!("A entrega #{id} é de outra missão."));
     }
     let handoff: Value = serde_json::from_str(&payload).map_err(|e| e.to_string())?;
@@ -1320,7 +1320,7 @@ pub(super) fn ci_watch(app: &AppHandle, args: &Value) -> Result<Value, String> {
 /// inteiro (o Vigia e o detector de parados leem o texto).
 fn emit_peer_message(app: &AppHandle, kind: &str, from_tab_id: &str, to_tab_id: Option<&str>, text: Option<&str>, log_text: Option<&str>, summary: Option<&str>) {
     // Persist successful lead-to-member sends independently of UI listeners.
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     // Os nomes vêm da janela: pedidos antes de pegar o lock do banco, para não prender os dois.
     let tabs = if log_text.is_some() && to_tab_id.is_some() { open_tabs(app).unwrap_or_default() } else { Vec::new() };
     if let (Some(target), Ok(db)) = (to_tab_id, super::shared::db(app)) {
@@ -1366,7 +1366,7 @@ pub(crate) fn reply_text(lines: Option<&Value>) -> Option<String> {
 
 /// Grava a resposta de quem foi perguntado no chat do time e avisa a tela. Não é delegação: não entra nos tempos.
 fn log_reply(app: &AppHandle, from_tab_id: &str, to_tab_id: &str, text: &str) {
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     let tabs = open_tabs(app).unwrap_or_default();
     if let Ok(db) = super::shared::db(app) {
         if let Ok(conn) = db.inner().lock() {
@@ -1635,7 +1635,7 @@ fn ask_repeat(target: &OpenTab, earlier: &crate::peer_queue::store::PeerMessage)
 
 pub(super) fn peer_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
-    let default = if crate::canvas::is_orchestrator(&crate::canvas::load_boards(), &from) { LEAD_DEFAULT_TIMEOUT_S } else { DEFAULT_TIMEOUT_S };
+    let default = if crate::canvas::is_orchestrator(&crate::canvas::load_boards().unwrap_or_default(), &from) { LEAD_DEFAULT_TIMEOUT_S } else { DEFAULT_TIMEOUT_S };
     let timeout = Duration::from_secs(arg_u64_opt(args, "timeout").unwrap_or(default).clamp(10, 3600));
     let (me, list) = peers(app, &from)?;
     let from_name = me.as_ref().map(|m| m.name.clone()).unwrap_or_else(|| from.clone());

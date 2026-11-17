@@ -102,7 +102,7 @@ fn team_members(app: &AppHandle, from: &str) -> Vec<Member> {
         let ids: Vec<(String, String)> = match chat {
             Some(view) => view.members.iter().map(|m| (m.member.clone(), m.label.clone())).collect(),
             None => {
-                let boards = crate::canvas::load_boards();
+                let boards = crate::canvas::load_boards().unwrap_or_default();
                 if !crate::canvas::is_orchestrator(&boards, from) {
                     return Vec::new();
                 }
@@ -112,7 +112,7 @@ fn team_members(app: &AppHandle, from: &str) -> Vec<Member> {
         let queued = crate::peer_queue::store::pending_counts(&conn).unwrap_or_default();
         (ids, queued)
     };
-    let book = crate::squads::recruit::load_book();
+    let book = crate::squads::recruit::load_book().unwrap_or_default();
     let now = crate::util::now_ts();
     let names: Vec<(String, String)> = super::peers::open_tabs(app).unwrap_or_default().into_iter().map(|t| (t.id, t.name)).collect();
     ids.into_iter()

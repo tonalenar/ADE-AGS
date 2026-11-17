@@ -279,7 +279,7 @@ pub fn mission_budget(
 }
 
 pub fn warn_lead(app: &tauri::AppHandle, mission: &str, message: &str) {
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     for board in boards.values() {
         for tab in &board.orchestrators {
             if crate::canvas::mission_of_tab(&boards, tab).as_deref() == Some(mission) {

@@ -173,7 +173,7 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     } else {
         Vec::new()
     };
-    crate::usage::capture_mission_tabs(&conn, &crate::canvas::load_boards())?;
+    crate::usage::capture_mission_tabs(&conn, &crate::canvas::load_boards().unwrap_or_default())?;
     for closed_id in closed_ids {
         let resolved = resolved.get(closed_id.as_str()).cloned().unwrap_or_default();
         archive_tab_row(&conn, closed_id, &state.workspace_id, &resolved)?;
@@ -236,7 +236,7 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
         .map_err(|e| e.to_string())?;
     }
 
-    crate::usage::capture_mission_tabs(&conn, &crate::canvas::load_boards())?;
+    crate::usage::capture_mission_tabs(&conn, &crate::canvas::load_boards().unwrap_or_default())?;
     tx.commit().map_err(|e| e.to_string())?;
     crate::skills::reconcile_link_dirs(&conn, &orphaned_dirs);
 

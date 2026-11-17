@@ -270,7 +270,7 @@ fn notify_due(app: &AppHandle, db: &DbConnection) {
     if due.is_empty() {
         return;
     }
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     let names: HashMap<String, String> = open_tabs(db).unwrap_or_default().into_iter().map(|r| (r.id, r.title)).collect();
     for item in due {
         // Sem orquestrador na aba (ou ele fechado), fica só na lista.
@@ -339,7 +339,7 @@ pub(crate) fn describe(item: &pending::Item, now_ms: i64) -> Value {
 
 /// As abas cujas pendências `from` pode ver e responder: as que ele alcança no canvas.
 fn scope_of(from: &str) -> Vec<String> {
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     let mut tabs: Vec<String> = crate::canvas::reachable(&boards, from).into_iter().collect();
     tabs.push(from.to_string());
     tabs
@@ -391,7 +391,7 @@ pub(super) fn peer_answer(app: &AppHandle, args: &Value) -> Result<Value, String
     let id: i64 = raw_id.trim().trim_start_matches('#').parse().map_err(|_| "Use o número da pendência: `ags peer answer 12 1`.".to_string())?;
     let answer = arg_str_opt(args, "text").filter(|t| !t.trim().is_empty()).ok_or("Falta a resposta: `ags peer answer <id> <resposta>`.")?;
     let item = with_db(app, |conn| pending::get(conn, id))?.ok_or_else(|| format!("A pendência #{id} não existe."))?;
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards().unwrap_or_default();
     if !crate::canvas::is_orchestrator(&boards, &from) || !crate::canvas::reachable(&boards, &from).contains(&item.tab_id) {
         return Err(format!("Só o orquestrador de \"{}\" (a coroa no canvas, conectado a ele) responde às pendências dele.", item.tab_name));
     }

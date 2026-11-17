@@ -155,7 +155,7 @@ pub(crate) fn compute(boards: &Boards, chat: &ChatShare, actor: &str) -> Vec<Rea
 /// O alcance de `actor` agora (lê o canvas e o painel). É a **única** porta de entrada.
 pub(crate) fn reach(actor: &str) -> Vec<Reach> {
     let chat = chat_share().lock().map(|s| s.clone()).unwrap_or_default();
-    compute(&canvas::load_boards(), &chat, actor)
+    compute(&canvas::load_boards().unwrap_or_default(), &chat, actor)
 }
 
 /// Só os aparelhos (Android e iOS), de qualquer origem.

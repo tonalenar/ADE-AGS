@@ -1,5 +1,29 @@
 use super::claude::parse_ts;
 
+#[cfg(unix)]
+#[test]
+fn trust_erro_de_permissao_nao_regrava() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // chmod não bloqueia root; nesse usuário, o cenário de permissão não se aplica.
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("ags-trust-permission-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join(".claude.json");
+    let original = br#"{"projects":{"/keep":{"hasTrustDialogAccepted":true}}}"#;
+    std::fs::write(&path, original).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let result = super::trust::trust_dir(&path, "/new");
+
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(result.is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// El formato lo escribe la propia TUI, siempre en UTC y siempre igual — pero si se
 /// parsea mal, el consumo entero cae fuera de la ventana y el panel muestra ceros.
 #[test]

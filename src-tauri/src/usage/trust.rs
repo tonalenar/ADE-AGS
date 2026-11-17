@@ -112,19 +112,16 @@ pub(super) fn with_trusted(config: &Value, dir: &str) -> Option<Value> {
 
 /// Deja `dir` pre-aprobada para esa cuenta. No hace nada si ya lo estaba.
 pub(super) fn trust_dir(config_path: &Path, dir: &str) -> Result<(), String> {
-    // Que el archivo no exista es el caso normal de una cuenta recién creada.
-    let raw = std::fs::read_to_string(config_path).unwrap_or_else(|_| "{}".to_string());
-    // Si existe y no se puede parsear, no se toca: es la configuración del usuario, con su
-    // login adentro, y reemplazarla por un objeto nuevo sería borrársela por un sondeo.
-    let config: Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("No se pudo leer {}: {e}", config_path.display()))?;
+    // Só a ausência é normal; os demais erros protegem o login e os projetos do usuário.
+    let config: Value = crate::util::user_json::read_user_json(config_path)
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| json!({}));
 
     let Some(next) = with_trusted(&config, dir) else {
         return Ok(());
     };
 
-    let body = serde_json::to_string_pretty(&next).map_err(|e| e.to_string())?;
-    write_atomic(config_path, &body)
+    crate::util::user_json::write_user_json(config_path, &next)
 }
 
 /// Pré-aprova a pasta dos worktrees das missões na conta principal do Claude Code.
@@ -143,33 +140,4 @@ pub(crate) fn trust_worktrees_root(base: &Path, account_dirs: &[String]) {
     for config in configs.flatten() {
         let _ = trust_dir(&config, &base);
     }
-}
-
-/// Escribe reemplazando el archivo entero de una sola vez.
-///
-/// Primero a un temporal al lado y después un `rename`: si la app se cae a mitad de la
-/// escritura, el original queda intacto en vez de truncado. Y el temporal hereda los
-/// permisos del original —`~/.claude.json` es 0600 y guarda credenciales—, porque un
-/// archivo nuevo saldría con los permisos por defecto y el `rename` dejaría el login de la
-/// cuenta legible para todo el sistema.
-fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
-    let tmp = path.with_extension(format!("ade-ags-{}.tmp", std::process::id()));
-    std::fs::write(&tmp, body).map_err(|e| format!("No se pudo escribir {}: {e}", tmp.display()))?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(path)
-            .map(|m| m.permissions().mode() & 0o777)
-            .unwrap_or(0o600);
-        if let Err(e) = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode)) {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(format!("No se pudieron ajustar los permisos de {}: {e}", tmp.display()));
-        }
-    }
-
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("No se pudo actualizar {}: {e}", path.display())
-    })
 }

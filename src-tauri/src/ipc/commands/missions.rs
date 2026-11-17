@@ -182,12 +182,12 @@ fn memory_caller_mission(args: &Value) -> Result<String, String> {
     let tab = authenticated_tab(args)?;
     let mut bound = args.clone();
     bound["from"] = json!(tab);
-    memory_mission_in_boards(&bound, &crate::canvas::load_boards())
+    memory_mission_in_boards(&bound, &crate::canvas::load_boards().unwrap_or_default())
 }
 
 /// Workspace da aba autenticada. Missão ou aba solta, e recusa workspace em soft-delete.
 fn workspace_for_caller(conn: &rusqlite::Connection, tab: &str) -> Result<(String, Option<String>), String> {
-    let mission = crate::canvas::mission_of_tab(&crate::canvas::load_boards(), tab);
+    let mission = crate::canvas::mission_of_tab(&crate::canvas::load_boards().unwrap_or_default(), tab);
     let workspace = if let Some(id) = &mission {
         crate::missions::store::get(conn, id)?.ok_or_else(|| "mission not found".to_string())?.workspace_id
     } else {

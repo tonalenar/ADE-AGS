@@ -207,7 +207,7 @@ pub fn mission_tokens_for_conn(
     mission_id: &str,
 ) -> Result<MissionTokens, String> {
     let mission = mission_snapshot(conn, mission_id)?;
-    capture_mission_tabs(conn, &crate::canvas::load_boards())?;
+    capture_mission_tabs(conn, &crate::canvas::load_boards().unwrap_or_default())?;
     let mut stmt = conn.prepare("SELECT tab_id,agent_id,label,kind,cwd,session_id,account_id,opened_at,closed_at,session_ids FROM mission_usage_tabs WHERE mission_id=?1 ORDER BY opened_at,tab_id").map_err(|e|e.to_string())?;
     let rows = stmt
         .query_map([mission_id], |r| {
