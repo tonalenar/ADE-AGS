@@ -71,7 +71,7 @@ fn save_window_source_avoids_pty_copy() {
     let src = include_str!("queries/windows.rs");
     let start = src.find("fn db_save_window_state_sync").expect("función");
     let rest = &src[start..];
-    let end = rest.find("pub fn db_load_window_state").expect("función siguiente");
+    let end = rest.find("pub async fn db_load_window_state").expect("función siguiente");
     let body = &rest[..end];
     let needle = ["scrollback", "_of"].concat();
     assert!(!body.contains(&needle), "db_save_window_state_sync no puede llamar al copiado del PTY");
