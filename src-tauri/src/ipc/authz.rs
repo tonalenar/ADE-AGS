@@ -94,7 +94,7 @@ const SCREEN_MAINTENANCE: Class = Person(crate::ipc::AGENT_MAINTENANCE_DENIED);
 pub(crate) const METHODS: &[(&str, Class)] = &[
     // Catálogo e estado do app.
     ("account.list", Free),
-    // O broker aplica sua própria prova de PID, conta e ticket de uso único.
+    // O broker aplica sua própria prova de PID e sessão viva para a conta pedida.
     ("credential.redeem", Free),
     ("agent.list", Free),
     ("app.status", Free),

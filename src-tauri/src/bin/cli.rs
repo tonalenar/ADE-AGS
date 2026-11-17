@@ -32,8 +32,8 @@ SEGREDOS TEMPORÁRIOS (conversas interativas)
   secret run <id> -- <programa> [args...]         Envia-o só pelo stdin; a saída do programa é descartada
 
 CREDENCIAIS DE AGENTE (uso interno)
-  credential claude --account <id> --ticket <ticket>  Entrega a chave só pelo stdout ao apiKeyHelper
-  credential codex --account <id> --ticket <ticket>   Entrega a chave só pelo stdout ao helper de autenticação
+  credential claude --account <id>              Entrega a chave só pelo stdout ao apiKeyHelper
+  credential codex --account <id>               Entrega a chave só pelo stdout ao helper de autenticação
 
 TESTES LOCAIS (no worktree atual, sem precisar do app)
   test affected [--dry-run] [--force]          Testes afetados desde a base do worktree + alterações locais
@@ -2016,7 +2016,7 @@ fn send_at(command: &str, args: Value, path: &std::path::Path) -> Result<Respons
 
 /// Entrega uma chave ao helper autenticado. O stdout é o protocolo do agente e não recebe JSON nem newline.
 fn run_credential(args: &[String]) -> ExitCode {
-    let usage = "Uso interno: ags credential <claude|codex> --account <id> --ticket <ticket>";
+    let usage = "Uso interno: ags credential <claude|codex> --account <id>";
     let Some(provider) = args.first().map(String::as_str) else {
         eprintln!("{usage}");
         return ExitCode::from(EXIT_USAGE);
@@ -2030,24 +2030,18 @@ fn run_credential(args: &[String]) -> ExitCode {
         }
     };
     let mut account_id = None;
-    let mut ticket = None;
     let mut flags = args[1..].iter();
     while let Some(flag) = flags.next() {
         let value = match (flag.as_str(), flags.next()) {
             ("--account", Some(value)) if account_id.is_none() => value.clone(),
-            ("--ticket", Some(value)) if ticket.is_none() => value.clone(),
             _ => {
                 eprintln!("{usage}");
                 return ExitCode::from(EXIT_USAGE);
             }
         };
-        match flag.as_str() {
-            "--account" => account_id = Some(value),
-            "--ticket" => ticket = Some(value),
-            _ => unreachable!(),
-        }
+        account_id = Some(value);
     }
-    let (Some(account_id), Some(ticket)) = (account_id, ticket) else {
+    let Some(account_id) = account_id else {
         eprintln!("{usage}");
         return ExitCode::from(EXIT_USAGE);
     };
@@ -2055,14 +2049,12 @@ fn run_credential(args: &[String]) -> ExitCode {
         || !account_id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        || ticket.len() != 32
-        || !ticket.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
         eprintln!("{usage}");
         return ExitCode::from(EXIT_USAGE);
     }
 
-    let args = json!({ "agentId": agent_id, "accountId": account_id, "ticket": ticket });
+    let args = json!({ "agentId": agent_id, "accountId": account_id });
     match send("credential.redeem", args) {
         Ok(mut response) if response.ok => {
             let Some(Value::String(mut secret)) = response.data.take() else {

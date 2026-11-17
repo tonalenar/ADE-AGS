@@ -304,7 +304,6 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
                 return Response::err("Não foi possível acessar as contas desta instância.");
             };
             crate::accounts::broker::redeem(
-                args.get("ticket").and_then(Value::as_str).unwrap_or(""),
                 args.get("accountId").and_then(Value::as_str).unwrap_or(""),
                 args.get("agentId").and_then(Value::as_str).unwrap_or(""),
                 crate::ipc::current_client_pid(),

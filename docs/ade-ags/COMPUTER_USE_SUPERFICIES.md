@@ -52,7 +52,7 @@ O `ags` fala com o app por um socket Unix (`~/.ags/ipc/<pid>.sock`, macOS e Linu
 | o mesmo perfil + `network.enabled = true` | ok | recusado | **liberada (200)** | — |
 | o mesmo + `--enable network_proxy` (feature **experimental**) | ok | recusado | recusada pelo proxy (403) | recusado |
 
-`ADE_TAB_ID` e `ADE_SESSION` chegam ao shell do Codex na conversa (o padrão de `shell_environment_policy` herda o ambiente). Na aba PTY a ADE já põe `ADE_TAB_ID` por `-c shell_environment_policy.set` e `ADE_SESSION` por perfil 0600 (`pty_manager::with_codex_identity`).
+`ADE_TAB_ID` e `ADE_SESSION` chegam ao shell do Codex na conversa (o padrão de `shell_environment_policy` herda o ambiente). Na aba PTY, a ADE põe `ADE_TAB_ID` por `-c shell_environment_policy.set`; operações de sessão comprovam a ancestralidade do PID no IPC, sem persistir `ADE_SESSION` no perfil temporário (`pty_manager::with_codex_identity`).
 
 Conclusão: a liberação estreita (só a pasta `~/.ags/ipc`, rede fechada) existe, mas depende da feature experimental `network_proxy`; sem ela, a mesma config **abre a rede geral**. Por isso **nada foi aplicado** ao sandbox: a decisão é do usuário. Opções:
 

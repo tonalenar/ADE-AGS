@@ -605,6 +605,10 @@ fn credential_redeem_tem_despacho_pid_e_saida_bruta_na_cli() {
         "a CLI helper precisa usar o método reservado e ser configurada pelo broker"
     );
     assert!(
+        cli.contains("credential claude --account <id>") && !cli.contains("--ticket"),
+        "o helper usa a conta; a autorização depende do PID de uma sessão viva"
+    );
+    assert!(
         cli.contains("write_all(secret.as_bytes())") && cli.contains("wipe_secret"),
         "o helper escreve apenas a chave em stdout e limpa a cópia local"
     );

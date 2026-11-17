@@ -713,8 +713,7 @@ fn codex_recibe_el_id_de_la_tab_por_su_config() {
     assert_eq!(with_codex_tab_id(&launched, Some("tab-1")), launched);
 }
 
-/// O valor de `ADE_SESSION` não entra no argv do Codex (nem no Windows, onde
-/// a linha aparece no Gerenciador de Tarefas). O sandbox lê um perfil 0600.
+/// Codex recebe identidade pela configuração do agente e pela ancestralidade do IPC, sem `ADE_SESSION` em arquivo.
 #[test]
 fn codex_argv_nao_contem_o_token_da_sessao() {
     use super::pty_manager::{
@@ -754,10 +753,10 @@ fn codex_argv_nao_contem_o_token_da_sessao() {
     );
 
     let home = std::env::temp_dir().join(format!("ags-codex-profile-{}", uuid::Uuid::new_v4()));
-    let path = write_codex_profile_with_auth_at(&home, "ags-perfil", token, None).unwrap();
+    let path = write_codex_profile_with_auth_at(&home, "ags-perfil", None).unwrap();
     let body = std::fs::read_to_string(&path).unwrap();
-    assert!(body.contains(token), "{body}");
-    assert!(body.contains("ADE_SESSION"));
+    assert!(!body.contains(token), "o perfil não deve persistir o token: {body}");
+    assert!(!body.contains("ADE_SESSION"));
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -765,7 +764,7 @@ fn codex_argv_nao_contem_o_token_da_sessao() {
         assert_eq!(
             mode & 0o777,
             0o600,
-            "o arquivo do token tem de ser só do usuário"
+            "o perfil temporário continua privado"
         );
     }
     let _ = std::fs::remove_dir_all(&home);
@@ -777,17 +776,13 @@ fn perfil_codex_usa_o_auth_helper_sem_gravar_a_chave() {
 
     let home = std::env::temp_dir().join(format!("ags-codex-auth-{}", uuid::Uuid::new_v4()));
     let ags = std::path::Path::new("/tmp/ags");
-    let ticket = "0123456789abcdef0123456789abcdef";
-    let auth = crate::accounts::broker::codex_provider_config(ags, "conta-123", ticket).unwrap();
-    let path =
-        write_codex_profile_with_auth_at(&home, "ags-perfil", "sess-token-teste", Some(&auth))
-            .unwrap();
+    let auth = crate::accounts::broker::codex_provider_config(ags, "conta-123").unwrap();
+    let path = write_codex_profile_with_auth_at(&home, "ags-perfil", Some(&auth)).unwrap();
     let body = std::fs::read_to_string(&path).unwrap();
     assert!(body.contains("model_providers.ade-openai.auth"));
-    assert!(body.contains(
-        "credential codex --account conta-123 --ticket 0123456789abcdef0123456789abcdef"
-    ));
-    assert!(body.contains("ADE_SESSION = \"sess-token-teste\""));
+    assert!(body.contains("credential codex --account conta-123"));
+    assert!(!body.contains("--ticket"));
+    assert!(!body.contains("ADE_SESSION"));
     assert!(!body.contains("sk-teste-nao-real"));
     let _ = std::fs::remove_dir_all(&home);
 }

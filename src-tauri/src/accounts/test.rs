@@ -259,7 +259,6 @@ fn ambiente_do_agente_sem_chave() {
         dir.path(),
         Path::new("/tmp/ags"),
         &account_id,
-        "0123456789abcdef0123456789abcdef",
     )
     .unwrap();
     let settings_json = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();
@@ -275,16 +274,27 @@ fn settings_claude_preserva_preferencias_e_grava_so_o_comando_helper() {
         "settings.json",
         r#"{"theme":"dark","permissions":{"allow":["Bash(git status)"]}}"#,
     );
-    let ticket = "0123456789abcdef0123456789abcdef";
-    super::broker::write_claude_settings(dir.path(), Path::new("/tmp/ags"), "conta-123", ticket)
-        .unwrap();
+    let first_command = super::broker::write_claude_settings(
+        dir.path(),
+        Path::new("/tmp/ags"),
+        "conta-123",
+    )
+    .unwrap();
+    let second_command = super::broker::write_claude_settings(
+        dir.path(),
+        Path::new("/tmp/ags"),
+        "conta-123",
+    )
+    .unwrap();
+    assert_eq!(first_command, second_command, "sessões da conta compartilham helper estável");
     let body = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();
     let settings: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(settings["theme"], "dark");
     assert_eq!(settings["permissions"]["allow"][0], "Bash(git status)");
-    assert!(settings["apiKeyHelper"].as_str().unwrap().contains(
-        "credential claude --account conta-123 --ticket 0123456789abcdef0123456789abcdef"
-    ));
+    assert_eq!(
+        settings["apiKeyHelper"].as_str().unwrap(),
+        "'/tmp/ags' credential claude --account conta-123"
+    );
     assert!(!body.contains("sk-teste-nao-real"));
 }
 
@@ -297,7 +307,6 @@ fn settings_claude_preserva_helper_de_terceiros() {
         dir.path(),
         Path::new("/tmp/ags"),
         "conta-123",
-        "0123456789abcdef0123456789abcdef",
     );
     assert!(
         result.is_err(),
@@ -310,32 +319,51 @@ fn settings_claude_preserva_helper_de_terceiros() {
 }
 
 #[test]
-fn helper_recusa_chamador_desconhecido_e_nao_reutiliza_ticket() {
+fn helper_autoriza_sessoes_vivas_renova_e_revoga_no_fechamento() {
     let broker = super::broker::Broker::default();
-    let ticket = broker.issue_ticket("conta-de-teste", 42);
-    let fake_keyring = std::collections::HashMap::from([(
-        "conta-de-teste".to_string(),
-        "sk-teste-nao-real".to_string(),
-    )]);
-    let lookup = |id: &str| fake_keyring.get(id).cloned();
+    let conta = format!("conta-{}", uuid::Uuid::new_v4());
+    let grant_a = broker.issue_grant(&conta);
+    let grant_b = broker.issue_grant(&conta);
+    broker.bind_grant(&grant_a, 42).unwrap();
+    broker.bind_grant(&grant_b, 52).unwrap();
     let parent = |pid| match pid {
         43 => Some(42),
+        53 => Some(52),
         _ => None,
     };
+    let load = |id: &str| (id == conta).then(|| "sk-teste-nao-real".to_string());
 
-    let recusado = broker.redeem_with(&ticket, 99, parent, lookup);
+    let recusado = broker.redeem_with_account(&conta, 99, parent, load);
     assert!(matches!(
         recusado,
         Err(super::broker::BrokerError::Forbidden)
     ));
+    for _ in 0..2 {
+        assert_eq!(
+            broker
+                .redeem_with_account(&conta, 43, parent, load)
+                .unwrap(),
+            "sk-teste-nao-real",
+            "o helper pode renovar enquanto a sessão autorizada vive"
+        );
+    }
+    broker.revoke_grant(&grant_b);
+    assert!(broker.has_account_grant(&conta), "a sessão B não revoga A");
     assert_eq!(
-        broker.redeem_with(&ticket, 43, parent, lookup).unwrap(),
+        broker
+            .redeem_with_account(&conta, 43, parent, load)
+            .unwrap(),
         "sk-teste-nao-real"
     );
-    assert!(matches!(
-        broker.redeem_with(&ticket, 43, parent, lookup),
-        Err(super::broker::BrokerError::TicketReused)
-    ));
+    assert!(broker
+        .redeem_with_account(&conta, 53, parent, load)
+        .is_err());
+
+    broker.revoke_grant(&grant_a);
+    assert!(!broker.has_account_grant(&conta));
+    assert!(broker
+        .redeem_with_account(&conta, 43, parent, load)
+        .is_err(), "uma sessão encerrada perde o acesso");
 }
 
 #[test]

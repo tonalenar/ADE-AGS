@@ -24,14 +24,14 @@ struct PtySession {
     /// A pasta em que o processo nasceu (o `cwd` da aba). Os pontos de restauração tiram a foto
     /// dela, e a restauração confere quem mais está na mesma pasta.
     cwd: String,
-    /// Token que este processo herda em `ADE_SESSION`. Sai do registro junto com o PTY.
+    /// Token emitido para operações da sessão; sai do registro junto com o PTY.
     session_token: Option<String>,
-    /// Perfil do Codex com o token de sessão, fora do argv.
+    /// Perfil temporário do Codex com configuração de provedor, sem token de sessão.
     codex_profile: Option<std::path::PathBuf>,
-    /// Helper Claude instalado neste perfil, removido ao encerrar o PTY.
-    claude_helper_cleanup: Option<(std::path::PathBuf, String)>,
-    /// Ticket de uso único, revogado quando a sessão termina.
-    credential_ticket: Option<String>,
+    /// Helper Claude instalado neste perfil, removido após a última sessão da conta.
+    claude_helper_cleanup: Option<(std::path::PathBuf, String, String, String)>,
+    /// Concessão vinculada à identidade da sessão, revogada quando ela termina.
+    credential_grant: Option<(String, String)>,
     ai_memory_settings: Option<std::path::PathBuf>,
 }
 
@@ -612,20 +612,22 @@ impl Drop for CodexProfileGuard {
     }
 }
 
-struct ClaudeHelperGuard(Option<(std::path::PathBuf, String)>);
+struct ClaudeHelperGuard(Option<(std::path::PathBuf, String, String, String)>);
 
 impl ClaudeHelperGuard {
-    fn new(value: (std::path::PathBuf, String)) -> Self {
+    fn new(value: (std::path::PathBuf, String, String, String)) -> Self {
         Self(Some(value))
     }
-    fn commit(mut self) -> (std::path::PathBuf, String) {
+    fn commit(mut self) -> (std::path::PathBuf, String, String, String) {
         self.0.take().expect("helper ativo")
     }
 }
 
 impl Drop for ClaudeHelperGuard {
     fn drop(&mut self) {
-        if let Some((config_dir, command)) = self.0.take() {
+        if let Some((config_dir, command, account_id, grant_id)) = self.0.take()
+            && !crate::accounts::broker::has_other_account_grant(&account_id, &grant_id)
+        {
             let _ = crate::accounts::broker::clear_claude_settings(&config_dir, &command);
         }
     }
@@ -638,23 +640,20 @@ fn codex_home() -> std::path::PathBuf {
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".codex"))
 }
 
-/// Grava `~/.codex/<nome>.config.toml` com o token, modo 0600 no Unix.
-/// O argv do Codex só leva `--profile <nome>`. O sandbox lê o `set` daqui,
-/// então o valor não aparece em `ps` nem no Gerenciador de Tarefas.
+/// Grava a configuração temporária do Codex sem persistir o token de sessão.
 pub(super) fn write_codex_profile_with_auth_at(
     home: &std::path::Path,
     name: &str,
-    token: &str,
     auth_config: Option<&str>,
 ) -> Result<std::path::PathBuf, String> {
-    if !shell_safe_id(name) || !shell_safe_id(token) {
+    if !shell_safe_id(name) {
         return Err("perfil do Codex recusou um valor inseguro".into());
     }
     std::fs::create_dir_all(home).map_err(|e| e.to_string())?;
     let dest = home.join(format!("{name}.config.toml"));
     let tmp = home.join(format!("{name}.config.toml.tmp"));
     let prefix = auth_config.unwrap_or_default();
-    let body = format!("{prefix}[shell_environment_policy.set]\nADE_SESSION = \"{token}\"\n");
+    let body = prefix.to_string();
     std::fs::write(&tmp, body).map_err(|e| e.to_string())?;
     if let Err(error) = restrict_to_user(&tmp) {
         let _ = std::fs::remove_file(&tmp);
@@ -778,11 +777,13 @@ fn forget_session(session: &PtySession) {
     if let Some(token) = &session.session_token {
         super::release_token(token);
     }
-    if let Some((config_dir, command)) = &session.claude_helper_cleanup {
-        let _ = crate::accounts::broker::clear_claude_settings(config_dir, command);
-    }
-    if let Some(ticket) = &session.credential_ticket {
-        crate::accounts::broker::revoke_ticket(ticket);
+    if let Some((grant_id, account_id)) = &session.credential_grant {
+        crate::accounts::broker::revoke_grant(grant_id);
+        if !crate::accounts::broker::has_account_grant(account_id)
+            && let Some((config_dir, command, _, _)) = &session.claude_helper_cleanup
+        {
+            let _ = crate::accounts::broker::clear_claude_settings(config_dir, command);
+        }
     }
     if let Some(path) = &session.codex_profile {
         let _ = std::fs::remove_file(path);
@@ -1110,20 +1111,25 @@ pub async fn pty_create(
     if let Some(tab) = &tab_id {
         cmd.env("ADE_TAB_ID", tab);
     }
-    match &session_token {
-        Some(token) => cmd.env(super::SESSION_ENV, token),
-        None => cmd.env_remove(super::SESSION_ENV),
+    if codex_stem(&command) {
+        // O Codex autentica comandos de sessão pelo PID comprovado no IPC (#363).
+        cmd.env_remove(super::SESSION_ENV);
+    } else {
+        match &session_token {
+            Some(token) => cmd.env(super::SESSION_ENV, token),
+            None => cmd.env_remove(super::SESSION_ENV),
+        }
     };
 
-    let credential_ticket = credential_account_id
+    let credential_grant = credential_account_id
         .as_deref()
-        .map(crate::accounts::broker::PendingTicket::new);
+        .map(crate::accounts::broker::PendingGrant::new);
     let mut claude_helper_cleanup = None;
     let mut codex_profile = None;
-    if let (Some(account_id), Some(provider), Some(ticket)) = (
+    if let (Some(account_id), Some(provider), Some(grant)) = (
         credential_account_id.as_deref(),
         credential_provider.as_deref(),
-        credential_ticket.as_ref(),
+        credential_grant.as_ref(),
     ) {
         let ags = crate::ipc::install::source_binary(&app)
             .ok_or("Não foi possível localizar o helper `ags` desta instância.")?;
@@ -1136,31 +1142,28 @@ pub async fn pty_create(
                     config_dir,
                     &ags,
                     account_id,
-                    ticket.token(),
                 )?;
-                claude_helper_cleanup = Some((config_dir.to_path_buf(), command));
+                claude_helper_cleanup = Some((
+                    config_dir.to_path_buf(),
+                    command,
+                    account_id.to_string(),
+                    grant.id().to_string(),
+                ));
             }
             "codex" => {}
             _ => return Err("O broker não oferece suporte a esse provedor de API key.".into()),
         }
     }
-    if let (Some(name), Some(token)) = (codex_profile_name.as_deref(), session_token.as_deref())
+    if let Some(name) = codex_profile_name.as_deref()
         && codex_stem(&command)
     {
         let auth_config = if credential_provider.as_deref() == Some("codex") {
             let account_id = credential_account_id
                 .as_deref()
                 .ok_or("A conta Codex não foi informada.")?;
-            let ticket = credential_ticket
-                .as_ref()
-                .ok_or("O ticket Codex não foi emitido.")?;
             let ags = crate::ipc::install::source_binary(&app)
                 .ok_or("Não foi possível localizar o helper `ags` desta instância.")?;
-            Some(crate::accounts::broker::codex_provider_config(
-                &ags,
-                account_id,
-                ticket.token(),
-            )?)
+            Some(crate::accounts::broker::codex_provider_config(&ags, account_id)?)
         } else {
             None
         };
@@ -1171,7 +1174,7 @@ pub async fn pty_create(
         } else {
             account_profile_dir.clone().unwrap_or_else(codex_home)
         };
-        let path = write_codex_profile_with_auth_at(&home, name, token, auth_config.as_deref())?;
+        let path = write_codex_profile_with_auth_at(&home, name, auth_config.as_deref())?;
         codex_profile = Some(CodexProfileGuard::new(path));
     }
     let claude_helper_guard = claude_helper_cleanup.take().map(ClaudeHelperGuard::new);
@@ -1191,10 +1194,10 @@ pub async fn pty_create(
     };
     group.adopt(&*child);
     let root_pid = child.process_id();
-    if let Some(ticket) = credential_ticket.as_ref() {
+    if let Some(grant) = credential_grant.as_ref() {
         let pid = root_pid
             .ok_or("Não foi possível provar o PID do agente para o broker de credenciais.")?;
-        ticket
+        grant
             .bind(pid)
             .map_err(|error| error.message().to_string())?;
     }
@@ -1245,8 +1248,14 @@ pub async fn pty_create(
                 session_token: session_token.clone(),
                 codex_profile: codex_profile.map(CodexProfileGuard::commit),
                 claude_helper_cleanup: claude_helper_guard.map(ClaudeHelperGuard::commit),
-                credential_ticket: credential_ticket
-                    .map(crate::accounts::broker::PendingTicket::commit),
+                credential_grant: credential_grant.map(|grant| {
+                    let grant_id = grant.commit();
+                    let account_id = credential_account_id
+                        .as_deref()
+                        .expect("concessão precisa de conta")
+                        .to_string();
+                    (grant_id, account_id)
+                }),
                 ai_memory_settings: memory.settings_file.take(),
             },
         );

@@ -338,7 +338,7 @@ Classes: **livre** (catálogo ou metadado, sem identidade) · **escopo:<alvo>** 
 Alvos de escopo: *aba* (a própria, as ligadas no canvas, as que abriu) · *conversa* (o mesmo, sobre `thread:<id>`) · *chamador* (exige aba ou conversa provada; o handler resolve o alvo pelo canvas dela) · *chamador-ou-fora* (o mesmo, ou a pessoa fora do app) · *frota* (o `taskId` ou a aba declarada tem de ser a provada) · *tarefa* (só a tarefa) · *missão* e *missão-coroa* (a do quadro de quem chama; a segunda só o orquestrador) · *fora* (só quem está fora da árvore do ADE).
 
 - **account**: list livre
-- **credential**: redeem livre (ticket de uso único, vinculado ao PID autenticado)
+- **credential**: redeem livre no porteiro IPC; broker libera só conta vinculada a sessão viva cujo PID é ancestral do chamador
 - **agent**: list livre
 - **app**: status livre
 - **approval**: decide pessoa, list pessoa

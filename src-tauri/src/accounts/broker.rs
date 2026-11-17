@@ -4,15 +4,12 @@ use std::collections::HashMap;
 use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-const TICKET_TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_ANCESTORS: usize = 64;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum BrokerError {
     Forbidden,
-    TicketReused,
-    UnknownTicket,
-    TicketNotReady,
+    GrantNotReady,
     MissingCredential,
     AccountMismatch,
 }
@@ -21,145 +18,134 @@ impl BrokerError {
     pub(crate) fn message(&self) -> &'static str {
         match self {
             Self::Forbidden => "O processo não pertence ao agente autorizado para esta credencial.",
-            Self::TicketReused => "O ticket de credencial já foi usado.",
-            Self::UnknownTicket => "O ticket de credencial é inválido ou expirou.",
-            Self::TicketNotReady => "O agente ainda está iniciando; tente novamente.",
+            Self::GrantNotReady => "A sessão do agente ainda está iniciando; tente novamente.",
             Self::MissingCredential => {
                 "A credencial da conta não está disponível no chaveiro do sistema."
             }
             Self::AccountMismatch => {
-                "A conta ou o provedor não corresponde ao ticket de credencial."
+                "A conta ou o provedor não corresponde à credencial solicitada."
             }
         }
     }
 }
 
-struct Ticket {
+struct Grant {
     account_id: String,
-    agent_pid: Option<u32>,
-    issued_at: Instant,
-    in_use: bool,
-    redeemed: bool,
+    agent_pid: u32,
 }
 
 #[derive(Default)]
 pub(crate) struct Broker {
-    tickets: Mutex<HashMap<String, Ticket>>,
+    grants: Mutex<HashMap<String, Grant>>,
     ready: Condvar,
 }
 
 impl Broker {
-    fn insert(&self, account_id: &str, agent_pid: Option<u32>) -> String {
-        let ticket = uuid::Uuid::new_v4().simple().to_string();
-        let mut tickets = self.tickets.lock().unwrap_or_else(|e| e.into_inner());
-        tickets.retain(|_, item| item.issued_at.elapsed() < TICKET_TTL);
-        tickets.insert(
-            ticket.clone(),
-            Ticket {
+    pub(crate) fn issue_grant(&self, account_id: &str) -> String {
+        let grant_id = uuid::Uuid::new_v4().simple().to_string();
+        self.grants.lock().unwrap_or_else(|e| e.into_inner()).insert(
+            grant_id.clone(),
+            Grant {
                 account_id: account_id.to_string(),
-                agent_pid,
-                issued_at: Instant::now(),
-                in_use: false,
-                redeemed: false,
+                agent_pid: 0,
             },
         );
-        ticket
+        grant_id
     }
 
-    pub(crate) fn issue_ticket(&self, account_id: &str, agent_pid: u32) -> String {
-        self.insert(account_id, Some(agent_pid))
-    }
-
-    pub(crate) fn issue_pending_ticket(&self, account_id: &str) -> String {
-        self.insert(account_id, None)
-    }
-
-    pub(crate) fn bind_ticket(&self, ticket: &str, agent_pid: u32) -> Result<(), BrokerError> {
+    pub(crate) fn bind_grant(&self, grant_id: &str, agent_pid: u32) -> Result<(), BrokerError> {
         if agent_pid == 0 {
             return Err(BrokerError::Forbidden);
         }
-        let mut tickets = self.tickets.lock().unwrap_or_else(|e| e.into_inner());
-        let item = tickets.get_mut(ticket).ok_or(BrokerError::UnknownTicket)?;
-        item.agent_pid = Some(agent_pid);
+        let mut grants = self.grants.lock().unwrap_or_else(|e| e.into_inner());
+        let item = grants.get_mut(grant_id).ok_or(BrokerError::Forbidden)?;
+        item.agent_pid = agent_pid;
         self.ready.notify_all();
         Ok(())
     }
 
-    pub(crate) fn revoke_ticket(&self, ticket: &str) {
-        self.tickets
+    pub(crate) fn revoke_grant(&self, grant_id: &str) {
+        self.grants
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .remove(ticket);
+            .remove(grant_id);
         self.ready.notify_all();
     }
 
-    fn redeem_with_account(
+    pub(crate) fn has_account_grant(&self, account_id: &str) -> bool {
+        self.grants
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .any(|grant| grant.account_id == account_id)
+    }
+
+    pub(crate) fn has_other_account_grant(&self, account_id: &str, excluded_id: &str) -> bool {
+        self.grants
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|(id, grant)| id != excluded_id && grant.account_id == account_id)
+    }
+
+    pub(crate) fn redeem_with_account(
         &self,
-        ticket: &str,
         account_id: &str,
         caller_pid: u32,
-        mut parent: impl FnMut(u32) -> Option<u32>,
+        parent: impl FnMut(u32) -> Option<u32> + Copy,
         load_key: impl FnOnce(&str) -> Option<String>,
     ) -> Result<String, BrokerError> {
         let started = Instant::now();
-        {
-            let mut tickets = self.tickets.lock().unwrap_or_else(|e| e.into_inner());
-            loop {
-                let item = tickets.get(ticket).ok_or(BrokerError::UnknownTicket)?;
-                if item.issued_at.elapsed() >= TICKET_TTL {
-                    tickets.remove(ticket);
-                    return Err(BrokerError::UnknownTicket);
-                }
-                if item.account_id != account_id {
-                    return Err(BrokerError::AccountMismatch);
-                }
-                if item.redeemed || item.in_use {
-                    return Err(BrokerError::TicketReused);
-                }
-                if let Some(agent_pid) = item.agent_pid {
-                    if !descends_from(caller_pid, agent_pid, &mut parent) {
-                        return Err(BrokerError::Forbidden);
-                    }
-                    tickets.get_mut(ticket).expect("ticket verificado").in_use = true;
-                    break;
-                }
-                let remaining = Duration::from_millis(1500).saturating_sub(started.elapsed());
-                if remaining.is_zero() {
-                    return Err(BrokerError::TicketNotReady);
-                }
-                let waited = self
-                    .ready
-                    .wait_timeout(tickets, remaining)
-                    .unwrap_or_else(|e| e.into_inner());
-                tickets = waited.0;
-                if waited.1.timed_out() {
-                    return Err(BrokerError::TicketNotReady);
-                }
+        let mut grants = self.grants.lock().unwrap_or_else(|e| e.into_inner());
+        let grant_id = loop {
+            if let Some(id) = grants
+                .iter()
+                .find(|(_, grant)| {
+                    grant.account_id == account_id
+                        && grant.agent_pid > 0
+                        && descends_from(caller_pid, grant.agent_pid, parent)
+                })
+                .map(|(id, _)| id.clone())
+            {
+                break id;
             }
-        }
+            if !grants
+                .values()
+                .any(|grant| grant.account_id == account_id && grant.agent_pid == 0)
+            {
+                return Err(BrokerError::Forbidden);
+            }
+            let remaining = Duration::from_millis(1500).saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return Err(BrokerError::GrantNotReady);
+            }
+            let waited = self
+                .ready
+                .wait_timeout(grants, remaining)
+                .unwrap_or_else(|error| error.into_inner());
+            grants = waited.0;
+            if waited.1.timed_out() {
+                return Err(BrokerError::GrantNotReady);
+            }
+        };
+        drop(grants);
 
         // A leitura do keyring pode bloquear: não mantenha o mutex do broker durante I/O.
-        let key = load_key(account_id);
-        let mut tickets = self.tickets.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(item) = tickets.get_mut(ticket) {
-            item.in_use = false;
-            if key.is_some() {
-                item.redeemed = true;
-            }
+        let mut key = load_key(account_id).ok_or(BrokerError::MissingCredential)?;
+        let still_authorized = self
+            .grants
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&grant_id)
+            .is_some_and(|grant| {
+                grant.account_id == account_id
+                    && descends_from(caller_pid, grant.agent_pid, parent)
+            });
+        if !still_authorized {
+            wipe_secret(&mut key);
+            return Err(BrokerError::Forbidden);
         }
-        self.ready.notify_all();
-        key.ok_or(BrokerError::MissingCredential)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn redeem_with(
-        &self,
-        ticket: &str,
-        caller_pid: u32,
-        parent: impl FnMut(u32) -> Option<u32>,
-        load_key: impl FnOnce(&str) -> Option<String>,
-    ) -> Result<String, BrokerError> {
-        self.redeem_with_account(ticket, "conta-de-teste", caller_pid, parent, load_key)
+        Ok(key)
     }
 }
 
@@ -183,30 +169,30 @@ fn descends_from(caller: u32, agent: u32, mut parent: impl FnMut(u32) -> Option<
     false
 }
 
-pub(crate) struct PendingTicket(Option<String>);
+pub(crate) struct PendingGrant(Option<String>);
 
-impl PendingTicket {
+impl PendingGrant {
     pub(crate) fn new(account_id: &str) -> Self {
-        Self(Some(issue_pending_ticket(account_id)))
+        Self(Some(global().issue_grant(account_id)))
     }
 
-    pub(crate) fn token(&self) -> &str {
-        self.0.as_deref().expect("ticket ainda ativo")
+    pub(crate) fn id(&self) -> &str {
+        self.0.as_deref().expect("concessão ainda ativa")
     }
 
     pub(crate) fn bind(&self, agent_pid: u32) -> Result<(), BrokerError> {
-        bind_ticket(self.token(), agent_pid)
+        global().bind_grant(self.id(), agent_pid)
     }
 
     pub(crate) fn commit(mut self) -> String {
-        self.0.take().expect("ticket ainda ativo")
+        self.0.take().expect("concessão ainda ativa")
     }
 }
 
-impl Drop for PendingTicket {
+impl Drop for PendingGrant {
     fn drop(&mut self) {
-        if let Some(ticket) = self.0.take() {
-            revoke_ticket(&ticket);
+        if let Some(grant_id) = self.0.take() {
+            revoke_grant(&grant_id);
         }
     }
 }
@@ -216,27 +202,20 @@ fn global() -> &'static Broker {
     BROKER.get_or_init(Broker::default)
 }
 
-/// Emite um ticket já associado ao processo raiz do agente.
-#[allow(dead_code)] // Interface do contrato; o lançamento de PTY usa ticket pendente até obter o PID.
-pub fn issue_ticket(account_id: &str, agent_pid: u32) -> String {
-    global().issue_ticket(account_id, agent_pid)
+pub(crate) fn revoke_grant(grant_id: &str) {
+    global().revoke_grant(grant_id)
 }
 
-pub(crate) fn issue_pending_ticket(account_id: &str) -> String {
-    global().issue_pending_ticket(account_id)
+pub(crate) fn has_account_grant(account_id: &str) -> bool {
+    global().has_account_grant(account_id)
 }
 
-pub(crate) fn bind_ticket(ticket: &str, agent_pid: u32) -> Result<(), BrokerError> {
-    global().bind_ticket(ticket, agent_pid)
+pub(crate) fn has_other_account_grant(account_id: &str, excluded_id: &str) -> bool {
+    global().has_other_account_grant(account_id, excluded_id)
 }
 
-pub(crate) fn revoke_ticket(ticket: &str) {
-    global().revoke_ticket(ticket)
-}
-
-/// Confere a conta, o provedor e a ancestralidade antes de ler o cofre.
+/// Confere a conta, o provedor e a sessão viva antes de ler o cofre.
 pub(crate) fn redeem(
-    ticket: &str,
     account_id: &str,
     agent_id: &str,
     caller_pid: Option<u32>,
@@ -251,7 +230,6 @@ pub(crate) fn redeem(
         return Err(BrokerError::AccountMismatch);
     }
     global().redeem_with_account(
-        ticket,
         account_id,
         caller_pid,
         crate::terminal::parent_pid,
@@ -272,15 +250,12 @@ fn helper_command(
     ags: &std::path::Path,
     agent: &str,
     account_id: &str,
-    ticket: &str,
 ) -> Result<String, String> {
     if !["claude", "codex"].contains(&agent)
         || account_id.is_empty()
         || !account_id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-')
-        || ticket.len() != 32
-        || !ticket.bytes().all(|b| b.is_ascii_hexdigit())
     {
         return Err("A configuração do intermediário de credenciais está inválida.".into());
     }
@@ -290,7 +265,7 @@ fn helper_command(
     #[cfg(not(windows))]
     let executable = format!("'{}'", executable.replace('\'', "'\\''"));
     Ok(format!(
-        "{executable} credential {agent} --account {account_id} --ticket {ticket}"
+        "{executable} credential {agent} --account {account_id}"
     ))
 }
 
@@ -299,9 +274,8 @@ pub(crate) fn write_claude_settings(
     config_dir: &std::path::Path,
     ags: &std::path::Path,
     account_id: &str,
-    ticket: &str,
 ) -> Result<String, String> {
-    let command = helper_command(ags, "claude", account_id, ticket)?;
+    let command = helper_command(ags, "claude", account_id)?;
     let path = config_dir.join("settings.json");
     let mut settings = if path.exists() {
         if std::fs::symlink_metadata(&path)
@@ -328,7 +302,7 @@ pub(crate) fn write_claude_settings(
         .get("apiKeyHelper")
         .and_then(serde_json::Value::as_str)
     {
-        let owned_prefix = format!("credential claude --account {account_id} --ticket ");
+        let owned_prefix = format!("credential claude --account {account_id}");
         if existing != command && !existing.contains(&owned_prefix) {
             return Err(
                 "Já existe um apiKeyHelper definido neste perfil Claude; ele foi preservado."
@@ -345,7 +319,7 @@ pub(crate) fn write_claude_settings(
     Ok(command)
 }
 
-/// Remove só o helper deste ticket, sem sobrescrever um helper instalado por outro lançamento.
+/// Remove só o helper deste perfil, sem sobrescrever um helper de terceiros.
 pub(crate) fn clear_claude_settings(
     config_dir: &std::path::Path,
     expected: &str,
@@ -386,9 +360,8 @@ pub(crate) fn clear_claude_settings(
 pub(crate) fn codex_provider_config(
     ags: &std::path::Path,
     account_id: &str,
-    ticket: &str,
 ) -> Result<String, String> {
-    let command = helper_command(ags, "codex", account_id, ticket)?;
+    let command = helper_command(ags, "codex", account_id)?;
     let command = serde_json::to_string(&command).map_err(|e| e.to_string())?;
     Ok(format!(
         "model_provider = \"ade-openai\"\n\n[model_providers.ade-openai]\nname = \"OpenAI via ADE AGS\"\nbase_url = \"https://api.openai.com/v1\"\nwire_api = \"responses\"\n\n[model_providers.ade-openai.auth]\ncommand = {command}\nrefresh_interval_ms = 0\n"

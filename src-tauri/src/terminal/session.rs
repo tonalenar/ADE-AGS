@@ -1,11 +1,9 @@
 //! Sessão de terminal emitida pelo app.
 //!
-//! Cada PTY de uma aba recebe um token (`ADE_SESSION`) que só o processo
-//! daquele terminal herda, e o PID desse processo fica registrado junto.
-//! A CLI manda o token. O servidor, no socket de credencial, lê o PID de
-//! quem conectou e só aceita se esse PID for o processo do PTY ou um
-//! descendente. Token e ancestralidade juntos: copiar o token de outro
-//! processo não basta.
+//! Cada PTY de uma aba registra seu PID raiz. Claude também recebe um token
+//! (`ADE_SESSION`) que só aquele terminal herda. O Codex usa a identidade da
+//! aba e a ancestralidade comprovada pelo PID do socket; não precisa guardar
+//! esse token no perfil temporário. Copiar um token de outro processo não basta.
 //!
 //! O transporte tem de entregar o PID. TCP em loopback não entrega
 //! (`SO_PEERCRED` / `GetNamedPipeClientProcessId` não existem aí). A app
@@ -15,12 +13,12 @@
 //!
 //! Plataformas Unix sem API de PID do peer ficam no token, de propósito
 //! e documentado (`ancestry_required` é falso). Linux, macOS e Windows
-//! exigem os dois.
+//! exigem ancestralidade pelo PID.
 //!
 //! Terminais restaurados reanexam o PTY vivo: o processo conserva o
 //! ambiente e este registro conserva o token e o PID. Um PTY novo para a
-//! mesma aba troca os dois. O valor do token não vai na linha de comando
-//! do Codex: o sandbox herda pelo perfil em arquivo (ver `pty_manager`).
+//! mesma aba troca os dois. O Codex usa somente a identidade da aba em seu
+//! perfil temporário; operações do ADE comprovam o PID pelo IPC.
 //!
 //! Fleet, Dreaming e o MCP da missão não passam por `ags memory` /
 //! `ags swarm`. Essas ferramentas rodam dentro do processo (`memory.list`,
@@ -178,13 +176,20 @@ fn bound_tab(session: Option<&str>, claimed_tab: Option<&str>) -> Result<Bound, 
     Ok(bound)
 }
 
-/// Token e ancestralidade. `client_pid` é o processo que abriu o IPC.
-/// Sem ele, ou se não descende do PTY, a chamada fecha.
+/// Autoriza por token e ancestralidade, ou por PID e sessão ativa quando o
+/// agente não recebeu `ADE_SESSION` (caso do Codex). `client_pid` é o processo
+/// que abriu o IPC; sem prova de descendência, a chamada fecha.
 pub fn authorize(
     session: Option<&str>,
     claimed_tab: Option<&str>,
     client_pid: Option<u32>,
 ) -> Result<String, String> {
+    if !session
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+    {
+        return authorize_by_pid(claimed_tab, client_pid);
+    }
     let bound = bound_tab(session, claimed_tab)?;
     if !ancestry_required() {
         return Ok(bound.tab);
@@ -196,6 +201,44 @@ pub fn authorize(
         return Err(ERR_ANCESTRY.into());
     }
     Ok(bound.tab)
+}
+
+/// Autoriza sessões sem token pela árvore comprovada do socket IPC.
+fn authorize_by_pid(claimed_tab: Option<&str>, client_pid: Option<u32>) -> Result<String, String> {
+    if !ancestry_required() {
+        return Err(ERR_MISSING.into());
+    }
+    let Some(client) = client_pid.filter(|pid| *pid > 0) else {
+        return Err(ERR_NO_PID.into());
+    };
+    let claimed = claimed_tab.map(str::trim).filter(|tab| !tab.is_empty());
+    let roots: Vec<(String, u32)> = {
+        let sessions = registry();
+        sessions
+            .by_tab
+            .iter()
+            .filter_map(|(tab, token)| {
+                sessions
+                    .by_token
+                    .get(token)
+                    .map(|bound| (tab.clone(), bound.root_pid))
+            })
+            .collect()
+    };
+    let mut current = client;
+    for _ in 0..MAX_ANCESTORS {
+        if let Some((tab, _)) = roots.iter().find(|(_, root)| *root == current) {
+            if claimed.is_some_and(|value| value != tab) {
+                return Err(ERR_FORGED.into());
+            }
+            return Ok(tab.clone());
+        }
+        if current <= 1 {
+            return Err(ERR_ANCESTRY.into());
+        }
+        current = parent_pid(current).ok_or_else(|| ERR_ANCESTRY.to_string())?;
+    }
+    Err(ERR_ANCESTRY.into())
 }
 
 /// Quem chama as ações do Jev e do computer use: um terminal de aba (token + ancestralidade, como
@@ -722,6 +765,15 @@ mod tests {
                 .contains("ausente")
         );
         assert!(authorize(None, Some(&thread), Some(std::process::id())).is_err());
+        let codex_tab = Issued::new("codex-pid");
+        if ancestry_required() {
+            assert_eq!(
+                authorize(None, Some(&codex_tab.tab), Some(std::process::id())).unwrap(),
+                codex_tab.tab,
+                "o PID do IPC identifica a sessão Codex sem ADE_SESSION"
+            );
+            assert!(authorize(None, Some(&codex_tab.tab), Some(1)).is_err());
+        }
         // Token de terminal não vale para outra aba mesmo com o PID certo.
         let issued = Issued::new("actor");
         assert!(
