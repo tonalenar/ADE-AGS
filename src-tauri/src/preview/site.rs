@@ -654,15 +654,18 @@ impl Site {
 
     /// Lo que hay que escribir, si cambió algo desde la última vez.
     fn pending_bytes(&self) -> Option<Vec<u8>> {
-        self.with(|inner| {
-            if !std::mem::take(&mut inner.dirty) {
-                return None;
-            }
-            let now = now_secs();
-            inner.saved.cookies.retain(|c| alive(c, now));
-            serde_json::to_vec(&inner.saved).ok()
-        })
-        .flatten()
+        // Só o clone sai com o lock; a serialização (até ~24 MB em JSON) roda fora dele.
+        let saved = self
+            .with(|inner| {
+                if !std::mem::take(&mut inner.dirty) {
+                    return None;
+                }
+                let now = now_secs();
+                inner.saved.cookies.retain(|c| alive(c, now));
+                Some(inner.saved.clone())
+            })
+            .flatten()?;
+        serde_json::to_vec(&saved).ok()
     }
 
     /// Si hay cambios que todavía no llegaron al archivo (el guardador espera un momento
