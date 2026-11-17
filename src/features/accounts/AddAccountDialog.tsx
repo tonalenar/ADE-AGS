@@ -11,6 +11,7 @@ import type { AgentAccount } from "@/features/accounts/types";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { AppDialog } from "@/shared/ui/AppDialog";
+import { PanelBoundary } from "@/app/PanelBoundary";
 
 interface AddAccountDialogProps {
   /** El servicio para el que se crea. Viene de la sección en la que estás parado, y no se
@@ -41,7 +42,6 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
   const create = useAccountsStore((s) => s.create);
   const createWithApiKey = useAccountsStore((s) => s.createWithApiKey);
   const checkHealth = useAccountsStore((s) => s.checkHealth);
-  const load = useAccountsStore((s) => s.load);
   const [name, setName] = useState("");
   const [mode, setMode] = useState<"login" | "api_key">(initialMode);
   const [apiKey, setApiKey] = useState("");
@@ -91,21 +91,17 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
         // creada pero vacía, y desde afuera parece que "no funcionó". Se sale por el botón.
         closeOnBackdrop={false}
         closeOnEsc={false}
+        // O rodapé e o texto são partes que não são terminal: cada um numa fronteira própria, para um erro neles
+        // não subir até a página e derrubar o terminal de login (que é filho direto do diálogo, abaixo).
         footer={
-          <Button
-            variant="primary"
-            onClick={async () => {
-              // Se recarregar a lista falhar, ainda assim se fecha: o login já foi feito.
-              try { await load(); } finally { onClose(); }
-            }}
-          >
-            {t("settings.accounts.login.done")}
-          </Button>
+          <PanelBoundary name="login-conta-rodape">
+            <LoginStepDone onDone={onClose} />
+          </PanelBoundary>
         }
       >
-        <p className="text-[11.5px] text-gray-500 dark:text-white/45 mb-3">
-          {t("settings.accounts.login.helper", { command: created.loginCommand })}
-        </p>
+        <PanelBoundary name="login-conta-texto">
+          <LoginStepHelp command={created.loginCommand} />
+        </PanelBoundary>
         <LoginTerminal account={created} />
       </AppDialog>
     );
@@ -233,5 +229,38 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
         <p className="mt-3 text-[11.5px] text-red-500 dark:text-red-400">{error}</p>
       )}
     </AppDialog>
+  );
+}
+
+/**
+ * Texto do passo de login (o comando a rodar). Componente próprio: ele renderiza dentro da sua fronteira,
+ * e não na função do diálogo, então um erro aqui fica aqui.
+ */
+function LoginStepHelp({ command }: { command: string }) {
+  const { t } = useTranslation();
+  return (
+    <p className="text-[11.5px] text-gray-500 dark:text-white/45 mb-3">
+      {t("settings.accounts.login.helper", { command })}
+    </p>
+  );
+}
+
+/**
+ * Botão de concluir o passo de login: recarrega a lista (mesmo se falhar, o login já foi feito) e fecha.
+ * Componente próprio, pelo mesmo motivo de `LoginStepHelp`.
+ */
+function LoginStepDone({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation();
+  const load = useAccountsStore((s) => s.load);
+  return (
+    <Button
+      variant="primary"
+      onClick={async () => {
+        // Se recarregar a lista falhar, ainda assim se fecha: o login já foi feito.
+        try { await load(); } finally { onDone(); }
+      }}
+    >
+      {t("settings.accounts.login.done")}
+    </Button>
   );
 }
