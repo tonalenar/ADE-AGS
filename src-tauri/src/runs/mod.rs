@@ -1157,7 +1157,10 @@ pub async fn reroute(
 ) -> Result<(Task, routing::Assignment), String> {
     let db = db_of(app)?;
     let assignment = assign(&db, request).await?;
-    let out = reroute_to(app, task_id, assignment, reason)?;
+    let (worker_app, worker_task, worker_reason) = (app.clone(), task_id.to_string(), reason.to_string());
+    let out = tauri::async_runtime::spawn_blocking(move || reroute_to(&worker_app, &worker_task, assignment, &worker_reason))
+        .await
+        .map_err(|e| e.to_string())??;
     scheduler::tick(app, &out.0.run_id);
     Ok(out)
 }
