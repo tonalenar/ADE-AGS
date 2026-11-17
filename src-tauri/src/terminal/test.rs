@@ -676,40 +676,33 @@ mod escalada_falsa {
 
     #[derive(Debug, PartialEq)]
     enum Evento {
-        Sinal(u32, libc::c_int),
+        Sinal(i32, libc::c_int),
         Espera(Duration),
     }
 
-    /// Um mundo sem processos de verdade: `vivos` é a tabela (pid, tempo de início); quem ignora o SIGTERM continua nela,
-    /// e os outros saem. O prazo só é anotado.
+    /// Um mundo sem processos de verdade: quem ignora SIGTERM continua no grupo até o SIGKILL.
     struct Falso {
-        arvore: Vec<(u32, String)>,
-        vivos: RefCell<Vec<(u32, String)>>,
+        vivos: RefCell<Vec<u32>>,
         ignoram_term: Vec<u32>,
         eventos: RefCell<Vec<Evento>>,
     }
 
     impl Falso {
-        fn novo(arvore: Vec<(u32, String)>, ignoram_term: Vec<u32>) -> Self {
-            Falso { vivos: RefCell::new(arvore.clone()), arvore, ignoram_term, eventos: RefCell::new(Vec::new()) }
+        fn novo(membros: Vec<u32>, ignoram_term: Vec<u32>) -> Self {
+            Falso { vivos: RefCell::new(membros), ignoram_term, eventos: RefCell::new(Vec::new()) }
         }
     }
 
     impl Sinais for Falso {
-        fn enviar(&self, pid: u32, sinal: libc::c_int) {
-            self.eventos.borrow_mut().push(Evento::Sinal(pid, sinal));
-            if sinal == libc::SIGTERM && !self.ignoram_term.contains(&pid) {
-                self.vivos.borrow_mut().retain(|(p, _)| *p != pid);
+        fn enviar_grupo(&self, pgid: i32, sinal: libc::c_int) -> bool {
+            self.eventos.borrow_mut().push(Evento::Sinal(-pgid, sinal));
+            let encontrou_membros = !self.vivos.borrow().is_empty();
+            if sinal == libc::SIGTERM {
+                self.vivos.borrow_mut().retain(|pid| self.ignoram_term.contains(pid));
+            } else if sinal == libc::SIGKILL {
+                self.vivos.borrow_mut().clear();
             }
-            if sinal == libc::SIGKILL {
-                self.vivos.borrow_mut().retain(|(p, _)| *p != pid);
-            }
-        }
-        fn inicio(&self, pid: u32) -> Option<String> {
-            self.vivos.borrow().iter().find(|(p, _)| *p == pid).map(|(_, inicio)| inicio.clone())
-        }
-        fn arvore(&self, _raiz: u32) -> Vec<(u32, String)> {
-            self.arvore.clone()
+            encontrou_membros
         }
         fn esperar(&self, prazo: Duration) {
             self.eventos.borrow_mut().push(Evento::Espera(prazo));
@@ -724,62 +717,25 @@ mod escalada_falsa {
         }
     }
 
-    fn inicio(texto: &str) -> String {
-        texto.to_string()
-    }
-
     #[test]
-    fn escalada_manda_term_a_arvore_e_kill_so_no_que_sobreviveu_ao_prazo() {
-        let falso = Falso::novo(vec![(30, inicio("A")), (20, inicio("A")), (10, inicio("A"))], vec![30, 10]);
-        let mut grupo = ProcessGroup::new(9_100);
+    fn escalada_manda_term_e_kill_ao_grupo_do_lider() {
+        const PGID: u32 = 0x7FFF_FFF0;
+        let falso = Falso::novo(vec![30, 20, 10], vec![30, 10]);
+        let mut grupo = ProcessGroup::new_acp();
         grupo.adopt(&PidInexistente);
         let prazo = Duration::from_secs(2);
         let escalada = grupo.encerrar_escalando_com(&falso);
         let forcados = escalada.concluir_com(&falso, prazo);
 
-        assert_eq!(forcados, vec![30, 10], "só quem sobreviveu ao SIGTERM leva o SIGKILL");
+        assert!(forcados, "o SIGKILL encontrou membros no grupo");
         assert_eq!(
             *falso.eventos.borrow(),
             vec![
-                Evento::Sinal(30, libc::SIGTERM),
-                Evento::Sinal(20, libc::SIGTERM),
-                Evento::Sinal(10, libc::SIGTERM),
+                Evento::Sinal(-(PGID as i32), libc::SIGTERM),
                 Evento::Espera(prazo),
-                Evento::Sinal(30, libc::SIGKILL),
-                Evento::Sinal(10, libc::SIGKILL),
+                Evento::Sinal(-(PGID as i32), libc::SIGKILL),
             ],
-            "o SIGKILL vem depois do prazo, e nunca antes do SIGTERM de toda a árvore"
-        );
-    }
-
-    /// A função de identidade com dados falsos: só o mesmo tempo de início conta como o mesmo processo.
-    #[test]
-    fn identidade_so_bate_com_o_mesmo_tempo_de_inicio() {
-        use super::super::containment::mesmo_processo;
-        let foto = "Mon Nov 17 07:07:01 2026";
-        assert!(mesmo_processo(foto, Some("Mon Nov 17 07:07:01 2026")), "mesmo processo");
-        assert!(!mesmo_processo(foto, Some("Tue Nov 17 07:07:02 2026")), "pid reutilizado: outro tempo de início");
-        assert!(!mesmo_processo(foto, None), "o pid já saiu");
-        assert!(!mesmo_processo("", Some("")), "sem tempo de início nada é identificado");
-    }
-
-    /// O pid 20 foi reutilizado por outro processo depois da fotografia (outro tempo de início). O SIGKILL não pode
-    /// cair nele. O pid 30 segue o mesmo processo e leva o SIGKILL.
-    #[test]
-    fn pid_reutilizado_nao_leva_sigkill() {
-        let falso = Falso::novo(vec![(30, inicio("A")), (20, inicio("A"))], vec![30, 20]);
-        // Depois da fotografia, o pid 20 é outro processo: a tabela tem o tempo de início novo dele.
-        falso.vivos.borrow_mut().retain(|(p, _)| *p != 20);
-        falso.vivos.borrow_mut().push((20, inicio("B")));
-        let mut grupo = ProcessGroup::new(9_101);
-        grupo.adopt(&PidInexistente);
-        let forcados = grupo.encerrar_escalando_com(&falso).concluir_com(&falso, Duration::from_secs(2));
-
-        assert_eq!(forcados, vec![30], "só o processo da fotografia leva o SIGKILL");
-        assert!(
-            !falso.eventos.borrow().contains(&Evento::Sinal(20, libc::SIGKILL)),
-            "o pid reutilizado não pode receber o SIGKILL: {:?}",
-            falso.eventos.borrow()
+            "os dois sinais vão ao PGID negativo, com a espera entre eles"
         );
     }
 }

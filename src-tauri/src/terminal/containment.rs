@@ -103,6 +103,12 @@ impl ProcessGroup {
         Self { imp: imp::create(id) }
     }
 
+    /// Contêiner usado por sessões ACP que nascem como líderes de um grupo Unix próprio.
+    /// Não cria cgroup no Linux: o encerramento escalado deve alcançar só o grupo Unix.
+    pub fn new_acp() -> Self {
+        Self { imp: imp::create_acp() }
+    }
+
     /// Mete al proceso recién lanzado en el grupo. Sus hijos futuros entran solos: tanto
     /// los cgroups como los Job Objects se heredan al crear un proceso.
     ///
@@ -145,15 +151,12 @@ impl Drop for ProcessGroup {
     }
 }
 
-/// Como o encerramento escalado fala com o sistema: mandar sinal, perguntar se o pid vive, ler a árvore e esperar o
-/// prazo. Em produção é `Reais`; os testes trocam por um falso, com relógio falso.
+/// Como o encerramento escalado fala com o sistema: sinalizar um grupo Unix e esperar o prazo.
+/// Em produção é `Reais`; os testes trocam por um falso, com relógio falso.
 #[cfg(unix)]
 pub(crate) trait Sinais {
-    fn enviar(&self, pid: u32, sinal: libc::c_int);
-    /// O tempo de início do pid agora (`None` se ele não existe mais). Identifica o processo: pid reutilizado tem outro.
-    fn inicio(&self, pid: u32) -> Option<String>;
-    /// A raiz e os descendentes que ela tem agora, folhas primeiro e a raiz por último, cada um com o tempo de início.
-    fn arvore(&self, raiz: u32) -> Vec<(u32, String)>;
+    /// `pgid` positivo; a implementação envia ao grupo todo, sem fotografar PIDs.
+    fn enviar_grupo(&self, pgid: i32, sinal: libc::c_int) -> bool;
     fn esperar(&self, prazo: std::time::Duration);
 }
 
@@ -162,16 +165,8 @@ pub(crate) struct Reais;
 
 #[cfg(unix)]
 impl Sinais for Reais {
-    fn enviar(&self, pid: u32, sinal: libc::c_int) {
-        unsafe {
-            libc::kill(pid as i32, sinal);
-        }
-    }
-    fn inicio(&self, pid: u32) -> Option<String> {
-        unix_tree::inicio_de(pid)
-    }
-    fn arvore(&self, raiz: u32) -> Vec<(u32, String)> {
-        unix_tree::arvore_com_inicio(raiz)
+    fn enviar_grupo(&self, pgid: i32, sinal: libc::c_int) -> bool {
+        unsafe { libc::killpg(pgid, sinal) == 0 }
     }
     fn esperar(&self, prazo: std::time::Duration) {
         std::thread::sleep(prazo);
@@ -179,20 +174,17 @@ impl Sinais for Reais {
 }
 
 /// O encerramento escalado de um grupo (só para sessões ACP; as abas seguem com `kill_all`, que manda SIGHUP). Em
-/// duas fases: `ProcessGroup::encerrar_escalando` manda SIGTERM a toda a árvore agora, e `concluir` manda SIGKILL no
-/// que ainda vive depois do prazo. Quem chama conta o prazo, numa thread de fundo, para o fechamento não esperar.
+/// duas fases: `ProcessGroup::encerrar_escalando` manda SIGTERM ao grupo Unix agora, e `concluir` manda SIGKILL ao
+/// grupo depois do prazo. O spawn ACP cria o processo líder com `process_group(0)`. Descendentes que chamam `setsid`
+/// saem do grupo e não são alcançados. Quem chama conta o prazo numa thread de fundo.
 pub struct Escalada {
-    /// Os pids que receberam SIGTERM, com o tempo de início de cada um, folhas primeiro e a raiz por último. Vazio no
-    /// Windows.
+    /// PGID positivo do processo líder; vazio no Windows.
     #[cfg_attr(not(unix), allow(dead_code))]
-    arvore: Vec<(u32, String)>,
-    /// O cgroup do grupo (Linux): depois do prazo, `cgroup.kill` pega o que tiver escapado da árvore.
-    #[cfg_attr(not(unix), allow(dead_code))]
-    cgroup: Option<std::path::PathBuf>,
+    pgid: Option<i32>,
 }
 
 impl ProcessGroup {
-    /// SIGTERM agora a toda a árvore do grupo. Devolve o plano do SIGKILL.
+    /// SIGTERM agora ao grupo Unix. Devolve o plano do SIGKILL.
     #[cfg(unix)]
     pub fn encerrar_escalando(&mut self) -> Escalada {
         self.encerrar_escalando_com(&Reais)
@@ -200,72 +192,40 @@ impl ProcessGroup {
 
     #[cfg(unix)]
     pub(crate) fn encerrar_escalando_com<S: Sinais>(&mut self, sinais: &S) -> Escalada {
-        let (raiz, cgroup) = imp::tirar_alvos(&mut self.imp);
-        let arvore = raiz.map(|raiz| sinais.arvore(raiz)).unwrap_or_default();
-        for (pid, _) in &arvore {
-            sinais.enviar(*pid, libc::SIGTERM);
+        let (raiz, _cgroup) = imp::tirar_alvos(&mut self.imp);
+        let pgid = raiz.and_then(|pid| i32::try_from(pid).ok()).filter(|pgid| *pgid > 0);
+        if let Some(pgid) = pgid {
+            sinais.enviar_grupo(pgid, libc::SIGTERM);
         }
-        Escalada { arvore, cgroup }
+        Escalada { pgid }
     }
 
     /// No Windows o job já é o encerramento imediato: não há sinal intermediário.
     #[cfg(not(unix))]
     pub fn encerrar_escalando(&mut self) -> Escalada {
         self.kill_all();
-        Escalada { arvore: Vec::new(), cgroup: None }
+        Escalada { pgid: None }
     }
 }
 
 impl Escalada {
-    /// Depois do prazo. Devolve os pids que precisaram de SIGKILL.
+    /// Depois do prazo. Retorna `true` se o SIGKILL encontrou membros no grupo.
     #[cfg(unix)]
-    pub fn concluir(self, prazo: std::time::Duration) -> Vec<u32> {
+    pub fn concluir(self, prazo: std::time::Duration) -> bool {
         self.concluir_com(&Reais, prazo)
     }
 
     #[cfg(not(unix))]
-    pub fn concluir(self, _prazo: std::time::Duration) -> Vec<u32> {
-        Vec::new()
+    pub fn concluir(self, _prazo: std::time::Duration) -> bool {
+        false
     }
 
     #[cfg(unix)]
-    pub(crate) fn concluir_com<S: Sinais>(self, sinais: &S, prazo: std::time::Duration) -> Vec<u32> {
+    pub(crate) fn concluir_com<S: Sinais>(self, sinais: &S, prazo: std::time::Duration) -> bool {
         sinais.esperar(prazo);
-        // O SIGTERM não se pode ignorar para sempre: quem ainda vive depois do prazo leva o SIGKILL, que não tem como
-        // ser ignorado. Só os pids da árvore: um pid que não estava nela não é tocado.
-        let mut a_forca = Vec::new();
-        // Só mata quem ainda é o mesmo processo da fotografia: pid reutilizado (outro tempo de início) e pid que já saiu
-        // não são alvo.
-        for (pid, inicio) in self.arvore {
-            if mesmo_processo(&inicio, sinais.inicio(pid).as_deref()) {
-                sinais.enviar(pid, libc::SIGKILL);
-                a_forca.push(pid);
-            }
-        }
-        if let Some(dir) = self.cgroup {
-            matar_cgroup(&dir);
-        }
-        a_forca
+        self.pgid.is_some_and(|pgid| sinais.enviar_grupo(pgid, libc::SIGKILL))
     }
 }
-
-/// A identidade de um processo: o tempo de início da fotografia é o mesmo agora? `None` (o pid não existe mais) nunca é o
-/// mesmo processo. Um pid reutilizado por outro processo tem outro tempo de início.
-#[cfg(unix)]
-pub(crate) fn mesmo_processo(foto: &str, agora: Option<&str>) -> bool {
-    !foto.is_empty() && agora == Some(foto)
-}
-
-/// O cgroup do grupo depois do prazo: `cgroup.kill` e tira o diretório (só existe no Linux).
-#[cfg(target_os = "linux")]
-fn matar_cgroup(dir: &std::path::Path) {
-    let _ = std::fs::write(dir.join("cgroup.kill"), "1");
-    let _ = std::fs::remove_dir(dir);
-}
-
-#[cfg(not(target_os = "linux"))]
-#[cfg_attr(not(unix), allow(dead_code))]
-fn matar_cgroup(_dir: &std::path::Path) {}
 
 // ─────────────────────────────────────────────────────────────────────────────────────
 // Linux — cgroup v2
@@ -299,6 +259,11 @@ pub(crate) mod imp {
             .map(|own| own.join(format!("cc-tab-{id}")))
             .filter(|d| std::fs::create_dir(d).is_ok());
         Group { dir, leader: None }
+    }
+
+    /// Sessões ACP usam `killpg`; não criam um cgroup que conteria processos com `setsid`.
+    pub fn create_acp() -> Group {
+        Group { dir: None, leader: None }
     }
 
     pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
@@ -390,6 +355,10 @@ pub(crate) mod imp {
         Group { leader: None }
     }
 
+    pub fn create_acp() -> Group {
+        create(0)
+    }
+
     pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
         g.leader = child.pid();
     }
@@ -421,40 +390,6 @@ pub(crate) mod imp {
 pub(crate) mod unix_tree {
     /// `(pid, ppid)` de todos los procesos del sistema. Se usa `ps` y no `/proc` porque
     /// este camino existe sobre todo para macOS, que no tiene `/proc`.
-    /// O tempo de início de `pid` no `ps` (`lstart`), com os espaços normalizados. `None` se o pid não existe.
-    pub(crate) fn inicio_de(pid: u32) -> Option<String> {
-        let mut cmd = crate::util::spawn::hidden_command("ps");
-        cmd.args(["-o", "lstart=", "-p", &pid.to_string()]);
-        let out = crate::util::spawn::output(&mut cmd, std::time::Duration::from_secs(2)).ok()?;
-        let texto = String::from_utf8_lossy(&out.stdout);
-        let normal = texto.split_whitespace().collect::<Vec<_>>().join(" ");
-        (!normal.is_empty()).then_some(normal)
-    }
-
-    /// A raiz e seus descendentes agora, folhas primeiro e a raiz por último, cada um com o tempo de início da fotografia.
-    pub(crate) fn arvore_com_inicio(raiz: u32) -> Vec<(u32, String)> {
-        let mut cmd = crate::util::spawn::hidden_command("ps");
-        cmd.args(["-eo", "pid=,ppid=,lstart="]);
-        let linhas = crate::util::spawn::output(&mut cmd, std::time::Duration::from_secs(5))
-            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
-            .unwrap_or_default();
-        let mut procs: Vec<(u32, u32, String)> = Vec::new();
-        for linha in linhas.lines() {
-            let mut partes = linha.split_whitespace();
-            let (Some(pid), Some(ppid)) = (partes.next().and_then(|v| v.parse().ok()), partes.next().and_then(|v| v.parse().ok())) else {
-                continue;
-            };
-            procs.push((pid, ppid, partes.collect::<Vec<_>>().join(" ")));
-        }
-        let pares: Vec<(u32, u32)> = procs.iter().map(|(p, pp, _)| (*p, *pp)).collect();
-        let mut pids = descendants(raiz, &pares);
-        pids.reverse();
-        pids.push(raiz);
-        pids.into_iter()
-            .filter_map(|pid| procs.iter().find(|(p, _, _)| *p == pid).map(|(_, _, inicio)| (pid, inicio.clone())))
-            .collect()
-    }
-
     pub(crate) fn snapshot() -> Vec<(u32, u32)> {
         let out = match crate::util::spawn::hidden_command("ps").args(["-eo", "pid=,ppid="]).output() {
             Ok(o) => o,
@@ -549,6 +484,10 @@ pub(crate) mod imp {
             }
         }
         Group { job, pid: None, atribuido: false }
+    }
+
+    pub fn create_acp() -> Group {
+        create(0)
     }
 
     pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {

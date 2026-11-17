@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -164,7 +164,7 @@ impl Session {
         self.alive.store(false, Ordering::SeqCst);
         let child = self.child.lock().ok().and_then(|mut c| c.take());
         let escalada = self.group.lock().unwrap_or_else(|e| e.into_inner()).encerrar_escalando();
-        // SIGTERM já foi a toda a árvore. O SIGKILL do que sobrar vem depois do prazo, numa thread de fundo: o
+        // SIGTERM já foi ao grupo. O SIGKILL do que sobrar vem depois do prazo, numa thread de fundo: o
         // fechamento não espera. O filho direto só sai quando a thread o solta (ele morre no `drop`, por `kill_on_drop`).
         let _ = std::thread::Builder::new().name("ags-acp-encerramento".into()).spawn(move || {
             escalada.concluir(PRAZO_ENCERRAMENTO);
@@ -173,13 +173,9 @@ impl Session {
     }
 }
 
-/// Quanto o agente tem entre o SIGTERM e o SIGKILL ao encerrar a sessão ACP. Depois disso, o que ainda viver da árvore
-/// (um neto que ignora HUP e TERM, por exemplo) é morto à força.
+/// Quanto o agente tem entre o SIGTERM e o SIGKILL ao encerrar a sessão ACP. Depois disso, o que ainda viver no grupo
+/// (por exemplo, um neto que ignora HUP e TERM) é morto à força.
 const PRAZO_ENCERRAMENTO: Duration = Duration::from_secs(2);
-
-/// Os ids dos grupos das sessões ACP. Começam numa faixa própria: o nome do grupo (um cgroup no Linux) não pode
-/// colidir com o das tabs nem com o dos agentes de fundo, que contam desde 1.
-static GRUPO_ACP: AtomicU32 = AtomicU32::new(0x4000_0000);
 
 fn sessions() -> &'static Mutex<HashMap<String, Arc<Session>>> {
     static SESSIONS: OnceLock<Mutex<HashMap<String, Arc<Session>>>> = OnceLock::new();
@@ -599,8 +595,10 @@ fn spawn(
     cmd.envs(crate::chat_team::env::thread_env(&row.id));
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
-    // O grupo existe antes do spawn, para que os netos que o agente lançar já nasçam dentro dele.
-    let mut grupo = ProcessGroup::new(GRUPO_ACP.fetch_add(1, Ordering::Relaxed));
+    // O próprio ACP nasce líder do grupo Unix; os descendentes herdam o PGID.
+    #[cfg(unix)]
+    cmd.process_group(0);
+    let mut grupo = ProcessGroup::new_acp();
     let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir {}: {e}", provider_label))?;
     grupo.adopt(&child);
     crate::chat_team::env::register_process(&row.id, child.id());
@@ -1021,7 +1019,9 @@ mod encerramento_tests {
     async fn sessao_com_neto(script: &str) -> (tokio::process::Child, ProcessGroup, tokio::io::Lines<tokio::io::BufReader<tokio::process::ChildStdout>>) {
         let mut cmd = crate::util::spawn::into_tokio(crate::util::spawn::hidden_command("sh"));
         cmd.arg("-c").arg(script).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
-        let mut grupo = ProcessGroup::new(0x4000_0001);
+        #[cfg(unix)]
+        cmd.process_group(0);
+        let mut grupo = ProcessGroup::new_acp();
         let mut child = cmd.spawn().expect("o sh sobe");
         grupo.adopt(&child);
         let mut linhas = tokio::io::BufReader::new(child.stdout.take().expect("stdout")).lines();
@@ -1048,7 +1048,7 @@ mod encerramento_tests {
     async fn o_encerramento_escala_para_o_que_ignora_hup_e_term() {
         let (_child, mut grupo, mut linhas) = sessao_com_neto("trap '' HUP TERM; sleep 60 & echo filho; wait").await;
         let forcados = grupo.encerrar_escalando().concluir(Duration::ZERO);
-        assert!(!forcados.is_empty(), "quem ignora o SIGTERM tem que receber o SIGKILL");
+        assert!(forcados, "o grupo que ignora SIGTERM tem que receber SIGKILL");
         let fim = tokio::time::timeout(Duration::from_secs(10), linhas.next_line()).await;
         assert!(matches!(fim, Ok(Ok(None))), "o que ignora HUP e TERM sobreviveu ao encerramento: {fim:?}");
     }
