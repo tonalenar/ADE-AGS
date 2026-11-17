@@ -21,22 +21,38 @@ pub fn spawn_housekeeping(app: AppHandle) {
     if STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
-    std::thread::Builder::new()
-        .name("startup-housekeeping".into())
-        .spawn(move || run(app))
-        .expect("hilo de puesta a punto");
+    arrancar_com(lanzar_hilo, move || run(app));
+}
+
+type Corpo = Box<dyn FnOnce() + Send>;
+
+fn lanzar_hilo(nome: &str, corpo: Corpo) -> std::io::Result<()> {
+    std::thread::Builder::new().name(nome.into()).spawn(corpo).map(|_| ())
+}
+
+/// Falha de thread é de ambiente: o app abre sem a limpeza em segundo plano, e o erro vai para o stderr.
+fn arrancar_com(lanzar: impl Fn(&str, Corpo) -> std::io::Result<()>, principal: impl FnOnce() + Send + 'static) {
+    if let Err(error) = lanzar("startup-housekeeping", Box::new(principal)) {
+        eprintln!("[housekeeping] não foi possível iniciar a puesta a punto: {error}");
+    }
     if !SECRET_CLEANER_STARTED.swap(true, Ordering::SeqCst) {
-        std::thread::Builder::new()
-            .name("agent-secret-expiry".into())
-            .spawn(|| {
+        let expiracion = lanzar(
+            "agent-secret-expiry",
+            Box::new(|| {
                 loop {
                     crate::ipc::commands::cleanup_expired_agent_secrets();
                     std::thread::sleep(Duration::from_secs(15 * 60));
                 }
-            })
-            .expect("hilo de expiração de segredos");
+            }),
+        );
+        if let Err(error) = expiracion {
+            eprintln!("[housekeeping] não foi possível iniciar a expiração de segredos: {error}");
+        }
     }
 }
+
+#[cfg(test)]
+mod test;
 
 fn run(app: AppHandle) {
     crate::ipc::commands::cleanup_expired_agent_secrets();
