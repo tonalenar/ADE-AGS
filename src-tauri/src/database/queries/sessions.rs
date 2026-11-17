@@ -518,7 +518,7 @@ pub fn archived_skills_of_session(
 /// skills sin id: se pueden mostrar y buscar por nombre, pero no reattachear directo.
 fn union_session_skills(conn: &Connection) -> SqlResult<()> {
     let mut stmt = conn.prepare(
-        "SELECT workspace_id, agent_id, cwd, COALESCE(session_id, ''), COALESCE(skills, '[]') FROM session_history",
+        "SELECT workspace_id, agent_id, cwd, COALESCE(session_id, ''), COALESCE(skills, '[]') FROM session_history ORDER BY rowid",
     )?;
     let rows = stmt
         .query_map([], |row| {
@@ -1550,5 +1550,22 @@ mod tests {
 
         // Idempotente: migrar otra vez no falla ni vuelve a agregar la columna.
         crate::database::migrate_for_tests(&conn).unwrap();
+    }
+
+    #[test]
+    fn union_de_skills_ordena_as_linhas_de_origem_de_forma_estavel() {
+        let conn = crate::database::test_db();
+        conn.execute_batch(
+            "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+             INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, session_id, skills, opened_at, closed_at)
+               VALUES ('h1', 'ws', 'codex', 'Codex', 'codex', '/p', 's', '[\"primeira\"]', 1, 1),
+                      ('h2', 'ws', 'codex', 'Codex', 'codex', '/p', 's', '[\"segunda\"]', 1, 2);
+             PRAGMA reverse_unordered_selects = ON;",
+        ).unwrap();
+
+        dedupe_session_history(&conn).unwrap();
+        let skills = archived_skills_of_session(&conn, "h2").unwrap();
+        let names: Vec<_> = skills.into_iter().map(|skill| skill.name).collect();
+        assert_eq!(names, ["primeira", "segunda"]);
     }
 }
