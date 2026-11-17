@@ -150,10 +150,10 @@ impl Drop for ProcessGroup {
 #[cfg(unix)]
 pub(crate) trait Sinais {
     fn enviar(&self, pid: u32, sinal: libc::c_int);
-    /// O pid ainda existe? Zumbi conta como vivo: um SIGKILL nele não faz mal.
-    fn vivo(&self, pid: u32) -> bool;
-    /// A raiz e os descendentes que ela tem agora, folhas primeiro e a raiz por último.
-    fn arvore(&self, raiz: u32) -> Vec<u32>;
+    /// O tempo de início do pid agora (`None` se ele não existe mais). Identifica o processo: pid reutilizado tem outro.
+    fn inicio(&self, pid: u32) -> Option<String>;
+    /// A raiz e os descendentes que ela tem agora, folhas primeiro e a raiz por último, cada um com o tempo de início.
+    fn arvore(&self, raiz: u32) -> Vec<(u32, String)>;
     fn esperar(&self, prazo: std::time::Duration);
 }
 
@@ -167,16 +167,11 @@ impl Sinais for Reais {
             libc::kill(pid as i32, sinal);
         }
     }
-    fn vivo(&self, pid: u32) -> bool {
-        // Só um teste de existência: EPERM (outro dono) conta como não existente aqui.
-        unsafe { libc::kill(pid as i32, 0) == 0 }
+    fn inicio(&self, pid: u32) -> Option<String> {
+        unix_tree::inicio_de(pid)
     }
-    fn arvore(&self, raiz: u32) -> Vec<u32> {
-        let procs = unix_tree::snapshot();
-        let mut arvore = unix_tree::descendants(raiz, &procs);
-        arvore.reverse();
-        arvore.push(raiz);
-        arvore
+    fn arvore(&self, raiz: u32) -> Vec<(u32, String)> {
+        unix_tree::arvore_com_inicio(raiz)
     }
     fn esperar(&self, prazo: std::time::Duration) {
         std::thread::sleep(prazo);
@@ -187,9 +182,10 @@ impl Sinais for Reais {
 /// duas fases: `ProcessGroup::encerrar_escalando` manda SIGTERM a toda a árvore agora, e `concluir` manda SIGKILL no
 /// que ainda vive depois do prazo. Quem chama conta o prazo, numa thread de fundo, para o fechamento não esperar.
 pub struct Escalada {
-    /// Os pids que receberam SIGTERM, folhas primeiro e a raiz por último. Vazio no Windows.
+    /// Os pids que receberam SIGTERM, com o tempo de início de cada um, folhas primeiro e a raiz por último. Vazio no
+    /// Windows.
     #[cfg_attr(not(unix), allow(dead_code))]
-    arvore: Vec<u32>,
+    arvore: Vec<(u32, String)>,
     /// O cgroup do grupo (Linux): depois do prazo, `cgroup.kill` pega o que tiver escapado da árvore.
     #[cfg_attr(not(unix), allow(dead_code))]
     cgroup: Option<std::path::PathBuf>,
@@ -206,8 +202,8 @@ impl ProcessGroup {
     pub(crate) fn encerrar_escalando_com<S: Sinais>(&mut self, sinais: &S) -> Escalada {
         let (raiz, cgroup) = imp::tirar_alvos(&mut self.imp);
         let arvore = raiz.map(|raiz| sinais.arvore(raiz)).unwrap_or_default();
-        for &pid in &arvore {
-            sinais.enviar(pid, libc::SIGTERM);
+        for (pid, _) in &arvore {
+            sinais.enviar(*pid, libc::SIGTERM);
         }
         Escalada { arvore, cgroup }
     }
@@ -238,8 +234,10 @@ impl Escalada {
         // O SIGTERM não se pode ignorar para sempre: quem ainda vive depois do prazo leva o SIGKILL, que não tem como
         // ser ignorado. Só os pids da árvore: um pid que não estava nela não é tocado.
         let mut a_forca = Vec::new();
-        for pid in self.arvore {
-            if sinais.vivo(pid) {
+        // Só mata quem ainda é o mesmo processo da fotografia: pid reutilizado (outro tempo de início) e pid que já saiu
+        // não são alvo.
+        for (pid, inicio) in self.arvore {
+            if mesmo_processo(&inicio, sinais.inicio(pid).as_deref()) {
                 sinais.enviar(pid, libc::SIGKILL);
                 a_forca.push(pid);
             }
@@ -249,6 +247,13 @@ impl Escalada {
         }
         a_forca
     }
+}
+
+/// A identidade de um processo: o tempo de início da fotografia é o mesmo agora? `None` (o pid não existe mais) nunca é o
+/// mesmo processo. Um pid reutilizado por outro processo tem outro tempo de início.
+#[cfg(unix)]
+pub(crate) fn mesmo_processo(foto: &str, agora: Option<&str>) -> bool {
+    !foto.is_empty() && agora == Some(foto)
 }
 
 /// O cgroup do grupo depois do prazo: `cgroup.kill` e tira o diretório (só existe no Linux).
@@ -416,6 +421,40 @@ pub(crate) mod imp {
 pub(crate) mod unix_tree {
     /// `(pid, ppid)` de todos los procesos del sistema. Se usa `ps` y no `/proc` porque
     /// este camino existe sobre todo para macOS, que no tiene `/proc`.
+    /// O tempo de início de `pid` no `ps` (`lstart`), com os espaços normalizados. `None` se o pid não existe.
+    pub(crate) fn inicio_de(pid: u32) -> Option<String> {
+        let mut cmd = crate::util::spawn::hidden_command("ps");
+        cmd.args(["-o", "lstart=", "-p", &pid.to_string()]);
+        let out = crate::util::spawn::output(&mut cmd, std::time::Duration::from_secs(2)).ok()?;
+        let texto = String::from_utf8_lossy(&out.stdout);
+        let normal = texto.split_whitespace().collect::<Vec<_>>().join(" ");
+        (!normal.is_empty()).then_some(normal)
+    }
+
+    /// A raiz e seus descendentes agora, folhas primeiro e a raiz por último, cada um com o tempo de início da fotografia.
+    pub(crate) fn arvore_com_inicio(raiz: u32) -> Vec<(u32, String)> {
+        let mut cmd = crate::util::spawn::hidden_command("ps");
+        cmd.args(["-eo", "pid=,ppid=,lstart="]);
+        let linhas = crate::util::spawn::output(&mut cmd, std::time::Duration::from_secs(5))
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+            .unwrap_or_default();
+        let mut procs: Vec<(u32, u32, String)> = Vec::new();
+        for linha in linhas.lines() {
+            let mut partes = linha.split_whitespace();
+            let (Some(pid), Some(ppid)) = (partes.next().and_then(|v| v.parse().ok()), partes.next().and_then(|v| v.parse().ok())) else {
+                continue;
+            };
+            procs.push((pid, ppid, partes.collect::<Vec<_>>().join(" ")));
+        }
+        let pares: Vec<(u32, u32)> = procs.iter().map(|(p, pp, _)| (*p, *pp)).collect();
+        let mut pids = descendants(raiz, &pares);
+        pids.reverse();
+        pids.push(raiz);
+        pids.into_iter()
+            .filter_map(|pid| procs.iter().find(|(p, _, _)| *p == pid).map(|(_, _, inicio)| (pid, inicio.clone())))
+            .collect()
+    }
+
     pub(crate) fn snapshot() -> Vec<(u32, u32)> {
         let out = match crate::util::spawn::hidden_command("ps").args(["-eo", "pid=,ppid="]).output() {
             Ok(o) => o,

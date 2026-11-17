@@ -680,22 +680,35 @@ mod escalada_falsa {
         Espera(Duration),
     }
 
-    /// Um mundo sem processos de verdade: a árvore é fixa, quem ignora o SIGTERM continua vivo, e o prazo só é anotado.
+    /// Um mundo sem processos de verdade: `vivos` é a tabela (pid, tempo de início); quem ignora o SIGTERM continua nela,
+    /// e os outros saem. O prazo só é anotado.
     struct Falso {
-        arvore: Vec<u32>,
+        arvore: Vec<(u32, String)>,
+        vivos: RefCell<Vec<(u32, String)>>,
         ignoram_term: Vec<u32>,
         eventos: RefCell<Vec<Evento>>,
+    }
+
+    impl Falso {
+        fn novo(arvore: Vec<(u32, String)>, ignoram_term: Vec<u32>) -> Self {
+            Falso { vivos: RefCell::new(arvore.clone()), arvore, ignoram_term, eventos: RefCell::new(Vec::new()) }
+        }
     }
 
     impl Sinais for Falso {
         fn enviar(&self, pid: u32, sinal: libc::c_int) {
             self.eventos.borrow_mut().push(Evento::Sinal(pid, sinal));
+            if sinal == libc::SIGTERM && !self.ignoram_term.contains(&pid) {
+                self.vivos.borrow_mut().retain(|(p, _)| *p != pid);
+            }
+            if sinal == libc::SIGKILL {
+                self.vivos.borrow_mut().retain(|(p, _)| *p != pid);
+            }
         }
-        fn vivo(&self, pid: u32) -> bool {
-            // Só quem ignora o SIGTERM sobrevive a ele. Os outros saíram.
-            self.ignoram_term.contains(&pid)
+        fn inicio(&self, pid: u32) -> Option<String> {
+            self.vivos.borrow().iter().find(|(p, _)| *p == pid).map(|(_, inicio)| inicio.clone())
         }
-        fn arvore(&self, _raiz: u32) -> Vec<u32> {
+        fn arvore(&self, _raiz: u32) -> Vec<(u32, String)> {
             self.arvore.clone()
         }
         fn esperar(&self, prazo: Duration) {
@@ -711,9 +724,13 @@ mod escalada_falsa {
         }
     }
 
+    fn inicio(texto: &str) -> String {
+        texto.to_string()
+    }
+
     #[test]
     fn escalada_manda_term_a_arvore_e_kill_so_no_que_sobreviveu_ao_prazo() {
-        let falso = Falso { arvore: vec![30, 20, 10], ignoram_term: vec![30, 10], eventos: RefCell::new(Vec::new()) };
+        let falso = Falso::novo(vec![(30, inicio("A")), (20, inicio("A")), (10, inicio("A"))], vec![30, 10]);
         let mut grupo = ProcessGroup::new(9_100);
         grupo.adopt(&PidInexistente);
         let prazo = Duration::from_secs(2);
@@ -732,6 +749,37 @@ mod escalada_falsa {
                 Evento::Sinal(10, libc::SIGKILL),
             ],
             "o SIGKILL vem depois do prazo, e nunca antes do SIGTERM de toda a árvore"
+        );
+    }
+
+    /// A função de identidade com dados falsos: só o mesmo tempo de início conta como o mesmo processo.
+    #[test]
+    fn identidade_so_bate_com_o_mesmo_tempo_de_inicio() {
+        use super::super::containment::mesmo_processo;
+        let foto = "Mon Nov 17 07:07:01 2026";
+        assert!(mesmo_processo(foto, Some("Mon Nov 17 07:07:01 2026")), "mesmo processo");
+        assert!(!mesmo_processo(foto, Some("Tue Nov 17 07:07:02 2026")), "pid reutilizado: outro tempo de início");
+        assert!(!mesmo_processo(foto, None), "o pid já saiu");
+        assert!(!mesmo_processo("", Some("")), "sem tempo de início nada é identificado");
+    }
+
+    /// O pid 20 foi reutilizado por outro processo depois da fotografia (outro tempo de início). O SIGKILL não pode
+    /// cair nele. O pid 30 segue o mesmo processo e leva o SIGKILL.
+    #[test]
+    fn pid_reutilizado_nao_leva_sigkill() {
+        let falso = Falso::novo(vec![(30, inicio("A")), (20, inicio("A"))], vec![30, 20]);
+        // Depois da fotografia, o pid 20 é outro processo: a tabela tem o tempo de início novo dele.
+        falso.vivos.borrow_mut().retain(|(p, _)| *p != 20);
+        falso.vivos.borrow_mut().push((20, inicio("B")));
+        let mut grupo = ProcessGroup::new(9_101);
+        grupo.adopt(&PidInexistente);
+        let forcados = grupo.encerrar_escalando_com(&falso).concluir_com(&falso, Duration::from_secs(2));
+
+        assert_eq!(forcados, vec![30], "só o processo da fotografia leva o SIGKILL");
+        assert!(
+            !falso.eventos.borrow().contains(&Evento::Sinal(20, libc::SIGKILL)),
+            "o pid reutilizado não pode receber o SIGKILL: {:?}",
+            falso.eventos.borrow()
         );
     }
 }
