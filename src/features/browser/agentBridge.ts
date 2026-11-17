@@ -18,7 +18,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath, isLocalUrl, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
-import { setChatBrowser, toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
+import { toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
+import { subscribeToMeasuredChatBrowser } from "@/features/chat/browserMeasurement";
 import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { useStructured } from "@/features/chat/structured/store";
 
@@ -165,6 +166,9 @@ async function openPortalFor(owner: ViewOwner, url: string): Promise<string | nu
   return created.id;
 }
 
+/** Uma espera de medida por vista: a miniatura abre só quando o slot real publicar o retângulo dele. */
+const pendingMiniatureMeasures = new Map<string, () => void>();
+
 /** Mostra sobre o chat a página que o agente acabou de abrir, quando a conversa é a atual. */
 function autoShowAgentBrowser(viewId: string, owner: ViewOwner | null): void {
   if (!owner || !readBrowserPreferences().autoShowFloatingPreview || !chatShellOn(useUiStore.getState())) return;
@@ -174,11 +178,17 @@ function autoShowAgentBrowser(viewId: string, owner: ViewOwner | null): void {
     ? owner.id === `thread:${chat.thread}`
     : owner.kind === "tab" && owner.id === activeTabId;
   if (!belongsToCurrentChat) return;
-  setChatBrowser({
-    viewId,
-    rect: chat.browser?.rect ?? { left: 0, top: 0, width: 560, height: 400 },
+  if (chat.browserFloating && chat.browser?.viewId === viewId) return;
+  // Sem retângulo medido não há origem para a miniatura: espera o primeiro medido do slot real (um 560×400 falso
+  // fazia a página ser renderizada com o layout errado na primeira vez).
+  pendingMiniatureMeasures.get(viewId)?.();
+  const stop = subscribeToMeasuredChatBrowser(viewId, (measured) => {
+    pendingMiniatureMeasures.delete(viewId);
+    const current = useChatStore.getState();
+    if (current.browserFloating || current.browser?.viewId !== measured.viewId) return;
+    toggleChatBrowserFloating();
   });
-  if (!chat.browserFloating) toggleChatBrowserFloating();
+  pendingMiniatureMeasures.set(viewId, stop);
 }
 
 /**

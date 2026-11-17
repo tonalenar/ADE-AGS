@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
 import { BrowserFloatGrip } from "../BrowserFloatGrip";
+import { publishMeasuredChatBrowser, subscribeToMeasuredChatBrowser } from "@/features/chat/browserMeasurement";
 import { useChatStore } from "@/features/chat/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 
@@ -46,5 +47,25 @@ describe("superfície nativa do navegador", () => {
     });
 
     expect(useChatStore.getState().panel).toBe("browser");
+  });
+
+  it("miniatura_do_agente_usa_medida_real", () => {
+    // Antes de o slot medir, não há origem: a miniatura não abre com um retângulo inventado.
+    const measured = vi.fn();
+    const unsubscribe = subscribeToMeasuredChatBrowser("browser-1", measured);
+    expect(measured).not.toHaveBeenCalled();
+
+    act(() => useChatStore.setState({ browser: { viewId: "browser-1", rect: { left: 3, top: 4, width: 420, height: 310 } } }));
+    expect(measured).toHaveBeenCalledWith({ viewId: "browser-1", rect: { left: 3, top: 4, width: 420, height: 310 } });
+    unsubscribe();
+  });
+
+  it("slot_zero_nao_zera_chat_browser", () => {
+    // Um slot que mede zero (painel recolhido, troca de aba) não apaga a última medida válida.
+    useChatStore.setState({ browser: { viewId: "browser-1", rect: { left: 3, top: 4, width: 420, height: 310 } } });
+    publishMeasuredChatBrowser("browser-1", { left: 0, top: 0, width: 0, height: 0 });
+    expect(useChatStore.getState().browser).toEqual({ viewId: "browser-1", rect: { left: 3, top: 4, width: 420, height: 310 } });
+    publishMeasuredChatBrowser("browser-1", { left: 8, top: 9, width: 500, height: 350 });
+    expect(useChatStore.getState().browser).toEqual({ viewId: "browser-1", rect: { left: 8, top: 9, width: 500, height: 350 } });
   });
 });
