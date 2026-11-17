@@ -17,6 +17,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import type { AgentInfo } from "@/features/tabs/types";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { AppDialog } from "@/shared/ui/AppDialog";
+import { PanelBoundary } from "@/app/PanelBoundary";
 
 import { accountIdentity, providerStatus, signInMethods, versionLabel, type SignInMethodId } from "./providersModel";
 import { useProvidersStore } from "./store";
@@ -152,6 +153,9 @@ export function ProviderDetail({ agent, onBack }: { agent: AgentInfo; onBack: ()
 
   return (
     <>
+      {/* O conteúdo da página (status, cadastro, contas, método) fica numa fronteira. Os diálogos abaixo são
+          irmãos dela: o login abre um terminal (um PTY), e um erro no conteúdo não o derruba. */}
+      <PanelBoundary name="provider-conteudo">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={onBack}>← {t("providers.back")}</Button>
       </div>
@@ -246,6 +250,8 @@ export function ProviderDetail({ agent, onBack }: { agent: AgentInfo; onBack: ()
           </div>
         </SettingsSection>
       )}
+
+      </PanelBoundary>
 
       {adding && <AddAccountDialog agentId={agent.id} initialMode={addMode} onClose={() => setAdding(false)} />}
 
