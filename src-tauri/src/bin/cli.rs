@@ -57,7 +57,7 @@ TABS
                                               para comando interativo (login, código, pergunta, assistente)
              [--in-chat]                      · o mesmo de qualquer conversa ou aba do chat (sem --agent)
              [--new-tab]                      · uma aba comum, fora do painel
-  tab close <id>                              Fecha uma tab (a sua, as conectadas a você, as que você abriu)
+  tab close <id>                              Fecha uma tab (o agente só fecha as que ele mesmo abriu; a pessoa fecha o resto)
   tab output <id> [--lines 40]                O que é NOVO desde a leitura anterior,
              [--full] [--raw]                 comprimido (erros, avisos, final). Mesmo alcance de `tab send`
   tab send <id> \"...\" [--no-enter]            Escreve no terminal dela (+ Enter) —

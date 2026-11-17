@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.80.0
+version: 1.81.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -239,8 +239,9 @@ did not open and are not connected to belongs to the person.
 The same reach applies to **every command that acts on another session's resource** (the app checks it per
 method, and refuses with the id and what to do instead):
 
-- **Tabs** — `tab output`, `tab send`, `tab close`, `tab state`, `watch add`, `watch remove`: your own tab, the tabs
-  connected to you on the canvas and the tabs you opened with `ags tab create`. `tab list`, `watch list|wait`,
+- **Tabs** — `tab output`, `tab send`, `tab state`, `watch add`, `watch remove`: your own tab, the tabs
+  connected to you on the canvas and the tabs you opened with `ags tab create`. `tab close` only closes a tab
+  **you opened yourself** with `ags tab create` (not your own tab and not a neighbour's). `tab list`, `watch list|wait`,
   `events since|wait` and the catalogs (`agents`, `accounts`, `skills`, `roles`, `app status`…) need no reach.
 - **Chat conversations** — `chat show|wait|send|stop|open|settle|goal|compact <id>`: your own conversation, the ones
   connected to you and the ones you opened with `ags chat new` (a child conversation is registered to whoever
