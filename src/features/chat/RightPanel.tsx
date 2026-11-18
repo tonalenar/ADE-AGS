@@ -26,6 +26,7 @@ import { SideChatPanel } from "./SideChatPanel";
 import { PROTOCOL_AGENTS } from "./chatModel";
 import { TasksPanel } from "./tasks/TasksPanel";
 import { clampPanelWidth, PANEL_W, setChatBrowser, setChatShell, setColumnTabResource, setPanelWidth, useChatStore } from "./store";
+import { publishMeasuredChatBrowser } from "./browserMeasurement";
 
 // Design e os aparelhos puxam o canvas (`@xyflow/react`): ficam fora do grafo estático do entry.
 const DesignPane = lazy(() => import("./DesignPane").then((m) => ({ default: m.DesignPane })));
@@ -65,6 +66,8 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   // A aba à vista: o `panel` é a superfície dela (o `reconcileColumn` garante que existe uma aba para ele).
   const activeTab = useChatStore((s) => s.columnTabs.find((tab) => tab.id === s.columnActive && tab.kind === s.panel) ?? null);
   const contentRef = useRef<HTMLDivElement>(null);
+  // Função estável para o `SelectionComment`: uma função nova a cada render reinstalava os listeners.
+  const contentOf = useCallback(() => contentRef.current, []);
   const panelRef = useRef<HTMLElement>(null);
   useShareDevices();
   // O atalho do Time (e quem mais pedir) leva o foco para dentro do painel.
@@ -114,7 +117,7 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
           </Suspense>
         )}
       </div>
-      {panel === "diff" && (conversation?.tabId ?? tabId) && <SelectionComment container={() => contentRef.current} quoteKey={conversation?.tabId ?? tabId!} />}
+      {panel === "diff" && (conversation?.tabId ?? tabId) && <SelectionComment container={contentOf} quoteKey={conversation?.tabId ?? tabId!} />}
     </aside>
   );
 }
@@ -430,7 +433,9 @@ function ShellSurface({ cwd, tab }: { cwd: string; tab: ColumnTab }) {
     setChatShell({ tabId, rect });
   }, [tabId]);
 
-  useLayoutEffect(() => measure());
+  // Mede quando o slot monta ou troca de aba (`measure` muda), e o ResizeObserver cobre o resto: medir a cada render
+  // lia o DOM sem precisar. (A barra de abas do navegador, em `BrowserSurface`, segue como estava.)
+  useLayoutEffect(() => measure(), [measure]);
   useEffect(() => {
     const el = slotRef.current;
     if (!el) return;
@@ -476,7 +481,6 @@ function browserCandidates(views: readonly ViewTab[], cwd: string, owner: ViewOw
 
 function BrowserSurface({ cwd, owner, tab }: { cwd: string; owner: ViewOwner | null; tab: ColumnTab }) {
   const slotRef = useRef<HTMLDivElement>(null);
-  const floating = useChatStore((s) => s.browserFloating);
   const scope = browserScope(cwd, owner);
   // Cada aba mostra a própria página, e cada conversa as suas; a tela de conversa nova usa uma tab do usuário.
   // Uma aba que pediu um perfil (submenu do Browser) não reaproveita página: nasce uma nova nesse perfil.
@@ -501,12 +505,11 @@ function BrowserSurface({ cwd, owner, tab }: { cwd: string; owner: ViewOwner | n
     setColumnTabResource(tab.id, scope, id);
   }, [cwd, owner?.kind, owner?.id, owner?.label, tab.id, scope, viewId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Também publica enquanto a miniatura flutua: o slot segue medido para a origem do zoom do agente. Um retângulo sem
+  // área não apaga a última medida válida (ver `publishMeasuredChatBrowser`).
   const measure = useCallback(() => {
-    if (floating) return;
-    const rect = rectInShell(slotRef.current);
-    if (!rect || !viewId) return setChatBrowser(null);
-    setChatBrowser({ viewId, rect });
-  }, [viewId, floating]);
+    publishMeasuredChatBrowser(viewId, rectInShell(slotRef.current));
+  }, [viewId]);
 
   useLayoutEffect(() => measure());
   useEffect(() => {
@@ -518,12 +521,15 @@ function BrowserSurface({ cwd, owner, tab }: { cwd: string; owner: ViewOwner | n
     if (base) observer.observe(base);
     return () => observer.disconnect();
   }, [measure]);
+  // Só o desmonte do slot tira a medida que ele publicou. Trocar de vista ou medir zero não a apaga: ao destacar, o
+  // slot desmonta, mas o mesmo BrowserTab continua no retângulo flutuante, e na troca entre duas abas o slot novo
+  // pode já ter publicado. A vista atual vai por ref, para o efeito não rodar a cada troca de `viewId`.
+  const viewIdRef = useRef(viewId);
+  viewIdRef.current = viewId;
   useEffect(() => () => {
-    // Ao destacar, o slot desmonta, mas o mesmo BrowserTab continua visível no retângulo flutuante.
-    // Só tira o que ESTE slot publicou: na troca entre duas abas de navegador o slot novo pode já ter publicado.
     const state = useChatStore.getState();
-    if (!state.browserFloating && state.browser?.viewId === viewId) setChatBrowser(null);
-  }, [viewId]);
+    if (!state.browserFloating && state.browser?.viewId === viewIdRef.current) setChatBrowser(null);
+  }, []);
 
   return <div ref={slotRef} data-chat-browser-slot={viewId ?? ""} className="flex-1 min-h-0" />;
 }

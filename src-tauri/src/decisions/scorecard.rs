@@ -7,12 +7,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 use super::hints::parse_answer;
 use super::log;
-use super::points::{memory_state_hash, POINT_MEMORY};
+use super::points::{POINT_MEMORY, memory_state_hash};
 use crate::database::DbConnection;
 
 /// Ponto da decisão humana que veio da limpeza. É o rótulo de origem `limpeza`.
@@ -55,7 +55,12 @@ pub struct Scorecard {
 
 /// Grava a rejeição humana de uma proposta pela limpeza (`corpo` ANTES da exclusão). Idempotente:
 /// devolve `false` quando a mesma rejeição já estava gravada.
-pub(crate) fn record_cleanup_rejection(conn: &Connection, key: &str, kind: &str, body: &str) -> Result<bool, String> {
+pub(crate) fn record_cleanup_rejection(
+    conn: &Connection,
+    key: &str,
+    kind: &str,
+    body: &str,
+) -> Result<bool, String> {
     log::migrate(conn).map_err(|error| error.to_string())?;
     let hash = memory_state_hash(key, kind, "proposta", body);
     let exists: Option<i64> = conn
@@ -75,7 +80,10 @@ pub(crate) fn record_cleanup_rejection(conn: &Connection, key: &str, kind: &str,
 
 /// A resposta mais recente e válida do Jev para UMA proposta de memória, que pode ter mais de um hash (a mesma
 /// proposta é consultada e decidida sob `proposta` e sob a operação da revisão).
-fn latest_jev(conn: &Connection, hashes: &[String]) -> Result<Option<(String, Option<bool>)>, String> {
+fn latest_jev(
+    conn: &Connection,
+    hashes: &[String],
+) -> Result<Option<(String, Option<bool>)>, String> {
     let mut best: Option<(i64, i64, String)> = None;
     for hash in hashes {
         let row: Option<(i64, i64, String)> = conn
@@ -89,7 +97,10 @@ fn latest_jev(conn: &Connection, hashes: &[String]) -> Result<Option<(String, Op
             .optional()
             .map_err(|error| error.to_string())?;
         if let Some(found) = row {
-            if best.as_ref().is_none_or(|current| (found.0, found.1) > (current.0, current.1)) {
+            if best
+                .as_ref()
+                .is_none_or(|current| (found.0, found.1) > (current.0, current.1))
+            {
                 best = Some(found);
             }
         }
@@ -110,7 +121,12 @@ fn proposal_groups(conn: &Connection) -> BTreeMap<String, Vec<String>> {
         return groups;
     };
     let Ok(rows) = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
     }) else {
         return groups;
     };
@@ -120,7 +136,9 @@ fn proposal_groups(conn: &Connection) -> BTreeMap<String, Vec<String>> {
     for (key, kind, operation, body) in rows.flatten() {
         let base = memory_state_hash(&key, &kind, "proposta", &body);
         let own = memory_state_hash(&key, &kind, &operation, &body);
-        let set = unions.entry(base.clone()).or_insert_with(|| BTreeSet::from([base]));
+        let set = unions
+            .entry(base.clone())
+            .or_insert_with(|| BTreeSet::from([base]));
         set.insert(own);
     }
     for (base, set) in unions {
@@ -134,7 +152,10 @@ fn proposal_groups(conn: &Connection) -> BTreeMap<String, Vec<String>> {
 }
 
 fn group_of(groups: &BTreeMap<String, Vec<String>>, hash: &str) -> Vec<String> {
-    groups.get(hash).cloned().unwrap_or_else(|| vec![hash.to_string()])
+    groups
+        .get(hash)
+        .cloned()
+        .unwrap_or_else(|| vec![hash.to_string()])
 }
 
 fn human_hashes(conn: &Connection, point: &str, decision: &str) -> Result<Vec<String>, String> {
@@ -155,7 +176,9 @@ fn human_approved(conn: &Connection) -> Result<Vec<String>, String> {
         .prepare("SELECT state_hash, decision FROM decision_human_log WHERE point = ?1 ORDER BY ts ASC, id ASC")
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map(params![POINT_MEMORY], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .query_map(params![POINT_MEMORY], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
@@ -204,7 +227,10 @@ pub fn scorecard(conn: &Connection) -> Result<Scorecard, String> {
         let hash = group[0].clone();
         card.labeled += 1;
         let Some((action, secret)) = latest_jev(conn, group)? else {
-            card.missed.push(Missed { state_hash: hash, jev_action: None });
+            card.missed.push(Missed {
+                state_hash: hash,
+                jev_action: None,
+            });
             continue;
         };
         card.answered += 1;
@@ -215,11 +241,17 @@ pub fn scorecard(conn: &Connection) -> Result<Scorecard, String> {
             REJECT => card.jev_reject += 1,
             APPROVE => {
                 card.jev_approve += 1;
-                card.missed.push(Missed { state_hash: hash, jev_action: Some(action) });
+                card.missed.push(Missed {
+                    state_hash: hash,
+                    jev_action: Some(action),
+                });
             }
             _ => {
                 card.jev_review += 1;
-                card.missed.push(Missed { state_hash: hash, jev_action: Some(action) });
+                card.missed.push(Missed {
+                    state_hash: hash,
+                    jev_action: Some(action),
+                });
             }
         }
     }
@@ -242,18 +274,34 @@ pub fn scorecard(conn: &Connection) -> Result<Scorecard, String> {
 }
 
 #[tauri::command]
-pub fn decision_jev_scorecard(db: tauri::State<DbConnection>) -> Result<Scorecard, String> {
-    let conn = db.lock().map_err(|_| "o banco de dados não está disponível".to_string())?;
-    scorecard(&conn)
+pub async fn decision_jev_scorecard(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Scorecard, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db
+            .lock()
+            .map_err(|_| "o banco de dados não está disponível".to_string())?;
+        scorecard(&conn)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::database::test_db;
-    use crate::decisions::log::{record, LogRow};
+    use crate::decisions::log::{LogRow, record};
 
-    fn jev(conn: &Connection, key: &str, body: &str, provider: &str, decision: Option<&str>, error: Option<&str>) {
+    fn jev(
+        conn: &Connection,
+        key: &str,
+        body: &str,
+        provider: &str,
+        decision: Option<&str>,
+        error: Option<&str>,
+    ) {
         record(
             conn,
             &LogRow {
@@ -281,7 +329,11 @@ mod tests {
         assert!(record_cleanup_rejection(&conn, "k", "note", "corpo").unwrap());
         assert!(!record_cleanup_rejection(&conn, "k", "note", "corpo").unwrap());
         let rows: i64 = conn
-            .query_row("SELECT COUNT(*) FROM decision_human_log WHERE point = ?1", [CLEANUP_POINT], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM decision_human_log WHERE point = ?1",
+                [CLEANUP_POINT],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(rows, 1);
         assert!(human_approved(&conn).unwrap().is_empty());
@@ -294,26 +346,83 @@ mod tests {
         for (key, body) in [("k1", "c1"), ("k2", "c2"), ("k3", "c3"), ("k4", "c4")] {
             record_cleanup_rejection(&conn, key, "note", body).unwrap();
         }
-        jev(&conn, "k1", "c1", "jev", Some("acao=rejeitar;segredo=nao"), None);
-        jev(&conn, "k2", "c2", "jev", Some("acao=aprovar;segredo=nao"), None);
-        jev(&conn, "k3", "c3", "jev", Some("acao=revisar;segredo=sim"), None);
+        jev(
+            &conn,
+            "k1",
+            "c1",
+            "jev",
+            Some("acao=rejeitar;segredo=nao"),
+            None,
+        );
+        jev(
+            &conn,
+            "k2",
+            "c2",
+            "jev",
+            Some("acao=aprovar;segredo=nao"),
+            None,
+        );
+        jev(
+            &conn,
+            "k3",
+            "c3",
+            "jev",
+            Some("acao=revisar;segredo=sim"),
+            None,
+        );
         // k4: o Jev deu erro, e outro provedor rejeitou: nenhum dos dois conta.
         jev(&conn, "k4", "c4", "jev", None, Some("timeout"));
-        jev(&conn, "k4", "c4", "laya_local", Some("acao=rejeitar;segredo=nao"), None);
+        jev(
+            &conn,
+            "k4",
+            "c4",
+            "laya_local",
+            Some("acao=rejeitar;segredo=nao"),
+            None,
+        );
         // Aprovações da tela normal: a1 o Jev rejeitaria, a2 ele aprovaria, a3 não foi consultado.
         for (key, body) in [("a1", "x1"), ("a2", "x2"), ("a3", "x3")] {
-            log::record_human(&conn, POINT_MEMORY, &memory_state_hash(key, "note", "proposta", body), APPROVE).unwrap();
+            log::record_human(
+                &conn,
+                POINT_MEMORY,
+                &memory_state_hash(key, "note", "proposta", body),
+                APPROVE,
+            )
+            .unwrap();
         }
-        jev(&conn, "a1", "x1", "jev", Some("acao=rejeitar;segredo=nao"), None);
-        jev(&conn, "a2", "x2", "jev", Some("acao=aprovar;segredo=nao"), None);
+        jev(
+            &conn,
+            "a1",
+            "x1",
+            "jev",
+            Some("acao=rejeitar;segredo=nao"),
+            None,
+        );
+        jev(
+            &conn,
+            "a2",
+            "x2",
+            "jev",
+            Some("acao=aprovar;segredo=nao"),
+            None,
+        );
 
         let card = scorecard(&conn).unwrap();
         assert_eq!(card.labeled, 4);
         assert_eq!(card.answered, 3);
-        assert_eq!((card.jev_reject, card.jev_approve, card.jev_review), (1, 1, 1));
+        assert_eq!(
+            (card.jev_reject, card.jev_approve, card.jev_review),
+            (1, 1, 1)
+        );
         assert_eq!(card.secret_flagged, 1);
         assert_eq!(card.missed.len(), 3);
-        assert_eq!(card.missed.iter().filter(|m| m.jev_action.is_none()).count(), 1);
+        assert_eq!(
+            card.missed
+                .iter()
+                .filter(|m| m.jev_action.is_none())
+                .count(),
+            1
+        );
         assert!((card.reject_recall.unwrap() - 1.0 / 3.0).abs() < 1e-9);
         assert_eq!(card.approved_by_human, 3);
         assert_eq!(card.jev_rejected_those_approved, 1);
@@ -327,15 +436,31 @@ mod tests {
 
     #[test]
     fn a_mesma_proposta_sob_dois_hashes_conta_uma_vez_e_o_apagado_deixa_de_ser_aprovacao() {
-        use crate::memory::{decide, propose, ProposalActor, ProposalInput};
+        use crate::memory::{ProposalActor, ProposalInput, decide, propose};
         let conn = test_db();
-        conn.execute_batch("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w1','W1',0,0);").unwrap();
+        conn.execute_batch(
+            "INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w1','W1',0,0);",
+        )
+        .unwrap();
         let add = |key: &str, body: &str| {
             let input = ProposalInput {
-                scope: "workspace".into(), key: key.into(), kind: "note".into(), body: body.into(), priority: 0,
-                operation: "create".into(), expected_revision: None, source_fact_id: None, reason: None, acknowledge_secret: false,
+                scope: "workspace".into(),
+                key: key.into(),
+                kind: "note".into(),
+                body: body.into(),
+                priority: 0,
+                operation: "create".into(),
+                expected_revision: None,
+                source_fact_id: None,
+                reason: None,
+                acknowledge_secret: false,
             };
-            let actor = ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None };
+            let actor = ProposalActor {
+                kind: "user",
+                run_id: None,
+                task_id: None,
+                fact_id: None,
+            };
             let made = propose(&conn, "workspace", "w1", None, &input, actor).unwrap();
             decide(&conn, &made.entry_id, made.revision, true).unwrap();
         };
@@ -344,73 +469,156 @@ mod tests {
         // A tela aprovou as duas sob DOIS hashes cada (proposta + create).
         for (key, body) in [("lixo", "ok"), ("boa", "A regra do projeto é X")] {
             for op in ["proposta", "create"] {
-                log::record_human(&conn, POINT_MEMORY, &memory_state_hash(key, "note", op, body), APPROVE).unwrap();
+                log::record_human(
+                    &conn,
+                    POINT_MEMORY,
+                    &memory_state_hash(key, "note", op, body),
+                    APPROVE,
+                )
+                .unwrap();
             }
         }
         let row = |key: &str, body: &str, op: &str, decision: &str| {
-            record(&conn, &LogRow {
-                ts: 100, point: POINT_MEMORY.into(), provider: "jev".into(), model: "m".into(),
-                state_hash: memory_state_hash(key, "note", op, body), heuristic: "acao=revisar;segredo=nao".into(),
-                provider_decision: Some(decision.into()), probability: None, confidence: None, latency_ms: Some(1),
-                error: None, input_tokens: None, output_tokens: None,
-            }).unwrap();
+            record(
+                &conn,
+                &LogRow {
+                    ts: 100,
+                    point: POINT_MEMORY.into(),
+                    provider: "jev".into(),
+                    model: "m".into(),
+                    state_hash: memory_state_hash(key, "note", op, body),
+                    heuristic: "acao=revisar;segredo=nao".into(),
+                    provider_decision: Some(decision.into()),
+                    probability: None,
+                    confidence: None,
+                    latency_ms: Some(1),
+                    error: None,
+                    input_tokens: None,
+                    output_tokens: None,
+                },
+            )
+            .unwrap();
         };
         // O Jev respondeu à "lixo" sob o hash create; o rótulo da limpeza só tem o hash proposta.
         row("lixo", "ok", "create", "acao=rejeitar;segredo=nao");
-        row("boa", "A regra do projeto é X", "proposta", "acao=aprovar;segredo=nao");
+        row(
+            "boa",
+            "A regra do projeto é X",
+            "proposta",
+            "acao=aprovar;segredo=nao",
+        );
         record_cleanup_rejection(&conn, "lixo", "note", "ok").unwrap();
 
         let card = scorecard(&conn).unwrap();
-        assert_eq!((card.labeled, card.answered, card.jev_reject), (1, 1, 1), "o rótulo acha a resposta do Jev sob o outro hash");
+        assert_eq!(
+            (card.labeled, card.answered, card.jev_reject),
+            (1, 1, 1),
+            "o rótulo acha a resposta do Jev sob o outro hash"
+        );
         // Só a "boa" segue aprovada, contada uma vez (não duas), e o Jev não a rejeitaria.
-        assert_eq!((card.approved_by_human, card.jev_rejected_those_approved), (1, 0));
+        assert_eq!(
+            (card.approved_by_human, card.jev_rejected_those_approved),
+            (1, 0)
+        );
         assert_eq!(card.false_alarm_rate, Some(0.0));
     }
 
     #[test]
     fn a_revisao_de_exclusao_nao_apaga_os_hashes_da_criacao() {
-        use crate::memory::{decide, propose, ProposalActor, ProposalInput};
+        use crate::memory::{ProposalActor, ProposalInput, decide, propose};
         let conn = test_db();
-        conn.execute_batch("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w1','W1',0,0);").unwrap();
+        conn.execute_batch(
+            "INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w1','W1',0,0);",
+        )
+        .unwrap();
         let input = |operation: &str, expected: Option<i64>| ProposalInput {
-            scope: "workspace".into(), key: "apagada".into(), kind: "note".into(), body: "texto antigo".into(), priority: 0,
-            operation: operation.into(), expected_revision: expected, source_fact_id: None, reason: None, acknowledge_secret: false,
+            scope: "workspace".into(),
+            key: "apagada".into(),
+            kind: "note".into(),
+            body: "texto antigo".into(),
+            priority: 0,
+            operation: operation.into(),
+            expected_revision: expected,
+            source_fact_id: None,
+            reason: None,
+            acknowledge_secret: false,
         };
-        let actor = || ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None };
-        let made = propose(&conn, "workspace", "w1", None, &input("create", None), actor()).unwrap();
+        let actor = || ProposalActor {
+            kind: "user",
+            run_id: None,
+            task_id: None,
+            fact_id: None,
+        };
+        let made = propose(
+            &conn,
+            "workspace",
+            "w1",
+            None,
+            &input("create", None),
+            actor(),
+        )
+        .unwrap();
         decide(&conn, &made.entry_id, made.revision, true).unwrap();
         // A pessoa apagou: nasce uma revisão de exclusão com o MESMO texto.
-        let gone = propose(&conn, "workspace", "w1", None, &input("delete", Some(made.revision)), actor()).unwrap();
+        let gone = propose(
+            &conn,
+            "workspace",
+            "w1",
+            None,
+            &input("delete", Some(made.revision)),
+            actor(),
+        )
+        .unwrap();
         decide(&conn, &gone.entry_id, gone.revision, true).unwrap();
         // O Jev respondeu sob o hash da criação; o rótulo da limpeza usa o hash proposta.
-        record(&conn, &LogRow {
-            ts: 5, point: POINT_MEMORY.into(), provider: "jev".into(), model: "m".into(),
-            state_hash: memory_state_hash("apagada", "note", "create", "texto antigo"), heuristic: "acao=revisar;segredo=nao".into(),
-            provider_decision: Some("acao=revisar;segredo=nao".into()), probability: Some(0.7), confidence: None, latency_ms: Some(1),
-            error: None, input_tokens: None, output_tokens: None,
-        }).unwrap();
+        record(
+            &conn,
+            &LogRow {
+                ts: 5,
+                point: POINT_MEMORY.into(),
+                provider: "jev".into(),
+                model: "m".into(),
+                state_hash: memory_state_hash("apagada", "note", "create", "texto antigo"),
+                heuristic: "acao=revisar;segredo=nao".into(),
+                provider_decision: Some("acao=revisar;segredo=nao".into()),
+                probability: Some(0.7),
+                confidence: None,
+                latency_ms: Some(1),
+                error: None,
+                input_tokens: None,
+                output_tokens: None,
+            },
+        )
+        .unwrap();
         record_cleanup_rejection(&conn, "apagada", "note", "texto antigo").unwrap();
         let card = scorecard(&conn).unwrap();
-        assert_eq!((card.labeled, card.answered, card.jev_review), (1, 1, 1), "achou a resposta mesmo com a revisão de exclusão");
+        assert_eq!(
+            (card.labeled, card.answered, card.jev_review),
+            (1, 1, 1),
+            "achou a resposta mesmo com a revisão de exclusão"
+        );
     }
 
     #[test]
     fn sem_dados_devolve_zeros_e_none() {
         let conn = test_db();
         let card = scorecard(&conn).unwrap();
-        assert_eq!(card, Scorecard {
-            labeled: 0,
-            answered: 0,
-            jev_reject: 0,
-            jev_approve: 0,
-            jev_review: 0,
-            secret_flagged: 0,
-            missed: Vec::new(),
-            reject_recall: None,
-            approved_by_human: 0,
-            jev_rejected_those_approved: 0,
-            false_alarm_rate: None,
-        });
+        assert_eq!(
+            card,
+            Scorecard {
+                labeled: 0,
+                answered: 0,
+                jev_reject: 0,
+                jev_approve: 0,
+                jev_review: 0,
+                secret_flagged: 0,
+                missed: Vec::new(),
+                reject_recall: None,
+                approved_by_human: 0,
+                jev_rejected_those_approved: 0,
+                false_alarm_rate: None,
+            }
+        );
     }
 
     #[test]
@@ -420,6 +628,12 @@ mod tests {
         let card = scorecard(&conn).unwrap();
         assert_eq!((card.labeled, card.answered), (1, 0));
         assert_eq!(card.reject_recall, None);
-        assert_eq!(card.missed, vec![Missed { state_hash: memory_state_hash("solo", "note", "proposta", "corpo"), jev_action: None }]);
+        assert_eq!(
+            card.missed,
+            vec![Missed {
+                state_hash: memory_state_hash("solo", "note", "proposta", "corpo"),
+                jev_action: None
+            }]
+        );
     }
 }

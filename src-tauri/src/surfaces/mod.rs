@@ -153,14 +153,14 @@ pub(crate) fn compute(boards: &Boards, chat: &ChatShare, actor: &str) -> Vec<Rea
 }
 
 /// O alcance de `actor` agora (lê o canvas e o painel). É a **única** porta de entrada.
-pub(crate) fn reach(actor: &str) -> Vec<Reach> {
+pub(crate) fn reach(actor: &str) -> Result<Vec<Reach>, String> {
     let chat = chat_share().lock().map(|s| s.clone()).unwrap_or_default();
-    compute(&canvas::load_boards(), &chat, actor)
+    Ok(compute(&canvas::load_boards()?, &chat, actor))
 }
 
 /// Só os aparelhos (Android e iOS), de qualquer origem.
-pub(crate) fn devices(actor: &str) -> Vec<Reach> {
-    reach(actor).into_iter().filter(|r| matches!(r.kind(), Some("android") | Some("ios"))).collect()
+pub(crate) fn devices(actor: &str) -> Result<Vec<Reach>, String> {
+    Ok(reach(actor)?.into_iter().filter(|r| matches!(r.kind(), Some("android") | Some("ios"))).collect())
 }
 
 /// Só os portais do canvas (navegadores e nós de aparelho), sem os do painel do chat.
@@ -170,8 +170,8 @@ pub(crate) fn canvas_portals(boards: &Boards, actor: &str) -> Vec<Reach> {
 
 /// O nó iOS `node` (com este `udid`) ainda é do ator e ele pode `action` nele? Refeito a cada passo do
 /// computer use: a corda ou a chave podem ter mudado desde o passo anterior.
-pub(crate) fn ios_allows(actor: &str, node: &str, udid: &str, action: &str) -> bool {
-    allows_in(&devices(actor), node, udid, action)
+pub(crate) fn ios_allows(actor: &str, node: &str, udid: &str, action: &str) -> Result<bool, String> {
+    Ok(allows_in(&devices(actor)?, node, udid, action))
 }
 
 pub(crate) fn allows_in(list: &[Reach], node: &str, udid: &str, action: &str) -> bool {

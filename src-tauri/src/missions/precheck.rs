@@ -28,23 +28,33 @@ const MAX_RENDER: usize = 2_400;
 /// pedir algo sobre ellas.
 const IGNORED_DIRS: &[&str] = &["node_modules", "target", "dist", ".git"];
 
-const EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "rs", "json", "md", "css", "toml", "yml", "yaml", "py", "html"];
+const EXTENSIONS: &[&str] = &[
+    "ts", "tsx", "js", "jsx", "rs", "json", "md", "css", "toml", "yml", "yaml", "py", "html",
+];
 
 // ── Extração (pura) ─────────────────────────────────────────────────
 
 /// Os caminhos de arquivo que o objetivo cita: o que tem `/` ou termina em extensão conhecida.
 pub fn extract_paths(objective: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for raw in objective.split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '"' | '`' | ',' | ';')) {
+    for raw in objective.split(|c: char| {
+        c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '"' | '`' | ',' | ';')
+    }) {
         let token = raw.trim_matches(|c: char| matches!(c, '\'' | '.' | ':' | '!' | '?'));
         if token.len() < 3 || token.contains("://") {
             continue;
         }
-        let ext = token.rsplit('.').next().filter(|_| token.contains('.')).unwrap_or("");
-        let looks_like_file = EXTENSIONS.contains(&ext) && !token.starts_with('.') && !token.ends_with('.');
+        let ext = token
+            .rsplit('.')
+            .next()
+            .filter(|_| token.contains('.'))
+            .unwrap_or("");
+        let looks_like_file =
+            EXTENSIONS.contains(&ext) && !token.starts_with('.') && !token.ends_with('.');
         let looks_like_path = token.contains('/') && token.chars().any(|c| c.is_alphabetic());
         let in_artifacts = token.split('/').any(|part| IGNORED_DIRS.contains(&part));
-        if (looks_like_file || looks_like_path) && !in_artifacts && !out.iter().any(|p| p == token) {
+        if (looks_like_file || looks_like_path) && !in_artifacts && !out.iter().any(|p| p == token)
+        {
             out.push(token.to_string());
         }
         if out.len() >= MAX_PATHS {
@@ -57,8 +67,13 @@ pub fn extract_paths(objective: &str) -> Vec<String> {
 fn is_identifier(word: &str) -> bool {
     let has_alpha = word.chars().any(char::is_alphabetic);
     let snake = word.contains('_');
-    let camel = word.chars().skip(1).any(char::is_uppercase) && word.chars().any(char::is_lowercase);
-    has_alpha && word.len() >= 4 && word.len() <= 40 && (snake || camel) && word.chars().all(|c| c.is_alphanumeric() || c == '_')
+    let camel =
+        word.chars().skip(1).any(char::is_uppercase) && word.chars().any(char::is_lowercase);
+    has_alpha
+        && word.len() >= 4
+        && word.len() <= 40
+        && (snake || camel)
+        && word.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
 /// Os termos que NOMEIAM algo: o que vem entre aspas ou crases e os identificadores
@@ -66,9 +81,15 @@ fn is_identifier(word: &str) -> bool {
 pub fn extract_terms(objective: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut push = |term: &str| {
-        let t = term.trim().trim_matches(|c: char| matches!(c, '?' | '!' | '.' | ':' | ','));
+        let t = term
+            .trim()
+            .trim_matches(|c: char| matches!(c, '?' | '!' | '.' | ':' | ','));
         let long_enough = t.chars().count() >= 4;
-        if long_enough && t.chars().count() <= 40 && !t.contains('/') && !out.iter().any(|x| x.eq_ignore_ascii_case(t)) {
+        if long_enough
+            && t.chars().count() <= 40
+            && !t.contains('/')
+            && !out.iter().any(|x| x.eq_ignore_ascii_case(t))
+        {
             out.push(t.to_string());
         }
     };
@@ -85,7 +106,8 @@ pub fn extract_terms(objective: &str) -> Vec<String> {
             if opens {
                 if let Some(rel) = chars[start..].iter().position(|c| *c == q) {
                     let inner: String = chars[start..start + rel].iter().collect();
-                    if !inner.contains(char::is_whitespace) || inner.split_whitespace().count() <= 3 {
+                    if !inner.contains(char::is_whitespace) || inner.split_whitespace().count() <= 3
+                    {
                         push(&inner);
                     }
                     i = start + rel + 1;
@@ -160,7 +182,9 @@ impl Precheck {
     /// Há algum indício de que o pedido já existe (um termo achado no código ou no histórico,
     /// ou uma missão parecida já concluída).
     pub fn has_leads(&self) -> bool {
-        self.terms.iter().any(|t| !t.commits.is_empty() || !t.files.is_empty())
+        self.terms
+            .iter()
+            .any(|t| !t.commits.is_empty() || !t.files.is_empty())
             || self.similar_missions.iter().any(|m| m.status == "done")
     }
 }
@@ -182,26 +206,79 @@ const LOG_FORMAT: &str = "--format=%h %ad %s";
 
 /// Un commit por línea, sin pasar de lo que cabe: es una pista, no el historial.
 fn short(lines: Vec<String>) -> Vec<String> {
-    lines.into_iter().map(|l| if l.chars().count() > 100 { l.chars().take(100).collect::<String>() + "…" } else { l }).collect()
+    lines
+        .into_iter()
+        .map(|l| {
+            if l.chars().count() > 100 {
+                l.chars().take(100).collect::<String>() + "…"
+            } else {
+                l
+            }
+        })
+        .collect()
 }
 
 fn commits_for_path(dir: &Path, path: &str) -> Vec<String> {
-    short(git(dir, &["log", "-n", &MAX_COMMITS.to_string(), LOG_FORMAT, "--date=short", "--", path]))
+    short(git(
+        dir,
+        &[
+            "log",
+            "-n",
+            &MAX_COMMITS.to_string(),
+            LOG_FORMAT,
+            "--date=short",
+            "--",
+            path,
+        ],
+    ))
 }
 
 fn commits_for_term(dir: &Path, term: &str) -> Vec<String> {
-    short(git(dir, &["log", "-n", &MAX_COMMITS.to_string(), LOG_FORMAT, "--date=short", "-i", "-F", &format!("--grep={term}")]))
+    short(git(
+        dir,
+        &[
+            "log",
+            "-n",
+            &MAX_COMMITS.to_string(),
+            LOG_FORMAT,
+            "--date=short",
+            "-i",
+            "-F",
+            &format!("--grep={term}"),
+        ],
+    ))
 }
 
 /// Un archivo de pruebas o de datos no dice si la funcionalidad existe en el producto.
 fn is_product_file(path: &str) -> bool {
     let lower = path.to_lowercase();
-    !(lower.contains("/tests/") || lower.contains("/test.rs") || lower.contains(".test.") || lower.contains("/test/") || lower.contains("testdata") || lower.contains("fixtures") || lower.ends_with(".md") || lower.starts_with("docs/"))
+    !(lower.contains("/tests/")
+        || lower.contains("/test.rs")
+        || lower.contains(".test.")
+        || lower.contains("/test/")
+        || lower.contains("testdata")
+        || lower.contains("fixtures")
+        || lower.ends_with(".md")
+        || lower.starts_with("docs/"))
 }
 
 /// `None` si el término está en tantos archivos que no distingue nada ("Confirmar", "node_modules").
 fn files_with_term(dir: &Path, term: &str) -> Option<Vec<String>> {
-    let all = git(dir, &["grep", "-l", "-i", "-F", "-e", term, "--", ".", ":(exclude)*.lock", ":(exclude)*.json"]);
+    let all = git(
+        dir,
+        &[
+            "grep",
+            "-l",
+            "-i",
+            "-F",
+            "-e",
+            term,
+            "--",
+            ".",
+            ":(exclude)*.lock",
+            ":(exclude)*.json",
+        ],
+    );
     let mut files: Vec<String> = all.into_iter().filter(|f| is_product_file(f)).collect();
     if files.len() > MAX_FILES {
         return None;
@@ -211,54 +288,115 @@ fn files_with_term(dir: &Path, term: &str) -> Option<Vec<String>> {
 }
 
 /// Missões anteriores da mesma pasta que se parecem com este objetivo, da mais parecida à menos.
-pub fn similar_missions(conn: &Connection, current_id: &str, cwd: &str, objective: &str) -> Vec<SimilarMission> {
+pub fn similar_missions(
+    conn: &Connection,
+    current_id: &str,
+    cwd: &str,
+    objective: &str,
+) -> Vec<SimilarMission> {
     let Ok(mut stmt) = conn.prepare("SELECT id, title, objective, status FROM missions WHERE cwd = ?1 AND id != ?2 AND status != 'draft'") else {
         return Vec::new();
     };
-    let rows = stmt.query_map([cwd, current_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)));
+    let rows = stmt.query_map([cwd, current_id], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+        ))
+    });
     let mut found: Vec<SimilarMission> = match rows {
         Ok(rows) => rows
             .flatten()
             .map(|(id, title, other, status)| {
                 let score = similarity(objective, &format!("{title} {other}"));
-                SimilarMission { id, title, status, score }
+                SimilarMission {
+                    id,
+                    title,
+                    status,
+                    score,
+                }
             })
             .filter(|m| m.score >= 0.45)
             .collect(),
         Err(_) => Vec::new(),
     };
-    found.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    found.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     found.truncate(3);
     found
 }
 
 /// A checagem completa de um objetivo em uma pasta.
 pub fn run(conn: &Connection, mission_id: &str, cwd: &str, objective: &str) -> Precheck {
+    run_with_similar(
+        cwd,
+        objective,
+        similar_missions(conn, mission_id, cwd, objective),
+    )
+}
+
+/// Faz a parte de Git e disco depois que os dados do banco já foram copiados.
+pub fn run_with_similar(
+    cwd: &str,
+    objective: &str,
+    similar_missions: Vec<SimilarMission>,
+) -> Precheck {
     let dir = Path::new(cwd);
     let paths = extract_paths(objective)
         .into_iter()
-        .filter(|path| path.rsplit('.').next().is_some_and(|ext| path.contains('.') && EXTENSIONS.contains(&ext)) || dir.join(path).exists())
+        .filter(|path| {
+            path.rsplit('.')
+                .next()
+                .is_some_and(|ext| path.contains('.') && EXTENSIONS.contains(&ext))
+                || dir.join(path).exists()
+        })
         .map(|path| {
             let exists = dir.join(&path).exists();
-            let recent_commits = if exists { commits_for_path(dir, &path) } else { Vec::new() };
-            PathFinding { path, exists, recent_commits }
+            let recent_commits = if exists {
+                commits_for_path(dir, &path)
+            } else {
+                Vec::new()
+            };
+            PathFinding {
+                path,
+                exists,
+                recent_commits,
+            }
         })
         .collect();
     let terms = extract_terms(objective)
         .into_iter()
         .filter_map(|term| {
             let files = files_with_term(dir, &term)?;
-            Some(TermFinding { commits: commits_for_term(dir, &term), files, term })
+            Some(TermFinding {
+                commits: commits_for_term(dir, &term),
+                files,
+                term,
+            })
         })
         .collect();
-    Precheck { paths, terms, similar_missions: similar_missions(conn, mission_id, cwd, objective) }
+    Precheck {
+        paths,
+        terms,
+        similar_missions,
+    }
 }
 
 /// O texto do briefing: curto, em português, com os fatos e a regra de decisão. Pura.
 pub fn render(check: &Precheck) -> String {
     let mut lines: Vec<String> = Vec::new();
     for m in &check.similar_missions {
-        lines.push(format!("- missão parecida ({}%, {}): \"{}\" ({})", (m.score * 100.0).round() as i64, m.status, m.title, &m.id[..m.id.len().min(8)]));
+        lines.push(format!(
+            "- missão parecida ({}%, {}): \"{}\" ({})",
+            (m.score * 100.0).round() as i64,
+            m.status,
+            m.title,
+            &m.id[..m.id.len().min(8)]
+        ));
     }
     for p in &check.paths {
         if !p.exists {
@@ -266,7 +404,11 @@ pub fn render(check: &Precheck) -> String {
         } else if p.recent_commits.is_empty() {
             lines.push(format!("- {}: existe, sem commits no histórico.", p.path));
         } else {
-            lines.push(format!("- {}: existe; últimos commits: {}", p.path, p.recent_commits.join(" | ")));
+            lines.push(format!(
+                "- {}: existe; últimos commits: {}",
+                p.path,
+                p.recent_commits.join(" | ")
+            ));
         }
     }
     for t in &check.terms {
@@ -290,7 +432,11 @@ pub fn render(check: &Precheck) -> String {
     } else {
         "Nada indica que isto já exista; siga com o plano normal."
     };
-    let mut text = format!("O QUE JÁ EXISTE (checagem automática, só leitura)\n{}\n{}", lines.join("\n"), rule);
+    let mut text = format!(
+        "O QUE JÁ EXISTE (checagem automática, só leitura)\n{}\n{}",
+        lines.join("\n"),
+        rule
+    );
     if text.chars().count() > MAX_RENDER {
         text = text.chars().take(MAX_RENDER).collect::<String>() + "…";
     }
@@ -301,35 +447,66 @@ pub fn render(check: &Precheck) -> String {
 mod test;
 
 /// Uses the app roster only. Does not inspect credential files or secrets.
-pub(crate) fn validate_launch(roster: &crate::runs::roster::Roster, assignment: &crate::runs::routing::Assignment, now: i64) -> Result<(), String> {
+pub(crate) fn validate_launch(
+    roster: &crate::runs::roster::Roster,
+    assignment: &crate::runs::routing::Assignment,
+    now: i64,
+) -> Result<(), String> {
     use crate::runs::roster::{ModelAvailability, ModelDiscoveryState};
-    let agent = roster.agent(&assignment.agent_id).ok_or("missions.error.agentMissing")?;
-    if assignment.agent_id == crate::desktop_apps::GEMINI_DESKTOP && (assignment.model.is_some() || assignment.account_id.is_some()) {
+    let agent = roster
+        .agent(&assignment.agent_id)
+        .ok_or("missions.error.agentMissing")?;
+    if assignment.agent_id == crate::desktop_apps::GEMINI_DESKTOP
+        && (assignment.model.is_some() || assignment.account_id.is_some())
+    {
         return Err("Choose the Gemini Desktop model and account in its application".into());
     }
-    if !agent.installed { return Err("missions.error.agentMissing".into()); }
+    if !agent.installed {
+        return Err("missions.error.agentMissing".into());
+    }
     let account = if agent.capabilities.accounts || !agent.accounts.is_empty() {
         // An absent system/default account is missing login state, not an accountless
         // provider. Terminals with Auto open the system account and cannot substitute one.
-        let missing = if assignment.account_id.is_none() { "missions.error.loginRequired" } else { "missions.error.accountMissing" };
-        Some(agent.accounts.iter().find(|a| a.account_id == assignment.account_id).ok_or(missing)?)
+        let missing = if assignment.account_id.is_none() {
+            "missions.error.loginRequired"
+        } else {
+            "missions.error.accountMissing"
+        };
+        Some(
+            agent
+                .accounts
+                .iter()
+                .find(|a| a.account_id == assignment.account_id)
+                .ok_or(missing)?,
+        )
     } else {
-        if assignment.account_id.is_some() { return Err("missions.error.accountMissing".into()); }
+        if assignment.account_id.is_some() {
+            return Err("missions.error.accountMissing".into());
+        }
         None
     };
     if let Some(account) = account {
-        if !account.logged_in { return Err("missions.error.loginRequired".into()); }
+        if !account.logged_in {
+            return Err("missions.error.loginRequired".into());
+        }
         if account.limit.is_some() || account.quota.as_ref().is_some_and(|q| q.exhausted_at(now)) {
             return Err("missions.error.usageExhausted".into());
         }
     }
     if let Some(id) = assignment.model.as_deref() {
         let (models, discovery) = match account {
-            Some(a) => (&a.models, a.model_discovery), None => (&agent.models, agent.model_discovery),
+            Some(a) => (&a.models, a.model_discovery),
+            None => (&agent.models, agent.model_discovery),
         };
         match models.iter().find(|m| m.id == id) {
-            Some(m) if m.availability == ModelAvailability::Unavailable || m.unavailable.is_some() => return Err("missions.error.modelUnavailable".into()),
-            None if discovery == ModelDiscoveryState::Available => return Err("missions.error.modelUnavailable".into()),
+            Some(m)
+                if m.availability == ModelAvailability::Unavailable || m.unavailable.is_some() =>
+            {
+                return Err("missions.error.modelUnavailable".into());
+            }
+            None if discovery == ModelDiscoveryState::Available => {
+                return Err("missions.error.modelUnavailable".into());
+            }
             _ => {}
         }
     }

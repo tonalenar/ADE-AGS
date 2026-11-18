@@ -454,7 +454,7 @@ fn states() -> &'static Mutex<HashMap<String, State>> {
     STATES.get_or_init(Default::default)
 }
 
-fn attempts() -> &'static Mutex<HashMap<String, (String, u64)>> {
+pub(super) fn attempts() -> &'static Mutex<HashMap<String, (String, u64)>> {
     static ATTEMPTS: OnceLock<Mutex<HashMap<String, (String, u64)>>> = OnceLock::new();
     ATTEMPTS.get_or_init(Default::default)
 }
@@ -464,9 +464,11 @@ pub fn is_compacting(thread_id: &str) -> bool {
     states().lock().unwrap_or_else(|e| e.into_inner()).get(thread_id).is_some_and(|s| s.is_active(crate::util::now_ts_ms()))
 }
 
-/// O processo da conversa fechou: nada mais a esperar.
+/// O processo da conversa fechou: nada mais a esperar. A tentativa também sai: fechada, a conversa não tem mais o que
+/// repetir, e reabrir não recompacta a mesma medida (o corte por `StaleUsage` lê a compactação já gravada no banco).
 pub fn on_closed(thread_id: &str) {
     states().lock().unwrap_or_else(|e| e.into_inner()).remove(thread_id);
+    attempts().lock().unwrap_or_else(|e| e.into_inner()).remove(thread_id);
 }
 
 /// Aplica um evento da compactação: grava e mostra o aviso. Se a conversa não tem turno vivo, avisa quem espera (`ags

@@ -27,11 +27,11 @@ async function migrateLegacyAgents(): Promise<void> {
   try {
     const parsed = JSON.parse(raw);
     const legacy = parsed?.state?.customAgents;
-    if (Array.isArray(legacy) && legacy.length > 0) {
-      await ipc.importLegacyCustomAgents(legacy);
-    }
+    if (!Array.isArray(legacy)) return;
+    if (legacy.length > 0) await ipc.importLegacyCustomAgents(legacy);
   } catch {
-    // Un localStorage corrupto no debe impedir que la app arranque: se descarta igual.
+    // Falha de leitura ou de importação mantém o legado para uma próxima tentativa.
+    return;
   }
   localStorage.removeItem(LEGACY_KEY);
 }

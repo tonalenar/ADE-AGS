@@ -1,5 +1,92 @@
 use super::claude::parse_ts;
 
+#[test]
+fn trust_worktrees_root_retorna_aviso_quando_claude_json_esta_ilegivel() {
+    let root = std::env::temp_dir().join(format!("ags-trust-warning-{}", uuid::Uuid::new_v4()));
+    let base = root.join("worktrees");
+    let config_dir = root.join("perfil");
+    std::fs::create_dir_all(config_dir.join(".claude.json")).unwrap();
+
+    let warnings = super::trust::trust_worktrees_root_with_configs(
+        &base,
+        [config_dir.join(".claude.json")],
+    );
+
+    assert!(base.is_dir(), "a raiz de worktrees deve ser criada apesar do erro de confiança");
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains(".claude.json"));
+    assert!(warnings[0].contains("Is a directory") || warnings[0].contains("diretório"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn trust_dir_mantem_permissao_privada_e_projetos_anteriores() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = std::env::temp_dir().join(format!("ags-trust-config-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join(".claude.json");
+
+    super::trust::trust_dir(&path, "/primeiro").unwrap();
+    super::trust::trust_dir(&path, "/segundo").unwrap();
+
+    let config: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(config["projects"]["/primeiro"]["hasTrustDialogAccepted"], true);
+    assert_eq!(config["projects"]["/segundo"]["hasTrustDialogAccepted"], true);
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn trust_dir_refaz_merge_apos_mudanca_externa_entre_leitura_e_gravacao() {
+    let root = std::env::temp_dir().join(format!("ags-trust-retry-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join(".claude.json");
+    std::fs::write(&path, br#"{"projects":{"/keep":{"hasTrustDialogAccepted":true}}}"#).unwrap();
+    let mut injected = false;
+
+    super::trust::trust_dir_with_hook(&path, "/worktree", || {
+        if !injected {
+            injected = true;
+            std::fs::write(&path, br#"{"external":true,"projects":{"/keep":{"hasTrustDialogAccepted":true}}}"#).unwrap();
+        }
+    }).unwrap();
+
+    let config: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(config["external"], true);
+    assert_eq!(config["projects"]["/keep"]["hasTrustDialogAccepted"], true);
+    assert_eq!(config["projects"]["/worktree"]["hasTrustDialogAccepted"], true);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn trust_erro_de_permissao_nao_regrava() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = std::env::temp_dir().join(format!("ags-trust-permission-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join(".claude.json");
+    let original = br#"{"projects":{"/keep":{"hasTrustDialogAccepted":true}}}"#;
+    std::fs::write(&path, original).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    // Se o sistema ainda permite abrir o arquivo, o cenário de permissão não se aplica.
+    if std::fs::File::open(&path).is_ok() {
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        return;
+    }
+
+    let result = super::trust::trust_dir(&path, "/new");
+
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(result.is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// El formato lo escribe la propia TUI, siempre en UTC y siempre igual — pero si se
 /// parsea mal, el consumo entero cae fuera de la ventana y el panel muestra ceros.
 #[test]

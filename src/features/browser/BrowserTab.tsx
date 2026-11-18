@@ -7,7 +7,7 @@ import {
   BugIcon, CameraIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
 } from "@/app/icons";
 import { DESKTOP_OS } from "@/app/platform";
-import { setChatBrowserFloatRect, toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
+import { toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
 import { WindowOpenIcon } from "@/features/chat/chatIcons";
 import { neighbors } from "@/features/canvas/board";
 import { useCanvasStore } from "@/features/canvas/store";
@@ -44,6 +44,8 @@ import { readBrowserPreferences } from "./browserPreferences";
 import { clearRecentBrowserPages, readRecentBrowserPages, rememberRecentBrowserPage, type RecentBrowserPage } from "./recentPages";
 import { previewDetectServers, previewResolve, previewSaveCapture, previewSetRecording, type PreviewTarget } from "./ipc";
 import { PageChannel, type LoadState } from "./pageChannel";
+import { askPersonAboutDialog } from "./dialogPolicy";
+import { captureUnlessDisposed, effectiveRecordingFps } from "./recordingStart";
 import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
 import { deviceAction, runDeviceAction, type PhoneActions } from "./deviceActions";
@@ -215,6 +217,8 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
+  /** A aba foi desmontada: a gravação que ainda esperava a captura inicial não pode começar. */
+  const recordingDisposedRef = useRef(false);
 
   /** Quién espera a que la persona marque algo, cuando lo pidió un agente. */
   const pickWaiter = useRef<((element: PickedElement | null) => void) | null>(null);
@@ -268,27 +272,6 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     };
   }, [menuOpen]);
 
-  useEffect(() => {
-    if (!floatingPreview) return;
-    const frame = root.current?.parentElement;
-    const shell = frame?.closest<HTMLElement>("[data-chat-shell]");
-    if (!frame || !shell) return;
-    const measure = () => {
-      const r = frame.getBoundingClientRect();
-      const b = shell.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) return;
-      setChatBrowserFloatRect({
-        left: Math.round(r.left - b.left),
-        top: Math.round(r.top - b.top),
-        width: Math.round(r.width),
-        height: Math.round(r.height),
-      });
-    };
-    const observer = new ResizeObserver(measure);
-    observer.observe(frame);
-    measure();
-    return () => observer.disconnect();
-  }, [floatingPreview, view.id]);
 
   const postToPage = useCallback((type: SimpleAppMessage["type"]) => {
     if (realRef.current) {
@@ -754,6 +737,9 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       }
     } else if (msg.type === "page:reply") {
       channel.reply(msg.payload);
+    } else if (msg.type === "dialog:asked") {
+      // Um `alert`, `confirm` ou `prompt` que disparou um agente: a persona decide na app (ver `dialogPolicy.ts`).
+      void askPersonAboutDialog(msg.payload, (key) => channel.run({ op: "dialogs", allow: key }, 8000).then(() => undefined, () => undefined));
     } else if (msg.type === "debug:batch") {
       const batch = { ...msg.payload, url: display(msg.payload.url) };
       useDebugStore.getState().apply(view.id, (log) => appendBatch(log, batch));
@@ -935,16 +921,23 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     if ((!target && !real) || !column.current || (!real && !iframe.current)) return;
     try {
       if (typeof MediaRecorder === "undefined") throw new Error("MediaRecorder indisponível neste sistema.");
-      const initial = real
-        ? (await realBrowserShot(view.id)).canvas
-        : (await freezePage(iframe.current!, column.current)).canvas;
+      // A aba pode ter sido desmontada durante a foto inicial (o cleanup já rodou e não viu gravador): não se cria nada (A187).
+      // As referências saem para constantes: dentro da closure o TypeScript não mantém o estreitamento de `column.current`.
+      const frame = iframe.current;
+      const pageColumn = column.current;
+      const initial = await captureUnlessDisposed(
+        async () => (real ? (await realBrowserShot(view.id)).canvas : (await freezePage(frame!, pageColumn!)).canvas),
+        () => recordingDisposedRef.current,
+      );
+      if (!initial) return;
       const canvas = document.createElement("canvas");
       canvas.width = initial.width;
       canvas.height = initial.height;
       const context = canvas.getContext("2d");
       if (!context || typeof canvas.captureStream !== "function") throw new Error("Captura de vídeo indisponível neste sistema.");
       context.drawImage(initial, 0, 0);
-      const fps = readBrowserPreferences().maxRecordingFps;
+      // O fps tem teto (ver `recordingStart.ts`, A204): a preferência de 60 não chega ao custo de rasterizar a página.
+      const fps = effectiveRecordingFps(readBrowserPreferences().maxRecordingFps);
       const stream = canvas.captureStream(fps);
       recordingStreamRef.current = stream;
       const mimeType = ["video/webm;codecs=vp9", "video/webm", "video/mp4"]
@@ -1000,12 +993,17 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     else void startVisualRecording();
   };
 
-  useEffect(() => () => {
-    if (recordingTimerRef.current !== null) window.clearTimeout(recordingTimerRef.current);
-    const recorder = recorderRef.current;
-    recorderRef.current = null;
-    if (recorder && recorder.state !== "inactive") recorder.stop();
-    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+  // `disposed` marca a desmontagem para a gravação que ainda está no `await` da captura inicial.
+  useEffect(() => {
+    recordingDisposedRef.current = false;
+    return () => {
+      recordingDisposedRef.current = true;
+      if (recordingTimerRef.current !== null) window.clearTimeout(recordingTimerRef.current);
+      const recorder = recorderRef.current;
+      recorderRef.current = null;
+      if (recorder && recorder.state !== "inactive") recorder.stop();
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
   }, []);
 
   const attachments = picks.length + captures.length;
@@ -1231,8 +1229,11 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     />
   );
 
+  const stageViewport = floatingPreview && isFillViewport(viewport) ? null : viewport;
+  const stageFramed = isFramedViewport(stageViewport);
+
   return (
-    <div ref={root} className={`flex flex-col ${floatingPreview ? "flex-1" : "h-full"} min-h-0 transition-colors duration-300 ${device ? "bg-transparent" : "bg-gray-50 dark:bg-surface"}`}>
+    <div ref={root} className={`flex flex-col ${floatingPreview ? "flex-1" : "h-full"} min-h-0 ${floatingPreview ? "" : "transition-colors duration-300"} ${(device || (floatingPreview && stageFramed)) ? "bg-transparent" : "bg-gray-50 dark:bg-surface"}`}>
       {/* No login, a barra que vale é a da janela do Chrome (é nela que se confere o endereço): a do Portal some. */}
       {device || floatingPreview ? null : toolbar}
 

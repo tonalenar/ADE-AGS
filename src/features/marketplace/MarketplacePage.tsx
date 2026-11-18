@@ -164,7 +164,7 @@ export function MarketplacePage() {
       setSelectedKey((current) => moveSelection(order.map(keyOf), current, e.key === "ArrowDown" ? 1 : -1));
       return;
     }
-    if (e.key === "Enter" && selected && !isInstalled(selected)) {
+    if (e.key === "Enter" && selected && !isInstalled(selected) && installingKey === null) {
       e.preventDefault();
       handleInstall(selected.registryId, selected.id);
     }

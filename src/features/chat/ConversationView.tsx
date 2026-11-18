@@ -182,12 +182,12 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   const composer = (
     <ComposerColumn>
       {/* O pedido de permissão vai colado ao composer, sempre à vista (o terminal mostra o mesmo diálogo). */}
-      {approval && <PermissionCard ask={approval} terminal />}
+      {approval && <PermissionCard key={approval.id} ask={approval} terminal />}
       {team?.error && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{team.error}</p>}
       <ChatComposer cwd={card.cwd} quoteKey={card.tabId} quoteSourceIds={quoteSourceIds} promptHistory={promptHistory}
         turnActive={busy} forceSend={!!approval}
         placeholder={approval ? t("chat.composer.redirect") : busy ? t(followUpBehavior === "queue" ? "chat.composer.queueHintQueue" : "chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
-        onSubmit={(text, attachments) => {
+        onSubmit={async (text, attachments) => {
           const planCommand = extractSlashCommand(text, "plan");
           if (planCommand.found && text.trim().toLowerCase() === "/plan" && attachments.length === 0) {
             if (locked) {
@@ -199,10 +199,10 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
               return false;
             }
             retune({ plan: !access.plan });
-            return;
+            return true;
           }
           const prepared = team && text.trim() ? team.prepare(text, { key: card.tabId, items }, attachments) : { text, onSent: () => undefined };
-          if (prepared === null) return;
+          if (prepared === null) return false;
           // Os anexos vão como `@caminho` no fim do texto (a TUI os lê pelo caminho).
           const sent = messageFor(card.tabId, prepared.text, attachments).text;
           if (sent.trim()) unsnoozeConversation(card.tabId);
@@ -211,6 +211,8 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
           sendToConversation(card.tabId, sent);
           // Numa aba não há resposta do backend a esperar: o resumo do time conta como entregue ao enviar.
           prepared.onSent();
+          // A mensagem vai ao terminal ou entra na fila dele (`sendToConversation`): em qualquer dos dois, ela já está guardada.
+          return true;
         }}
         onSendAndNewThread={newConversationLocal}
         onQueue={(text, attachments) => {

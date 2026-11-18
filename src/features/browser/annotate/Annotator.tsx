@@ -191,7 +191,7 @@ function SizeButton({ size, label, selected, onClick }: {
 }
 
 /** El color elegido, que despliega los demás. Para cuando la barra es angosta. */
-function ColorMenu({ session }: { session: AnnotationSession }) {
+export function ColorMenu({ session }: { session: AnnotationSession }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -204,6 +204,18 @@ function ColorMenu({ session }: { session: AnnotationSession }) {
     };
     window.addEventListener("pointerdown", close, { capture: true });
     return () => window.removeEventListener("pointerdown", close, { capture: true });
+  }, [open]);
+
+  // A paleta é `fixed`, com a posição de quando abriu: se a barra (um ancestral) rola com ela aberta, fecha. A rolagem de
+  // uma parte que não contém a paleta (o chat que escreve em streaming) não a fecha (A191, como o seletor de agente).
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = (event: Event) => {
+      const from = event.target;
+      if (from === document || (from instanceof Node && ref.current !== null && from.contains(ref.current))) setOpen(false);
+    };
+    window.addEventListener("scroll", onScroll, true);
+    return () => window.removeEventListener("scroll", onScroll, true);
   }, [open]);
 
   return (
@@ -223,7 +235,8 @@ function ColorMenu({ session }: { session: AnnotationSession }) {
 }
 
 function ColorPopover({ anchor, label, children }: { anchor: HTMLElement | null; label: string; children: React.ReactNode }) {
-  const box = anchor?.getBoundingClientRect();
+  // Medida UMA vez, quando a paleta abre (é montada só aberta): não a cada render, que forçava layout (A191).
+  const [box] = useState(() => anchor?.getBoundingClientRect());
   if (!box) return null;
   return (
     <div

@@ -11,7 +11,8 @@ import { useConversationsStore } from "@/features/sessions/conversationsStore";
 import type { Tab } from "@/features/tabs/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { lastOutputAt } from "@/features/terminal/activity";
-import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { screenOf } from "@/features/terminal/terminalRegistry";
+import { blockFromScreen, sendAutonomous } from "@/features/terminal/safeWrite";
 import { structuredOf, structuredVerdict, workingWith } from "@/features/terminal/structuredState";
 import { showBotToast } from "@/shared/brand/botToastStore";
 import { missionIndex, tabsByMission } from "./groups";
@@ -21,7 +22,7 @@ import { prematureClosing } from "./vigiaClosing";
 import { LOOP_DONE, loopStep, loopStuck, type LoopWatch } from "./vigiaLoop";
 import { contextDue, contextNudge, contextPressure, contextStuck, REPEAT_DONE, repeatKey, repeatStuck } from "./vigiaSignals";
 import { vigiaToast } from "./vigiaToast";
-import { isFinalReport, memberFinished, pokeAllowed } from "./vigiaPoke";
+import { alvoPorNome, isFinalReport, memberFinished, pokeAllowed, sugestaoDoModelo } from "./vigiaPoke";
 import { repeatAfterEach } from "./repeatAfterEach";
 import { vigiaActive } from "./vigiaSwitch";
 import { automationPausedFor, notePausedTeam } from "./automation";
@@ -278,6 +279,14 @@ function rememberWatches(): void {
     /* sem armazenamento: vale só nesta sessão */
   }
 }
+/**
+ * O número do lembrete que acabou de sair. Conta no registro atual (o que o tick seguinte deixou), e não no objeto
+ * capturado quando a cutucada foi agendada: senão o incremento se perdia (A168). Pura.
+ */
+export function contaLembreteEnviado(atual: Watch | undefined, capturado: Watch): number {
+  return (atual ?? capturado).nudges + 1;
+}
+
 /** Quando cada aba foi reportada ao modelo; missões com uma consulta em andamento. */
 const lastPoke = new Map<string, number>();
 const inFlight = new Set<string>();
@@ -285,9 +294,13 @@ const lastErrorReport = new Map<string, number>();
 /** Quando o Vigia escreveu pela última vez no terminal de cada aba (uma cutucada por vez). */
 const pokes = new Map<string, number>();
 
-/** O destino está trabalhando agora? A tela, somada ao transcript (Claude Code/Codex) quando há canal. */
+/**
+ * O destino está trabalhando agora, ou parado numa pergunta de aprovação? A tela somada ao transcript (Claude
+ * Code/Codex) quando há canal. A mesma conferência da guarda de escrita (`safeWrite.ts`): pergunta conta como ocupado (A160).
+ */
 function busyNow(tabId: string): boolean {
-  return workingWith(tabId, isWorking(screenOf(tabId)?.lines ?? []));
+  const lines = screenOf(tabId)?.lines ?? [];
+  return blockFromScreen(lines, workingWith(tabId, isWorking(lines))) !== null;
 }
 
 /** Pode escrever no terminal desta aba agora? Ver `pokeAllowed`. O interruptor vem primeiro (falha fechada). */
@@ -306,14 +319,20 @@ export function pokeGuard(active: () => boolean, busy: () => boolean): boolean {
 
 function poke(tabId: string, text: string, now: number, onSent: () => void): void {
   const guard = () => pokeGuard(vigiaActive, () => busyNow(tabId));
-  // Checado AQUI (onde o trabalho começa) e de novo dentro de `sendWhenReady`, logo antes de colar.
+  // Checado AQUI (onde o trabalho começa) e de novo dentro de `sendAutonomous`, antes de colar e antes do Enter.
   if (!guard()) return;
+  const before = pokes.get(tabId);
   pokes.set(tabId, now);
-  sendWhenReady(tabId, text, {
+  sendAutonomous(tabId, text, "vigia", {
     guard,
     onSent: (at) => {
       pokes.set(tabId, at);
       onSent();
+    },
+    // Não saiu (apareceu uma pergunta ou o trabalho voltou): não conta como cutucada, e a próxima pode sair.
+    onSkipped: () => {
+      if (before === undefined) pokes.delete(tabId);
+      else pokes.set(tabId, before);
     },
   });
 }
@@ -553,10 +572,9 @@ export function vigiaTick(now = Date.now()): Promise<void> {
       // Orquestrador trabalhando, ou sem responder à cutucada anterior: espera o próximo ciclo.
       if (!mayPoke(lead.id, now)) continue;
       poke(lead.id, `[${VIGIA_NAME}] ${finding.nudge}`, now, () => {
-        watch.nudges += 1;
-        watch.lastNudge = Date.now();
-        rememberWatches();
-        reportToChat(lead.id, reportLine(finding.stuck, `lembrete ${watch.nudges}/${NUDGE_LIMIT} enviado ao ${lead.title}.`));
+        const nudges = contaLembreteEnviado(watches.get(mission.id), watch);
+        patchWatch(mission, { nudges, lastNudge: Date.now() });
+        reportToChat(lead.id, reportLine(finding.stuck, `lembrete ${nudges}/${NUDGE_LIMIT} enviado ao ${lead.title}.`));
       });
       continue;
     }
@@ -600,9 +618,10 @@ export function vigiaTick(now = Date.now()): Promise<void> {
             reportToChat(lead.id, reportLine(action.message, "avisei você na tela: a decisão é sua.", "aviso"));
             continue;
           }
-          const target = team.find((tab) => tab.title === action.to);
+          // O destino é um nome único no time (A170). A frase do modelo leu telas de outros agentes: vai como dado (A164).
+          const target = alvoPorNome(team, action.to);
           if (!target || memberFinished(taskAt.get(target.id), finishedAt.get(target.id)) || !mayPoke(target.id, Date.now())) continue;
-          poke(target.id, `[${VIGIA_NAME}] ${action.message}`, Date.now(), () => {
+          poke(target.id, `[${VIGIA_NAME}] ${sugestaoDoModelo(action.message)}`, Date.now(), () => {
             reportToChat(lead.id, reportLine(action.message, `mandei a ${action.to}.`, "aviso"));
           });
         }

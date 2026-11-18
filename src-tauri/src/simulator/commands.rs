@@ -22,7 +22,7 @@ pub fn simulator_devices() -> Result<Vec<Device>, String> {
 pub fn simulator_boot(app: AppHandle, udid: String, light: Option<bool>) -> Result<(), String> {
     ops::boot(&udid, light.unwrap_or(true))?;
     ops::forget_orientation(&udid);
-    lifecycle::booted(&app, &udid);
+    lifecycle::booted(&app, &udid, true);
     Ok(())
 }
 
@@ -200,7 +200,17 @@ pub async fn simulator_attach<R: Runtime>(webview: Webview<R>, id: String, udid:
     #[cfg(target_os = "macos")]
     {
         let target = udid.clone();
-        let (screen, hid) = tokio::task::spawn_blocking(move || super::native::connect(&target)).await.map_err(|e| e.to_string())??;
+        let connected = tokio::task::spawn_blocking(move || super::native::connect(&target)).await.map_err(|e| e.to_string())?;
+        let (screen, hid) = match connected {
+            Ok(pair) => pair,
+            Err(error) => {
+                // A tela só vale com o aparelho conectado: a que ficou registrada sem conexão impedia a hibernação (A269).
+                if let Some((_, still_visible)) = screens().lock().ok().and_then(|mut m| m.remove(&id)) {
+                    lifecycle::seen(&udid, still_visible);
+                }
+                return Err(error);
+            }
+        };
         let (tx, rx) = tokio::sync::oneshot::channel();
         webview
             .with_webview(move |platform| {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isFinalReport, memberFinished, POKE_PENDING_MS, pokeAllowed } from "../vigiaPoke";
+import { isFinalReport, memberFinished, POKE_PENDING_MS, pokeAllowed, pokeBusy } from "../vigiaPoke";
 
 const MIN = 60_000;
 
@@ -86,5 +86,29 @@ describe("andamento com o nome na frente não é entrega (v19 B1)", () => {
     expect(isFinalReport("Backend: em andamento. Vou executar as suítes e ler o banco; resultados ainda pendentes, nenhum relatório final disponível.", "tell", "Backend", true)).toBe(false);
     expect(isFinalReport("Backend: recebido, começando agora; volto com o resultado completo dos testes e dos arquivos quando terminar a rodada de leitura.", "tell", "Backend", true)).toBe(false);
     expect(isFinalReport("Backend: corrigi A1 em src-tauri/src/memory.rs, commit 4f1a2b3, ags test run rust verde (1378 passaram), sem pendências.", "tell", "Backend", true)).toBe(true);
+  });
+});
+
+// O Vigia cola texto e Enter num terminal: o menu de aprovação aberto não pode receber a cutucada (rodada 1 do PR11).
+const CODEX_MENU_OPEN = [
+  "  Would you like to run the following command?",
+  "",
+  "› 1. Yes, proceed (y)",
+  "  2. Yes, and don't ask again (p)",
+  "  3. No, and tell Codex what to do differently (esc)",
+];
+
+describe("pokeBusy: a guarda de escrita do Vigia (rodada 1)", () => {
+  it("menu_de_permissao_aberto_segura_a_cutucada", () => {
+    expect(pokeBusy(CODEX_MENU_OPEN, false)).toBe(true);
+    expect(pokeAllowed(undefined, undefined, pokeBusy(CODEX_MENU_OPEN, false), 0)).toBe(false);
+  });
+
+  it("marca_do_menu_impressa_no_meio_da_saida_nao_segura_a_cutucada", () => {
+    expect(pokeBusy([...CODEX_MENU_OPEN, "$ bun test", "ok 12 testes"], false)).toBe(false);
+  });
+
+  it("agente_trabalhando_continua_segurando_a_cutucada", () => {
+    expect(pokeBusy(["$ ls"], true)).toBe(true);
   });
 });
