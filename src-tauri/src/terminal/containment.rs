@@ -346,7 +346,7 @@ pub(crate) mod imp {
 
     /// Sessões ACP usam `killpg`; não criam um cgroup que conteria processos com `setsid`.
     pub fn create_acp() -> Group {
-        Group { dir: None, leader: None }
+        Group { dir: None, leader: None, leader_identity: None, pending: Vec::new() }
     }
 
     pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
@@ -446,7 +446,7 @@ pub(crate) mod imp {
 
     #[cfg(test)]
     mod tests {
-        use super::super::super::ProcessGroup;
+        use crate::terminal::containment::ProcessGroup;
 
         #[test]
         fn cgroup_populado_impede_encerrar_antes_da_arvore_tratada() {
@@ -564,7 +564,7 @@ pub(crate) mod unix_tree {
         pub(crate) start_time: u64,
         pub(crate) pgid: u32,
         #[cfg(target_os = "linux")]
-        pidfd: Option<std::sync::Arc<std::os::fd::OwnedFd>>,
+        pub(crate) pidfd: Option<std::sync::Arc<std::os::fd::OwnedFd>>,
     }
 
     #[cfg(target_os = "linux")]
