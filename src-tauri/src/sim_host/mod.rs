@@ -151,9 +151,6 @@ pub fn start() {
     #[cfg(target_os = "macos")]
     {
         STOP.store(false, Ordering::SeqCst);
-        if let Err(error) = install() {
-            eprintln!("[ade-ags] não preparei o bloqueio do Device Hub: {error}");
-        }
         spawn_watcher();
     }
 }
@@ -297,6 +294,10 @@ fn spawn_watcher() {
     std::thread::Builder::new()
         .name("ade-device-hub".into())
         .spawn(|| {
+            // A preparação pode compilar o chamariz com `clang` (até 30 s): fica aqui, fora da abertura da janela (A275).
+            if let Err(error) = install() {
+                eprintln!("[ade-ags] não preparei o bloqueio do Device Hub: {error}");
+            }
             while !STOP.load(Ordering::SeqCst) {
                 dismiss_apple_device_hub();
                 keep_decoy();

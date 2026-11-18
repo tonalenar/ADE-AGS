@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import { DESKTOP_OS } from "@/app/platform";
@@ -12,6 +12,12 @@ import { hydrateThread, useStructured } from "../structured/store";
 import { autoAllowRule, decidedByBackend, freshAsks } from "./permissionModel";
 import { startTeams } from "../team/teamStore";
 import { answerAsk, loadRules, notifyAsk, setTuiPrompts, teamDecision, toggleInbox, usePendingAsks, usePermissions } from "./permissionsStore";
+
+/**
+ * Os pedidos já vistos. Fica fora do componente: remontar a caixa (a aba de time, o chat) não reprocessa
+ * nem avisa de novo os pedidos que já estavam na tela.
+ */
+let seenAsks = new Set<string>();
 
 /**
  * O que a caixa de permissões precisa rodando enquanto a casca do chat está aberta, sem desenhar
@@ -42,12 +48,11 @@ export function PermissionsManager() {
   const asks = usePendingAsks();
   const rules = usePermissions((s) => s.rules);
   const loaded = usePermissions((s) => s.rulesLoaded);
-  const seen = useRef<Set<string>>(new Set());
   useEffect(() => {
     // Sem as regras lidas, um pedido novo ainda não pode ser decidido: espera.
     if (!loaded) return;
-    const fresh = freshAsks(seen.current, asks);
-    seen.current = new Set(asks.map((a) => a.id));
+    const fresh = freshAsks(seenAsks, asks);
+    seenAsks = new Set(asks.map((a) => a.id));
     for (const ask of fresh) {
       // O backend já decidiu o que a política e as regras cobrem; o que chegou aqui é da pessoa.
       if (decidedByBackend(ask)) {

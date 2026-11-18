@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   appendBatch, appendProxy, clearConsole, consoleForAgent, currentCounts, EMPTY_LOG, filterRequests,
-  formatBytes, isFailed, MAX_CONSOLE, mergeCookies, networkForAgent, requestRows, typeOf,
-  type DebugLog,
+  formatBytes, isFailed, limitBodyBytes, MAX_CONSOLE, mergeCookies, networkForAgent, requestRows, typeOf,
+  type DebugLog, type LoggedRequest,
 } from "../debugLog";
 import type { ProxyRequest } from "../ipc";
 import type { ConsoleEntry, DebugBatch } from "../protocol";
@@ -230,5 +230,34 @@ describe("viewport", () => {
     expect(formatBytes(null)).toBe("—");
     expect(formatBytes(900)).toBe("900 B");
     expect(formatBytes(2048)).toBe("2.0 kB");
+  });
+});
+
+/** Um pedido guardado no log, com o corpo de resposta indicado (`null` = sem corpo). */
+function logged(id: number, responseText: string | null): LoggedRequest {
+  return {
+    id, doc: "a", at: 1000 + id, method: "GET", url: `http://app.exemplo.com/${id}`, status: 200, statusText: "OK",
+    type: "fetch", durationMs: 5, size: responseText?.length ?? null,
+    responseBody: responseText === null ? null : { size: responseText.length, text: responseText, truncated: false },
+  } as LoggedRequest;
+}
+
+describe("orçamento de bytes dos corpos do log", () => {
+  it("corpos acima do orçamento saem dos pedidos mais velhos, e o metadado fica", () => {
+    const big = "x".repeat(600);
+    const requests = [logged(1, big), logged(2, big), logged(3, big)];
+    // Cabe um corpo de 600 com teto de 1000: o mais novo fica, os outros dois perdem o texto.
+    const out = limitBodyBytes(requests, 1000);
+    expect(out[2].responseBody?.text).toBe(big);
+    expect(out[1].responseBody?.evicted).toBe(true);
+    expect(out[1].responseBody?.text ?? null).toBeNull();
+    expect(out[0].responseBody?.evicted).toBe(true);
+    expect(out[0].url).toBe("http://app.exemplo.com/1");
+    expect(out[0].status).toBe(200);
+  });
+
+  it("dentro do orçamento, ou sem corpos, devolve a própria lista", () => {
+    const requests = [logged(1, "pequeno"), logged(2, null)];
+    expect(limitBodyBytes(requests, 1000)).toBe(requests);
   });
 });

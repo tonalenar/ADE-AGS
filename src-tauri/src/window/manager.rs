@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::database::{self, DbConnection, WindowRow};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -27,6 +29,12 @@ pub(crate) fn usable_size(width: Option<i32>, height: Option<i32>) -> Option<(u3
     }
 }
 
+/// Pura: há alguma janela nova do workspace que está abrindo? Sem nenhuma, as janelas antigas não podem fechar:
+/// a última a sair leva o app inteiro embora (`ExitRequested` sem janelas, em `app::run`).
+pub(crate) fn tem_janela_nova(criadas: usize) -> bool {
+    criadas > 0
+}
+
 /// Recrea ventanas nativas a partir de filas guardadas en SQLite (posición, tamaño).
 /// Usada tanto al arrancar la app (restaura todo lo que estaba `is_open = 1`) como al
 /// abrir un workspace guardado en caliente desde la UI.
@@ -45,8 +53,10 @@ pub(crate) fn usable_size(width: Option<i32>, height: Option<i32>) -> Option<(u3
 /// buscando por su propio label nativo, así que renombrar la fila es suficiente.
 ///
 /// Las filas sin tabs guardadas se omiten para no resucitar ventanas vacías.
-pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) -> Result<(), String> {
+pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) -> Result<usize, String> {
     let db = app.state::<DbConnection>();
+    // Quantas janelas novas subiram (a `reuse_main` não conta). Quem troca de workspace checa isso antes de fechar as antigas.
+    let mut criadas = 0usize;
     // Mutable: los labels que se generan dentro del loop se van agregando, para que dos
     // filas restauradas en la misma pasada no puedan pisarse entre sí.
     let mut live_labels: std::collections::HashSet<String> =
@@ -100,7 +110,10 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
         // layout: antes el `?` abortaba el loop entero y las filas que faltaban por
         // procesar no se restauraban ni quedaban marcadas como abiertas.
         match builder.build() {
-            Ok(_) => database::mark_window_open(&db, &w.id)?,
+            Ok(_) => {
+                database::mark_window_open(&db, &w.id)?;
+                criadas += 1;
+            }
             Err(e) => {
                 eprintln!("[restore_windows] no se pudo recrear la ventana '{label}': {e}");
                 live_labels.remove(&label);
@@ -121,7 +134,7 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
         crate::skills::reconcile_link_dirs_db(&db, &dirs);
     }
 
-    Ok(())
+    Ok(criadas)
 }
 
 /// A moldura de cada sistema. No macOS, a nativa com a barra de título `Overlay` e sem título: o conteúdo vai
@@ -214,7 +227,13 @@ pub async fn open_workspace(
         Vec::new()
     };
 
-    restore_windows(&app, rows, false)?;
+    // Primeiro o workspace novo; só depois as antigas saem. Se nenhuma janela nova subiu (o workspace não tinha
+    // filas úteis, ou todas falharam), abre uma em branco antes. Se ela também falhar, o `?` sai com as antigas
+    // ainda abertas: antes elas fechavam antes dessa checagem, e a última a sair deixava o app sem janela.
+    let criadas = restore_windows(&app, rows, false)?;
+    if !tem_janela_nova(criadas) {
+        spawn_blank_window(&app, &db, &workspace_id)?;
+    }
 
     for label in previously_open {
         if let Some(win) = app.get_webview_window(&label) {
@@ -332,6 +351,129 @@ pub fn focus_window(app: tauri::AppHandle, label: String) -> Result<(), String> 
     Ok(())
 }
 
+/// Se o primeiro quadro da principal não chegar, abre as janelas adiadas no prazo do backend.
+pub fn arm_deferred_deadline(app: &AppHandle) {
+    let handle = app.clone();
+    let prazo = super::startup::DEFERRED_RESTORE_DEADLINE;
+    armar_com_relogio(prazo, std::thread::sleep, move |decorrido| {
+        // A restauração cria WebViews: tem que correr no event loop, não na thread do relógio.
+        let principal = handle.clone();
+        if let Err(error) = handle.run_on_main_thread(move || restaurar_adiadas_se_prazo(&principal, decorrido, prazo)) {
+            eprintln!("[restore] não foi possível levar a restauração das janelas adiadas à thread principal: {error}");
+        }
+    });
+}
+
+/// Espera `prazo` no relógio injetado e só então chama `ao_vencer`. O teste troca o relógio por um canal.
+fn armar_com_relogio(
+    prazo: Duration,
+    dormir: impl FnOnce(Duration) + Send + 'static,
+    ao_vencer: impl FnOnce(Duration) + Send + 'static,
+) {
+    armar_com_relogio_com(prazo, dormir, ao_vencer, |corpo| {
+        std::thread::Builder::new()
+            .name("deferred-restore".into())
+            .spawn(corpo)
+            .map(|_| ())
+    });
+}
+
+fn armar_com_relogio_com(
+    prazo: Duration,
+    dormir: impl FnOnce(Duration) + Send + 'static,
+    ao_vencer: impl FnOnce(Duration) + Send + 'static,
+    criar: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<()>,
+) {
+    let job = std::sync::Arc::new(std::sync::Mutex::new(Some((dormir, ao_vencer))));
+    let job_na_thread = std::sync::Arc::clone(&job);
+    let resultado = criar(Box::new(move || {
+        if let Some((dormir, ao_vencer)) = job_na_thread
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .take()
+        {
+            dormir(prazo);
+            ao_vencer(prazo);
+        }
+    }));
+    if let Err(error) = resultado {
+        eprintln!("[restore] não foi possível criar a thread do relógio: {error}");
+        if let Some((_dormir, ao_vencer)) = job.lock().unwrap_or_else(|err| err.into_inner()).take() {
+            ao_vencer(prazo);
+        }
+    }
+}
+
+#[cfg(test)]
+mod prazo_test {
+    use super::*;
+    use crate::window::startup::DEFERRED_RESTORE_DEADLINE;
+    use std::sync::mpsc;
+
+    #[test]
+    fn o_prazo_espera_o_relogio_e_so_depois_avisa() {
+        let (dormiu, rx_dormiu) = mpsc::channel();
+        let (venceu, rx_venceu) = mpsc::channel();
+        armar_com_relogio(
+            DEFERRED_RESTORE_DEADLINE,
+            move |tempo| {
+                let _ = dormiu.send(tempo);
+            },
+            move |decorrido| {
+                let _ = venceu.send(decorrido);
+            },
+        );
+        let tempo = rx_dormiu.recv().expect("o relógio injetado não foi usado");
+        assert_eq!(tempo, DEFERRED_RESTORE_DEADLINE);
+        let decorrido = rx_venceu.recv().expect("o prazo não avisou depois do relógio");
+        assert_eq!(decorrido, DEFERRED_RESTORE_DEADLINE);
+    }
+
+    #[test]
+    fn falha_ao_criar_a_thread_do_relogio_restaura_na_hora() {
+        let (venceu, rx_venceu) = mpsc::channel();
+        armar_com_relogio_com(
+            DEFERRED_RESTORE_DEADLINE,
+            |_| panic!("não deveria esperar o relógio se a thread não subiu"),
+            move |decorrido| {
+                let _ = venceu.send(decorrido);
+            },
+            |_| Err(std::io::Error::other("sem recurso")),
+        );
+        let decorrido = rx_venceu
+            .try_recv()
+            .expect("a falha ao criar a thread do relógio tinha que restaurar as janelas na hora");
+        assert_eq!(decorrido, DEFERRED_RESTORE_DEADLINE);
+    }
+
+    #[test]
+    fn a_restauracao_do_prazo_vai_para_a_thread_principal() {
+        let fonte = include_str!("manager.rs");
+        let inicio = fonte.find("pub fn arm_deferred_deadline").expect("arm_deferred_deadline mudou de forma");
+        let resto = &fonte[inicio..];
+        let corpo = &resto[..resto.find("\n}\n").expect("fim de arm_deferred_deadline")];
+        assert!(corpo.contains("run_on_main_thread"), "o prazo restaura janelas fora do event loop");
+        assert!(corpo.contains("eprintln!"), "a falha ao despachar tem que ficar registrada");
+    }
+}
+
+fn restaurar_adiadas_se_prazo(app: &AppHandle, decorrido: Duration, prazo: Duration) {
+    let Some(deferred) = app.try_state::<super::startup::DeferredRestore>() else {
+        return;
+    };
+    let rows = deferred.on_deadline(decorrido, prazo);
+    if rows.is_empty() {
+        return;
+    }
+    eprintln!(
+        "[restore] o primeiro quadro não chegou em {prazo:?}; restaurando {} janela(s) adiada(s)",
+        rows.len()
+    );
+    if let Err(error) = restore_windows(app, rows, true) {
+        eprintln!("[restore] não foi possível restaurar as janelas adiadas: {error}");
+    }
+}
+
 /// Crea las ventanas que el arranque dejó esperando el primer cuadro de la principal.
 ///
 /// Idempotente: la primera llamada se las lleva, y las ventanas que ella misma abre
@@ -345,7 +487,7 @@ pub fn restore_deferred_windows(app: tauri::AppHandle) -> Result<(), String> {
     if rows.is_empty() {
         return Ok(());
     }
-    restore_windows(&app, rows, true)
+    restore_windows(&app, rows, true).map(|_| ())
 }
 
 /// Abre una nueva ventana nativa de Tauri.
@@ -404,5 +546,18 @@ mod bounds_test {
         assert_eq!(usable_position(Some(-1920), Some(3)), Some((-1920, 3)));
         assert_eq!(usable_size(Some(1400), Some(860)), Some((1400, 860)));
         assert_eq!(usable_position(None, Some(5)), None);
+    }
+}
+
+#[cfg(test)]
+mod abertura_test {
+    use super::tem_janela_nova;
+
+    /// Sem nenhuma janela criada, não há janela nova: a abertura tem que abrir a em branco antes de fechar as antigas.
+    #[test]
+    fn sem_janela_criada_nao_ha_janela_nova() {
+        assert!(!tem_janela_nova(0));
+        assert!(tem_janela_nova(1));
+        assert!(tem_janela_nova(3));
     }
 }

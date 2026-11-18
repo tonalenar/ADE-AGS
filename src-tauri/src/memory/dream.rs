@@ -283,6 +283,15 @@ pub fn validate_start(conn: &Connection, workspace: &str) -> Result<Value, Strin
     Ok(input)
 }
 
+/// O prompt do sonho: a instrução e o histórico (JSON com o texto das memórias) como DADO não confiável, no
+/// envelope único de `util::untrusted`. Um corpo com a tag de fechamento não fecha o bloco. Pura.
+pub fn prompt_for(input: &Value) -> String {
+    format!(
+        "Leia os dados e proponha somente melhorias justificadas.\n{}",
+        crate::util::untrusted::untrusted_block("historico-da-memoria", &input.to_string())
+    )
+}
+
 /// Called inside the proposal transaction, including direct core calls.
 pub fn validate_proposal(
     conn: &Connection,

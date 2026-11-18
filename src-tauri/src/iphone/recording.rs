@@ -14,6 +14,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -24,6 +25,11 @@ use super::mp4::{self, Mp4Writer, Sample, Summary};
 pub const FIRST_FRAME_WAIT: Duration = Duration::from_secs(6);
 /// Quanto esperar a finalização do arquivo ao parar.
 pub const FINISH_WAIT: Duration = Duration::from_secs(30);
+/// Quadros que podem esperar pelo disco. Passou disso, o disco não acompanha o vídeo e a gravação falha com aviso.
+/// A alternativa, descartar quadros, quebra as referências do H.265 até o próximo quadro-chave (o vídeo sai
+/// estragado sem aviso); crescer sem limite estoura a memória num disco parado (~30 quadros/s de 50–150 KB).
+/// Decisão: falhar com aviso, que é a opção conservadora.
+pub const QUEUE_LIMIT: usize = 240;
 
 /// Um quadro entregue pela sessão.
 pub struct Frame {
@@ -66,12 +72,26 @@ type Shared = Arc<(Mutex<Progress>, Condvar)>;
 
 /// A ponta que a sessão usa para entregar quadros (barata de clonar, sem trava).
 #[derive(Clone)]
-pub struct Tap(Sender<Cmd>);
+pub struct Tap {
+    tx: Sender<Cmd>,
+    /// Quadros enfileirados que o escritor ainda não pegou.
+    backlog: Arc<AtomicUsize>,
+    shared: Shared,
+}
 
 impl Tap {
     /// `false`: o gravador acabou (parou ou falhou); a sessão larga a ponta.
     pub fn push(&self, frame: Frame) -> bool {
-        self.0.send(Cmd::Frame(frame)).is_ok()
+        if self.backlog.load(Ordering::Acquire) >= QUEUE_LIMIT {
+            note_error(&self.shared, "O disco não acompanhou o vídeo e a gravação foi interrompida. Grave de novo.".into());
+            return false;
+        }
+        self.backlog.fetch_add(1, Ordering::AcqRel);
+        if self.tx.send(Cmd::Frame(frame)).is_ok() {
+            return true;
+        }
+        self.backlog.fetch_sub(1, Ordering::AcqRel);
+        false
     }
 }
 
@@ -79,22 +99,25 @@ impl Tap {
 pub struct Recording {
     tx: Sender<Cmd>,
     shared: Shared,
+    backlog: Arc<AtomicUsize>,
 }
 
 impl Recording {
     pub fn start(writer: impl Writer) -> Recording {
         let (tx, rx) = mpsc::channel();
         let shared: Shared = Arc::default();
+        let backlog = Arc::new(AtomicUsize::new(0));
         let worker = shared.clone();
-        let spawned = std::thread::Builder::new().name("ade-iphone-record".into()).spawn(move || run(writer, rx, worker));
+        let worker_backlog = backlog.clone();
+        let spawned = std::thread::Builder::new().name("ade-iphone-record".into()).spawn(move || run(writer, rx, worker, worker_backlog));
         if spawned.is_err() {
             note_error(&shared, "Não consegui abrir a thread da gravação.".into());
         }
-        Recording { tx, shared }
+        Recording { tx, shared, backlog }
     }
 
     pub fn tap(&self) -> Tap {
-        Tap(self.tx.clone())
+        Tap { tx: self.tx.clone(), backlog: self.backlog.clone(), shared: self.shared.clone() }
     }
 
     /// Espera o primeiro quadro estar no arquivo (ou o escritor falhar). Dorme no aviso, sem polling.
@@ -143,13 +166,14 @@ fn note_error(shared: &Shared, error: String) {
     shared.1.notify_all();
 }
 
-fn run(mut writer: impl Writer, rx: Receiver<Cmd>, shared: Shared) {
+fn run(mut writer: impl Writer, rx: Receiver<Cmd>, shared: Shared, backlog: Arc<AtomicUsize>) {
     let mut last_arrival: Option<Instant> = None;
     let mut failed = false;
     // Sem laço de espera: dorme no canal. O fim do canal (ninguém mais com `Tap` nem `Recording`) encerra.
     while let Ok(cmd) = rx.recv() {
         match cmd {
             Cmd::Frame(frame) => {
+                backlog.fetch_sub(1, Ordering::AcqRel);
                 if failed {
                     continue;
                 }
@@ -168,8 +192,11 @@ fn run(mut writer: impl Writer, rx: Receiver<Cmd>, shared: Shared) {
                 }
             }
             Cmd::Finish(reply) => {
-                let result = if failed {
-                    Err(shared.0.lock().unwrap_or_else(|e| e.into_inner()).error.clone().unwrap_or_else(|| "A gravação falhou.".into()))
+                // Um erro que chegou pela fila cheia também conta: o vídeo truncado não pode sair como sucesso.
+                let pending = shared.0.lock().unwrap_or_else(|e| e.into_inner()).error.clone();
+                let result = if failed || pending.is_some() {
+                    writer.abort();
+                    Err(pending.unwrap_or_else(|| "A gravação falhou.".into()))
                 } else {
                     let tail = last_arrival.map_or(Duration::ZERO, |at| at.elapsed());
                     let result = writer.finish(tail);

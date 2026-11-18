@@ -21,8 +21,13 @@ export async function loadRuntime(html: string, options: { fetch?: typeof fetch 
   document.documentElement.innerHTML = `<head><title>Teste</title></head><body>${html}</body>`;
   delete (window as { __agsPage?: boolean }).__agsPage;
   const sent: PageMessage[] = [];
+  /** Quem espera a resposta de cada orden, por id: o `page:reply` resuelve la promesa en el mismo `postMessage`. */
+  const waiting = new Map<string, (message: PageMessage & { type: "page:reply" }) => void>();
   const fakeParent = {
-    postMessage: (message: PageMessage) => { sent.push(message); },
+    postMessage: (message: PageMessage) => {
+      sent.push(message);
+      if (message.type === "page:reply") waiting.get(message.payload.id)?.(message as PageMessage & { type: "page:reply" });
+    },
   };
   Object.defineProperty(window, "parent", { value: fakeParent, configurable: true });
   (globalThis as { __ags_target?: string }).__ags_target = undefined;
@@ -54,21 +59,14 @@ export async function loadRuntime(html: string, options: { fetch?: typeof fetch 
   let seq = 0;
   const run = (command: PageCommand): Promise<unknown> => new Promise((resolve, reject) => {
     const id = `t${++seq}`;
-    const before = sent.length;
-    const poll = () => {
-      for (let i = before; i < sent.length; i++) {
-        const m = sent[i];
-        if (m.type === "page:reply" && m.payload.id === id) {
-          if (m.payload.ok) resolve(m.payload.result); else reject(new Error(m.payload.error));
-          return;
-        }
-      }
-      setTimeout(poll, 5);
-    };
+    // Sem polling: a resposta chega pelo `postMessage` do `fakeParent` e resolve a promessa ali mesmo.
+    waiting.set(id, (m) => {
+      waiting.delete(id);
+      if (m.payload.ok) resolve(m.payload.result); else reject(new Error(m.payload.error));
+    });
     window.dispatchEvent(new MessageEvent("message", {
       data: { source: "ade-ags", type: "page:run", id, command }, source: fakeParent as unknown as Window, origin: "http://app.test",
     }));
-    poll();
   });
   return { run, sent };
 }

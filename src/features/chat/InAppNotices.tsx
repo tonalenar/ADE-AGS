@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useChatLive } from "@/features/chat/liveStore";
+import { useCanvasStore } from "@/features/canvas/store";
 import { noticesBetween, noticeStatesOf, type ConversationNotice, type NoticeKind, type NoticeState } from "@/features/chat/noticeRules";
 import { useStructured } from "@/features/chat/structured/store";
 import { useConversations, useSelectedRef } from "@/features/chat/unified/useConversations";
@@ -49,6 +50,8 @@ export function InAppNotices() {
   const question = useChatLive((s) => s.question);
   const awaiting = useChatLive((s) => s.awaiting);
   const threads = useStructured((s) => s.live);
+  const canvasLoadError = useCanvasStore((s) => s.loadError);
+  const canvasSaveError = useCanvasStore((s) => s.saveError);
   const states = useMemo(
     () => noticeStatesOf(conversations.map((c) => c.ref), { phase, question, awaiting }, threads),
     [conversations, phase, question, awaiting, threads],
@@ -70,6 +73,18 @@ export function InAppNotices() {
       });
     }
   }, [states, selectedRef, enabled, conversations, t]);
+
+  useEffect(() => {
+    if (canvasLoadError) {
+      void AlertaToast(t("canvas.title"), t("canvas.loadError", { error: canvasLoadError }), "error", 15000);
+    }
+  }, [canvasLoadError, t]);
+
+  useEffect(() => {
+    if (canvasSaveError) {
+      void AlertaToast(t("canvas.title"), t("canvas.saveError", { error: canvasSaveError }), "error", 10000);
+    }
+  }, [canvasSaveError, t]);
 
   return null;
 }

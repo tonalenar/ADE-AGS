@@ -74,9 +74,10 @@ export function listenActivity() {
     if (kind === "action" && text.startsWith("start")) void refreshDevices();
   }).catch(() => { listening = false; });
   // O backend desligou um aparelho por economia (hibernou, ou outro foi ligado com "um por vez").
-  listen<{ udid: string; state: SimDevice["state"]; reason: "hibernated" | "single" }>("simulator-state", (e) => {
+  listen<{ udid: string; state: SimDevice["state"]; reason: "hibernated" | "single" | "reopened" }>("simulator-state", (e) => {
     const { udid, state, reason } = e.payload;
     setDeviceState(udid, state);
-    useSimulatorStore.setState((s) => ({ paused: { ...s.paused, [udid]: reason } }));
+    // "reopened": o backend religou o aparelho que começara a hibernar (uma tela abriu durante o desligamento). Não é pausa.
+    if (reason !== "reopened") useSimulatorStore.setState((s) => ({ paused: { ...s.paused, [udid]: reason } }));
   }).catch(() => undefined);
 }

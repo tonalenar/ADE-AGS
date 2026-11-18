@@ -154,6 +154,19 @@ impl Hid {
         self.dtu.is_some()
     }
 
+    /// A marca antes de um gesto de agente: `confirm` diz depois se alguma entrega desde ela falhou.
+    pub fn mark(&self) -> u64 {
+        self.dtu.as_ref().map_or(0, |dtu| dtu.failures())
+    }
+
+    /// Espera o que já foi mandado chegar ao `dtuhidd` e diz se alguma entrega desde `mark` falhou. Sem isso o
+    /// agente recebia "ok" para um toque que não chegou ao aparelho.
+    pub fn confirm(&self, mark: u64) -> Result<(), String> {
+        let Some(dtu) = &self.dtu else { return Ok(()) };
+        dtu.drain();
+        super::super::model::delivery_check(mark, dtu.failures())
+    }
+
     pub fn button(&self, source: i32, down: bool) -> Result<(), String> {
         if let Some(dtu) = &self.dtu {
             dtu.button(dtu::button_usage(source).ok_or("Esse botão não existe no HID novo.")?, down);

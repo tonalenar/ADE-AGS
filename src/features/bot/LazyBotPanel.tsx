@@ -1,5 +1,6 @@
-import { lazy, Suspense, useState } from "react";
+import { Suspense, useState } from "react";
 
+import { lazyWithRetry } from "@/app/lazyWithRetry";
 import { useBotPanelStore } from "./botPanelStore";
 
 /**
@@ -7,7 +8,7 @@ import { useBotPanelStore } from "./botPanelStore";
  * entry e os hooks dele (pet, conversas ao vivo) rodavam com o painel fechado. Depois de aberto uma
  * vez fica montado, para guardar a aba e a missão escolhidas.
  */
-const Impl = lazy(() => import("./BotPanel").then((m) => ({ default: m.BotPanel })));
+const Impl = lazyWithRetry(() => import("./BotPanel").then((m) => ({ default: m.BotPanel })));
 
 export function BotPanel() {
   const open = useBotPanelStore((s) => s.open);

@@ -228,7 +228,7 @@ pub fn mission_tokens_for_conn(
     conn: &Connection,
     mission_id: &str,
 ) -> Result<MissionTokens, String> {
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards()?;
     let snapshot = mission_usage_snapshot(conn, mission_id, &boards)?;
     mission_tokens_from_snapshot(mission_id, snapshot)
 }
@@ -248,7 +248,7 @@ pub(crate) fn mission_tokens_for_db_with(
     mission_id: &str,
     antes_do_io: impl FnOnce(),
 ) -> Result<MissionTokens, String> {
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards()?;
     let snapshot = {
         let conn = db.lock().map_err(|error| error.to_string())?;
         mission_usage_snapshot(&conn, mission_id, &boards)?

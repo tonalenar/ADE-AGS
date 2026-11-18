@@ -8,6 +8,7 @@ import { Modal, Progress } from "neogestify-ui-components";
 
 import i18n from "@/i18n";
 import { saveForClose, type SaveStep } from "@/features/tabs/persistence";
+import { flushCanvasSavesForClose } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { ptyKill } from "@/features/terminal/ipc";
 import { closeAndForgetWindow, confirmExitAll } from "@/shared/ipc/window";
@@ -171,6 +172,7 @@ export async function closeWindowWithSave(mode: "button" | "system"): Promise<vo
         total = windowTotal + extra;
         alert.render(done, total, stepLabel(step));
       });
+      await flushCanvasSavesForClose();
       await saveSites(sites, (origin) => tick({ kind: "site", origin }));
       await killTerminals(terms, (title) => tick({ kind: "kill", title }));
     })());
@@ -292,6 +294,7 @@ export function installCloseListeners(): () => void {
         total = windowTotal + terms.length;
         report(step);
       }).catch(console.error);
+      await flushCanvasSavesForClose().catch(console.error);
       await killTerminals(terms, (title) => { done += 1; report({ kind: "kill", title }); });
     }),
   ];

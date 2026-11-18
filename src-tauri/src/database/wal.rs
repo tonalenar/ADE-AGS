@@ -57,7 +57,8 @@ pub(crate) fn checkpoint_wal_with(_db: &DbConnection, db_file: &Path, ceiling: u
 pub fn spawn_wal_maintenance(db: DbConnection) {
     let _ = std::thread::Builder::new().name("wal-checkpoint".into()).spawn(move || {
         super::connection::wait_until_db_ready();
-        let path = user_db_path();
+        // Sem pasta de dados não há base para checkpointar: a thread simplesmente termina.
+        let Some(path) = user_db_path() else { return };
         loop {
             std::thread::sleep(INTERVAL);
             let _ = checkpoint_wal(&db, &path, WAL_CHECKPOINT_CEILING);

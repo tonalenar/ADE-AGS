@@ -10,6 +10,8 @@
  * Este archivo es la lógica pura (probada en `tests/viewTabs.test.ts`); el store la usa.
  */
 
+import { isLocalOrigin } from "@/features/browser/egressPolicy";
+
 interface ViewBase {
   id: string;
   /** El workspace al que pertenece. La barra solo muestra las del workspace activo. */
@@ -192,15 +194,10 @@ export function normalizeUrl(input: string): string | null {
 }
 
 /** ¿Es un servidor de esta máquina? Es lo que se abre en una tab en vez del navegador del
- *  sistema al hacer click en un link de la terminal. */
+ *  sistema al hacer click en un link de la terminal. Es la MISMA regra de origem local de la
+ *  política de saída (`egressPolicy.ts`): así `0.0.0.0` y `127.0.0.1.evil.com` no son locales. */
 export function isLocalUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
-    return host === "localhost" || host.endsWith(".localhost") || host === "0.0.0.0"
-      || host === "::1" || host.startsWith("127.") || host.endsWith(".local");
-  } catch {
-    return false;
-  }
+  return isLocalOrigin(url);
 }
 
 /**

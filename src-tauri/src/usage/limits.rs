@@ -149,31 +149,37 @@ pub async fn plan_limits(
 ) -> Result<Vec<PlanLimits>, String> {
     let db = db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        // A leitura dos transcripts e do canvas acontece sem o mutex do banco.
         let limits = limits_for_db(&db, codex)?;
-        let boards = crate::canvas::load_boards();
-        let mut warnings = Vec::new();
-        {
+        let boards = crate::canvas::load_boards()?;
+        let warnings = {
             let c = db.lock().map_err(|e| e.to_string())?;
             super::capture_mission_tabs(&c, &boards)?;
-        for limit in &limits {
-            let agent=if limit.provider=="codex" {"codex"} else {"claude-code"};
-            for window in limit.windows.iter().filter(|w|w.used_pct.is_some_and(|p|p>=80.0)) {
-                let mut stmt=c.prepare("SELECT DISTINCT u.mission_id FROM mission_usage_tabs u JOIN missions m ON m.id=u.mission_id JOIN tabs t ON t.id=u.tab_id WHERE u.agent_id=?1 AND u.account_id IS ?2 AND m.status NOT IN ('done','cancelled','failed')").map_err(|e|e.to_string())?;
-                for row in stmt.query_map(rusqlite::params![agent,limit.account_id],|r|r.get::<_,String>(0)).map_err(|e|e.to_string())? {
-                    let mission=row.map_err(|e|e.to_string())?;
-                    let key=format!("mission.plan.warning.{mission}.{agent}.{:?}.{}.{:?}",limit.account_id,window.label,window.resets_at);
-                    if c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES (?1,'1')",[key]).map_err(|e|e.to_string())?>0 {
-                        warnings.push((mission, format!("[AGS] {agent}: janela {} a {:.0}% do limite do plano (conta {:?}).",window.label,window.used_pct.unwrap_or(0.0),limit.account_id)));
+            let mut warnings = Vec::new();
+            for limit in &limits {
+                let agent = if limit.provider == "codex" { "codex" } else { "claude-code" };
+                for window in limit.windows.iter().filter(|w| w.used_pct.is_some_and(|p| p >= 80.0)) {
+                    let mut stmt = c.prepare(
+                        "SELECT DISTINCT u.mission_id FROM mission_usage_tabs u JOIN missions m ON m.id=u.mission_id JOIN tabs t ON t.id=u.tab_id WHERE u.agent_id=?1 AND u.account_id IS ?2 AND m.status NOT IN ('done','cancelled','failed')"
+                    ).map_err(|e| e.to_string())?;
+                    for row in stmt.query_map(rusqlite::params![agent, limit.account_id], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())? {
+                        let mission = row.map_err(|e| e.to_string())?;
+                        let key = format!("mission.plan.warning.{mission}.{agent}.{:?}.{}.{:?}", limit.account_id, window.label, window.resets_at);
+                        if c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES (?1,'1')", [key]).map_err(|e| e.to_string())? > 0 {
+                            warnings.push((mission, format!("[AGS] {agent}: janela {} a {:.0}% do limite do plano (conta {:?}).", window.label, window.used_pct.unwrap_or(0.0), limit.account_id)));
+                        }
                     }
                 }
             }
-        }
-        }
+            warnings
+        };
         for (mission, message) in warnings {
             super::warn_lead(&app, &mission, &message);
         }
         Ok(limits)
-    }).await.map_err(|e|e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

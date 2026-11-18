@@ -145,8 +145,7 @@ pub fn delete_workspace_windows(db: &DbConnection, workspace_id: &str) -> Result
             })
             .collect()
     };
-
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards()?;
     let conn = db.lock().map_err(|e| e.to_string())?;
 
     // Antes de perder todo (cascada windows→tabs→project_skills.tab_id), archivar cada
