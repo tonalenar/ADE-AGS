@@ -13,6 +13,11 @@ use tauri::AppHandle;
 #[cfg(target_os = "macos")]
 use super::model::{self, Edge, TouchPhase};
 
+/// Quanto o dedo fica na tela num toque de agente. Com 60 ms, medido no Google Maps pelo Wi-Fi (18/11/2026), 2 de 6
+/// toques em "Iniciar" não pegavam: o HID aceitava, o app ignorava. Com 150 ms, 12 de 13 pegaram (a outra rodada
+/// terminou numa tela que não deu para classificar). Fica bem abaixo dos ~500 ms em que o iOS passa a ler toque longo.
+pub const TAP_HOLD_MS: u64 = 150;
+
 /// Quanto esperar o aparelho ficar pronto para o toque (abrir o túnel e o vídeo leva de 1 a 8 s no Wi-Fi).
 pub const READY_WAIT: Duration = Duration::from_secs(20);
 
@@ -97,7 +102,7 @@ mod mac {
         let r = ready(app, device)?;
         let p = model::point_ratio(x, y, r.points()?)?;
         r.input.send_checked(vec![model::touch_line(TouchPhase::Start, p, None, Edge::None)])?;
-        pause(60);
+        pause(TAP_HOLD_MS);
         r.input.send_checked(vec![model::touch_line(TouchPhase::End, p, None, Edge::None)])?;
         Ok(())
     }

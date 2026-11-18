@@ -1132,6 +1132,7 @@
   "app.routeError.reload": "Reload",
   "app.panelError.title": "This panel hit an error",
   "app.panelError.retry": "Try again",
+  "app.panelError.copy": "Copy details",
   "rail.workspaces": "Workspaces",
   "workspaces.changed": "{{n}} uncommitted",
   "workspaces.new": "Open a new agent",

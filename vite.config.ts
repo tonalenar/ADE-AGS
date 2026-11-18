@@ -96,6 +96,11 @@ export default defineConfig(async () => ({
     },
   },
 
+  // Mantém os nomes das funções e dos componentes no bundle minificado: a pilha que o `PanelBoundary` guarda e copia
+  // ("Copiar detalhes") precisa dizer QUAL componente quebrou. Sem isto ela vinha com nomes de uma letra, e um
+  // "Maximum update depth exceeded" na build instalada não tinha como ser rastreado.
+  esbuild: { keepNames: true },
+
   build: {
     // El bundle solo corre dentro del webview que empaqueta Tauri, no en navegadores
     // arbitrarios: se compila contra ese motor concreto (WebView2 en Windows, WebKit en

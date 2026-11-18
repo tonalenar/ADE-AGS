@@ -105,7 +105,16 @@ pub enum Failure {
     AccessibilityPermission,
     ScreenRecordingPermission,
     OutsideScope,
+    /// Falha sem etapa conhecida (o `?` sobre um `String`).
     Operation,
+    /// Não deu para ver a tela (foto, OCR ou leitura do driver); nada foi consultado nem feito.
+    Observe,
+    /// O provedor (Jev) não respondeu à observação; nada foi feito.
+    Decide,
+    /// A ação foi tentada e não chegou à superfície.
+    Execute,
+    /// O iPhone físico não ficou pronto para o toque (espelho ou HID não abriram a tempo); nada foi feito.
+    DeviceNotReady,
     Timeout,
 }
 
@@ -130,6 +139,18 @@ impl Failure {
             }
             Self::Operation => {
                 "A superfície ou o provedor falhou. Não repeti a ação; observe a tela antes de continuar."
+            }
+            Self::Observe => {
+                "Não consegui ver a tela da superfície (a foto ou a leitura falhou); nada foi feito. Confira se o aparelho está conectado e tire uma foto antes de tentar de novo."
+            }
+            Self::Decide => {
+                "O provedor não respondeu à observação da tela; nada foi feito. Tente de novo ou toque por coordenadas."
+            }
+            Self::DeviceNotReady => {
+                "O iPhone físico não ficou pronto para o toque: o espelho ou o HID não abriu a tempo, e nada foi feito. Abra o aparelho no painel do chat (ou reconecte-o) e tente de novo."
+            }
+            Self::Execute => {
+                "A ação não chegou à superfície. Não repeti a ação; observe a tela antes de continuar."
             }
         }
     }
@@ -350,7 +371,7 @@ fn run_inner(
     // Há sempre uma leitura final, mesmo quando a última ação esgota o orçamento.
     for turn in 0..=request.steps {
         surface.authorize()?;
-        let observation = surface.observe()?;
+        let observation = surface.observe().map_err(|_| Failure::Observe)?;
         report.observations += 1;
         if report.effects.len() < report.actions.len() {
             let effect = last.as_ref().zip(observation.pixels.as_ref()).and_then(|(a, b)| visual::effect(a, b));
@@ -393,7 +414,7 @@ fn run_inner(
             ));
         }
         report.queries += 1;
-        let decision = decider.decide(&provider_goal, &observation, &report.actions)?;
+        let decision = decider.decide(&provider_goal, &observation, &report.actions).map_err(|_| Failure::Decide)?;
         if !decision.probability.is_finite() || !(0.4..=1.0).contains(&decision.probability) {
             return Ok((
                 Status::Unsure,
@@ -472,7 +493,7 @@ fn run_inner(
         surface.authorize()?;
         // Registra ANTES da chamada, pois um erro pode acontecer depois de o SO aplicar o efeito.
         report.actions.push(action.clone());
-        if !surface.execute(&observation.revision, &action, value)? {
+        if !surface.execute(&observation.revision, &action, value).map_err(|_| Failure::Execute)? {
             report.actions.pop();
         }
         previous.push(signature);
