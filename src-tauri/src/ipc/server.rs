@@ -12,7 +12,8 @@ use uuid::Uuid;
 use super::commands;
 use super::intake::{self, Intake, Slot, Slots};
 use super::protocol::{
-    handshake_path, instance_handshake_path, Handshake, Request, Response, HANDSHAKE_ENV, PROTOCOL_VERSION,
+    HANDSHAKE_ENV, Handshake, PROTOCOL_VERSION, Request, Response, handshake_path,
+    instance_handshake_path,
 };
 
 /// Cada cuánto se revisa que los handshakes sigan apuntando a esta instancia.
@@ -25,7 +26,11 @@ pub(super) fn token_matches(given: &str, expected: &str) -> bool {
     if given.len() != expected.len() {
         return false;
     }
-    given.iter().zip(expected).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+    given
+        .iter()
+        .zip(expected)
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0
 }
 
 /// Exporta [`HANDSHAKE_ENV`] con el handshake propio de esta instancia, para que lo hereden
@@ -61,7 +66,12 @@ fn try_start(app: AppHandle) -> Result<(), String> {
     let endpoint = super::protocol::credential_endpoint(pid);
     // Cada canal com as suas vagas (F-03): quem enche o TCP não tira vaga do canal de credencial.
     let tcp_slots = Slots::new();
-    let socket = match super::transport::start_credential_server(app.clone(), token.clone(), endpoint.clone(), Slots::new()) {
+    let socket = match super::transport::start_credential_server(
+        app.clone(),
+        token.clone(),
+        endpoint.clone(),
+        Slots::new(),
+    ) {
         Ok(()) => Some(endpoint),
         Err(error) => {
             eprintln!("[ade-ags] socket de credencial indisponível: {error}");
@@ -95,8 +105,11 @@ fn try_start(app: AppHandle) -> Result<(), String> {
             // Un cliente lento (o que abre la conexión y no manda nada) no debe bloquear
             // a los demás, así que cada conexión se atiende en su propio thread.
             std::thread::spawn(move || {
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(intake::READ_TIMEOUT_SECS)));
-                let Ok(writer) = stream.try_clone() else { return };
+                let _ =
+                    stream.set_read_timeout(Some(Duration::from_secs(intake::READ_TIMEOUT_SECS)));
+                let Ok(writer) = stream.try_clone() else {
+                    return;
+                };
                 // TCP não entrega PID. Memória e swarm fecham sem ele.
                 handle_connection(stream, writer, &app, &token, None, slot);
             });
@@ -152,9 +165,14 @@ fn create_private_dir(dir: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir).map_err(|e| e.to_string())?;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .map_err(|e| e.to_string())?;
         if dir.file_name().is_some_and(|name| name == "ipc") {
-            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+                .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -188,7 +206,11 @@ fn is_alive(handshake: &Handshake) -> bool {
 /// Solo se reescribe cuando falta, no se entiende o es de una instancia muerta. Si es de
 /// otra instancia viva se respeta: pelearse por el archivo lo reescribiría cada pocos
 /// segundos, y los agentes de cada una ya van a la suya por [`HANDSHAKE_ENV`].
-pub(super) fn global_needs_rewrite(current: Option<&Handshake>, own_pid: u32, alive: impl Fn(&Handshake) -> bool) -> bool {
+pub(super) fn global_needs_rewrite(
+    current: Option<&Handshake>,
+    own_pid: u32,
+    alive: impl Fn(&Handshake) -> bool,
+) -> bool {
     match current {
         None => true,
         Some(h) if h.pid == own_pid => false,
@@ -220,7 +242,9 @@ fn watch_handshakes(own: &Handshake) {
 pub fn other_instance_alive() -> bool {
     let own = std::process::id();
     let dir = instance_handshake_path(0).parent().map(Path::to_path_buf);
-    let Some(entries) = dir.and_then(|d| std::fs::read_dir(d).ok()) else { return false };
+    let Some(entries) = dir.and_then(|d| std::fs::read_dir(d).ok()) else {
+        return false;
+    };
     entries
         .flatten()
         .filter_map(|entry| read_handshake(&entry.path()))
@@ -231,7 +255,9 @@ pub fn other_instance_alive() -> bool {
 /// no llegó a hacerlo.
 fn sweep_dead_instances() {
     let dir = instance_handshake_path(0).parent().map(Path::to_path_buf);
-    let Some(entries) = dir.and_then(|d| std::fs::read_dir(d).ok()) else { return };
+    let Some(entries) = dir.and_then(|d| std::fs::read_dir(d).ok()) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         let dead = match read_handshake(&path) {
@@ -276,7 +302,13 @@ pub(super) fn handle_connection(
     let started = std::time::Instant::now();
     let mut now_ms = || started.elapsed().as_millis() as u64;
     let mut budget = intake::InFlightBytes::empty();
-    let line = match intake::read_request(&mut reader, expected_token, &mut now_ms, &mut || slot.authenticated(), &mut budget) {
+    let line = match intake::read_request(
+        &mut reader,
+        expected_token,
+        &mut now_ms,
+        &mut || slot.authenticated(),
+        &mut budget,
+    ) {
         Intake::Line(line) => line,
         Intake::Closed => return,
         Intake::Refused(message) => {
@@ -288,7 +320,7 @@ pub(super) fn handle_connection(
     };
 
     let mut command = String::new();
-    let response = match serde_json::from_str::<Request>(&line) {
+    let mut response = match serde_json::from_str::<Request>(&line) {
         Err(e) => Response::err(format!("Requisição inválida: {e}")),
         Ok(req) if !token_matches(&req.token, expected_token) => {
             Response::err("Token inválido — leia de novo ~/.ags/ipc.json")
@@ -303,15 +335,20 @@ pub(super) fn handle_connection(
         }
     };
 
-    if let Ok(json) = serde_json::to_string(&response) {
-        // Fase 9: se contabiliza lo que la CLI se lleva de verdad — el JSON ya serializado,
-        // no una estimación de antes de armarlo. Es el número que ve el usuario en el
-        // indicador de la UI. Las requests rechazadas (token inválido) no cuentan: no
-        // salieron de ningún orquestador nuestro.
-        if !command.is_empty() {
+    if let Ok(mut json) = serde_json::to_string(&response) {
+        let credential = command == "credential.redeem";
+        // O segredo atravessa o socket, mas nunca entra no histórico de uso nem em logs.
+        if !credential && !command.is_empty() {
             crate::orchestrator::record_response(app, &command, &json);
         }
-        let _ = writeln!(writer, "{json}");
+        let _ = writer.write_all(json.as_bytes());
+        let _ = writer.write_all(b"\n");
         let _ = writer.flush();
+        if credential {
+            crate::accounts::broker::wipe_secret(&mut json);
+            if let Some(serde_json::Value::String(secret)) = response.data.as_mut() {
+                crate::accounts::broker::wipe_secret(secret);
+            }
+        }
     }
 }

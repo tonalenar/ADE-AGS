@@ -66,7 +66,9 @@ export function useMemoryPendingNotice(workspaceId: string): void {
 
       for (const owner of grownOwners(previousCounts, nextCounts)) {
         try {
+          if (!active) return;
           const page = await memoryIpc.listMemory(workspaceId, owner);
+          if (!active) return;
           for (const entry of newAgentProposals(page.items, seen)) {
             seen.add(pendingKeyOf(entry));
             showBotToast({

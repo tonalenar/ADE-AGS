@@ -17,6 +17,7 @@ import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { showWorktreeTrustWarnings } from "@/features/missions/trustWarning";
 import { appConfirm } from "@/shared/ui/appConfirm";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 import { tuiMessage } from "@/features/chat/attachments/send";
 import type { Attachment } from "@/features/chat/attachments/attachModel";
 
@@ -69,12 +70,15 @@ export async function startComparison(input: StartInput): Promise<Comparison> {
     return { entry, tabId };
   });
 
-  let saved = cmp;
+  // Sem o attach a comparação não existe: não vai ao store nem ao canvas, e o erro volta ao diálogo.
+  let saved: typeof cmp | null;
   try {
     saved = await compareAttach(cmp.id, opened.map((o) => ({ pick: o.entry.pick, tabId: o.tabId })));
   } catch (e) {
-    console.error(e);
+    throw new Error(uiErrorText(e));
   }
+  // Um attach que volta sem a comparação também é falha: sem ela o canvas e o store não podem ser montados.
+  if (!saved) throw new Error(t("compare.error.attach"));
   upsertComparison(saved);
 
   const key = compareBoardKey(input.cwd, cmp.id);

@@ -5,6 +5,9 @@
  */
 import { create } from "zustand";
 
+import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
+import i18n from "i18next";
 import { compareList, compareStatus } from "./ipc";
 import type { Comparison, EntryStatus } from "./types";
 import type { PickDraft } from "./types";
@@ -21,6 +24,7 @@ interface CompareState {
   dialog: { cwd: string; prompt?: string; picks?: PickDraft[]; attachments?: Attachment[] } | null;
   comparisons: Comparison[];
   loaded: boolean;
+  error: string | null;
   /** O que cada agente mudou, por comparação e `pick`. */
   statuses: Record<string, Record<string, EntryStatus>>;
   /** Abas que ainda não receberam o pedido (a TUI está abrindo). Só desta execução. */
@@ -29,7 +33,7 @@ interface CompareState {
   diff: { comparisonId: string; pick: string } | null;
 }
 
-export const useCompareStore = create<CompareState>(() => ({ dialog: null, comparisons: [], loaded: false, statuses: {}, pending: {}, diff: null }));
+export const useCompareStore = create<CompareState>(() => ({ dialog: null, comparisons: [], loaded: false, error: null, statuses: {}, pending: {}, diff: null }));
 
 export function openCompareDialog(cwd = "", seed: CompareDialogSeed = {}): void {
   useCompareStore.setState({ dialog: { cwd, ...seed } });
@@ -63,10 +67,10 @@ export function upsertComparison(cmp: Comparison): void {
 
 export async function loadComparisons(): Promise<void> {
   try {
-    useCompareStore.setState({ comparisons: await compareList(), loaded: true });
+    useCompareStore.setState({ comparisons: await compareList(), loaded: true, error: null });
   } catch (e) {
-    console.error(e);
-    useCompareStore.setState({ loaded: true });
+    AlertaToast(i18n.t("compare.title"), uiErrorText(e), "error", 6000);
+    useCompareStore.setState({ loaded: true, error: uiErrorText(e) });
   }
 }
 
@@ -76,6 +80,6 @@ export async function refreshStatus(id: string): Promise<void> {
     const byPick = Object.fromEntries(list.map((s) => [s.pick, s]));
     useCompareStore.setState({ statuses: { ...useCompareStore.getState().statuses, [id]: byPick } });
   } catch (e) {
-    console.error(e);
+    AlertaToast(i18n.t("compare.title"), uiErrorText(e), "error", 6000);
   }
 }

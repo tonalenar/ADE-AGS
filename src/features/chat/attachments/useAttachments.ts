@@ -16,6 +16,11 @@ export function fromInspected(info: Inspected): Attachment {
   };
 }
 
+/** Solta a prévia `blob:` de um anexo que não vai para a lista. */
+function revokePreview(a: Attachment): void {
+  if (a.preview?.startsWith("blob:")) URL.revokeObjectURL(a.preview);
+}
+
 /** Os caminhos de uma lista `text/uri-list` (arquivos copiados no Finder); só `file://`. Pura. */
 export function pathsFromUriList(list: string): string[] {
   return list.split(/\r?\n/)
@@ -57,8 +62,13 @@ export function useAttachments() {
   }, [t]);
 
   const add = useCallback((incoming: Attachment[], extra: string[] = []) => {
-    if (!mountedRef.current) return false;
+    if (!mountedRef.current) {
+      incoming.forEach(revokePreview);
+      return false;
+    }
     const next = addAttachments(current.current, incoming);
+    // O que o limite (ou um caminho repetido) deixou de fora não chega à lista: a prévia dele não pode ficar presa.
+    for (const a of incoming) if (!next.list.includes(a)) revokePreview(a);
     current.current = next.list;
     setList(next.list);
     setNotices([...extra, ...next.rejected.map(describe)]);
@@ -104,7 +114,7 @@ export function useAttachments() {
           if (mountedRef.current) extra.push(t("chat.attach.notice.saveFailed", { name, error: String(e) }));
         }
       }
-      if (mountedRef.current) add(out, extra);
+      add(out, extra);
     } finally {
       endIngestion();
     }

@@ -12,11 +12,13 @@ let root: Root;
 let host: HTMLDivElement;
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-01-01T00:01:05Z"));
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
 });
-afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); });
+afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); vi.useRealTimers(); });
 
 const COMMAND = 'export PATH="$HOME/.local/bin:$PATH"; cd /tmp/e2e && ./e2e.sh J4b';
 
@@ -26,6 +28,7 @@ describe("a linha viva acima do composer", () => {
     await act(async () => { root.render(<ActivityLine live={running} startedAt={null} />); });
     const status = host.querySelector("[role='status']") as HTMLElement;
     expect(status.textContent).toContain("chat.timeline.working");
+    expect(status.textContent).toContain("1 min 5 s");
     expect(status.textContent).not.toContain("export PATH");
     expect(status.textContent).not.toContain("chat.live.command");
     expect(host.querySelector("button[aria-expanded]")?.textContent).toBe("chat.live.show");

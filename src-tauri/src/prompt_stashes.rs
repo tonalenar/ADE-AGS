@@ -16,7 +16,8 @@ const MAX_PENDING: usize = 10;
 const MAX_INDEX_BYTES: usize = 16 * 1024;
 const MAX_MANIFEST_BYTES: usize = 1024;
 const MAX_STASH_BYTES: usize = 32 * 1024;
-const CHUNK_BYTES: usize = 1800;
+// 1200 bytes UTF-8 ocupam no máximo 2400 bytes UTF-16 no keyring do Windows.
+const CHUNK_BYTES: usize = 1200;
 const MAX_CHUNKS: usize = (MAX_STASH_BYTES + CHUNK_BYTES - 1) / CHUNK_BYTES;
 const MAX_ATTACHMENTS: usize = 10;
 const MAX_QUOTES: usize = 10;
@@ -637,4 +638,22 @@ pub async fn chat_prompt_stash_delete(id: String) -> Result<(), String> {
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn blocos_de_rascunho_respeitam_limite_windows_do_keyring() {
+        let text = "a".repeat(super::MAX_STASH_BYTES);
+        let chunks = super::split_chunks(&text);
+        assert!(chunks.len() <= super::MAX_CHUNKS);
+        for chunk in chunks {
+            assert!(chunk.len() <= super::CHUNK_BYTES);
+            assert!(
+                chunk.encode_utf16().count() * 2 <= 2560,
+                "bloco de {} bytes UTF-16",
+                chunk.encode_utf16().count() * 2
+            );
+        }
+    }
 }

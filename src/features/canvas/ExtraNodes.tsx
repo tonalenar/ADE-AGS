@@ -87,6 +87,28 @@ export type ImageFlowNode = Node<ImageNodeData, "image">;
 
 /** Las que ya se leyeron del disco: un nodo se renderiza muchas veces y la imagen pesa. */
 const loaded = new Map<string, string>();
+const refs = new Map<string, number>();
+
+export function peekImageAsset(asset: string): string | undefined {
+  return loaded.get(asset);
+}
+
+export function acquireImageAsset(asset: string, url: string): string {
+  loaded.set(asset, url);
+  refs.set(asset, (refs.get(asset) ?? 0) + 1);
+  return url;
+}
+
+export function releaseImageAsset(asset: string): string | undefined {
+  const next = (refs.get(asset) ?? 0) - 1;
+  if (next <= 0) {
+    refs.delete(asset);
+    loaded.delete(asset);
+    return undefined;
+  }
+  refs.set(asset, next);
+  return loaded.get(asset);
+}
 
 /**
  * Una imagen en el canvas (una captura, un diseño, un diagrama). Decoración, como el texto.
@@ -100,16 +122,25 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<I
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (loaded.has(image.asset)) return setSrc(loaded.get(image.asset) ?? null);
+    const cached = peekImageAsset(image.asset);
+    if (cached) {
+      acquireImageAsset(image.asset, cached);
+      setSrc(cached);
+      return () => { releaseImageAsset(image.asset); };
+    }
     let alive = true;
+    let held = false;
     invoke<string>("canvas_asset_load", { id: image.asset })
       .then((url) => {
-        loaded.set(image.asset, url);
-        if (alive) setSrc(url);
+        if (!alive) return;
+        acquireImageAsset(image.asset, url);
+        held = true;
+        setSrc(url);
       })
       .catch(() => alive && setFailed(true));
     return () => {
       alive = false;
+      if (held) releaseImageAsset(image.asset);
     };
   }, [image.asset]);
 

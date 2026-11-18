@@ -226,8 +226,9 @@ export function hydrateThread(id: string): Promise<void> {
           ...live,
           // O que chegou por evento enquanto lia fica (é mais novo).
           items: [...items.filter((i) => !live.items.some((x) => x.id === i.id)), ...live.items],
-          // Uma caixa vazia confirma a resolução dos pedidos anteriores à leitura; eventos recebidos depois prevalecem.
-          requests: requests.length > 0 ? requests : live.requests.filter((request) => (requestArrivals[request.id] ?? 0) > readSeq),
+          // Mantém eventos que chegaram durante a leitura, inclusive quando ela também trouxe pedidos.
+          // Uma caixa vazia confirma a resolução dos pedidos anteriores ao início da leitura.
+          requests: requestsAfterRead(requests, live.requests, requestArrivals, readSeq),
           phase: status.working ? "working" : live.phase,
           providerConfig: providerConfig ?? live.providerConfig,
         }));
@@ -257,6 +258,12 @@ export function retryThreadHydration(id: string): void {
 function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
   const { [key]: _removed, ...rest } = record;
   return rest;
+}
+
+/** Os pedidos da leitura, mais os que chegaram por evento enquanto ela corria (a leitura não os viu). Pura. */
+function requestsAfterRead<T extends { id: string }>(read: T[], live: T[], arrivals: Record<string, number>, readSeq: number): T[] {
+  const ids = new Set(read.map((r) => r.id));
+  return [...read, ...live.filter((r) => !ids.has(r.id) && (arrivals[r.id] ?? 0) > readSeq)];
 }
 
 /** Mostra uma conversa por protocolo. */

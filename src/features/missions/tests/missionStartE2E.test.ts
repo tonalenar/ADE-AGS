@@ -45,7 +45,11 @@ vi.mock("@/features/accounts/store", () => ({
 vi.mock("@/features/tabs/store", () => ({
   useTabsStore: {
     getState: () => ({
-      addTab: mocks.addTab,
+      addTab: (...args: unknown[]) => {
+        const id = mocks.addTab(...args) as string;
+        if (id) mocks.tabs.push({ id, ptyId: 1 });
+        return id;
+      },
       activateTab: mocks.activateTab,
       detectedAgents: [
         { id: "codex", command: "codex", available: true },
@@ -200,6 +204,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    mocks.tabs.length = 0;
     recordedSpans.length = 0;
     cleanups.splice(0, cleanups.length).forEach((fn) => fn());
     mocks.tabs.length = 0;

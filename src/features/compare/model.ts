@@ -131,7 +131,7 @@ export function hardBlocked(report: readonly RemoveEntry[]): RemoveEntry[] {
 /** Linhas de um diff com o tipo de cada uma, para pintar. */
 export function diffLines(patch: string): { text: string; kind: "add" | "del" | "hunk" | "meta" | "ctx" }[] {
   return patch.split("\n").map((text) => {
-    if (text.startsWith("+++") || text.startsWith("---") || text.startsWith("diff --git") || text.startsWith("index ")) return { text, kind: "meta" as const };
+    if (text.startsWith("diff --git") || text.startsWith("index ") || text.startsWith("+++ ") || text.startsWith("--- ")) return { text, kind: "meta" as const };
     if (text.startsWith("@@")) return { text, kind: "hunk" as const };
     if (text.startsWith("+")) return { text, kind: "add" as const };
     if (text.startsWith("-")) return { text, kind: "del" as const };

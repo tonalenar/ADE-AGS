@@ -16,7 +16,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, Read};
 use std::process::{Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// `CREATE_NO_WINDOW`. Sem isso um binário de console aberto por um app de janela
@@ -28,6 +28,7 @@ pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub const DETACHED_PROCESS: u32 = 0x0000_0008;
 
 const POLL: Duration = Duration::from_millis(25);
+const STDERR_CAPTURE_LIMIT: usize = 64 * 1024;
 
 /// Como a janela do processo filho deve nascer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,6 +146,45 @@ pub fn output_with_stdout_limit(
     timeout: Duration,
     max_stdout_bytes: usize,
 ) -> io::Result<Output> {
+    output_with_stdout_limit_inner(cmd, timeout, max_stdout_bytes, false).map(|(output, _)| output)
+}
+
+/// Como `output_with_stdout_limit`, mas devolve o prefixo capturado quando o teto é excedido.
+pub fn output_with_stdout_limit_truncated(
+    cmd: &mut Command,
+    timeout: Duration,
+    max_stdout_bytes: usize,
+) -> io::Result<(Output, bool)> {
+    output_with_stdout_limit_inner(cmd, timeout, max_stdout_bytes, true)
+}
+
+fn output_with_stdout_limit_inner(
+    cmd: &mut Command,
+    timeout: Duration,
+    max_stdout_bytes: usize,
+    keep_truncated: bool,
+) -> io::Result<(Output, bool)> {
+    output_with_stdout_limit_inner_with_stderr_wait(
+        cmd,
+        timeout,
+        max_stdout_bytes,
+        keep_truncated,
+        None,
+    )
+}
+
+type StderrWaitHook<'a> = (
+    std::sync::mpsc::Sender<Vec<u8>>,
+    &'a mut dyn FnMut() -> Duration,
+);
+
+fn output_with_stdout_limit_inner_with_stderr_wait(
+    cmd: &mut Command,
+    timeout: Duration,
+    max_stdout_bytes: usize,
+    keep_truncated: bool,
+    stderr_wait_hook: Option<StderrWaitHook<'_>>,
+) -> io::Result<(Output, bool)> {
     apply_window(cmd, WindowMode::Hidden);
     prepare_session(cmd);
     let started = Instant::now();
@@ -153,12 +193,47 @@ pub fn output_with_stdout_limit(
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()?;
     let mut guard = GroupGuard::adopt(&child);
     let exceeded = Arc::new(AtomicBool::new(false));
     let reader_exceeded = exceeded.clone();
     let (reader_done_tx, reader_done_rx) = std::sync::mpsc::channel();
+    let Some(mut stderr_pipe) = child.stderr.take() else {
+        guard.kill();
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(io::Error::other("stderr indisponível"));
+    };
+    let (stderr_progress_tx, stderr_wait) = match stderr_wait_hook {
+        Some((tx, wait)) => (Some(tx), Some(wait)),
+        None => (None, None),
+    };
+    let stderr_capture = Arc::new(Mutex::new(Vec::with_capacity(STDERR_CAPTURE_LIMIT)));
+    let stderr_shared = stderr_capture.clone();
+    let (stderr_done_tx, stderr_done_rx) = std::sync::mpsc::channel();
+    let stderr_reader = std::thread::spawn(move || {
+        let mut chunk = [0_u8; 8192];
+        loop {
+            match stderr_pipe.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(count) => {
+                    let snapshot = {
+                        let Ok(mut bytes) = stderr_shared.lock() else { break };
+                        let remaining = STDERR_CAPTURE_LIMIT.saturating_sub(bytes.len());
+                        bytes.extend_from_slice(&chunk[..count.min(remaining)]);
+                        stderr_progress_tx.as_ref().map(|_| bytes.clone())
+                    };
+                    if let (Some(tx), Some(snapshot)) = (&stderr_progress_tx, snapshot) {
+                        let _ = tx.send(snapshot);
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
+        let _ = stderr_done_tx.send(());
+    });
     let Some(mut pipe) = child.stdout.take() else {
         guard.kill();
         let _ = child.kill();
@@ -196,16 +271,21 @@ pub fn output_with_stdout_limit(
     let mut child_status = None;
     let mut reader_done = false;
     let status = loop {
-        if exceeded.load(Ordering::Acquire) {
+        if exceeded.load(Ordering::Acquire) && !keep_truncated {
             guard.kill();
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
+            drop(stderr_reader);
             log_finish(&program, &argv, started.elapsed(), None);
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("stdout excedeu o limite de {max_stdout_bytes} bytes"),
             ));
+        }
+        if exceeded.load(Ordering::Acquire) && child_status.is_none() {
+            guard.kill();
+            child_status = child.wait().ok();
         }
         if child_status.is_none() {
             match child.try_wait() {
@@ -216,6 +296,7 @@ pub fn output_with_stdout_limit(
                     let _ = child.kill();
                     let _ = child.wait();
                     let _ = reader.join();
+                    drop(stderr_reader);
                     log_finish(&program, &argv, started.elapsed(), None);
                     return Err(error);
                 }
@@ -232,6 +313,7 @@ pub fn output_with_stdout_limit(
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
+            drop(stderr_reader);
             log_finish(&program, &argv, started.elapsed(), None);
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
@@ -244,19 +326,40 @@ pub fn output_with_stdout_limit(
     let stdout = reader
         .join()
         .map_err(|_| io::Error::other("a leitura de stdout falhou"))??;
-    if exceeded.load(Ordering::Acquire) {
+    let truncated = exceeded.load(Ordering::Acquire);
+    if truncated && !keep_truncated {
+        guard.kill();
+        drop(stderr_reader);
         log_finish(&program, &argv, started.elapsed(), status.code());
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("stdout excedeu o limite de {max_stdout_bytes} bytes"),
         ));
     }
+    let stderr_timeout = match stderr_wait {
+        Some(wait) => wait(),
+        None => timeout.saturating_sub(started.elapsed()),
+    };
+    if stderr_done_rx.recv_timeout(stderr_timeout).is_err() {
+        // O processo principal já terminou, mas um descendente pode manter o pipe herdado.
+        // Mata o grupo e não espera além do prazo por um leitor preso num pipe ainda aberto.
+        guard.kill();
+        if stderr_done_rx.try_recv().is_ok() {
+            let _ = stderr_reader.join();
+        } else {
+            drop(stderr_reader);
+        }
+    } else {
+        stderr_reader
+            .join()
+            .map_err(|_| io::Error::other("a leitura de stderr falhou"))?;
+    }
+    let stderr = stderr_capture
+        .lock()
+        .map_err(|_| io::Error::other("a captura de stderr falhou"))?
+        .clone();
     log_finish(&program, &argv, started.elapsed(), status.code());
-    Ok(Output {
-        status,
-        stdout,
-        stderr: Vec::new(),
-    })
+    Ok((Output { status, stdout, stderr }, truncated))
 }
 
 /// Como [`output`], escrevendo `input` na entrada padrão do filho (numa thread, para um filho
@@ -679,6 +782,80 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
     }
 
+    #[test]
+    #[cfg(unix)]
+    fn o_teto_de_stdout_encerra_antes_de_carregar_tudo() {
+        let mut cmd = hidden_command("sh");
+        cmd.args(["-c", "dd if=/dev/zero bs=1024 count=64 2>/dev/null"]);
+        let err = output_with_stdout_limit(&mut cmd, Duration::from_secs(5), 256)
+            .expect_err("o teto tem que cortar o stdout");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("stdout excedeu"), "{err}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn limite_de_stdout_preserva_stderr_diagnostico() {
+        let mut cmd = hidden_command("sh");
+        cmd.args(["-c", "echo 'fatal: branch ausente' >&2; exit 1"]);
+        let out = output_with_stdout_limit(&mut cmd, Duration::from_secs(5), 256).unwrap();
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains("fatal: branch ausente"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn captura_stderr_para_no_teto_sem_bloquear_o_filho() {
+        let mut cmd = hidden_command("sh");
+        cmd.args(["-c", "head -c 100000 /dev/zero >&2"]);
+        let out = output_with_stdout_limit(&mut cmd, Duration::from_secs(5), 256).unwrap();
+        assert!(out.status.success());
+        assert_eq!(out.stderr.len(), STDERR_CAPTURE_LIMIT);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn stderr_aberto_por_descendente_nao_prende_o_retorno_apos_o_prazo() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let fifo = std::env::temp_dir().join(format!("ags-stderr-{}.fifo", uuid::Uuid::new_v4()));
+        let c_path = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        // SAFETY: o caminho é um CString válido e o FIFO é exclusivo deste teste.
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        let mut keep_fifo_open = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&fifo)
+            .unwrap();
+
+        let script = "( read _ < \"$1\"; printf 'descendente\\n' >&2 ) >/dev/null & printf 'principal\\n' >&2; exit 0";
+        let mut cmd = hidden_command("sh");
+        cmd.args(["-c", script, "sh", fifo.to_str().unwrap()]);
+        let (stderr_tx, stderr_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let mut wait_until_principal = || {
+            while let Ok(bytes) = stderr_rx.recv() {
+                if String::from_utf8_lossy(&bytes).contains("principal") {
+                    break;
+                }
+            }
+            Duration::ZERO
+        };
+        let (out, _) = output_with_stdout_limit_inner_with_stderr_wait(
+            &mut cmd,
+            Duration::from_secs(5),
+            256,
+            false,
+            Some((stderr_tx, &mut wait_until_principal)),
+        )
+        .unwrap();
+        // Libera o descendente caso a leitura ainda esteja aberta durante a limpeza.
+        use std::io::Write;
+        let _ = keep_fifo_open.write_all(b"liberar\n");
+        let _ = std::fs::remove_file(fifo);
+
+        assert!(out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains("principal"));
+    }
     // A regra do prazo sem relógio está nos testes `pipe_*` abaixo.
     #[cfg(unix)]
     #[test]

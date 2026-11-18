@@ -66,16 +66,40 @@ pub fn with_boot_lease<T>(
         }
     }
 
+    let _guard = BootLeaseGuard {
+        db: db.clone(),
+        owner,
+    };
     let result = work();
     let released = db
         .lock()
         .map_err(|error| error.to_string())
-        .and_then(|conn| release(&conn, &owner));
-    match (result, released) {
-        (Ok(value), Ok(true)) => Ok(Some(value)),
-        (Ok(_), Ok(false)) => Err("o lease de recuperação foi tomado por outra instância".into()),
-        (Err(error), Ok(_)) => Err(error),
-        (_, Err(error)) => Err(error),
+        .and_then(|conn| release(&conn, &_guard.owner));
+    match released {
+        Ok(true) => result.map(Some),
+        Ok(false) => Err("lease de boot foi perdido durante a reconciliação".into()),
+        Err(error) => Err(format!("não foi possível liberar o lease de boot: {error}")),
+    }
+}
+
+struct BootLeaseGuard {
+    db: DbConnection,
+    owner: String,
+}
+
+impl Drop for BootLeaseGuard {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            return;
+        }
+        if let Err(error) = self
+            .db
+            .lock()
+            .map_err(|error| error.to_string())
+            .and_then(|conn| release(&conn, &self.owner))
+        {
+            eprintln!("[harness] não foi possível soltar o lease de boot: {error}");
+        }
     }
 }
 

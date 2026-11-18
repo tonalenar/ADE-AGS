@@ -82,7 +82,11 @@ pub enum AccountKind {
 
 impl AccountKind {
     pub fn parse(raw: &str) -> Self {
-        if raw == "api_key" { AccountKind::ApiKey } else { AccountKind::Login }
+        if raw == "api_key" {
+            AccountKind::ApiKey
+        } else {
+            AccountKind::Login
+        }
     }
 }
 
@@ -109,7 +113,8 @@ pub(super) struct AccountRow {
 }
 
 /// Las columnas que espera [`AccountRow::from_row`], en ese orden.
-pub(super) const ACCOUNT_COLUMNS: &str = "id, agent_id, name, dir, created_at, kind, base_url, key_hint";
+pub(super) const ACCOUNT_COLUMNS: &str =
+    "id, agent_id, name, dir, created_at, kind, base_url, key_hint";
 
 impl AccountRow {
     pub(super) fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
@@ -130,10 +135,25 @@ pub(super) fn row_to_account(row: AccountRow) -> Option<AgentAccount> {
     let spec = spec_for(&row.agent_id)?;
     let path = PathBuf::from(&row.dir);
     let (marker_logged_in, label) = read_identity(&path, spec);
-    // Una cuenta de Claude Code por API key no deja marcador de login: está "lista" si la
-    // key sigue en el llavero. Codex sí lo deja (`auth.json`), y se lee como siempre.
+    // Claude por API key depende de la chave no keyring. Codex também usa o keyring;
+    // um auth.json legado é aceito como marcador até ser migrado no próximo lançamento.
     let logged_in = match (row.kind, row.agent_id.as_str()) {
-        (AccountKind::ApiKey, "claude-code") => super::secrets::load(&row.id).is_some(),
+        (AccountKind::ApiKey, "claude-code") => {
+            let Some(mut key) = super::secrets::load(&row.id) else {
+                return None;
+            };
+            super::broker::wipe_secret(&mut key);
+            true
+        }
+        // Perfis antigos do Codex ainda podem ter a chave no auth.json. O lançamento
+        // migra esse arquivo para o keyring, fora do lock do banco.
+        (AccountKind::ApiKey, "codex") => match super::secrets::load(&row.id) {
+            Some(mut key) => {
+                super::broker::wipe_secret(&mut key);
+                true
+            }
+            None => marker_logged_in,
+        },
         _ => marker_logged_in,
     };
     let label = match row.kind {
@@ -161,17 +181,12 @@ pub(super) fn row_to_account(row: AccountRow) -> Option<AgentAccount> {
     })
 }
 
-/// Las variables con las que una cuenta `api_key` de Claude Code se autentica. Sin gateway,
-/// `ANTHROPIC_API_KEY` (cabecera `x-api-key`); con gateway, `ANTHROPIC_AUTH_TOKEN` (Bearer,
-/// que es lo que piden OpenRouter y los proxies compatibles) más `ANTHROPIC_BASE_URL`.
-pub(super) fn claude_key_env(key: &str, base_url: Option<&str>) -> HashMap<String, String> {
-    match base_url {
-        None => HashMap::from([("ANTHROPIC_API_KEY".to_string(), key.to_string())]),
-        Some(url) => HashMap::from([
-            ("ANTHROPIC_AUTH_TOKEN".to_string(), key.to_string()),
-            ("ANTHROPIC_BASE_URL".to_string(), url.to_string()),
-        ]),
-    }
+/// Só a configuração não secreta do endpoint chega ao processo. A chave sai pelo
+/// `apiKeyHelper` do broker quando Claude Code pede autenticação.
+pub(super) fn claude_api_env(base_url: Option<&str>) -> HashMap<String, String> {
+    base_url
+        .map(|url| HashMap::from([("ANTHROPIC_BASE_URL".to_string(), url.to_string())]))
+        .unwrap_or_default()
 }
 
 /// Variables que el backend inyecta al lanzar un proceso con esta cuenta.
@@ -188,33 +203,54 @@ pub fn env_for_account(db: &DbConnection, account_id: &str) -> Option<HashMap<St
         .ok()?
     };
     account_env_from_row(account_id, &agent_id, &dir, &kind, base_url.as_deref())
+        .ok()
+        .flatten()
 }
 
-fn account_env_from_row(
+pub(super) fn account_env_from_row(
     account_id: &str,
     agent_id: &str,
     dir: &str,
     kind: &str,
     base_url: Option<&str>,
-) -> Option<HashMap<String, String>> {
+) -> Result<Option<HashMap<String, String>>, String> {
     // La variable sale del provider. Sin perfil (Gemini, Kimi, una TUI desconocida) no hay
     // mapa: no se hereda el de otra.
-    let mut env = crate::agents::adapter_for(agent_id)?.account_env(dir)?;
+    let Some(adapter) = crate::agents::adapter_for(agent_id) else {
+        return Ok(None);
+    };
+    let Some(mut env) = adapter.account_env(dir) else {
+        return Ok(None);
+    };
     // Antigravity: a conta é um HOME inteiro; é montado aqui, uma vez por lançamento, e nunca
     // apaga nada (ver `antigravity_home`). Sem isso o PTY abriria num HOME sem git nem ssh.
     if agent_id == "antigravity" {
         if let Some(home) = dirs::home_dir() {
-            let _ = super::antigravity_home::prepare(&home, std::path::Path::new(dir));
+            super::antigravity_home::prepare(&home, std::path::Path::new(dir)).map_err(
+                |error| {
+                    format!(
+                        "Não foi possível preparar o HOME isolado da conta Antigravity: {error}"
+                    )
+                },
+            )?;
         }
     }
     // El llavero se lee FUERA del lock de la base: puede tardar (D-Bus, Keychain).
-    if AccountKind::parse(kind) == AccountKind::ApiKey && agent_id == "claude-code" {
-        // Sin la key (borrada del llavero por fuera) la cuenta no se lanza: arrancaría con
-        // el perfil vacío y pediría login, que no es lo que el usuario eligió.
-        let key = super::secrets::load(account_id)?;
-        env.extend(claude_key_env(&key, base_url));
+    if AccountKind::parse(kind) == AccountKind::ApiKey
+        && matches!(agent_id, "claude-code" | "codex")
+    {
+        if agent_id == "codex" {
+            super::secrets::migrate_legacy_codex_api_key(account_id, std::path::Path::new(dir))?;
+        }
+        let Some(mut key) = super::secrets::load(account_id) else {
+            return Ok(None);
+        };
+        super::broker::wipe_secret(&mut key);
+        if agent_id == "claude-code" {
+            env.extend(claude_api_env(base_url));
+        }
     }
-    Some(env)
+    Ok(Some(env))
 }
 
 /// Resolve o ambiente de uma conta para o provedor declarado no lançamento do PTY.
@@ -239,16 +275,42 @@ pub fn env_for_account_for_agent(
     if agent_id != expected_agent_id {
         return Err("A conta selecionada não pertence ao provedor desta aba.".into());
     }
-    account_env_from_row(account_id, &agent_id, &dir, &kind, base_url.as_deref())
-        .ok_or_else(|| {
-            "O perfil ou a credencial desta conta não está disponível no sistema.".to_string()
-        })
+    account_env_from_row(account_id, &agent_id, &dir, &kind, base_url.as_deref())?.ok_or_else(
+        || "O perfil ou a credencial desta conta não está disponível no sistema.".to_string(),
+    )
+}
+
+/// Tipo da conta, validando também o provedor esperado pelo lançamento do PTY.
+pub fn kind_for_account_for_agent(
+    db: &DbConnection,
+    account_id: &str,
+    expected_agent_id: &str,
+) -> Result<AccountKind, String> {
+    let conn = db
+        .lock()
+        .map_err(|_| "Não foi possível acessar as contas locais.".to_string())?;
+    let (agent, kind): (String, String) = conn
+        .query_row(
+            "SELECT agent_id, kind FROM agent_accounts WHERE id = ?1",
+            [account_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| "A conta selecionada não existe mais.".to_string())?;
+    if agent != expected_agent_id {
+        return Err("A conta selecionada não pertence ao provedor desta aba.".into());
+    }
+    Ok(AccountKind::parse(&kind))
 }
 
 /// Agente dono da conta, sem carregar as credenciais do chaveiro.
 pub fn agent_id_for_account(db: &DbConnection, account_id: &str) -> Option<String> {
     let conn = db.lock().ok()?;
-    conn.query_row("SELECT agent_id FROM agent_accounts WHERE id = ?1", [account_id], |row| row.get(0)).ok()
+    conn.query_row(
+        "SELECT agent_id FROM agent_accounts WHERE id = ?1",
+        [account_id],
+        |row| row.get(0),
+    )
+    .ok()
 }
 
 /// Directorio de perfil de una cuenta. Es la raíz donde la TUI guarda TODO lo suyo —

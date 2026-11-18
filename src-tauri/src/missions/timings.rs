@@ -80,7 +80,28 @@ pub fn add(conn: &Connection, mission_id: &str, span: &NewSpan) -> Result<(), St
         .query_row("SELECT COUNT(*) FROM mission_timings WHERE mission_id = ?1", [mission_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
     if count >= MAX_SPANS {
-        return Ok(()); // o limite não é um erro para quem mede: simplesmente deixa de guardar
+        let keep = span.kind == "team_delivered" || span.kind.starts_with("start_");
+        if !keep {
+            return Ok(());
+        }
+        let removed = conn
+            .execute(
+                "DELETE FROM mission_timings WHERE id = (
+                    SELECT id FROM mission_timings WHERE mission_id=?1
+                      AND kind NOT LIKE 'start_%' AND kind != 'team_delivered'
+                    ORDER BY started_ms ASC, id ASC LIMIT 1)",
+                [mission_id],
+            )
+            .map_err(|e| e.to_string())?;
+        if removed == 0 {
+            conn.execute(
+                "DELETE FROM mission_timings WHERE id = (
+                    SELECT id FROM mission_timings WHERE mission_id=?1
+                    ORDER BY started_ms ASC, id ASC LIMIT 1)",
+                [mission_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
     }
     conn.execute(
         "INSERT INTO mission_timings (mission_id, kind, actor, target, started_ms, ended_ms, detail)

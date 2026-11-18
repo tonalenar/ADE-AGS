@@ -24,7 +24,10 @@ export function RollbackDialog({ task, onClose, onDone }: { task: Task; onClose:
   const [photos, setPhotos] = useState<Checkpoint[]>([]);
   const [busy, setBusy] = useState(false);
 
-  const loadPhotos = () => runCheckpoints(task.runId).then((l) => setPhotos(restorable(l))).catch(() => setPhotos([]));
+  const loadPhotos = () => runCheckpoints(task.runId).then((l) => setPhotos(restorable(l))).catch((e) => {
+    setPhotos([]);
+    setProblem(String(e));
+  });
   useEffect(() => {
     rollbackPreview(task.id).then(setPreview).catch((e) => setProblem(String(e)));
     void loadPhotos();

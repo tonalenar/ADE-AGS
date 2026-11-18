@@ -11,7 +11,9 @@ import { AlertaToast } from "@/shared/ui/alerts";
 import { appConfirm } from "@/shared/ui/appConfirm";
 import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
 
+import { clearAgentFlashIds, mergeAgentFlash } from "./agentFlash";
 import { clampAnchor, formatSendText, parentSelector, pinPosition, sendPayload, threadsOf } from "./anchor";
+import { shouldSendCommentToAgent } from "./commentSubmit";
 import { ArtboardFrame, type FrameHandlers, type StudioBoard } from "./ArtboardFrame";
 import {
   boardFitBox, clampScale, DEFAULT_CAMERA, fitCamera, glideDuration, lerpCamera, liveBoards,
@@ -136,6 +138,7 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
   const active = useRef(host === "page");
   const selfUntil = useRef(0);
   const prevVersions = useRef<Record<string, number> | null>(null);
+  const flashTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const renamingRef = useRef<string | null>(null);
   renamingRef.current = renaming;
 
@@ -502,11 +505,12 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
     // "Seguir o agente": a câmera vai até a prancheta que mudou (se estiver nesta página).
     setLastBump(bumped[0]);
     if (latest.current.following && boardById.has(bumped[0])) fitBoard(bumped[0]);
-    setAgentFlash((f) => ({ ...f, ...Object.fromEntries(bumped.map((id) => [id, true as const])) }));
-    const timer = setTimeout(() => setAgentFlash((f) => { const n = { ...f }; for (const id of bumped) delete n[id]; return n; }), AGENT_FLASH_MS);
-    return () => clearTimeout(timer);
+    setAgentFlash((f) => mergeAgentFlash(f, bumped));
+    const timer = setTimeout(() => setAgentFlash((f) => clearAgentFlashIds(f, bumped)), AGENT_FLASH_MS);
+    flashTimers.current.push(timer);
   }, [detail]);
   useEffect(() => { prevVersions.current = null; }, [designId]);
+  useEffect(() => () => { for (const id of flashTimers.current) clearTimeout(id); }, []);
 
   // ---------- view state (o que a pessoa vê) ----------
   const lastView = useRef<DesignViewState | null>(null);
@@ -1166,8 +1170,8 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
     if (!draft) return;
     const d = draft;
     setDraft(null);
-    await act(designApi.addAnchoredComment({ artboardId: d.boardId, text, selector: d.anchor, anchor: d.anchor, pointX: d.pointX, pointY: d.pointY }));
-    if (send) await sendToAgent(d.boardId, d.label, d.text, text, d.anchor);
+    const saved = await act(designApi.addAnchoredComment({ artboardId: d.boardId, text, selector: d.anchor, anchor: d.anchor, pointX: d.pointX, pointY: d.pointY }));
+    if (shouldSendCommentToAgent(saved, send)) await sendToAgent(d.boardId, d.label, d.text, text, d.anchor);
   };
   const threadLabel = (root: DesignComment & { anchor: string | null }) => `${boardById.get(root.artboardId)?.title ?? ""}${root.anchor ? ` › ${root.anchor.split(" > ").pop()}` : ""}`;
 

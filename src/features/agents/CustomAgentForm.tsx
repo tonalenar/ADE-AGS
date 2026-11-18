@@ -50,8 +50,13 @@ export function CustomAgentForm({ initial, onSubmit, onCancel }: CustomAgentForm
 
   const setEnvKey = (oldKey: string, newKey: string) => {
     const next: Record<string, string> = {};
-    for (const [k, v] of envRows) next[k === oldKey ? newKey : k] = v;
-    delete next[""];
+    for (const [k, v] of envRows) {
+      if (k === oldKey) continue;
+      next[k] = v;
+    }
+    let key = newKey;
+    if (key && key in next) key = `${newKey}_`;
+    if (key) next[key] = draft.env?.[oldKey] ?? "";
     patch({ env: next });
   };
 

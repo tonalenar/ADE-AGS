@@ -360,8 +360,12 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     }
     group.adopt(&child);
     // F-02: o `taskId` dos pedidos desta tarefa passa a ser provado por este PID (o do agente e seus descendentes).
-    if let Some(pid) = child.id() {
-        crate::terminal::register_task_process(&task.id, pid);
+    let pid = child
+        .id()
+        .ok_or_else(|| "Não foi possível ler o PID do agente da tarefa.".to_string())?;
+    if let Err(error) = crate::terminal::register_task_process(&task.id, pid) {
+        group.kill_all();
+        return Err(error);
     }
     let marked_running = match db.lock() {
         Ok(conn) => store::mark_running(&conn, &task.id, &attempt_id, &session_id, &events_path.to_string_lossy()),

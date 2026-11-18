@@ -131,6 +131,7 @@ describe("o painel Time sem conversa (rascunho)", () => {
     expect(useTeamDraft.getState().members[0]).toMatchObject({ kind: "existing", conv: { key: "tab-9" } });
     await click(byText("button", "chat.team.link"));
     await click(host.querySelector("[aria-label^='chat.team.form.agent']"));
+    expect(host.querySelector("[role=menu], [role=listbox], [role=menuitem], [role=menuitemradio]")).not.toBeNull();
     expect(item("Conversa aberta")).toBeUndefined();
   });
 

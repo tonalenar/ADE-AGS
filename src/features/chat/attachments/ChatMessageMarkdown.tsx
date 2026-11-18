@@ -23,9 +23,27 @@ export function ChatMessageMarkdown({ content, tone = "chat", renderCodeBlock, s
 /** As imagens citadas por caminho na resposta viram miniaturas abaixo dela; clicar abre o visualizador da ADE. */
 function MentionedImageStrip({ content }: { content: string }) {
   const cwd = useContext(AttachCwdContext);
-  const items: ShownAttachment[] = useMemo(() => mentionedMedia(content, cwd).slice(0, 24)
+  const found: ShownAttachment[] = useMemo(() => mentionedMedia(content, cwd).slice(0, 24)
     .map((media) => ({ path: media.path, name: media.name, kind: media.kind === "video" ? "file" : "image", size: null })), [content, cwd]);
+  const items = useSameShown(found);
   return items.length > 0 ? <AttachmentStrip items={items} className="mt-3" /> : null;
+}
+
+/** Mantém a lista de anexos a mesma enquanto só o texto cresce: a fileira registra no visualizador a cada troca de lista. */
+function useSameShown(found: ShownAttachment[]): ShownAttachment[] {
+  const [stable, setStable] = useState(found);
+  if (!sameShown(stable, found)) {
+    setStable(found);
+    return found;
+  }
+  return stable;
+}
+
+function sameShown(a: readonly ShownAttachment[], b: readonly ShownAttachment[]): boolean {
+  return a.length === b.length && a.every((x, i) => {
+    const y = b[i]!;
+    return x.path === y.path && x.name === y.name && x.kind === y.kind && x.size === y.size && (x.preview ?? null) === (y.preview ?? null);
+  });
 }
 
 /** Miniaturas de imagens citadas por Markdown em saídas de ferramentas. */
@@ -59,9 +77,12 @@ function useGalleryOf(found: MarkdownImageMedia[]) {
   // A lista só muda de identidade quando as imagens mudam. Num streaming o texto cresce a cada pedaço e
   // `found` é um array novo (quase sempre vazio) toda vez; sem isto, `load`/`open` mudam a cada pedaço, o
   // `Markdown` recria os componentes e o React remonta todos os blocos, que refazem o fade de entrada (piscar).
-  const stable = useRef(found);
-  if (stable.current !== found && !sameMarkdownImages(stable.current, found)) stable.current = found;
-  const images = stable.current;
+  const [stable, setStable] = useState(found);
+  let images = stable;
+  if (!sameMarkdownImages(stable, found)) {
+    images = found;
+    setStable(found);
+  }
   const [loadedPreviews, setLoadedPreviews] = useState<Record<string, string>>({});
   const gallery = useMemo(() => images.map((image) => ({ ...image, preview: image.preview ?? loadedPreviews[image.path] ?? null })), [images, loadedPreviews]);
 

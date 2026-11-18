@@ -11,8 +11,11 @@
 //! cada briefing e na migração.
 
 use std::path::{Path, PathBuf};
+use std::collections::HashSet;
 
 use rusqlite::{params, Connection};
+
+use crate::database::DbConnection;
 
 /// O `.git` comum do repositório que contém `cwd` (o de um worktree aponta para o principal).
 fn common_git_dir(cwd: &Path) -> Option<PathBuf> {
@@ -94,20 +97,162 @@ pub fn repo_key(cwd: &Path) -> Option<String> {
     Some(normalize_url(&root.to_string_lossy()))
 }
 
-/// A chave do repositório de uma missão (pela pasta dela).
+/// A pasta da missão, sem ler o `.git`.
+pub fn mission_cwd(conn: &Connection, mission_id: &str) -> Option<String> {
+    conn.query_row("SELECT cwd FROM missions WHERE id = ?1", [mission_id], |r| r.get(0)).ok()
+}
+
+/// A chave do repositório de uma missão (pela pasta dela). Lê o `.git` com o `conn` já aberto.
+#[cfg(test)]
 pub fn mission_repo_key(conn: &Connection, mission_id: &str) -> Option<String> {
-    let cwd: String = conn.query_row("SELECT cwd FROM missions WHERE id = ?1", [mission_id], |r| r.get(0)).ok()?;
-    repo_key(Path::new(&cwd))
+    repo_key(Path::new(&mission_cwd(conn, mission_id)?))
+}
+
+fn task_repo_cwd(conn: &Connection, task_id: &str) -> Result<String, String> {
+    let task = crate::runs::store::task_by_id(conn, task_id)?
+        .ok_or("caller Task is unavailable")?;
+    let run = crate::runs::store::run_by_id(conn, &task.run_id)?
+        .ok_or("caller Run is unavailable")?;
+    Ok(run.mission_id
+        .as_deref()
+        .and_then(|mission| mission_cwd(conn, mission))
+        .unwrap_or(task.cwd))
+}
+
+/// Resolve a tarefa quando o chamador já tem a conexão aberta.
+#[cfg(test)]
+pub fn task_repo_key(conn: &Connection, task_id: &str) -> Result<Option<String>, String> {
+    Ok(repo_key(Path::new(&task_repo_cwd(conn, task_id)?)))
+}
+
+/// Lê Task/Run/Mission sob o mutex e o `.git` depois de soltá-lo.
+pub fn task_repo_key_unlocked(
+    db: &DbConnection,
+    task_id: &str,
+) -> Result<Option<String>, String> {
+    let cwd = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        task_repo_cwd(&conn, task_id)?
+    };
+    Ok(repo_key(Path::new(&cwd)))
+}
+
+#[derive(Default)]
+pub struct TaskHistoryScope {
+    pub repo_key: Option<String>,
+    pub run_ids: HashSet<String>,
+    pub mission_ids: HashSet<String>,
+}
+
+/// Reúne os IDs de evidência do próprio repositório; só consulta o filesystem depois de soltar o lock.
+pub fn task_history_scope_unlocked(
+    db: &DbConnection,
+    task_id: &str,
+) -> Result<TaskHistoryScope, String> {
+    let (task_cwd, runs, missions) = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        let cwd = task_repo_cwd(&conn, task_id)?;
+        let workspace: String = conn.query_row(
+            "SELECT r.workspace_id FROM tasks t JOIN runs r ON r.id=t.run_id WHERE t.id=?1",
+            [task_id],
+            |row| row.get(0),
+        ).map_err(|_| "caller Task is unavailable".to_string())?;
+        let runs = {
+            let mut statement = conn.prepare(
+                "SELECT r.id,COALESCE(m.cwd,r.cwd) FROM runs r LEFT JOIN missions m ON m.id=r.mission_id WHERE r.workspace_id=?1 ORDER BY r.created_at DESC,r.id LIMIT 128",
+            ).map_err(|e| e.to_string())?;
+            statement.query_map([&workspace], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .map_err(|e| e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
+        };
+        let missions = {
+            let mut statement = conn.prepare(
+                "SELECT id,cwd FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT 128",
+            ).map_err(|e| e.to_string())?;
+            statement.query_map([&workspace], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .map_err(|e| e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
+        };
+        (cwd, runs, missions)
+    };
+    let target = repo_key(Path::new(&task_cwd));
+    let matches = |candidate: Option<&str>| match target.as_deref() {
+        Some(key) => candidate.is_none_or(|value| value == key),
+        None => candidate.is_none(),
+    };
+    let run_ids = runs.into_iter().filter_map(|(id, cwd)| {
+        matches(repo_key(Path::new(&cwd)).as_deref()).then_some(id)
+    }).collect();
+    let mission_ids = missions.into_iter().filter_map(|(id, cwd)| {
+        matches(repo_key(Path::new(&cwd)).as_deref()).then_some(id)
+    }).collect();
+    Ok(TaskHistoryScope { repo_key: target, run_ids, mission_ids })
+}
+
+/// Predicado SQL: falha fechada só com missão sem chave.
+pub fn sql_match(placeholder: &str, fail_closed: bool) -> String {
+    if fail_closed {
+        format!("(e.repo_key IS NULL OR e.repo_key={placeholder})")
+    } else {
+        format!("({placeholder} IS NULL OR e.repo_key IS NULL OR e.repo_key={placeholder})")
+    }
+}
+
+pub fn sql_match_bare(placeholder: &str, fail_closed: bool) -> String {
+    if fail_closed {
+        format!("(repo_key IS NULL OR repo_key={placeholder})")
+    } else {
+        format!("({placeholder} IS NULL OR repo_key IS NULL OR repo_key={placeholder})")
+    }
+}
+
+/// Lê o `cwd` sob o mutex e o `.git/config` com o lock solto.
+pub fn mission_repo_key_unlocked(db: &DbConnection, mission_id: Option<&str>) -> Result<Option<String>, String> {
+    let Some(id) = mission_id else {
+        return Ok(None);
+    };
+    let cwd = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        mission_cwd(&conn, id)
+    };
+    Ok(cwd.as_deref().and_then(|c| repo_key(Path::new(c))))
+}
+
+/// Resolve as chaves das missões do workspace sem manter o mutex durante a leitura do `.git`.
+pub fn mission_repo_keys_unlocked(
+    db: &DbConnection,
+    workspace_id: &str,
+) -> Result<std::collections::HashMap<String, Option<String>>, String> {
+    let missions = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id,cwd FROM missions WHERE workspace_id=?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([workspace_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+        rows
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?
+    };
+    Ok(missions
+        .into_iter()
+        .map(|(id, cwd)| (id, repo_key(Path::new(&cwd))))
+        .collect())
 }
 
 /// Marca uma memória recém-criada por uma missão com o repositório dela. Correção de uma memória
 /// existente não muda a chave (uma memória sem chave, de antes, continua valendo em todos).
-pub fn tag_new_entry(conn: &Connection, entry_id: &str, mission_id: &str) -> Result<(), String> {
+pub fn tag_new_entry(
+    conn: &Connection,
+    entry_id: &str,
+    mission_id: &str,
+    key: Option<&str>,
+) -> Result<(), String> {
     // A origem: o dream cita a missão como fonte (antes as revisões de missão não tinham nenhuma e o
     // dream terminava com «falta de evidência citável»).
     conn.execute("UPDATE memory_entries SET source_mission = ?1 WHERE id = ?2 AND source_mission IS NULL", params![mission_id, entry_id])
         .map_err(|e| e.to_string())?;
-    let Some(key) = mission_repo_key(conn, mission_id) else { return Ok(()) };
+    let Some(key) = key else { return Ok(()) };
     conn.execute(
         "UPDATE memory_entries SET repo_key = ?1 WHERE id = ?2 AND repo_key IS NULL
             AND (SELECT COUNT(*) FROM memory_revisions r WHERE r.entry_id = memory_entries.id) <= 1",

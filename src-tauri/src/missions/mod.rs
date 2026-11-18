@@ -982,15 +982,25 @@ pub async fn mission_precheck(app: AppHandle, mission_id: String) -> Result<Stri
 
 /// El bloque de memoria aprobada (workspace + misión) para el briefing del Orquestador. Vacío si
 /// no hay nada. Solo lee.
-pub(crate) fn memory_context_text(conn: &Connection, mission_id: &str) -> Result<String, String> {
-    let mission = store::get(conn, mission_id)?
-        .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
-    let docs = crate::memory::search::load_docs(conn, &mission.workspace_id, Some(&mission.id))?;
+pub(crate) fn memory_context_text(
+    conn: &Connection,
+    workspace_id: &str,
+    mission_id: &str,
+    objective: &str,
+    repo_key: Option<&str>,
+) -> Result<String, String> {
+    let docs = crate::memory::search::load_docs_with_repo(
+        conn,
+        workspace_id,
+        Some(mission_id),
+        repo_key,
+        true,
+    )?;
     // 10 entradas / 2.600 caracteres: cabem ~9 com o corte de 280 por corpo (antes eram ~6).
     Ok(crate::memory::search::briefing_block(
         &docs,
-        &mission.id,
-        &mission.objective,
+        mission_id,
+        objective,
         10,
         2_600,
     ))
@@ -1000,13 +1010,21 @@ pub(crate) fn memory_context_text(conn: &Connection, mission_id: &str) -> Result
 /// memórias relevantes ao objetivo (ver `decisions/relevance.rs`); se não escolher, sai o índice de
 /// sempre, com as mesmas entradas de `memory_context_text`. Não segura o banco na chamada ao provedor.
 pub(crate) fn memory_briefing(db: &DbConnection, mission_id: &str) -> Result<String, String> {
-    let (mission, docs) = {
+    let mission = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let mission = store::get(&conn, mission_id)?
-            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
-        let docs =
-            crate::memory::search::load_docs(&conn, &mission.workspace_id, Some(&mission.id))?;
-        (mission, docs)
+        store::get(&conn, mission_id)?
+            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?
+    };
+    let repo = crate::memory::repo_scope::repo_key(Path::new(&mission.cwd));
+    let docs = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::memory::search::load_docs_with_repo(
+            &conn,
+            &mission.workspace_id,
+            Some(&mission.id),
+            repo.as_deref(),
+            true,
+        )?
     };
     if let Some(text) = crate::decisions::relevance::briefing(
         db,
@@ -1054,8 +1072,20 @@ pub async fn mission_memory_context(app: AppHandle, mission_id: String) -> Resul
 
 pub(crate) fn mission_memory_context_now(app: &AppHandle, mission_id: String) -> Result<String, String> {
     let db = db_of(&app)?;
+    let mission = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::get(&conn, &mission_id)?
+            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?
+    };
+    let repo = crate::memory::repo_scope::repo_key(Path::new(&mission.cwd));
     let conn = db.lock().map_err(|e| e.to_string())?;
-    memory_context_text(&conn, &mission_id)
+    memory_context_text(
+        &conn,
+        &mission.workspace_id,
+        &mission.id,
+        &mission.objective,
+        repo.as_deref(),
+    )
 }
 
 pub(crate) fn mark_test_now(

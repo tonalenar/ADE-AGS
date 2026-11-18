@@ -53,6 +53,7 @@ export function CompareDialog({ initialCwd, initialPrompt = "", initialPicks: se
   useEffect(() => { getRoster().then(setRoster).catch(() => setRoster(null)); }, []);
   useEffect(() => {
     if (!cwd.trim()) { setCheck(null); return; }
+    setCheck(null);
     let alive = true;
     const timer = window.setTimeout(() => {
       compareCheck(cwd.trim()).then((c) => alive && setCheck(c)).catch((e) => alive && setCheck({ repo: null, branch: null, head: null, dirty: 0, error: String(e) }));

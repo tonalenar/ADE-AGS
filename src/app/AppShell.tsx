@@ -194,14 +194,13 @@ export function AppShell() {
   // recortados (sin nada detrás), así que se quitan mientras esté maximizada.
   useEffect(() => {
     const win = getCurrentWindow();
-    win.isMaximized().then(setIsMaximized);
-
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    win.isMaximized().then(setIsMaximized);
     win.onResized(async () => {
       setIsMaximized(await win.isMaximized());
-    }).then((fn) => { unlisten = fn; });
-
-    return () => { unlisten?.(); };
+    }).then((fn) => { if (cancelled) fn(); else unlisten = fn; });
+    return () => { cancelled = true; unlisten?.(); };
   }, []);
 
   // A seleção única de conversa: o canvas da conversa por protocolo aberta, e ativar uma aba fecha a conversa por protocolo.
@@ -250,6 +249,7 @@ export function AppShell() {
   // enfoca (activa la tab) en vez de dejar que se abra una duplicada en otra parte.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
     listen<string>("cc-focus-tab", (event) => {
       try {
         const data = JSON.parse(event.payload);
@@ -258,8 +258,8 @@ export function AppShell() {
         activateTab(data.tabId);
         navigate("/workspace");
       } catch { /* ignore */ }
-    }).then((fn) => { unlisten = fn; });
-    return () => unlisten?.();
+    }).then((fn) => { if (cancelled) fn(); else unlisten = fn; });
+    return () => { cancelled = true; unlisten?.(); };
   }, []);
 
   useEffect(() => {

@@ -11,6 +11,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use crate::util::{external_path, output_with_timeout};
+use crate::util::spawn::output_with_stdout_limit;
 
 const GIT_FAST: Duration = Duration::from_secs(20);
 const GIT_SLOW: Duration = Duration::from_secs(120);
@@ -70,8 +71,16 @@ fn run(dir: &Path, args: &[&str], envs: &[(&str, &str)], limit: Duration) -> Res
 
 /// Saída crua (com os `\0` de `-z`), sem aparar nada.
 fn run_raw(dir: &Path, args: &[&str], envs: &[(&str, &str)], limit: Duration) -> Result<Vec<u8>, String> {
+    run_raw_capped(dir, args, envs, limit, None)
+}
+
+fn run_raw_capped(dir: &Path, args: &[&str], envs: &[(&str, &str)], limit: Duration, max_stdout: Option<usize>) -> Result<Vec<u8>, String> {
     let mut cmd = command(dir, args, envs);
-    let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("não foi possível rodar o git: {e}"))?;
+    let out = if let Some(max) = max_stdout {
+        output_with_stdout_limit(&mut cmd, limit, max).map_err(|e| format!("não foi possível rodar o git: {e}"))?
+    } else {
+        output_with_timeout(&mut cmd, limit).map_err(|e| format!("não foi possível rodar o git: {e}"))?
+    };
     if out.status.success() {
         Ok(out.stdout)
     } else {
@@ -428,7 +437,13 @@ pub fn diff(root: &Path, from_commit: &str, to_tree: &str, max_bytes: usize) -> 
     let stat = run(root, &stat_args, &[], GIT_SLOW)?;
     let mut patch_args: Vec<&str> = base.to_vec();
     patch_args.extend([from_commit, to_tree]);
-    let patch = run_raw(root, &patch_args, &[], GIT_SLOW)?;
+    let patch = match run_raw_capped(root, &patch_args, &[], GIT_SLOW, Some(max_bytes.saturating_add(1))) {
+        Ok(bytes) => bytes,
+        Err(err) if err.contains("stdout excedeu") => {
+            return Ok((stat, String::new(), true));
+        }
+        Err(err) => return Err(err),
+    };
     let truncated = patch.len() > max_bytes;
     let mut text = String::from_utf8_lossy(&patch[..patch.len().min(max_bytes)]).to_string();
     if truncated {

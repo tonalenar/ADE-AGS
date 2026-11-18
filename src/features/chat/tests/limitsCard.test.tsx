@@ -28,7 +28,7 @@ import { useStructured } from "../structured/store";
 import { useTeamStore } from "../team/teamStore";
 import { LimitsCard } from "../summary/LimitsCard";
 
-const NOW = Math.floor(Date.now() / 1000);
+const NOW = 1_700_000_000;
 const account = (id: string, agentId: string, name: string, over: Partial<AgentAccount> = {}): AgentAccount =>
   ({ id, agentId, name, dir: "", envVar: "", loginCommand: "", loggedIn: true, label: null, createdAt: 1, kind: "login", ...over }) as AgentAccount;
 const SYS_CLAUDE = account("system:claude-code", "claude-code", "Claude Code");
@@ -52,6 +52,8 @@ const bars = () => [...host.querySelectorAll("[role=progressbar]")] as HTMLEleme
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW * 1000);
   localStorage.clear();
   backend.teams = []; backend.summary = []; backend.pools = []; backend.poolState = { poolName: null, originLabel: null };
   refreshes = [];
@@ -66,7 +68,7 @@ beforeEach(() => {
   document.body.appendChild(host);
   root = createRoot(host);
 });
-afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); });
+afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); vi.useRealTimers(); });
 
 describe("o cartão Limites de uso", () => {
   it("mostra a janela atual e a semanal da conta em uso (a principal, sem conta escolhida)", async () => {
@@ -159,6 +161,13 @@ describe("atualização: ao abrir e no fim de cada turno, sem polling", () => {
     // só a conta que a conversa usa é relida, com a validade do store (nada forçado); as outras mostram
     // o último snapshot local (Ton e Codex estão listadas, mas não são pedidas).
     expect(refreshes).toEqual([["system:claude-code", false]]);
+  });
+
+  it("uma mudança nas abas que não troca a conta em uso não relê a cota", async () => {
+    await mount();
+    const first = refreshes.length;
+    await act(async () => { useTabsStore.setState({ tabs: [tab()] } as never); });
+    expect(refreshes).toHaveLength(first);
   });
 
   it("pede de novo quando o turno termina, e só então", async () => {

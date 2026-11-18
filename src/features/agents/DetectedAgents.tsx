@@ -67,7 +67,11 @@ export function DetectedAgents() {
       const result = await agentInstall(agentId);
       if (result.ok) {
         AlertaToast(label, t("settings.tuis.install.done", { label }), "success", 5000);
-        setDetectedAgents(await detectAgents(true));
+        try {
+          setDetectedAgents(await detectAgents(true));
+        } catch {
+          /* a instalação ok; a re-detecção falhou — não vira falha de install */
+        }
         refreshOffers();
         await loadAccounts();
       } else {

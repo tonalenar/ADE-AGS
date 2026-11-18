@@ -205,7 +205,7 @@ describe("buildTasks - Fluxo de Construção de Design", () => {
     it("suporta shape provisório e contrato real do backend com campos estendidos", () => {
       const backendDesign = {
         id: "real-backend-id",
-        workspace: "C:\\Users\\tonz1n\\proj",
+        workspace: "C:\\Users\\qa\\proj",
         missionId: "mission-123",
         ownerTabId: "tab-lead",
         title: "Design Completo",

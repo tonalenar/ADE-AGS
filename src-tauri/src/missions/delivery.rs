@@ -374,7 +374,7 @@ fn parse_ci_status(stdout: &[u8]) -> CiStatus {
             .to_ascii_uppercase();
         match state.as_str() {
             "SUCCESS" | "NEUTRAL" => {}
-            "PENDING" | "EXPECTED" | "QUEUED" | "IN_PROGRESS" | "REQUESTED" | "WAITING" => pending = true,
+            "" | "PENDING" | "EXPECTED" | "QUEUED" | "IN_PROGRESS" | "REQUESTED" | "WAITING" => pending = true,
             _ => return CiStatus::Failure,
         }
     }
@@ -437,6 +437,8 @@ mod tests {
         assert_eq!(parse_ci_status(br#"{"statusCheckRollup":[{"conclusion":"SUCCESS"},{"status":"IN_PROGRESS"}]}"#), CiStatus::Pending);
         assert_eq!(parse_ci_status(br#"{"statusCheckRollup":[{"conclusion":"SUCCESS"},{"conclusion":"FAILURE"}]}"#), CiStatus::Failure);
         assert_eq!(parse_ci_status(br#"{"statusCheckRollup":[]}"#), CiStatus::Pending);
+        assert_eq!(parse_ci_status(br#"{"statusCheckRollup":[{"conclusion":null,"status":"IN_PROGRESS"}]}"#), CiStatus::Pending);
+        assert_eq!(parse_ci_status(br#"{"statusCheckRollup":[{"conclusion":""}]}"#), CiStatus::Pending);
     }
 
     #[test]

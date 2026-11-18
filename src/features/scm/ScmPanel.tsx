@@ -13,6 +13,9 @@ import { SignInButton } from "@/features/forge/SignInButton";
 import { useRepoTarget } from "@/features/forge/useRepoTarget";
 import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { useDocumentVisible } from "@/shared/useDocumentVisible";
+import { createGeneration } from "@/shared/generation";
+import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 import { BranchMenu } from "./BranchMenu";
 import { CommitGraph } from "./CommitGraph";
@@ -128,10 +131,15 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
    *  (el número sobre el icono, las marcas del árbol) también tienen que enterarse. */
   const lastCount = useRef<number | null>(null);
 
+  /** Una generación por panel: dos paneles no pueden descartar la lectura del otro. */
+  const [gens] = useState(() => ({ status: createGeneration(), log: createGeneration() }));
+
   const load = useCallback(async () => {
     if (!cwd) return;
+    const gen = gens.status.next();
     try {
       const next = await scmStatus(cwd);
+      if (!gens.status.isCurrent(gen)) return;
       setStatus(next);
       if (next) {
         const count = next.staged.length + next.unstaged.length + next.untracked.length + next.conflicted.length;
@@ -139,9 +147,10 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
         lastCount.current = count;
       }
     } catch (e) {
-      setError(isScmError(e) ? e : { kind: "git", message: String(e) });
+      if (!gens.status.isCurrent(gen)) return;
+      setError(isScmError(e) ? e : { kind: "git", message: uiErrorText(e) });
     }
-  }, [cwd]);
+  }, [cwd, gens]);
 
   // Cambiar de workspace es otro repo: lo del anterior no puede verse ni un instante.
   useEffect(() => {
@@ -177,8 +186,12 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
   }, [shownRefs]);
 
   const loadLog = useCallback(() => {
-    if (root) scmLog(root, logLimit, shownRefs).then(setLog).catch(() => setLog([]));
-  }, [root, logLimit, shownRefs]);
+    if (!root) return;
+    const gen = gens.log.next();
+    scmLog(root, logLimit, shownRefs)
+      .then((rows) => { if (gens.log.isCurrent(gen)) setLog(rows); })
+      .catch(() => { if (gens.log.isCurrent(gen)) setLog([]); });
+  }, [root, logLimit, shownRefs, gens]);
 
   useEffect(() => { if (logOpen) loadLog(); }, [logOpen, loadLog]);
 
@@ -190,7 +203,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
     try {
       await op();
     } catch (e) {
-      setError(isScmError(e) ? e : { kind: "git", message: String(e) });
+      setError(isScmError(e) ? e : { kind: "git", message: uiErrorText(e) });
     } finally {
       await load();
       if (root) invalidateRepoInfo(root);
@@ -606,7 +619,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
               {remote.name} · {remote.host ?? remote.url}
             </span>
             {remote.webUrl && (
-              <IconAction label={t("scm.openWeb")} onClick={() => openExternalUrl(remote.webUrl!).catch(console.error)}>
+              <IconAction label={t("scm.openWeb")} onClick={() => openExternalUrl(remote.webUrl!).catch((e) => AlertaToast(t("scm.openWeb"), uiErrorText(e), "error", 5000))}>
                 <ExternalIcon className="w-3 h-3" />
               </IconAction>
             )}

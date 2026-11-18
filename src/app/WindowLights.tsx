@@ -79,19 +79,20 @@ function MacLightsSlot() {
 // ─── Windows e Linux ─────────────────────────────────────────────────────────────────────────────
 
 function useWindowActions() {
-  const win = getCurrentWindow();
   const [maximized, setMaximized] = useState(false);
   useEffect(() => {
+    const win = getCurrentWindow();
     win.isMaximized().then(setMaximized).catch(() => {});
     const unlisten = win.onResized(() => { win.isMaximized().then(setMaximized).catch(() => {}); });
     return () => { unlisten.then((fn) => fn()).catch(() => {}); };
-  }, [win]);
+  }, []);
   const act = useCallback((key: "close" | "minimize" | "maximize") => {
+    const win = getCurrentWindow();
     // Cerrar guarda todo antes (con la alerta de progreso) y después cierra por el camino de siempre.
     if (key === "close") closeWindowWithSave("button").catch(console.error);
     else if (key === "minimize") win.minimize().catch(console.error);
     else win.toggleMaximize().catch(console.error);
-  }, [win]);
+  }, []);
   return { maximized, act };
 }
 

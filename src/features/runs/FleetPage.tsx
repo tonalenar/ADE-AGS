@@ -10,6 +10,8 @@ import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath } from "@/features/tabs/viewTabs";
 import { AppDialog } from "@/shared/ui/AppDialog";
+import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 import { HandoffView } from "./HandoffView";
 import { AgentCard } from "./AgentCard";
@@ -287,17 +289,17 @@ export function FleetPage() {
                 focused={task.id === focusedId}
                 onDecide={(allow, remember) => {
                   const a = byTask.get(task.id);
-                  if (a) decideApproval(a.id, allow, remember).catch(console.error);
+                  if (a) decideApproval(a.id, allow, remember).catch((e) => AlertaToast(t("fleet.title"), uiErrorText(e), "error", 7000));
                 }}
-                onCancel={() => cancelTask(task.id).catch(console.error)}
+                onCancel={() => cancelTask(task.id).catch((e) => AlertaToast(t("fleet.title"), uiErrorText(e), "error", 7000))}
                 onShowResult={() => setDetail(task.id)}
                 onOpenPane={() => openInTerminal(task)}
                 onDiscardWorktree={() => discard(task)}
-                onReroute={() => rerouteTask(task.id).catch(console.error)}
+                onReroute={() => rerouteTask(task.id).catch((e) => AlertaToast(t("fleet.title"), uiErrorText(e), "error", 7000))}
                 onFixDecide={(action) => {
                   decideFix(task, action)
                     .then(() => { if (workspaceId) return refreshTask(workspaceId, task.id); })
-                    .catch(console.error);
+                    .catch((e) => AlertaToast(t("fleet.title"), uiErrorText(e), "error", 7000));
                 }}
                 onRollback={() => setRollbackFor(task)}
               />

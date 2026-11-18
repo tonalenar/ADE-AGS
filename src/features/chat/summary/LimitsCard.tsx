@@ -116,12 +116,15 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
 
   // Atualiza somente as contas desta conversa/time. As demais ficam visíveis com o último valor local conhecido.
   const keys = entries.map((e) => e.key).join("|");
+  // Só a identidade das contas em uso conta: trocar de aba ou de integrante sem trocar de conta não relê a cota.
+  const usedKey = used.map((u) => u.key).join("|");
+  const usesAgy = used.some((entry) => entry.agentId === "antigravity" && !entry.accountId);
   useEffect(() => {
     let alive = true;
     const run = async () => {
       if (!loaded) await useAccountsStore.getState().load().catch(() => undefined);
       const { refresh, refreshAgy } = useUsageStore.getState();
-      if (used.some((entry) => entry.agentId === "antigravity" && !entry.accountId)) void refreshAgy(false);
+      if (usesAgy) void refreshAgy(false);
       for (const entry of entries.filter((candidate) => candidate.who.length > 0)) {
         if (entry.account && MEASURED_AGENTS.has(entry.agentId) && !(entry.agentId === "antigravity" && !entry.accountId)) void refresh(entry.account as AgentAccount, false);
       }
@@ -130,7 +133,7 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
     };
     void run();
     return () => { alive = false; };
-  }, [keys, turnEnds, used]); // eslint-disable-line react-hooks/exhaustive-deps -- `entries` muda com `keys`; `loaded` só vale na primeira vez
+  }, [keys, turnEnds, usedKey]); // eslint-disable-line react-hooks/exhaustive-deps -- `entries` muda com `keys`; `loaded` só vale na primeira vez
 
   // O pool da conversa: relido junto com a cota (a troca acontece no fim de um turno).
   const threadId = threadIdOf(conversation.tabId);
@@ -157,7 +160,7 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
     // O Antigravity sem perfil é o login local do `agy`: a mesma leitura do canvas.
     if (entry.agentId === "antigravity" && !entry.accountId) return readAgy(agy, true, now);
     const account = entry.account;
-    if (!account) return { state: "unmeasured", reason: loaded ? "noSource" : "loading" };
+    if (!account) return { state: "unmeasured", reason: !loaded ? "loading" : entry.accountId ? "unresolved" : "noSource" };
     if (entry.agentId === "claude-code") return readClaude(claude[account.id] ?? null, account.loggedIn, now);
     if (entry.agentId === "codex") return readCodex(codex[account.id], account.loggedIn, now);
     return readAntigravity(antigravity[account.id], account.loggedIn, now);
@@ -199,7 +202,7 @@ function AccountBlock({ entry, reading, budget, now, poolNote = null }: { entry:
     <div className="flex flex-col gap-2">
       <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45 truncate" title={entry.who.join(", ")}>
         <span className="font-medium text-gray-800 dark:text-white/85">{agentName(entry.agentId)}</span>
-        {" · "}{accountName(entry.account, t)}
+        {" · "}{reading.state === "unmeasured" && reading.reason === "unresolved" ? t("chat.summary.limits.unresolvedAccount") : accountName(entry.account, t)}
         {entry.who.length > 0 && <span className="text-gray-400 dark:text-white/35">{" · "}{t("chat.summary.limits.usedBy", { who: entry.who.join(", ") })}</span>}
       </div>
       {poolNote && <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45">{poolNote}</div>}

@@ -58,7 +58,12 @@ export class PanelBoundary extends Component<PanelBoundaryProps, PanelBoundarySt
       if (this.props.fallback !== undefined) return this.props.fallback;
       return <PanelErrorView detail={errorDetail(this.state.error)} onRetry={this.retry} />;
     }
-    return <RetryAttemptContext value={this.state.attempt}>{this.props.children}</RetryAttemptContext>;
+    return (
+      <RetryAttemptContext value={this.state.attempt}>
+        {this.props.name === "boot" ? <span hidden data-panel-boundary="boot" /> : null}
+        {this.props.children}
+      </RetryAttemptContext>
+    );
   }
 }
 

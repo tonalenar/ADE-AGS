@@ -111,6 +111,7 @@ export function NewConversation({ projects, folder, onFolder }: {
   const [workspaceSettingsError, setWorkspaceSettingsError] = useState("");
   const [error, setError] = useState("");
   const submitInFlight = useRef(false);
+  const keptWorktree = useRef<{ projectCwd: string; worktree: Awaited<ReturnType<typeof chatNewWorktree>> } | null>(null);
   const [projectAgentPolicy, setProjectAgentPolicy] = useState<ProjectChatAgentPolicy | null>(null);
   const [projectPolicyLoadedCwd, setProjectPolicyLoadedCwd] = useState<string | null>(null);
   const [projectPolicySaving, setProjectPolicySaving] = useState(false);
@@ -450,17 +451,23 @@ export function NewConversation({ projects, folder, onFolder }: {
       // Num worktree novo o agente roda numa cópia do repo, na sua branch (ver `conversa.rs`).
       let cwd = project.cwd;
       if (workspaceMode.worktree) {
-        const worktree = await chatNewWorktree(project.cwd, conversationTitle(launchPrompt) ?? project.name, agent.id, worktreeSubmodules.mode);
+        // Com o script de criação falho, a tentativa seguinte reaproveita o worktree já feito (não cria outro).
+        const kept = keptWorktree.current?.projectCwd === project.cwd ? keptWorktree.current.worktree : null;
+        const worktree = kept ?? await chatNewWorktree(project.cwd, conversationTitle(launchPrompt) ?? project.name, agent.id, worktreeSubmodules.mode);
         cwd = worktree.cwd;
-        registerProjectScriptWorktree(worktree.cwd, project.cwd);
-        if (worktree.submodules === "failed") {
-          showBotToast({ title: t("chat.workspace.submodules.title"), text: t("chat.workspace.submodules.failed"), tone: "warning", ms: 8000 });
+        if (!kept) {
+          registerProjectScriptWorktree(worktree.cwd, project.cwd);
+          if (worktree.submodules === "failed") {
+            showBotToast({ title: t("chat.workspace.submodules.title"), text: t("chat.workspace.submodules.failed"), tone: "warning", ms: 8000 });
+          }
         }
         const setupSucceeded = await runProjectScriptsOnWorktreeCreate(project.cwd, worktree.cwd);
         if (!setupSucceeded) {
+          keptWorktree.current = { projectCwd: project.cwd, worktree };
           setError(t("chat.projectScripts.worktreeSetupFailed"));
           return false;
         }
+        keptWorktree.current = null;
       }
       if (withTeam) {
         // Com integrantes no rascunho: conversa, time e integrantes nascem juntos, ou nada fica (ver `launchTeam`).

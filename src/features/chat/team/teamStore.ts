@@ -9,6 +9,7 @@ import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { showBotToast } from "@/shared/brand/botToastStore";
 import { sendAutonomous } from "@/features/terminal/safeWrite";
 
 import { chatCommand } from "../chatModel";
@@ -67,9 +68,13 @@ function upsertTeam(team: TeamView): void {
   useTeamStore.setState((s) => ({ teams: s.teams.some((t) => t.id === team.id) ? s.teams.map((t) => (t.id === team.id ? team : t)) : [...s.teams, team] }));
 }
 
+let teamsReads = 0;
+
 export async function reloadTeams(): Promise<TeamView[]> {
+  const read = ++teamsReads;
   const { teams, missionTeams } = splitMirrors(await chatTeamList());
-  useTeamStore.setState({ teams, missionTeams, loaded: true });
+  // Uma resposta pedida antes, que chega depois, não volta por cima da leitura mais nova.
+  if (read === teamsReads) useTeamStore.setState({ teams, missionTeams, loaded: true });
   return teams;
 }
 
@@ -259,7 +264,15 @@ async function runMirror(): Promise<void> {
       // A linha de base passa a ser o canvas de agora ANTES de executar: o que os comandos devolvem ao
       // canvas (chat -> canvas) é adotado de novo em `syncTeamCanvas`.
       for (const team of useTeamStore.getState().teams) adoptBaseline(team);
-      for (const op of ops) await applyReverse(op).catch((e) => console.warn("[time] espelho canvas -> chat:", e));
+      for (const op of ops) {
+        await applyReverse(op).catch((e) => {
+          console.warn("[time] espelho canvas -> chat:", e);
+          showBotToast({ title: i18n.t("chat.team.mirror.refusedTitle"), text: i18n.t("chat.team.mirror.refused", { error: String(e) }), tone: "warning" });
+          // O que o time não aceitou sai do canvas: a linha de base já o tinha como acordado, e sem isto a falha some.
+          const team = useTeamStore.getState().teams.find((t) => t.id === op.teamId);
+          if (team) void syncTeamCanvas(team, op.kind === "link" ? { removed: [op.ref] } : {});
+        });
+      }
       // Depois do que o time já tinha: coroas novas viram time (só nos canvases em que a pessoa mexeu).
       const only = [...touchedBoards];
       touchedBoards.clear();

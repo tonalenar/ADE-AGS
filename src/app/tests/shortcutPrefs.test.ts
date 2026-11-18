@@ -62,6 +62,15 @@ describe("preferências de atalhos", () => {
     expect(matchShortcut(chord("h", { ctrlKey: true, shiftKey: true }))?.action).toEqual({ kind: "goto", path: "/" });
   });
 
+  it("reusa a lista enquanto as preferências não mudam", () => {
+    const first = getShortcuts();
+    expect(getShortcuts()).toBe(first);
+    useShortcutPreferences.getState().setBinding("navigation.fleet", {
+      key: "g", ctrl: false, shift: true, alt: false, meta: true,
+    });
+    expect(getShortcuts()).not.toBe(first);
+  });
+
   it("distingue acordes pela combinação exata de modificadores e tecla", () => {
     const a = validateShortcutBinding({ key: "m", ctrl: true, shift: true });
     const b = validateShortcutBinding({ key: "m", ctrl: true, shift: false });

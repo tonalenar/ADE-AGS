@@ -6,6 +6,8 @@ import {
 import { useWorkspacesStore } from "@/features/workspaces/store";
 import type { WorkspaceSummary } from "@/features/workspaces/types";
 import { AppDialog } from "@/shared/ui/AppDialog";
+import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 interface OpenWorkspaceDialogProps {
   workspace: WorkspaceSummary;
@@ -22,6 +24,8 @@ export function OpenWorkspaceDialog({ workspace, onClose }: OpenWorkspaceDialogP
     try {
       await openWorkspace(workspace.id, closeCurrent);
       onClose();
+    } catch (e) {
+      AlertaToast(t("workspace.open.title", { name: workspace.name }), uiErrorText(e), "error", 7000);
     } finally {
       setBusy(false);
     }

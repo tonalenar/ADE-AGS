@@ -82,6 +82,7 @@ export function DiffTab({ view, active }: { view: DiffView; active: boolean }) {
   const diff = useDiffPrefs();
   const codeWrap = useDisplayPrefs().codeWrap;
   const host = useRef<HTMLDivElement>(null);
+  const loadGen = useRef(0);
   const handle = useRef<DiffHandle | null>(null);
   const themeSlots = useRef({ a: new Compartment(), b: new Compartment() });
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +96,7 @@ export function DiffTab({ view, active }: { view: DiffView; active: boolean }) {
     : t(view.staged ? "editor.diff.side.index" : "editor.diff.side.disk");
 
   const load = useCallback(async () => {
+    const gen = ++loadGen.current;
     try {
       const [before, after, language] = await Promise.all([
         view.commit
@@ -107,7 +109,7 @@ export function DiffTab({ view, active }: { view: DiffView; active: boolean }) {
             : readFile(abs).then((c) => (c.kind === "text" ? c.content : null)).catch(() => null),
         languageFor(view.path),
       ]);
-      if (!host.current) return;
+      if (!host.current || gen !== loadGen.current) return;
       handle.current?.destroy();
       const dark = themeRef.current === "dark";
       // Layout, recolhimento, quebra de linha e espaços vêm de `diffBuildOptions` (as preferências). Os

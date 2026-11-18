@@ -367,10 +367,19 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let raw_extras: String = row.get(16)?;
-    let extra_inputs: Vec<SquadExtraMemberInput> = serde_json::from_str(&raw_extras).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(16, rusqlite::types::Type::Text, Box::new(error))
-    })?;
+    let raw_extras: Option<String> = row.get(16)?;
+    let mut extra_invalid = None;
+    let extra_inputs: Vec<SquadExtraMemberInput> = match raw_extras.as_deref().filter(|raw| !raw.trim().is_empty()) {
+        None => Vec::new(),
+        Some(raw) => match serde_json::from_str(raw) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("[squads] extra_members inválido no squad {id}: {error}");
+                extra_invalid = Some(format!("extra_members: JSON inválido ({error})"));
+                Vec::new()
+            }
+        },
+    };
     let extra_members = extra_inputs
         .into_iter()
         .map(|extra| -> rusqlite::Result<SquadExtraMember> {
@@ -391,10 +400,14 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
             })
         })
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let unavailable_reasons = lead_reason
+    let mut unavailable_reasons: Vec<String> = lead_reason
         .into_iter()
         .map(|reason| format!("lead: {reason}"))
         .collect();
+    let extras_ok = extra_invalid.is_none();
+    if let Some(reason) = extra_invalid {
+        unavailable_reasons.push(reason);
+    }
     let default_subagent = row.get::<_, Option<String>>(12)?.map(|agent_id| -> rusqlite::Result<SubagentDefault> {
         Ok(SubagentDefault {
             agent_id,
@@ -413,7 +426,7 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
         extra_members,
         created_at: row.get(8)?,
         updated_at: row.get(9)?,
-        available: lead_availability.can_attempt(),
+        available: lead_availability.can_attempt() && extras_ok,
         unavailable_reasons,
     })
 }

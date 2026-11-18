@@ -56,7 +56,7 @@ export interface LimitWindow {
   expired: boolean;
 }
 
-export type UnmeasuredReason = "loading" | "failed" | "notLoggedIn" | "apiKey" | "noWindows" | "noSource" | "noQuotaSource";
+export type UnmeasuredReason = "loading" | "failed" | "notLoggedIn" | "apiKey" | "noWindows" | "noSource" | "noQuotaSource" | "unresolved";
 
 export type AccountReading =
   | { state: "measured"; windows: LimitWindow[]; /** O servidor recusou por limite. */ rejected: boolean }
@@ -219,8 +219,8 @@ export function connectedAccounts(input: {
 }): AccountEntry[] {
   const all = [...input.systemAccounts, ...input.accounts];
   const byKey = new Map<string, AccountEntry>();
-  const add = (agentId: string, account: AccountLike | null, who: string[]) => {
-    const accountId = account && !account.id.startsWith("system:") ? account.id : null;
+  // A conta que a conversa usa fica com o id dela, mesmo sem registro: não se troca pela conta principal.
+  const add = (agentId: string, account: AccountLike | null, who: string[], accountId: string | null = account && !account.id.startsWith("system:") ? account.id : null) => {
     const key = accountKeyOf(agentId, accountId);
     if (!byKey.has(key)) byKey.set(key, { key, agentId, accountId, account, who });
   };
@@ -229,7 +229,7 @@ export function connectedAccounts(input: {
   // As da conversa primeiro, na ordem em que ela as usa.
   for (const u of input.used) {
     const account = all.find((a) => (u.accountId ? a.id === u.accountId : a.id === `system:${u.agentId}` || (a.agentId === u.agentId && a.id.startsWith("system:")))) ?? null;
-    add(u.agentId, account, u.who);
+    add(u.agentId, account, u.who, u.accountId);
   }
   const rest = all
     .filter((a) => input.measured.has(a.agentId) && a.loggedIn)

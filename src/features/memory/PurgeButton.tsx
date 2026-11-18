@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { purgeConfirmed } from "./dreamReview";
@@ -17,7 +17,15 @@ export function PurgeButton({ entryId, entryKey, disabled, onDone }: { entryId: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const opener = useRef<HTMLButtonElement>(null);
-  const close = () => { setOpen(false); setTyped(""); setError(""); setTimeout(() => opener.current?.focus(), 0); };
+  useEffect(() => () => { if (focusTimer.current != null) window.clearTimeout(focusTimer.current); }, []);
+  const focusTimer = useRef<number | null>(null);
+  const close = () => {
+    setOpen(false);
+    setTyped("");
+    setError("");
+    if (focusTimer.current != null) window.clearTimeout(focusTimer.current);
+    focusTimer.current = window.setTimeout(() => opener.current?.focus(), 0);
+  };
   const run = async () => {
     if (!purgeConfirmed(typed, entryKey) || busy) return;
     setBusy(true);

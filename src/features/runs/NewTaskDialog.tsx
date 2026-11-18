@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Alert, AnimateSpin, Button, Checkbox, Input, SegmentedControl, TextArea,
@@ -60,6 +60,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
   /** `null` = todavía no se sabe si la carpeta es un repo. */
   const [isRepo, setIsRepo] = useState<boolean | null>(null);
   const [isolate, setIsolate] = useState(false);
+  const isolateTouched = useRef(false);
   const [assignment, setAssignment] = useState<Assignment | null>(null);
   const [routeError, setRouteError] = useState("");
   // O erro do roster é separado do da previsão: o seguinte não pode apagar o primeiro.
@@ -70,10 +71,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
       .then((info) => {
         const repo = info.root !== null;
         setIsRepo(repo);
-        // Encendido solo si hace falta: con otro agente ya trabajando en la carpeta, el
-        // segundo editaría los mismos archivos. Con la carpeta libre no hay choque, y un
-        // worktree sería una copia del repo y una rama que nadie pidió.
-        setIsolate(repo && busyInFolder > 0);
+        setIsolate((cur) => isolateTouched.current ? cur : (repo && busyInFolder > 0));
       })
       .catch(() => setIsRepo(false));
   }, [cwd, busyInFolder]);
@@ -303,7 +301,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
             size="sm"
             checked={Boolean(isRepo) && isolate}
             disabled={!isRepo}
-            onChange={setIsolate}
+            onChange={(v) => { isolateTouched.current = true; setIsolate(v); }}
             label={t("fleet.new.isolate")}
             description={isRepo === false ? t("fleet.new.isolateNoRepo") : t("fleet.new.isolateHint")}
           />

@@ -1013,6 +1013,11 @@ function SessionRow({ card, diff, selected, asks, pinned, unread, renaming, onOp
   const awaiting = threadId ? !!threadAsk && threadAsk !== "question" : tabAwaiting;
   const needsYou = asks > 0 || awaiting || question;
   const working = !needsYou && (phase === "working" || live.working);
+  // Uma edição de nome termina uma vez: o blur que chega depois do Enter (ou do Esc) não grava de novo.
+  const renameSettled = useRef(false);
+  useEffect(() => { if (renaming) renameSettled.current = false; }, [renaming]);
+  const commitRename = (value: string) => { if (renameSettled.current) return; renameSettled.current = true; onRename(value); };
+  const cancelRename = () => { renameSettled.current = true; onCancelRename(); };
   const open = () => { setUnread(card.tabId, false); openCard(card.tabId); onOpened?.(); };
   const stateLabel = needsYou ? t("chat.status.approval") : working ? t("chat.sidebar.working") : unread ? t("chat.sidebar.unread") : null;
   const tip = [card.cwd, card.branch, diff && diff.added + diff.removed > 0 ? `+${diff.added} −${diff.removed}` : null].filter(Boolean).join(" · ");
@@ -1038,10 +1043,10 @@ function SessionRow({ card, diff, selected, asks, pinned, unread, renaming, onOp
         <input autoFocus defaultValue={card.title} aria-label={t("chat.sidebar.renameLabel")}
           onClick={(e) => e.stopPropagation()} onKeyDown={(e) => {
             e.stopPropagation();
-            if (e.key === "Enter") onRename(e.currentTarget.value);
-            else if (e.key === "Escape") onCancelRename();
+            if (e.key === "Enter") commitRename(e.currentTarget.value);
+            else if (e.key === "Escape") cancelRename();
           }}
-          onBlur={(e) => onRename(e.currentTarget.value)} onFocus={(e) => e.currentTarget.select()}
+          onBlur={(e) => commitRename(e.currentTarget.value)} onFocus={(e) => e.currentTarget.select()}
           className="flex-1 min-w-0 h-6 px-1 -mx-1 rounded bg-white dark:bg-white/10 outline-none ring-1 ring-accent-500/70 text-[13px] text-gray-900 dark:text-white" />
       ) : (
         <span className={`flex-1 min-w-0 truncate text-[13.5px] text-gray-900 dark:text-white ${unread ? "font-semibold" : ""}`}>{card.title}</span>

@@ -85,19 +85,24 @@ pub fn history_for_entry(
     workspace_id: &str,
     mission_id: Option<&str>,
     entry_id: &str,
+    repo: Option<String>,
 ) -> Result<Vec<MemoryValidityInterval>, String> {
     let mut statement = conn
         .prepare(
+            &format!(
             "SELECT r.entry_id,r.revision,r.status,r.operation,r.kind,r.priority,r.body,r.content_hash,r.actor_kind,r.source_run_id,r.source_task_id,r.source_fact_id,r.reason,r.expected_revision,r.created_at,r.decided_at
                FROM memory_entries e
                JOIN memory_revisions r ON r.entry_id=e.id
               WHERE e.id=?1 AND e.workspace_id=?2 AND r.status='approved'
                 AND (e.scope='workspace' OR (e.scope='mission' AND ?3 IS NOT NULL AND e.mission_id=?3))
+                AND {}
               ORDER BY r.decided_at ASC, r.revision ASC",
+                super::repo_scope::sql_match("?4", mission_id.is_some() && repo.is_none()),
+            ),
         )
         .map_err(|_| "could not read memory history".to_string())?;
     let revisions = statement
-        .query_map(params![entry_id, workspace_id, mission_id], |row| {
+        .query_map(params![entry_id, workspace_id, mission_id, repo], |row| {
             Ok(MemoryRevision {
                 entry_id: row.get(0)?,
                 revision: row.get(1)?,
@@ -136,7 +141,7 @@ pub fn validity_at(
     at: i64,
 ) -> Result<Vec<MemoryValidityInterval>, String> {
     Ok(intervals_at(
-        &history_for_entry(conn, workspace_id, mission_id, entry_id)?,
+        &history_for_entry(conn, workspace_id, mission_id, entry_id, None)?,
         at,
     ))
 }
@@ -290,21 +295,21 @@ mod tests {
         let mission_entry = approve_create(&conn, "w1", Some("m1"), "mission", "private");
 
         assert_eq!(
-            history_for_entry(&conn, "w1", Some("m2"), &workspace_entry)
+            history_for_entry(&conn, "w1", Some("m2"), &workspace_entry, None)
                 .unwrap()
                 .len(),
             1
         );
-        assert!(history_for_entry(&conn, "w1", Some("m2"), &mission_entry)
+        assert!(history_for_entry(&conn, "w1", Some("m2"), &mission_entry, None)
             .unwrap()
             .is_empty());
         assert_eq!(
-            history_for_entry(&conn, "w1", Some("m1"), &mission_entry)
+            history_for_entry(&conn, "w1", Some("m1"), &mission_entry, None)
                 .unwrap()
                 .len(),
             1
         );
-        assert!(history_for_entry(&conn, "w2", Some("m1"), &mission_entry)
+        assert!(history_for_entry(&conn, "w2", Some("m1"), &mission_entry, None)
             .unwrap()
             .is_empty());
     }

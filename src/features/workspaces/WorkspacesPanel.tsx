@@ -13,6 +13,7 @@ import { flattenWorkspaces } from "@/features/workspaces/workspaceTree";
 import type { RepoGroup, WorkspaceNode } from "@/features/workspaces/workspaceTree";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { SkillPalette, type SkillScopeTarget } from "@/features/skills/SkillPalette";
+import { consumeSnapshotAfterRestore } from "@/features/workspaces/reopenSnapshot";
 import { useSnapshotsStore } from "@/features/workspaces/snapshotsStore";
 import { useSkillsStore } from "@/features/skills/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
@@ -156,6 +157,7 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
   const skills = useSkillsStore((s) => s.skills);
   const saveSnapshot = useSnapshotsStore((s) => s.save);
   const takeSnapshot = useSnapshotsStore((s) => s.take);
+  const peekSnapshot = useSnapshotsStore((s) => s.peek);
   const forgetSnapshot = useSnapshotsStore((s) => s.forget);
 
   // El panel dibuja una lista plana: el repo sigue agrupando el orden, pero ya no se
@@ -244,40 +246,39 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
 
   /** Reabrirlo: se recrean sus agentes con su conversación y sus skills. */
   const reopenWorkspace = async (ws: WorkspaceNode) => {
-    const snapshot = await takeSnapshot(ws.cwd);
-    if (!snapshot) return;
+    await consumeSnapshotAfterRestore({
+      peek: () => peekSnapshot(ws.cwd),
+      restore: async (snapshot) => {
+        let first: string | null = null;
+        for (const saved of snapshot.tabs) {
+          const tabId = addTab({
+            cwd: snapshot.cwd,
+            agent: {
+              id: saved.agentId,
+              label: saved.agentLabel,
+              command: saved.command,
+              available: true,
+            },
+            title: saved.title,
+            titleIsCustom: saved.titleIsCustom ?? undefined,
+            sessionId: saved.sessionId ?? undefined,
+            accountId: saved.accountId ?? undefined,
+            prelaunch: saved.prelaunch,
+          });
+          first ??= tabId;
 
-    let first: string | null = null;
-    for (const saved of snapshot.tabs) {
-      const tabId = addTab({
-        cwd: snapshot.cwd,
-        agent: {
-          id: saved.agentId,
-          label: saved.agentLabel,
-          command: saved.command,
-          available: true,
-        },
-        title: saved.title,
-        titleIsCustom: saved.titleIsCustom ?? undefined,
-        sessionId: saved.sessionId ?? undefined,
-        accountId: saved.accountId ?? undefined,
-        prelaunch: saved.prelaunch,
-      });
-      first ??= tabId;
-
-      if (saved.skillIds.length > 0) {
-        // Los symlinks tienen que existir ANTES de que arranque el agente: varias TUIs
-        // solo leen su carpeta de skills al boot. `flushPendingSave` va adentro de
-        // `attachSkillsToTab`, que es lo que hace que la fila de la tab exista en SQLite.
-        registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, saved.skillIds));
-      }
-    }
-
-    if (first) {
-      await flushPendingSave();
-      activateTab(first);
-      navigate("/workspace");
-    }
+          if (saved.skillIds.length > 0) {
+            registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, saved.skillIds));
+          }
+        }
+        if (first) {
+          await flushPendingSave();
+          activateTab(first);
+          navigate("/workspace");
+        }
+      },
+      take: async () => { await takeSnapshot(ws.cwd); },
+    });
   };
 
   return (

@@ -44,10 +44,11 @@ export function portalConnectedNotice(board: Board, a: string, b: string): { age
         + `A pessoa conversa com você pelo painel do simulador: responda lá com \`ags device say "${portal.name}" "…"\`.`,
     };
   }
-  const where = portal.url ? ` (${portal.url})` : "";
+  const url = portal.url ? portal.url.replace(/<(?=\/?\s*untrusted_data\b)/gi, "‹") : "";
+  const where = url ? `\n<untrusted_data source="portal-url">\n${url}\n</untrusted_data>\n` : " ";
   return {
     agent,
-    text: `[ADE AGS] O navegador "${portal.name}"${where} do canvas foi conectado a você. `
+    text: `[ADE AGS] O navegador "${portal.name}" do canvas foi conectado a você.${where}`
       + `Maneje-o com \`ags portal snapshot "${portal.name}"\` (a página, com refs @e1…), \`ags portal navigate "${portal.name}" <url>\`, `
       + "`click`, `type`, `press`, `scroll`, `wait` e `screenshot`; para um trajeto inteiro, `ags portal act \"" + portal.name + "\" \"<objetivo>\" --expect text:\"...\"` (MCP `browser_act`). A pessoa vê tudo o que você faz nele; `ags portals` lista os seus navegadores.",
   };

@@ -175,13 +175,20 @@ export function CitationCommentPopover({
       setPos(computePos(pr && pr.width > 0 ? pr.width : 320, pr && pr.height > 0 ? pr.height : 148));
     };
 
-    const observer =
-      typeof MutationObserver !== "undefined" ? new MutationObserver(checkSource) : null;
+    // Cada pedaço do streaming é uma mutação: a medição (layout forçado) fica para o próximo quadro, uma vez.
+    let frame: number | null = null;
+    const observer = typeof MutationObserver !== "undefined"
+      ? new MutationObserver(() => {
+        if (frame !== null) return;
+        frame = requestAnimationFrame(() => { frame = null; checkSource(); });
+      })
+      : null;
     observer?.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("scroll", checkSource, true);
     window.addEventListener("resize", checkSource);
     return () => {
       observer?.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
       window.removeEventListener("scroll", checkSource, true);
       window.removeEventListener("resize", checkSource);
     };

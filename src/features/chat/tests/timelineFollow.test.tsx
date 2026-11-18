@@ -164,16 +164,19 @@ describe("a conversa segue o fim enquanto a pessoa está nele", () => {
     expect(host.querySelector('[data-chat-virtual-spacer="bottom"]')).not.toBeNull();
   });
 
-  it("mantém um turno visível no mesmo commit em que a lista virtualizada encolhe", async () => {
+  it("mantém um turno visível quando a lista virtualizada encolhe", async () => {
     content = 30_000;
     await render(longHistory);
     await runAnimation();
-    expect(host.querySelectorAll("[data-virtual-turn]").length).toBeGreaterThan(0);
+    const before = [...host.querySelectorAll("[data-virtual-turn]")].map((el) => el.getAttribute("data-virtual-turn"));
+    expect(before.length).toBeGreaterThan(0);
 
     const shorter = longHistory.slice(0, 180); // 60 turnos: ainda virtualizada, com o intervalo antigo no fim.
     await render(shorter);
-    expect(host.querySelectorAll("[data-virtual-turn]").length).toBeGreaterThan(0);
+    const after = [...host.querySelectorAll("[data-virtual-turn]")].map((el) => el.getAttribute("data-virtual-turn"));
     expect(host.querySelector('[data-virtual-turn="virtual-u-59"]')).not.toBeNull();
+    expect(after).not.toEqual(before);
+    expect(after.length).toBeGreaterThan(0);
   });
 
   it("acompanha novas respostas no fim virtualizado e preserva a posição quando a pessoa lê acima", async () => {

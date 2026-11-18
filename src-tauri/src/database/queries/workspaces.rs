@@ -12,6 +12,26 @@ use crate::util::now_ts;
 
 use super::sessions::{archive_tab_row, resolve_for_archive};
 
+fn unique_workspace_name_error(conn: &Connection, name: &str, raw: &str) -> String {
+    if !raw.contains("UNIQUE") {
+        return raw.to_string();
+    }
+    let in_trash = conn
+        .query_row(
+            "SELECT deleted_at FROM workspaces WHERE name = ?1",
+            [name],
+            |r| r.get::<_, Option<i64>>(0),
+        )
+        .ok()
+        .flatten()
+        .is_some();
+    if in_trash {
+        format!("Ya existe un workspace llamado \"{name}\" en la papelera")
+    } else {
+        format!("Ya existe un workspace llamado \"{name}\"")
+    }
+}
+
 // (no una carpeta raíz). Se crea explícitamente con "Guardar como workspace...".
 
 /// Marca un workspace como usado ahora. Se llama en cada autosave de ventana y al
@@ -198,15 +218,7 @@ pub(crate) fn db_save_workspace_now(
         "INSERT INTO workspaces (id, name, created_at, last_active) VALUES (?1, ?2, ?3, ?3)",
         rusqlite::params![id, name, now],
     )
-    .map_err(|e| {
-        // `workspaces.name` es UNIQUE: sin esto el usuario veía el error crudo de SQLite
-        // ("UNIQUE constraint failed: workspaces.name") en un toast.
-        if e.to_string().contains("UNIQUE") {
-            format!("Ya existe un workspace llamado \"{name}\"")
-        } else {
-            e.to_string()
-        }
-    })?;
+    .map_err(|e| unique_workspace_name_error(&conn, &name, &e.to_string()))?;
 
     move_open_windows_to_workspace(&conn, &id, &source_workspace_id, now)?;
 
@@ -369,13 +381,7 @@ pub(crate) fn db_rename_workspace_now(
             "UPDATE workspaces SET name = ?1 WHERE id = ?2",
             rusqlite::params![name, workspace_id],
         )
-        .map_err(|e| {
-            if e.to_string().contains("UNIQUE") {
-                format!("Ya existe un workspace llamado \"{name}\"")
-            } else {
-                e.to_string()
-            }
-        })?;
+        .map_err(|e| unique_workspace_name_error(&conn, &name, &e.to_string()))?;
     if affected == 0 {
         return Err("Workspace no encontrado".to_string());
     }

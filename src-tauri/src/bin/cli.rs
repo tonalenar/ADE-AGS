@@ -7,8 +7,11 @@
 //! El código de salida distingue los casos que a un agente le importan: 0 todo bien,
 //! 1 la app rechazó el comando, 2 error de uso, 3 la app no está corriendo.
 
-use ade_ags_lib::ipc::protocol::{client_handshake_path, Handshake, Request, Response, PROTOCOL_VERSION};
-use serde_json::{json, Map, Value};
+use ade_ags_lib::ipc::protocol::{
+    Handshake, PROTOCOL_VERSION, Request, Response, client_handshake_path,
+};
+use serde_json::{Map, Value, json};
+use std::io::Write;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
@@ -27,6 +30,10 @@ SEGREDOS TEMPORÁRIOS (conversas interativas)
   secret request --label \"R2\" [--description \"...\"]   Pede o valor em campo protegido e guarda no cofre por até 24 h
   secret revoke <id>                              Remove um segredo desta conversa
   secret run <id> -- <programa> [args...]         Envia-o só pelo stdin; a saída do programa é descartada
+
+CREDENCIAIS DE AGENTE (uso interno)
+  credential claude --account <id>              Entrega a chave só pelo stdout ao apiKeyHelper
+  credential codex --account <id>               Entrega a chave só pelo stdout ao helper de autenticação
 
 TESTES LOCAIS (no worktree atual, sem precisar do app)
   test affected [--dry-run] [--force]          Testes afetados desde a base do worktree + alterações locais
@@ -541,6 +548,9 @@ pub(crate) fn main() -> ExitCode {
     if args[0] == "secret" && args.get(1).is_some_and(|action| action == "run") {
         return run_secret(&args[2..]);
     }
+    if args[0] == "credential" {
+        return run_credential(&args[1..]);
+    }
 
     // `ags skills` / `ags agents`: listar es lo único que se hace con ellos, y exigir
     // `skill list` para eso era ceremonia sin ganancia.
@@ -550,38 +560,46 @@ pub(crate) fn main() -> ExitCode {
             Some("revoke") => ("secret.revoke".to_string(), &args[2..]),
             Some("run") => unreachable!("secret run é tratado antes do parser comum"),
             Some(action) if action.starts_with("--") => ("secret.request".to_string(), &args[1..]),
-            Some(other) => { eprintln!("Ação de segredo desconhecida: {other}"); return ExitCode::from(EXIT_USAGE); }
+            Some(other) => {
+                eprintln!("Ação de segredo desconhecida: {other}");
+                return ExitCode::from(EXIT_USAGE);
+            }
             None => ("secret.request".to_string(), &args[1..]),
         }
     } else if args[0] == "design" {
         match design_command(&args) {
             Ok(v) => v,
-            Err(e) => { eprintln!("{e}"); return ExitCode::from(EXIT_USAGE); }
-        }    } else if args[0].starts_with("http://") || args[0].starts_with("https://") {
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        }
+    } else if args[0].starts_with("http://") || args[0].starts_with("https://") {
         // `ags http://localhost:5173`: é como as ferramentas que respeitam $BROWSER (Vite, Python…) chamam
         // o "navegador": a app põe BROWSER=ags nos terminais, e o endereço chega como único argumento.
         ("portal.open".to_string(), &args[..])
-    } else { match shortcut(&args[0]) {
-        Some(cmd) => {
-            // `ags prelaunch` y `ags prelaunch list` son lo mismo. Escribir la accion
-            // igual es lo natural para quien viene de `ags account list`, y sin esto
-            // fallaba con "argumento inesperado 'list'" — un error sin sentido para algo
-            // que es exactamente lo que el atajo hace.
-            let action = cmd.split('.').nth(1).unwrap_or("");
-            let rest = match args.get(1) {
-                Some(next) if next == action => &args[2..],
-                _ => &args[1..],
-            };
-            (cmd.to_string(), rest)
-        }
-        None => {
-            if args.len() < 2 {
-                eprintln!("Falta a ação para '{}'. Tente: ags --help", args[0]);
-                return ExitCode::from(EXIT_USAGE);
+    } else {
+        match shortcut(&args[0]) {
+            Some(cmd) => {
+                // `ags prelaunch` y `ags prelaunch list` son lo mismo. Escribir la accion
+                // igual es lo natural para quien viene de `ags account list`, y sin esto
+                // fallaba con "argumento inesperado 'list'" — un error sin sentido para algo
+                // que es exactamente lo que el atajo hace.
+                let action = cmd.split('.').nth(1).unwrap_or("");
+                let rest = match args.get(1) {
+                    Some(next) if next == action => &args[2..],
+                    _ => &args[1..],
+                };
+                (cmd.to_string(), rest)
             }
-            (format!("{}.{}", args[0], args[1]), &args[2..])
+            None => {
+                if args.len() < 2 {
+                    eprintln!("Falta a ação para '{}'. Tente: ags --help", args[0]);
+                    return ExitCode::from(EXIT_USAGE);
+                }
+                (format!("{}.{}", args[0], args[1]), &args[2..])
+            }
         }
-    }
     };
 
     // Compactar e restaurar só rodam na interface. Recusar aqui também: um `ags`
@@ -638,10 +656,15 @@ pub(crate) fn main() -> ExitCode {
     let parsed = if command.starts_with("design.") {
         let cwd = match std::env::current_dir() {
             Ok(cwd) => cwd,
-            Err(e) => { eprintln!("{e}"); return ExitCode::from(EXIT_USAGE); }
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::from(EXIT_USAGE);
+            }
         };
         design_defaults(&command, parsed, &cwd)
-    } else { parsed };
+    } else {
+        parsed
+    };
     // `ags chat new` abre a conversa na pasta da shell, não na do app.
     let parsed = if command == "chat.new" {
         let cwd = match std::env::current_dir() {
@@ -658,7 +681,9 @@ pub(crate) fn main() -> ExitCode {
                 return ExitCode::from(EXIT_USAGE);
             }
         }
-    } else { parsed };
+    } else {
+        parsed
+    };
     let parsed = if command.starts_with("run.") {
         let cwd = match std::env::current_dir() {
             Ok(cwd) => cwd,
@@ -674,13 +699,20 @@ pub(crate) fn main() -> ExitCode {
                 return ExitCode::from(EXIT_USAGE);
             }
         }
-    } else { parsed };
-    let mut parsed=parsed;
+    } else {
+        parsed
+    };
+    let mut parsed = parsed;
     if command.starts_with("worktrees.") || command == "gemini.consult" {
-        let requested=parsed.get("cwd").and_then(Value::as_str).unwrap_or(".");
+        let requested = parsed.get("cwd").and_then(Value::as_str).unwrap_or(".");
         match std::path::absolute(requested) {
-            Ok(path)=>{parsed["cwd"]=Value::String(path.to_string_lossy().into_owned());},
-            Err(e)=>{eprintln!("{e}");return ExitCode::from(EXIT_USAGE);}
+            Ok(path) => {
+                parsed["cwd"] = Value::String(path.to_string_lossy().into_owned());
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::from(EXIT_USAGE);
+            }
         }
     }
     let parsed = with_caller(&command, parsed);
@@ -689,16 +721,24 @@ pub(crate) fn main() -> ExitCode {
         Ok(response) if response.ok => {
             let mut body = response.data.unwrap_or(Value::Null);
             // Respostas grandes de leitura vão para `~/.ags/spill/`; `--no-spill` devolve tudo.
-            if ade_ags_lib::ipc::spill::CLI_COMMANDS.contains(&command.as_str()) && parsed.get("noSpill").and_then(Value::as_bool) != Some(true) {
+            if ade_ags_lib::ipc::spill::CLI_COMMANDS.contains(&command.as_str())
+                && parsed.get("noSpill").and_then(Value::as_bool) != Some(true)
+            {
                 let session = std::env::var("ADE_TAB_ID").ok();
-                ade_ags_lib::ipc::spill::spill_json(ade_ags_lib::ipc::spill::root().as_deref(), session.as_deref().unwrap_or("cli"), &mut body);
+                ade_ags_lib::ipc::spill::spill_json(
+                    ade_ags_lib::ipc::spill::root().as_deref(),
+                    session.as_deref().unwrap_or("cli"),
+                    &mut body,
+                );
             }
             println!("{body}");
             ExitCode::from(EXIT_OK)
         }
         Ok(response) => {
             let err = response.error.unwrap_or_default();
-            if command == "mission.redeliver" && (err.contains("desconocido") || err.contains("desconhecido")) {
+            if command == "mission.redeliver"
+                && (err.contains("desconocido") || err.contains("desconhecido"))
+            {
                 return execute_standalone_redeliver(&parsed);
             }
             println!("{}", json!({ "error": err }));
@@ -722,81 +762,163 @@ pub(crate) fn main() -> ExitCode {
 
 fn execute_tests(command: &str, args: &Value) -> ExitCode {
     match execute_tests_inner(command, args) {
-        Ok((body, passed)) => { println!("{body}"); ExitCode::from(if passed { EXIT_OK } else { EXIT_COMMAND_FAILED }) }
-        Err(error) => { println!("{}", json!({"error":error})); ExitCode::from(EXIT_COMMAND_FAILED) }
+        Ok((body, passed)) => {
+            println!("{body}");
+            ExitCode::from(if passed { EXIT_OK } else { EXIT_COMMAND_FAILED })
+        }
+        Err(error) => {
+            println!("{}", json!({"error":error}));
+            ExitCode::from(EXIT_COMMAND_FAILED)
+        }
     }
 }
 
 fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), String> {
     use ade_ags_lib::testspeed::run as test_runner;
     use rusqlite::OptionalExtension;
-    let cwd = args.get("cwd").and_then(Value::as_str).map(std::path::PathBuf::from)
-        .map(Ok).unwrap_or_else(std::env::current_dir).map_err(|e| e.to_string())?;
-    let output = std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).current_dir(&cwd).output().map_err(|e| e.to_string())?;
-    if !output.status.success() { return Err("Execute ags test dentro de um repositório Git.".into()); }
-    let root = dunce::canonicalize(std::path::Path::new(String::from_utf8_lossy(&output.stdout).trim())).map_err(|e|e.to_string())?;
+    let cwd = args
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map(std::path::PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)
+        .map_err(|e| e.to_string())?;
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err("Execute ags test dentro de um repositório Git.".into());
+    }
+    let root = dunce::canonicalize(std::path::Path::new(
+        String::from_utf8_lossy(&output.stdout).trim(),
+    ))
+    .map_err(|e| e.to_string())?;
     let suite = args.get("suite").and_then(Value::as_str).unwrap_or("");
     let mut selection = None;
-    let commands = if command == "test.run" { test_runner::suite_commands_in(&root, suite)? } else if command == "test.status" { vec![] } else if command == "test.affected" {
+    let commands = if command == "test.run" {
+        test_runner::suite_commands_in(&root, suite)?
+    } else if command == "test.status" {
+        vec![]
+    } else if command == "test.affected" {
         let changed = test_runner::changed_files(&root)?;
         // Fora do layout do ADE-AGS, as suítes detectadas (ver testspeed::project).
         let plan = match ade_ags_lib::testspeed::project::detect(&root) {
             ade_ags_lib::testspeed::project::Layout::AdeAgs => {
-                let unsafe_files = test_runner::unsafe_files(&root,&changed)?;
-                ade_ags_lib::testspeed::affected::plan_with_unsafe(&changed,&unsafe_files).with_changed_base(&test_runner::base_ref(&root)?)
+                let unsafe_files = test_runner::unsafe_files(&root, &changed)?;
+                ade_ags_lib::testspeed::affected::plan_with_unsafe(&changed, &unsafe_files)
+                    .with_changed_base(&test_runner::base_ref(&root)?)
             }
-            ade_ags_lib::testspeed::project::Layout::Generic(suites) => ade_ags_lib::testspeed::affected::plan_generic(&changed, &suites),
+            ade_ags_lib::testspeed::project::Layout::Generic(suites) => {
+                ade_ags_lib::testspeed::affected::plan_generic(&changed, &suites)
+            }
         };
         eprint!("{}", plan.render_dry_run());
-        let commands = plan.steps.iter().map(|step| test_runner::TestCommand {
-            suite:step.suite.into(),program:step.program.clone(),args:step.args.clone(),cwd:step.cwd.unwrap_or(".").into()
-        }).collect();
+        let commands = plan
+            .steps
+            .iter()
+            .map(|step| test_runner::TestCommand {
+                suite: step.suite.into(),
+                program: step.program.clone(),
+                args: step.args.clone(),
+                cwd: step.cwd.unwrap_or(".").into(),
+            })
+            .collect();
         selection = Some((changed, plan));
         commands
     } else {
-        return Err(format!("Comando desconhecido '{command}'. Use test run <suite> ou test status."));
+        return Err(format!(
+            "Comando desconhecido '{command}'. Use test run <suite> ou test status."
+        ));
     };
     if args.get("dryRun").and_then(Value::as_bool).unwrap_or(false) {
-        return Ok((json!({"commands":commands,"full":selection.as_ref().is_some_and(|(_,p)|p.full),"risk":selection.as_ref().map(|(_,p)|&p.risk),"unmapped":selection.as_ref().map(|(_,p)|&p.unmapped),"ignored":selection.as_ref().map(|(_,p)|&p.ignored)}), true));
+        return Ok((
+            json!({"commands":commands,"full":selection.as_ref().is_some_and(|(_,p)|p.full),"risk":selection.as_ref().map(|(_,p)|&p.risk),"unmapped":selection.as_ref().map(|(_,p)|&p.unmapped),"ignored":selection.as_ref().map(|(_,p)|&p.ignored)}),
+            true,
+        ));
     }
-    let home = ade_ags_lib::util::datadir::ags_home().ok_or("Não foi possível localizar a pasta do usuário.")?;
+    let home = ade_ags_lib::util::datadir::ags_home()
+        .ok_or("Não foi possível localizar a pasta do usuário.")?;
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
     let conn = rusqlite::Connection::open(home.join("data.db")).map_err(|e| e.to_string())?;
     // 30 s e não 5: o app grava em WAL ao mesmo tempo, e um "database is locked" aqui jogava
     // fora um verde já obtido (a próxima chamada rodava a suíte de novo).
-    conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON;")
+        .map_err(|e| e.to_string())?;
     // Additive DDL only: the standalone CLI never migrates or downgrades the app DB.
     test_runner::migrate(&conn).map_err(|e| e.to_string())?;
-    if command == "test.status" { return Ok((test_runner::status(&conn,&root)?,true)); }
-    let explicit_mission = args.get("mission").and_then(Value::as_str).map(str::to_owned)
-        .or_else(||std::env::var("ADE_MISSION_ID").ok());
+    if command == "test.status" {
+        return Ok((test_runner::status(&conn, &root)?, true));
+    }
+    let explicit_mission = args
+        .get("mission")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| std::env::var("ADE_MISSION_ID").ok());
     let inferred: Option<(String,String)> = conn.query_row(
         "SELECT w.mission_id,w.name FROM mission_team_workspaces w JOIN missions m ON m.id=w.mission_id WHERE w.root=?1 AND m.status='running' LIMIT 1",
         [root.to_string_lossy().as_ref()], |r|Ok((r.get(0)?,r.get(1)?))).optional().unwrap_or(None);
-    let mission = explicit_mission.or_else(||inferred.as_ref().map(|r|r.0.clone()));
-    let actor = inferred.map(|r|r.1).or_else(||std::env::var("ADE_TAB_ID").ok()).unwrap_or_default();
+    let mission = explicit_mission.or_else(|| inferred.as_ref().map(|r| r.0.clone()));
+    let actor = inferred
+        .map(|r| r.1)
+        .or_else(|| std::env::var("ADE_TAB_ID").ok())
+        .unwrap_or_default();
     let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
     if command == "test.affected" {
-        let (_,plan) = selection.as_ref().expect("affected selection");
-        let suites: std::collections::BTreeSet<_> = commands.iter().map(|c|c.suite.as_str()).collect();
-        let skipped = ["frontend","rust","tsc","babel"].iter().filter(|s| !suites.contains(**s)).count();
+        let (_, plan) = selection.as_ref().expect("affected selection");
+        let suites: std::collections::BTreeSet<_> =
+            commands.iter().map(|c| c.suite.as_str()).collect();
+        let skipped = ["frontend", "rust", "tsc", "babel"]
+            .iter()
+            .filter(|s| !suites.contains(**s))
+            .count();
         let now = chrono::Utc::now().timestamp_millis();
-        test_runner::record_span(&conn,mission.as_deref(),&actor,"affected","",now,now,false,skipped)?;
+        test_runner::record_span(
+            &conn,
+            mission.as_deref(),
+            &actor,
+            "affected",
+            "",
+            now,
+            now,
+            false,
+            skipped,
+        )?;
         // O cargo (o passo lento) corre numa thread própria, com a sua conexão, enquanto babel,
         // tsc e vitest correm aqui em série. Antes era tudo em fila: o tempo do cargo somava ao
         // dos outros. Cada thread para no primeiro passo que falha dela.
-        let (rust_steps, quick_steps): (Vec<_>, Vec<_>) = commands.iter().cloned().partition(|step| step.suite == "rust");
+        let (rust_steps, quick_steps): (Vec<_>, Vec<_>) = commands
+            .iter()
+            .cloned()
+            .partition(|step| step.suite == "rust");
         let rust_thread = (!rust_steps.is_empty()).then(|| {
-            let (db, root, mission, actor) = (home.join("data.db"), root.clone(), mission.clone(), actor.clone());
+            let (db, root, mission, actor) = (
+                home.join("data.db"),
+                root.clone(),
+                mission.clone(),
+                actor.clone(),
+            );
             std::thread::spawn(move || -> Result<Vec<test_runner::RunResult>, String> {
                 let conn = rusqlite::Connection::open(db).map_err(|e| e.to_string())?;
-                conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
+                conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON;")
+                    .map_err(|e| e.to_string())?;
                 let mut out = Vec::new();
                 for step in &rust_steps {
-                    let result = test_runner::run(&conn,&root,&step.suite,std::slice::from_ref(step),force,mission.as_deref(),&actor)?;
+                    let result = test_runner::run(
+                        &conn,
+                        &root,
+                        &step.suite,
+                        std::slice::from_ref(step),
+                        force,
+                        mission.as_deref(),
+                        &actor,
+                    )?;
                     let ok = result.passed;
                     out.push(result);
-                    if !ok { break; }
+                    if !ok {
+                        break;
+                    }
                 }
                 Ok(out)
             })
@@ -804,27 +926,53 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
         let mut results = Vec::new();
         let mut passed = true;
         for step in &quick_steps {
-            let result = test_runner::run(&conn,&root,&step.suite,std::slice::from_ref(step),force,mission.as_deref(),&actor)?;
+            let result = test_runner::run(
+                &conn,
+                &root,
+                &step.suite,
+                std::slice::from_ref(step),
+                force,
+                mission.as_deref(),
+                &actor,
+            )?;
             passed &= result.passed;
             results.push(result);
-            if !passed { break; }
+            if !passed {
+                break;
+            }
         }
         if let Some(thread) = rust_thread {
-            let rust = thread.join().map_err(|_| "o passo de Rust terminou com pânico".to_string())??;
+            let rust = thread
+                .join()
+                .map_err(|_| "o passo de Rust terminou com pânico".to_string())??;
             passed &= rust.iter().all(|result| result.passed);
             results.extend(rust);
         }
-        return Ok((json!({"results":results,"passed":passed,"full":plan.full,"risk":plan.risk,"unmapped":plan.unmapped,"ignored":plan.ignored,"skippedAffected":skipped}),passed));
+        return Ok((
+            json!({"results":results,"passed":passed,"full":plan.full,"risk":plan.risk,"unmapped":plan.unmapped,"ignored":plan.ignored,"skippedAffected":skipped}),
+            passed,
+        ));
     }
-    let result = test_runner::run(&conn,&root,suite,&commands,force,mission.as_deref(),&actor)?;
-    Ok((json!(result),result.passed))
+    let result = test_runner::run(
+        &conn,
+        &root,
+        suite,
+        &commands,
+        force,
+        mission.as_deref(),
+        &actor,
+    )?;
+    Ok((json!(result), result.passed))
 }
 
 fn execute_standalone_redeliver(args: &Value) -> ExitCode {
     let home = match ade_ags_lib::util::datadir::ags_home() {
         Some(h) => h,
         None => {
-            println!("{}", json!({ "error": "não foi possível determinar o diretório home" }));
+            println!(
+                "{}",
+                json!({ "error": "não foi possível determinar o diretório home" })
+            );
             return ExitCode::from(EXIT_COMMAND_FAILED);
         }
     };
@@ -832,13 +980,19 @@ fn execute_standalone_redeliver(args: &Value) -> ExitCode {
     let conn = match rusqlite::Connection::open(&db_path) {
         Ok(c) => c,
         Err(e) => {
-            println!("{}", json!({ "error": format!("erro ao abrir banco de dados: {e}") }));
+            println!(
+                "{}",
+                json!({ "error": format!("erro ao abrir banco de dados: {e}") })
+            );
             return ExitCode::from(EXIT_COMMAND_FAILED);
         }
     };
     let _ = conn.execute_batch("PRAGMA busy_timeout = 5000;");
     if let Err(e) = ade_ags_lib::migrate(&conn) {
-        println!("{}", json!({ "error": format!("erro ao migrar banco de dados: {e}") }));
+        println!(
+            "{}",
+            json!({ "error": format!("erro ao migrar banco de dados: {e}") })
+        );
         return ExitCode::from(EXIT_COMMAND_FAILED);
     }
 
@@ -849,7 +1003,10 @@ fn execute_standalone_redeliver(args: &Value) -> ExitCode {
             return ExitCode::from(EXIT_USAGE);
         }
     };
-    let pr = args.get("pr").or_else(|| args.get("pullRequest")).and_then(Value::as_str);
+    let pr = args
+        .get("pr")
+        .or_else(|| args.get("pullRequest"))
+        .and_then(Value::as_str);
     let test_override = match args.get("test") {
         Some(Value::String(s)) => Some(ade_ags_lib::missions::TestResult::parse(s)),
         Some(Value::Bool(true)) => Some(ade_ags_lib::missions::TestResult::Passed),
@@ -860,7 +1017,10 @@ fn execute_standalone_redeliver(args: &Value) -> ExitCode {
     let cwd = match ade_ags_lib::missions::store::get(&conn, mission_id) {
         Ok(Some(m)) => m.cwd,
         Ok(None) => {
-            println!("{}", json!({ "error": format!("missão não encontrada: {mission_id}") }));
+            println!(
+                "{}",
+                json!({ "error": format!("missão não encontrada: {mission_id}") })
+            );
             return ExitCode::from(EXIT_COMMAND_FAILED);
         }
         Err(e) => {
@@ -892,12 +1052,20 @@ struct CliError {
 
 impl CliError {
     fn new(message: String, code: u8) -> Self {
-        CliError { message, code, retryable: false }
+        CliError {
+            message,
+            code,
+            retryable: false,
+        }
     }
 
     /// Todavía no, pero puede que sí: ver `retryable`.
     fn not_yet(message: String) -> Self {
-        CliError { message, code: EXIT_NO_APP, retryable: true }
+        CliError {
+            message,
+            code: EXIT_NO_APP,
+            retryable: true,
+        }
     }
 }
 
@@ -907,8 +1075,14 @@ impl CliError {
 /// conversa do chat que pede um shell (`ADE_TAB_ID=thread:<id>`); comandos `run.*` recebem `tabId`,
 /// que preserva o escopo da conversa ao criar ou consultar tarefas da Frota. Pura.
 fn takes_caller(command: &str) -> bool {
-    const GROUPS: [&str; 21] = ["fix.", "peer.", "team.", "note.", "portal.", "device.", "sim.", "desk.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.", "events.", "secret.", "run.", "render."];
-    command == "tab.create" || command == "tab.send" || GROUPS.iter().any(|g| command.starts_with(g))
+    const GROUPS: [&str; 21] = [
+        "fix.", "peer.", "team.", "note.", "portal.", "device.", "sim.", "desk.", "notify.",
+        "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.",
+        "events.", "secret.", "run.", "render.",
+    ];
+    command == "tab.create"
+        || command == "tab.send"
+        || GROUPS.iter().any(|g| command.starts_with(g))
 }
 
 fn with_caller(command: &str, mut parsed: Value) -> Value {
@@ -939,8 +1113,17 @@ fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>, session: 
     }
     // `peer.answer`, `tab.send`, `tab.create` e `fix.decide`: o servidor prova a identidade (F-09, `fix.decide`), então
     // ela vem só do ambiente que o app injetou no PTY.
-    let proven = matches!(command, "peer.answer" | "tab.send" | "tab.create" | "fix.decide");
-    if proven || command.starts_with("memory.") || command.starts_with("swarm.") || command.starts_with("sim.") || command.starts_with("desk.") || command.starts_with("secret.") {
+    let proven = matches!(
+        command,
+        "peer.answer" | "tab.send" | "tab.create" | "fix.decide"
+    );
+    if proven
+        || command.starts_with("memory.")
+        || command.starts_with("swarm.")
+        || command.starts_with("sim.")
+        || command.starts_with("desk.")
+        || command.starts_with("secret.")
+    {
         if let Some(map) = parsed.as_object_mut() {
             map.remove("from");
             map.remove("mission");
@@ -957,7 +1140,9 @@ fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>, session: 
         return;
     }
     // The design creator is always the actual terminal, even if an agent passed --from.
-    if parsed.get("from").is_some() && !command.starts_with("design.") { return; }
+    if parsed.get("from").is_some() && !command.starts_with("design.") {
+        return;
+    }
     if let (Some(tab), Some(map)) = (tab, parsed.as_object_mut()) {
         map.insert("from".into(), Value::String(tab));
     }
@@ -1006,7 +1191,10 @@ fn design_defaults(command: &str, mut args: Value, cwd: &std::path::Path) -> Val
             }
         }
     }
-    if command == "design.artboard.add" && args.get("page").is_some() && args.get("designId").is_none() {
+    if command == "design.artboard.add"
+        && args.get("page").is_some()
+        && args.get("designId").is_none()
+    {
         if let Some(id) = args.as_object_mut().and_then(|a| a.remove("pageId")) {
             args["designId"] = id;
         }
@@ -1017,7 +1205,10 @@ fn design_defaults(command: &str, mut args: Value, cwd: &std::path::Path) -> Val
 fn design_command(args: &[String]) -> Result<(String, &[String]), String> {
     let action = args.get(1).ok_or("Missing design action")?;
     let nested = matches!(action.as_str(), "page" | "artboard" | "note")
-        || (action == "comment" && args.get(2).is_some_and(|v| matches!(v.as_str(), "add" | "resolve")))
+        || (action == "comment"
+            && args
+                .get(2)
+                .is_some_and(|v| matches!(v.as_str(), "add" | "resolve")))
         || (action == "approve" && args.get(2).is_some_and(|v| v == "all"));
     if nested {
         let sub = args.get(2).ok_or("Missing design subcommand")?;
@@ -1034,15 +1225,35 @@ fn design_command(args: &[String]) -> Result<(String, &[String]), String> {
 /// Valida o uso antes do IPC, inclusive argumentos passados por --json-args.
 fn validate_usage(command: &str, args: &Value) -> Result<(), String> {
     if command == "secret.consume" {
-        return Err("O segredo só pode ser entregue por `ags secret run <id> -- <programa>`".into());
+        return Err(
+            "O segredo só pode ser entregue por `ags secret run <id> -- <programa>`".into(),
+        );
     }
-    if command == "secret.request" && args.get("label").and_then(Value::as_str).is_none_or(|label| label.trim().is_empty()) {
-        return Err("Uso: ags secret request --label \"nome do segredo\" [--description \"uso esperado\"]".into());
+    if command == "secret.request"
+        && args
+            .get("label")
+            .and_then(Value::as_str)
+            .is_none_or(|label| label.trim().is_empty())
+    {
+        return Err(
+            "Uso: ags secret request --label \"nome do segredo\" [--description \"uso esperado\"]"
+                .into(),
+        );
     }
-    if command == "secret.revoke" && args.get("secretId").and_then(Value::as_str).is_none_or(|id| id.trim().is_empty()) {
+    if command == "secret.revoke"
+        && args
+            .get("secretId")
+            .and_then(Value::as_str)
+            .is_none_or(|id| id.trim().is_empty())
+    {
         return Err("Uso: ags secret revoke <id>".into());
     }
-    if command == "peer.check" && args.get("to").and_then(Value::as_str).is_none_or(|to| to.trim().is_empty()) {
+    if command == "peer.check"
+        && args
+            .get("to")
+            .and_then(Value::as_str)
+            .is_none_or(|to| to.trim().is_empty())
+    {
         return Err("Uso: ags peer check <nome> [--lines 60]".into());
     }
     if command.starts_with("run.") {
@@ -1060,7 +1271,9 @@ fn validate_usage(command: &str, args: &Value) -> Result<(), String> {
 /// A pasta vem da shell do CLI, nunca da pasta em que o app foi iniciado.
 fn run_defaults(mut args: Value, shell_cwd: &std::path::Path) -> Result<Value, String> {
     let requested = match args.get("cwd") {
-        Some(value) => value.as_str().filter(|value| !value.trim().is_empty())
+        Some(value) => value
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
             .ok_or("--cwd precisa de um caminho")?,
         None => ".",
     };
@@ -1079,11 +1292,20 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "design.get" | "design.delete" | "design.archive" | "design.approve.all" => &["designId"],
         "design.page.add" => &["designId", "name"],
         "design.artboard.add" => &["pageId", "title"],
-        "design.update" | "design.artboard.update" | "design.revert" | "design.artboard.revert" | "design.approve" | "design.artboard.approve" | "design.reject" | "design.artboard.reject" => &["artboardId"],
+        "design.update"
+        | "design.artboard.update"
+        | "design.revert"
+        | "design.artboard.revert"
+        | "design.approve"
+        | "design.artboard.approve"
+        | "design.reject"
+        | "design.artboard.reject" => &["artboardId"],
         "design.comment" | "design.comment.add" => &["artboardId", "text"],
         "design.comment.resolve" => &["commentId"],
         "design.view" | "design.open" => &["designId"],
-        "design.artboard.duplicate" | "design.artboard.delete" | "design.artboard.resize" => &["artboardId"],
+        "design.artboard.duplicate" | "design.artboard.delete" | "design.artboard.resize" => {
+            &["artboardId"]
+        }
         "design.page.rename" => &["pageId", "name"],
         "design.page.delete" => &["pageId"],
         "design.note.add" => &["pageId", "text"],
@@ -1099,7 +1321,9 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "tab.create" => &["cwd"],
         "workspace.open" => &["workspace"],
         // `ags mission wait <id>`, `ags mission accept <id> <tarea>`.
-        "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" | "mission.timings" | "mission.efficiency" | "mission.precheck" | "mission.startcheck" | "mission.redeliver" => &["mission"],
+        "mission.start" | "mission.status" | "mission.wait" | "mission.review"
+        | "mission.apply" | "mission.timings" | "mission.efficiency" | "mission.precheck"
+        | "mission.startcheck" | "mission.redeliver" => &["mission"],
         "mission.cleanup" => &["mission"],
         "mission.accept" => &["mission", "task"],
         // `ags peer ask Revisor "..."`: el nombre del agente y después el mensaje.
@@ -1146,7 +1370,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         // `ags routine create Testes "rode os testes" --at 09:00`
         "routine.create" => &["name", "text"],
         "routine.edit" => &["name", "text"],
-        "routine.show" | "routine.enable" | "routine.disable" | "routine.run" | "routine.delete" => &["name"],
+        "routine.show" | "routine.enable" | "routine.disable" | "routine.run"
+        | "routine.delete" => &["name"],
         "role.show" => &["role"],
         "role.create" => &["name", "content"],
         "role.edit" => &["role", "content"],
@@ -1180,8 +1405,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "device.clipboard" => &["name", "text"],
         "device.say" => &["name", "text"],
         "device.tap" | "device.swipe" => &["name"],
-        "portal.scroll" | "portal.wait" | "portal.snapshot" | "portal.screenshot" | "portal.console"
-        | "portal.layout" | "portal.reset" => &["name"],
+        "portal.scroll" | "portal.wait" | "portal.snapshot" | "portal.screenshot"
+        | "portal.console" | "portal.layout" | "portal.reset" => &["name"],
         _ => &[],
     }
 }
@@ -1205,7 +1430,11 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
                 if positionals.is_empty() {
                     "só aceita flags (começam com --)".to_string()
                 } else {
-                    format!("aceita no máximo {} valor(es) solto(s): {}", positionals.len(), positionals.join(", "))
+                    format!(
+                        "aceita no máximo {} valor(es) solto(s): {}",
+                        positionals.len(),
+                        positionals.join(", ")
+                    )
                 }
             ));
         };
@@ -1217,7 +1446,9 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
     while i < args.len() {
         let raw = &args[i];
         let Some(key) = raw.strip_prefix("--") else {
-            return Err(format!("Argumento inesperado '{raw}' (as flags começam com --)"));
+            return Err(format!(
+                "Argumento inesperado '{raw}' (as flags começam com --)"
+            ));
         };
 
         // Escotilla para lo que el parseo simple no cubra (objetos anidados, etc.).
@@ -1273,7 +1504,14 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
             let value = args
                 .get(i + 1)
                 .filter(|v| !v.starts_with("--"))
-                .ok_or_else(|| if key == "fill" { "--fill precisa de campo=valor".to_string() } else { "--expect precisa de tipo:valor (text:, url:, count: ou absent:)".to_string() })?;
+                .ok_or_else(|| {
+                    if key == "fill" {
+                        "--fill precisa de campo=valor".to_string()
+                    } else {
+                        "--expect precisa de tipo:valor (text:, url:, count: ou absent:)"
+                            .to_string()
+                    }
+                })?;
             match map.entry(key.to_string()) {
                 serde_json::map::Entry::Occupied(mut e) => {
                     if let Some(list) = e.get_mut().as_array_mut() {
@@ -1289,7 +1527,9 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
         }
 
         if matches!(key, "run-id" | "task")
-            && args.get(i + 1).is_none_or(|value| value.starts_with("--") || value.trim().is_empty())
+            && args
+                .get(i + 1)
+                .is_none_or(|value| value.starts_with("--") || value.trim().is_empty())
         {
             return Err(format!("--{key} precisa de um valor"));
         }
@@ -1317,8 +1557,12 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
 /// Los dos no se pueden combinar: si vinieran juntos habría que elegir cuál gana, y
 /// cualquier elección sería una sorpresa para quien mandó el otro.
 fn inline_file(args: Value, command: &str) -> Result<Value, String> {
-    let Value::Object(mut map) = args else { return Ok(args) };
-    let Some(file) = map.remove("file") else { return Ok(Value::Object(map)) };
+    let Value::Object(mut map) = args else {
+        return Ok(args);
+    };
+    let Some(file) = map.remove("file") else {
+        return Ok(Value::Object(map));
+    };
     let Some(path) = file.as_str() else {
         return Err("--file precisa de um caminho".to_string());
     };
@@ -1327,7 +1571,8 @@ fn inline_file(args: Value, command: &str) -> Result<Value, String> {
         return Err(format!("Use --file ou --{field}, não os dois"));
     }
     let bytes = std::fs::read(path).map_err(|e| format!("Não foi possível ler {path}: {e}"))?;
-    let content = decode_text_file(&bytes).map_err(|e| format!("Não foi possível ler {path}: {e}"))?;
+    let content =
+        decode_text_file(&bytes).map_err(|e| format!("Não foi possível ler {path}: {e}"))?;
     map.insert(field.to_string(), Value::String(content));
     Ok(Value::Object(map))
 }
@@ -1335,7 +1580,9 @@ fn inline_file(args: Value, command: &str) -> Result<Value, String> {
 /// `--mostrar` e `--sem-mostrar` viram o campo `show` (true ou false) que o app lê. Só valem para os comandos que
 /// mostram algo na conversa (aparelho e página HTML); nos outros as flags ficam como estão. Pura.
 fn show_flags(args: Value, command: &str) -> Result<Value, String> {
-    let Value::Object(mut map) = args else { return Ok(args) };
+    let Value::Object(mut map) = args else {
+        return Ok(args);
+    };
     if !matches!(command, "device.create" | "render.publish") {
         return Ok(Value::Object(map));
     }
@@ -1363,7 +1610,16 @@ fn decode_text_file(bytes: &[u8]) -> Result<String, String> {
         return String::from_utf8(rest.to_vec()).map_err(|e| e.to_string());
     }
     let utf16 = |rest: &[u8], big: bool| -> Result<String, String> {
-        let units: Vec<u16> = rest.chunks_exact(2).map(|p| if big { u16::from_be_bytes([p[0], p[1]]) } else { u16::from_le_bytes([p[0], p[1]]) }).collect();
+        let units: Vec<u16> = rest
+            .chunks_exact(2)
+            .map(|p| {
+                if big {
+                    u16::from_be_bytes([p[0], p[1]])
+                } else {
+                    u16::from_le_bytes([p[0], p[1]])
+                }
+            })
+            .collect();
         String::from_utf16(&units).map_err(|e| e.to_string())
     };
     if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
@@ -1397,7 +1653,10 @@ fn text_field(command: &str) -> &'static str {
 
 fn value_for(key: &str, raw: &str) -> Value {
     match key {
-        "priority" => raw.parse::<i64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.into())),
+        "priority" => raw
+            .parse::<i64>()
+            .map(Value::from)
+            .unwrap_or_else(|_| Value::String(raw.into())),
         // Mismo trato que `--skills`: listas cortas separadas por coma.
         "skills" | "categories" | "agents" => Value::Array(
             raw.split(',')
@@ -1408,9 +1667,11 @@ fn value_for(key: &str, raw: &str) -> Value {
         ),
         // Un número mal escrito se manda tal cual como string: el backend lo rechaza con
         // un mensaje que nombra el flag, mejor que un "0" silencioso acá.
-        "lines" | "timeout" | "max" | "idle" | "start" | "count" | "turns" | "limit" | "maxParallel" | "last" => {
-            raw.parse::<u64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.into()))
-        }
+        "lines" | "timeout" | "max" | "idle" | "start" | "count" | "turns" | "limit"
+        | "maxParallel" | "last" => raw
+            .parse::<u64>()
+            .map(Value::from)
+            .unwrap_or_else(|_| Value::String(raw.into())),
         _ => Value::String(raw.to_string()),
     }
 }
@@ -1433,45 +1694,72 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         }
         // Igual: bloquea hasta que llega un evento o vence su plazo (tope 600 s).
         "events.wait" => {
-            let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(60).clamp(1, 600);
+            let requested = args
+                .get("timeout")
+                .and_then(Value::as_u64)
+                .unwrap_or(60)
+                .clamp(1, 600);
             Duration::from_secs(requested + 15)
         }
         // Esperar una misión entera: lo que se pidió (una hora por defecto, tope 6 h), más
         // el arranque, que puede sondear el roster.
         "mission.wait" | "mission.run" => {
-            let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(3600).clamp(1, 6 * 3600);
+            let requested = args
+                .get("timeout")
+                .and_then(Value::as_u64)
+                .unwrap_or(3600)
+                .clamp(1, 6 * 3600);
             Duration::from_secs(requested + 180)
         }
         // Arrancar rutea el lead (puede sondear el roster); integrar y aplicar hacen merges.
-        "mission.start" | "mission.accept" | "mission.apply" | "mission.review" | "mission.redeliver" => Duration::from_secs(180),
+        "mission.start" | "mission.accept" | "mission.apply" | "mission.review"
+        | "mission.redeliver" => Duration::from_secs(180),
         // Los topes del backend suman ~40s (15 para que aparezca el PTY + 25 de arranque).
         "tab.create" if has_init_prompt(args) => Duration::from_secs(75),
         // `pick` espera a una persona; el resto son segundos.
         "browser.run" if args.pointer("/request/op").and_then(Value::as_str) == Some("pick") => {
-            let asked = args.pointer("/request/timeout_s").and_then(Value::as_u64).unwrap_or(120).clamp(10, 600);
+            let asked = args
+                .pointer("/request/timeout_s")
+                .and_then(Value::as_u64)
+                .unwrap_or(120)
+                .clamp(10, 600);
             Duration::from_secs(asked + 60)
         }
         // `act` encadeia passos e pode esperar a pessoa confirmar: o prazo pedido (padrão 115 s), mais margem.
         "browser.run" if args.pointer("/request/op").and_then(Value::as_str) == Some("act") => {
-            Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.pointer("/request/timeout")) + 30)
+            Duration::from_secs(
+                ade_ags_lib::ipc::mcp::act_timeout_secs(args.pointer("/request/timeout")) + 30,
+            )
         }
         "browser.run" => Duration::from_secs(ade_ags_lib::ipc::mcp::BROWSER_TIMEOUT_SECS + 15),
         // Esperar a que terminen workers: lo que pidió el agente, más margen.
         "run.await" => {
-            let requested = args.pointer("/args/timeout_s").and_then(Value::as_u64).unwrap_or(300).clamp(10, 1800);
+            let requested = args
+                .pointer("/args/timeout_s")
+                .and_then(Value::as_u64)
+                .unwrap_or(300)
+                .clamp(10, 1800);
             Duration::from_secs(requested + 30)
         }
         // `peer ask` espera el turno entero del otro agente; antes de escribirle espera hasta
         // 60s a que se calle (no se interrumpe a quien está trabajando).
         "peer.ask" => {
-            let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(600).clamp(10, 3600);
+            let requested = args
+                .get("timeout")
+                .and_then(Value::as_u64)
+                .unwrap_or(600)
+                .clamp(10, 3600);
             Duration::from_secs(requested + 90)
         }
         "peer.tell" => Duration::from_secs(90),
         // `team delegate` revalida e envia (`mode=async`) ou espera a resposta como o `peer ask` (`mode=wait`).
         "team.delegate" => {
             if args.get("mode").and_then(Value::as_str) == Some("wait") {
-                let requested = args.get("timeout_s").and_then(Value::as_u64).unwrap_or(300).clamp(10, 1800);
+                let requested = args
+                    .get("timeout_s")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(300)
+                    .clamp(10, 1800);
                 Duration::from_secs(requested + 90)
             } else {
                 Duration::from_secs(90)
@@ -1479,13 +1767,21 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         }
         // `chat wait` bloqueia até o turno acabar (tope 1 h); abrir a conversa sobe o agente e começa o turno.
         "chat.wait" => {
-            let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(600).clamp(1, 3600);
+            let requested = args
+                .get("timeout")
+                .and_then(Value::as_u64)
+                .unwrap_or(600)
+                .clamp(1, 3600);
             Duration::from_secs(requested + 15)
         }
-        "chat.new" | "chat.send" | "chat.stop" | "chat.compact" | "chat.goal" => Duration::from_secs(150),
+        "chat.new" | "chat.send" | "chat.stop" | "chat.compact" | "chat.goal" => {
+            Duration::from_secs(150)
+        }
         "fix.list" | "fix.decide" => Duration::from_secs(60),
         // O `portal act` espera o prazo pedido (padrão 115 s, o backend corta nele), mais margem.
-        "portal.act" => Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.get("timeout")) + 30),
+        "portal.act" => {
+            Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.get("timeout")) + 30)
+        }
         // Cargar una página o esperar un texto puede tardar; el backend corta a los 90 s.
         c if c.starts_with("portal.") => Duration::from_secs(120),
         // Arrancar un emulador y esperar a que termine de iniciar (el backend corta a los 120 s).
@@ -1493,7 +1789,9 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         // Encerrar um processo físico exige inventário dos apps e a lista de processos antes do PID.
         "device.close" => Duration::from_secs(150),
         "device.apps" | "device.launch" | "device.open" => Duration::from_secs(90),
-        "sim.act" | "desk.act" => Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.get("timeout")) + 75),
+        "sim.act" | "desk.act" => {
+            Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.get("timeout")) + 75)
+        }
         c if c.starts_with("device.") => Duration::from_secs(60),
         // `routine run` espera a que el agente de destino se calle (hasta 60 s).
         "routine.run" => Duration::from_secs(120),
@@ -1502,9 +1800,16 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         // Validar un plan puede sondear el roster (lanzar `opencode models`) y crear worktrees.
         "run.plan" | "run.addTask" | "run.roster" => Duration::from_secs(120),
         "run.delegateTask" => {
-            let mode = args.pointer("/args/mode").and_then(Value::as_str).unwrap_or("async");
+            let mode = args
+                .pointer("/args/mode")
+                .and_then(Value::as_str)
+                .unwrap_or("async");
             if mode == "wait" {
-                let requested = args.pointer("/args/timeout_s").and_then(Value::as_u64).unwrap_or(300).clamp(10, 1800);
+                let requested = args
+                    .pointer("/args/timeout_s")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(300)
+                    .clamp(10, 1800);
                 Duration::from_secs(requested + 30)
             } else {
                 Duration::from_secs(120)
@@ -1522,7 +1827,9 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
 }
 
 fn has_init_prompt(args: &Value) -> bool {
-    ["initPrompt", "initprompt"].iter().any(|k| args.get(k).and_then(Value::as_str).is_some())
+    ["initPrompt", "initprompt"]
+        .iter()
+        .any(|k| args.get(k).and_then(Value::as_str).is_some())
 }
 
 fn to_camel_case(flag: &str) -> String {
@@ -1567,23 +1874,35 @@ fn run_secret(args: &[String]) -> ExitCode {
         }
     };
     if !response.ok {
-        println!("{}", json!({ "error": response.error.unwrap_or_else(|| "O app recusou o pedido".into()) }));
+        println!(
+            "{}",
+            json!({ "error": response.error.unwrap_or_else(|| "O app recusou o pedido".into()) })
+        );
         return ExitCode::from(EXIT_COMMAND_FAILED);
     }
     let Some(mut data) = response.data else {
         println!("{}", json!({ "error": "O cofre não retornou o segredo" }));
         return ExitCode::from(EXIT_COMMAND_FAILED);
     };
-    let Some(value) = data.as_object_mut().and_then(|object| object.remove("secret")) else {
+    let Some(value) = data
+        .as_object_mut()
+        .and_then(|object| object.remove("secret"))
+    else {
         println!("{}", json!({ "error": "O cofre não retornou o segredo" }));
         return ExitCode::from(EXIT_COMMAND_FAILED);
     };
     let serde_json::Value::String(secret) = value else {
-        println!("{}", json!({ "error": "O cofre retornou um valor inválido" }));
+        println!(
+            "{}",
+            json!({ "error": "O cofre retornou um valor inválido" })
+        );
         return ExitCode::from(EXIT_COMMAND_FAILED);
     };
     let Ok(cwd) = std::env::current_dir() else {
-        println!("{}", json!({ "error": "Não foi possível ler a pasta atual" }));
+        println!(
+            "{}",
+            json!({ "error": "Não foi possível ler a pasta atual" })
+        );
         return ExitCode::from(EXIT_COMMAND_FAILED);
     };
     let mut command = ade_ags_lib::util::spawn::hidden_command(&args[2]);
@@ -1595,15 +1914,25 @@ fn run_secret(args: &[String]) -> ExitCode {
     ) {
         Ok((status, elapsed)) => {
             let code = status.code().unwrap_or(-1);
-            println!("{}", json!({
-                "exitCode": code,
-                "durationMs": elapsed.as_millis(),
-                "output": "stdout e stderr foram descartados; o segredo foi enviado apenas pelo stdin"
-            }));
-            ExitCode::from(if status.success() { EXIT_OK } else { EXIT_COMMAND_FAILED })
+            println!(
+                "{}",
+                json!({
+                    "exitCode": code,
+                    "durationMs": elapsed.as_millis(),
+                    "output": "stdout e stderr foram descartados; o segredo foi enviado apenas pelo stdin"
+                })
+            );
+            ExitCode::from(if status.success() {
+                EXIT_OK
+            } else {
+                EXIT_COMMAND_FAILED
+            })
         }
         Err(_) => {
-            println!("{}", json!({ "error": "O programa não pôde ser iniciado ou excedeu 5 minutos; a entrada temporária foi descartada" }));
+            println!(
+                "{}",
+                json!({ "error": "O programa não pôde ser iniciado ou excedeu 5 minutos; a entrada temporária foi descartada" })
+            );
             ExitCode::from(EXIT_COMMAND_FAILED)
         }
     }
@@ -1627,8 +1956,11 @@ fn send_waiting(command: &str, args: Value) -> Result<Response, CliError> {
 }
 
 fn send(command: &str, args: Value) -> Result<Response, CliError> {
-    let path = client_handshake_path();
-    let raw = std::fs::read_to_string(&path).map_err(|_| {
+    send_at(command, args, &client_handshake_path())
+}
+
+fn send_at(command: &str, args: Value, path: &std::path::Path) -> Result<Response, CliError> {
+    let raw = std::fs::read_to_string(path).map_err(|_| {
         CliError::not_yet(format!(
             "O ADE AGS não parece estar em execução (não encontrei {}). Abra o app e tente de novo.",
             path.display()
@@ -1636,8 +1968,12 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
     })?;
 
     // Reintentable: la app lo reescribe sola si quedó mal (ver `ipc::server::watch_handshakes`).
-    let handshake: Handshake = serde_json::from_str(&raw)
-        .map_err(|e| CliError::not_yet(format!("O arquivo de handshake {} está corrompido ({e}); reinicie o app", path.display())))?;
+    let handshake: Handshake = serde_json::from_str(&raw).map_err(|e| {
+        CliError::not_yet(format!(
+            "O arquivo de handshake {} está corrompido ({e}); reinicie o app",
+            path.display()
+        ))
+    })?;
 
     if handshake.protocol != PROTOCOL_VERSION {
         // A propósito NO es reintentable: esperar no cambia la versión de nadie.
@@ -1651,8 +1987,13 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
     }
 
     let timeout = read_timeout_for(command, &args);
-    let request = Request { token: handshake.token.clone(), command: command.to_string(), args };
-    let payload = serde_json::to_string(&request).map_err(|e| CliError::new(e.to_string(), EXIT_USAGE))?;
+    let request = Request {
+        token: handshake.token.clone(),
+        command: command.to_string(),
+        args,
+    };
+    let payload =
+        serde_json::to_string(&request).map_err(|e| CliError::new(e.to_string(), EXIT_USAGE))?;
     let line = ade_ags_lib::ipc::exchange(&handshake, &payload, timeout).map_err(|e| {
         // Negado pelo sandbox: o app está aberto, então não é exit 3 ("abra o app").
         if e.denied {
@@ -1664,7 +2005,97 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
         }
     })?;
 
-    serde_json::from_str(&line).map_err(|e| CliError::new(format!("Resposta ilegível do app: {e}"), EXIT_NO_APP))
+    let mut line = line;
+    let parsed = serde_json::from_str(&line)
+        .map_err(|e| CliError::new(format!("Resposta ilegível do app: {e}"), EXIT_NO_APP));
+    if command == "credential.redeem" {
+        wipe_secret(&mut line);
+    }
+    parsed
+}
+
+/// Entrega uma chave ao helper autenticado. O stdout é o protocolo do agente e não recebe JSON nem newline.
+fn run_credential(args: &[String]) -> ExitCode {
+    let usage = "Uso interno: ags credential <claude|codex> --account <id>";
+    let Some(provider) = args.first().map(String::as_str) else {
+        eprintln!("{usage}");
+        return ExitCode::from(EXIT_USAGE);
+    };
+    let agent_id = match provider {
+        "claude" => "claude-code",
+        "codex" => "codex",
+        _ => {
+            eprintln!("{usage}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let mut account_id = None;
+    let mut flags = args[1..].iter();
+    while let Some(flag) = flags.next() {
+        let value = match (flag.as_str(), flags.next()) {
+            ("--account", Some(value)) if account_id.is_none() => value.clone(),
+            _ => {
+                eprintln!("{usage}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        account_id = Some(value);
+    }
+    let Some(account_id) = account_id else {
+        eprintln!("{usage}");
+        return ExitCode::from(EXIT_USAGE);
+    };
+    if account_id.is_empty()
+        || !account_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    {
+        eprintln!("{usage}");
+        return ExitCode::from(EXIT_USAGE);
+    }
+
+    let args = json!({ "agentId": agent_id, "accountId": account_id });
+    match send("credential.redeem", args) {
+        Ok(mut response) if response.ok => {
+            let Some(Value::String(mut secret)) = response.data.take() else {
+                eprintln!("O intermediário de credenciais devolveu uma resposta inválida.");
+                return ExitCode::from(EXIT_COMMAND_FAILED);
+            };
+            let result = std::io::stdout()
+                .write_all(secret.as_bytes())
+                .and_then(|()| std::io::stdout().flush());
+            wipe_secret(&mut secret);
+            match result {
+                Ok(()) => ExitCode::from(EXIT_OK),
+                Err(_) => {
+                    eprintln!("Não foi possível entregar a credencial ao agente.");
+                    ExitCode::from(EXIT_COMMAND_FAILED)
+                }
+            }
+        }
+        Ok(response) => {
+            eprintln!(
+                "{}",
+                response
+                    .error
+                    .unwrap_or_else(|| "O intermediário de credenciais recusou o pedido.".into())
+            );
+            ExitCode::from(EXIT_COMMAND_FAILED)
+        }
+        Err(error) => {
+            eprintln!("{}", error.message);
+            ExitCode::from(error.code)
+        }
+    }
+}
+
+/// Zera a cópia de transporte antes de liberar a alocação.
+fn wipe_secret(secret: &mut String) {
+    // SAFETY: bytes zero formam UTF-8 válido.
+    unsafe {
+        secret.as_mut_vec().fill(0);
+    }
+    secret.clear();
 }
 
 /// `ags mcp`: el puente MCP de un agente. Con `--task` es el de una tarea de la flota
@@ -1729,12 +2160,18 @@ fn run_mcp(args: &[String]) -> ExitCode {
         stdin.lock(),
         std::io::stdout(),
         |command, payload| {
-            let payload = if command.starts_with("secret.") { with_caller(command, payload) } else { payload };
+            let payload = if command.starts_with("secret.") {
+                with_caller(command, payload)
+            } else {
+                payload
+            };
             let response = send_waiting(command, payload).map_err(|e| e.message)?;
             if response.ok {
                 Ok(response.data.unwrap_or(Value::Null))
             } else {
-                Err(response.error.unwrap_or_else(|| "o app recusou o pedido".into()))
+                Err(response
+                    .error
+                    .unwrap_or_else(|| "o app recusou o pedido".into()))
             }
         },
     );

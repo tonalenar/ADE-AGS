@@ -186,12 +186,10 @@ fn supports_api_key(agent_id: &str) -> bool {
 
 /// Alta de una cuenta por API key: sin terminal de login.
 ///
-/// - **Claude Code** no tiene un login con key que la guarde en su perfil: la key va al
-///   llavero del sistema y se pone en el entorno al lanzar (ver `env_for_account`). Con
-///   `base_url`, va como token de un gateway compatible (OpenRouter, un proxy propio).
-/// - **Codex** sí: `codex login --with-api-key` la guarda en el perfil de la cuenta, igual
-///   que guarda un login de ChatGPT. La app se la pasa por stdin (no por argumentos, que se
-///   verían en la lista de procesos) y no se queda con ella.
+/// - **Claude Code** lê a chave do keyring pelo `apiKeyHelper` instalado no perfil da conta.
+///   O processo do agente recebe só a configuração pública de `base_url`, quando houver.
+/// - **Codex** usa um provedor configurado com `auth.command`; a chave continua no keyring e
+///   é entregue pelo mesmo broker, sem gravá-la em `auth.json`.
 ///
 /// La key no se verifica contra el proveedor acá: eso es [`account_health`], que el
 /// frontend corre enseguida. Así una key válida con la red caída igual se puede guardar.
@@ -234,15 +232,11 @@ pub async fn create_agent_api_key_account(
 
     // Primero el secreto, después la fila: una fila sin su key sería una cuenta que no
     // arranca. Si la fila falla después, se borra lo guardado.
-    let (secret_id, store_key, login_dir, login_key) =
-        (id.clone(), api_key.clone(), dir.clone(), api_key);
-    let agent = agent_id.clone();
-    tokio::task::spawn_blocking(move || match agent.as_str() {
-        "claude-code" => super::secrets::save(&secret_id, &store_key),
-        _ => super::health::codex_login_with_api_key(&login_dir, &login_key),
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    // As chaves de todos os provedores passam pelo keyring e pelo broker; não vão para o perfil do agente.
+    let (secret_id, store_key) = (id.clone(), api_key);
+    tokio::task::spawn_blocking(move || super::secrets::save(&secret_id, &store_key))
+        .await
+        .map_err(|e| e.to_string())??;
 
     let row = (id.clone(), agent_id.clone(), name.clone(), dir_str.clone(), base_url.clone(), hint.clone());
     let inserted = crate::database::blocking_db(&db, move |conn| {
@@ -302,8 +296,7 @@ pub async fn delete_agent_account(
                 .map_err(|e| e.to_string())?;
             dir
         };
-        // La key de una cuenta de Claude Code vive en el llavero, no en la carpeta: sin la fila
-        // no la usa nadie, así que se va siempre (no hay nada que "conservar" para re-agregarla).
+        // A credencial do broker fica no keyring, não na pasta do perfil.
         super::secrets::delete(&id);
 
         if delete_files {

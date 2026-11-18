@@ -1,6 +1,6 @@
 import { ViewportPortal } from "@xyflow/react";
 
-import { strokePath, type Stroke } from "./board";
+import { cachedStrokePath, type Stroke } from "./board";
 
 /**
  * Los trazos a mano alzada, dibujados en las coordenadas del canvas (se mueven y escalan
@@ -27,14 +27,14 @@ export function DrawingLayer({
           <g key={s.id}>
             {erasing && s.id !== live?.id && (
               // Un trazo fino es difícil de agarrar: la goma tiene una zona más ancha.
-              <path d={strokePath(s.points)} fill="none" stroke="transparent" strokeWidth={Math.max(s.width, 16)}
+              <path d={cachedStrokePath(s.id, s.points)} fill="none" stroke="transparent" strokeWidth={Math.max(s.width, 16)}
                 strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: "stroke", cursor: "pointer" }}
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   onErase(s.id);
                 }} />
             )}
-            <path d={strokePath(s.points)} fill="none" stroke={s.color} strokeWidth={s.width} strokeLinecap="round"
+            <path d={cachedStrokePath(s.id, s.points)} fill="none" stroke={s.color} strokeWidth={s.width} strokeLinecap="round"
               strokeLinejoin="round" style={{ pointerEvents: "none" }} />
           </g>
         ))}

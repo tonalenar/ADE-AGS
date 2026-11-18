@@ -97,7 +97,7 @@ export function TeamPanel({ conversation, cards }: { conversation: ConversationC
       {error && <p role="alert" className="mx-3.5 mt-2.5 mb-0 text-chat-caption text-red-700 dark:text-red-400">{error}</p>}
       <div className="mx-3.5 mt-2.5 empty:hidden"><ChatTeamScopeOverlaps teamId={team.id} /></div>
       <ul aria-label={t("chat.team.title")} className="list-none m-0 p-2.5 flex flex-col gap-2 cc-scroll-hidden min-h-0 flex-1">
-        {rows.map((row) => <MemberCard key={row.ref} row={row} teamId={team.id} />)}
+        {rows.map((row) => <MemberCard key={row.ref} row={row} teamId={team.id} onError={setError} />)}
       </ul>
       <label title={t("chat.team.autoDecide.hint")} className="mx-3.5 mb-1 flex items-center gap-2 text-chat-caption text-gray-600 dark:text-white/55 cursor-pointer">
         <input type="checkbox" checked={team.autoDecide === false} onChange={(e) => setAutoDecide(team.id, !e.target.checked)} />
@@ -117,7 +117,7 @@ export function TeamPanel({ conversation, cards }: { conversation: ConversationC
       </label>
       <div className="px-3.5 pb-1 flex items-center justify-end gap-2">
         {confirming && <span className="text-chat-caption text-gray-500 dark:text-white/45">{t("chat.team.dissolveConfirm")}</span>}
-        <button type="button" onClick={() => { if (confirming) void dissolveTeam(team.id); setConfirming(!confirming); }}
+        <button type="button" onClick={() => { if (confirming) dissolveTeam(team.id).catch((e) => setError(t("chat.team.dissolveFailed", { error: String(e) }))); setConfirming(!confirming); }}
           onBlur={() => setConfirming(false)}
           className={`h-7 px-2 rounded-md text-chat-caption hover:bg-gray-100 dark:hover:bg-white/10 ${confirming ? "text-red-700 dark:text-red-400 font-medium" : "text-gray-500 dark:text-white/45"}`}>
           {confirming ? t("chat.team.dissolveYes") : t("chat.team.dissolve")}
@@ -136,7 +136,7 @@ function Footer() {
   );
 }
 
-function MemberCard({ row, teamId }: { row: RosterRow; teamId: string }) {
+function MemberCard({ row, teamId, onError }: { row: RosterRow; teamId: string; onError: (message: string) => void }) {
   const { t } = useTranslation();
   const roleLabel = useRoleLabel();
   const lead = row.role === "orchestrator";
@@ -162,7 +162,7 @@ function MemberCard({ row, teamId }: { row: RosterRow; teamId: string }) {
         {row.policy && <span className="whitespace-nowrap">· {t(`chat.team.policy.${row.policy}`)}</span>}
         <span className="flex-1" />
         {!lead && (
-          <button type="button" onClick={() => { void unlinkMember(teamId, row.ref); }}
+          <button type="button" onClick={() => { unlinkMember(teamId, row.ref).catch((e) => onError(t("chat.team.unlinkFailed", { error: String(e) }))); }}
             className="hidden group-hover:inline whitespace-nowrap text-[11px] text-gray-500 dark:text-white/45 hover:text-red-700 dark:hover:text-red-400">
             {t("chat.team.unlink")}
           </button>

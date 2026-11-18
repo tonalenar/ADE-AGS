@@ -84,6 +84,9 @@ pub fn check_duplicate(
             }
         }
 
+        if status == "draft" {
+            continue;
+        }
         let is_running = status == "running";
         let timestamp = started_at.unwrap_or(created_at);
         let is_recent = (now - timestamp).abs() <= RECENT_MISSION_SECS;
@@ -270,6 +273,29 @@ mod test {
         )
         .unwrap();
 
+        let dup = check_duplicate(
+            &conn,
+            Some("m2"),
+            Some("w1"),
+            Some("/project"),
+            "Refatorar auth",
+            Some("Migrar JWT"),
+            now,
+        )
+        .unwrap();
+        assert!(dup.is_none());
+    }
+
+    #[test]
+    fn rascunho_nao_conta_como_duplicata() {
+        let conn = create_test_db();
+        let now = 100_000;
+        conn.execute(
+            "INSERT INTO missions (id, workspace_id, cwd, title, objective, status, created_at, started_at) \
+             VALUES ('m1', 'w1', '/project', 'Refatorar auth', 'Migrar JWT', 'draft', ?1, ?2)",
+            [now, now],
+        )
+        .unwrap();
         let dup = check_duplicate(
             &conn,
             Some("m2"),

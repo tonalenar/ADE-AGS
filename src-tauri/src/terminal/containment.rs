@@ -830,6 +830,64 @@ pub(crate) mod unix_tree {
             rescan_tree, signal_victims, signal_wave, tree,
         };
 
+        fn identidade_de_teste(pid: u32, start_time: u64) -> ProcessIdentity {
+            ProcessIdentity {
+                pid,
+                start_time,
+                pgid: pid,
+                #[cfg(target_os = "linux")]
+                pidfd: None,
+            }
+        }
+
+        #[test]
+        fn arvore_identificada_encontra_descendentes_sem_tocar_ramos_alheios() {
+            let identidade = identidade_de_teste(100, 10);
+            let processos = [
+                ProcessInfo { pid: 200, ppid: 100, pgid: 100, start_time: 20, alive: true },
+                ProcessInfo { pid: 300, ppid: 200, pgid: 100, start_time: 30, alive: true },
+                ProcessInfo { pid: 201, ppid: 100, pgid: 100, start_time: 21, alive: true },
+                ProcessInfo { pid: 901, ppid: 900, pgid: 900, start_time: 40, alive: true },
+                ProcessInfo { pid: 100, ppid: 1, pgid: 100, start_time: 10, alive: true },
+            ];
+            let mut encontrados = tree(100, &identidade, &[], &processos);
+            encontrados.sort_unstable();
+            assert_eq!(encontrados, [(100, 10), (200, 20), (201, 21), (300, 30)]);
+        }
+
+        #[test]
+        fn ordem_da_arvore_coloca_descendentes_antes_do_lider_ao_reverter() {
+            let identidade = identidade_de_teste(100, 10);
+            let processos = [
+                ProcessInfo { pid: 100, ppid: 1, pgid: 100, start_time: 10, alive: true },
+                ProcessInfo { pid: 200, ppid: 100, pgid: 100, start_time: 20, alive: true },
+                ProcessInfo { pid: 300, ppid: 200, pgid: 100, start_time: 30, alive: true },
+            ];
+            let encontrados = tree(100, &identidade, &[], &processos);
+            let ordem_de_sinal = encontrados.iter().rev().map(|(pid, _)| *pid).collect::<Vec<_>>();
+            assert_eq!(ordem_de_sinal, [300, 200, 100]);
+        }
+
+        #[test]
+        fn ciclo_de_ppid_nao_repete_processos() {
+            let identidade = identidade_de_teste(100, 10);
+            let processos = [
+                ProcessInfo { pid: 200, ppid: 100, pgid: 100, start_time: 20, alive: true },
+                ProcessInfo { pid: 100, ppid: 200, pgid: 100, start_time: 10, alive: true },
+            ];
+            assert_eq!(tree(100, &identidade, &[], &processos), [(100, 10), (200, 20)]);
+        }
+
+        #[test]
+        fn folha_sem_descendentes_nao_inclui_processos_alheios() {
+            let identidade = identidade_de_teste(100, 10);
+            let processos = [
+                ProcessInfo { pid: 100, ppid: 1, pgid: 100, start_time: 10, alive: true },
+                ProcessInfo { pid: 901, ppid: 900, pgid: 900, start_time: 40, alive: true },
+            ];
+            assert_eq!(tree(100, &identidade, &[], &processos), [(100, 10)]);
+        }
+
         #[test]
         fn falha_ao_sinalizar_o_grupo_repassa_a_onda_aos_pids_validados() {
             let leader_pid = u32::MAX;
