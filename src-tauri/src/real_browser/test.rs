@@ -93,10 +93,16 @@ fn zoom_zero_mantem_o_ultimo_zoom_valido() {
 
 #[test]
 fn bomba_do_cef_so_roda_com_navegador_aberto() {
-    // Sem nenhum navegador aberto, a bomba não se reagenda; com um, segue.
-    assert!(!keeps_pumping(0));
-    assert!(keeps_pumping(1));
-    assert!(keeps_pumping(3));
+    // Sem nenhum navegador aberto nem em criação, a bomba não se reagenda; com um, segue.
+    assert!(!keeps_pumping(0, 0));
+    assert!(keeps_pumping(1, 0));
+    assert!(keeps_pumping(3, 0));
+}
+
+#[test]
+fn bomba_do_cef_roda_enquanto_o_primeiro_navegador_e_criado() {
+    // O primeiro navegador só termina de nascer com a bomba rodando.
+    assert!(keeps_pumping(0, 1));
 }
 
 #[test]

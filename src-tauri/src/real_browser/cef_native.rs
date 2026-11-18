@@ -370,7 +370,7 @@ fn pump() {
     PUMPING.with(|pumping| pumping.set(false));
     // Sem pedido novo durante o trabalho, garante a próxima volta no teto de espera.
     let generation = PUMP_GENERATION.load(Ordering::SeqCst);
-    if keeps_pumping(OPEN_BROWSERS.load(Ordering::SeqCst)) {
+    if keeps_pumping(OPEN_BROWSERS.load(Ordering::SeqCst), CREATING_BROWSERS.load(Ordering::SeqCst)) {
         let _ = dispatch2::DispatchQueue::main().after(dispatch2::DispatchTime::NOW.time(MAX_PUMP_DELAY_MS * 1_000_000), move || {
             if PUMP_GENERATION.load(Ordering::SeqCst) == generation { pump(); }
         });
@@ -820,6 +820,10 @@ pub async fn create(app: &AppHandle, parent: isize, id: &str, profile: PathBuf, 
     let id = id.to_string();
     let timeout_id = id.clone();
     let (ready, created) = oneshot::channel();
+    // A bomba roda durante a criação; sem navegador aberto ela estaria parada e o primeiro nunca nasceria.
+    CREATING_BROWSERS.fetch_add(1, Ordering::SeqCst);
+    let _creating = CreatingGuard;
+    schedule_pump(0);
     let generation = on_main(&app, move || create_on_main(&main_thread_app, parent as *mut AnyObject, &id, profile, rect, ready)).await?;
     match tokio::time::timeout(BROWSER_READY_TIMEOUT, created).await {
         Ok(Ok(())) => Ok(()),
@@ -843,6 +847,15 @@ pub async fn create(app: &AppHandle, parent: isize, id: &str, profile: PathBuf, 
             .await?;
             Err("O Chromium não abriu a página a tempo.".to_string())
         }
+    }
+}
+
+/// Desconta a criação ao sair de `create`, com sucesso, erro ou prazo estourado.
+struct CreatingGuard;
+
+impl Drop for CreatingGuard {
+    fn drop(&mut self) {
+        CREATING_BROWSERS.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -1156,6 +1169,8 @@ pub fn shutdown() {
 /// Até ~3 s para os browsers fecharem ao sair do app.
 const SHUTDOWN_PUMP_ROUNDS: usize = 300;
 static OPEN_BROWSERS: AtomicUsize = AtomicUsize::new(0);
+/// Portais pedidos ao CEF que ainda não chegaram a `on_after_created` (ou estouraram o prazo).
+static CREATING_BROWSERS: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(test)]
 mod tests {

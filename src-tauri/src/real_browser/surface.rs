@@ -113,10 +113,11 @@ pub(super) fn effective_zoom(zoom: f64, last: Option<f64>) -> f64 {
     if zoom > 0.0 && zoom.is_finite() { zoom } else { last.unwrap_or(1.0) }
 }
 
-/// A bomba do CEF só se reagenda enquanto há navegador aberto. Sem nenhum, ela não acorda a thread principal à toa
-/// a cada 33 ms: o próprio CEF pede trabalho quando precisa (`on_schedule_message_pump_work`).
-pub(super) fn keeps_pumping(open_browsers: usize) -> bool {
-    open_browsers > 0
+/// A bomba do CEF só se reagenda enquanto há navegador aberto ou sendo criado. Sem nenhum, ela não acorda a thread
+/// principal à toa a cada 33 ms. A criação conta: o primeiro navegador só chega a `on_after_created` com a bomba
+/// rodando, e sem ela o Portal estourava o prazo ("O Chromium não abriu a página a tempo").
+pub(super) fn keeps_pumping(open_browsers: usize, creating: usize) -> bool {
+    open_browsers > 0 || creating > 0
 }
 
 /// O estado de uma criação de Portal. Um timeout cancela só a criação que ainda não ficou pronta, e um callback
