@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => import("@/test/invokeMock").then((m) => m.tauriCoreMock()));
@@ -36,13 +37,13 @@ beforeEach(() => {
 describe("o store real de permissão", () => {
   it("allow e deny mandam o threadId e o requestId ao backend e fecham o cartão", async () => {
     invokeMock.on("chat_request_answer", true);
-    answerAsk(threadAsk, "allow");
+    await answerAsk(threadAsk, "allow");
     expect(invokeMock.calls("chat_request_answer")).toEqual([{ requestId: "q", choice: "allow" }]);
     expect(usePermissions.getState().answered["thread:q"]).toBe(true);
     expect(usePermissions.getState().selected).toBeNull();
     expect(useStructured.getState().live.th?.requests.some((r) => r.id === "q")).toBe(false);
 
-    answerAsk({ ...threadAsk, id: "thread:d", ref: { source: "thread", threadId: "th", requestId: "d" } }, "deny");
+    await answerAsk({ ...threadAsk, id: "thread:d", ref: { source: "thread", threadId: "th", requestId: "d" } }, "deny");
     const answers = invokeMock.calls("chat_request_answer") as Array<{ requestId: string; choice: string }>;
     expect(answers[answers.length - 1]).toEqual({ requestId: "d", choice: "deny" });
   });
@@ -50,7 +51,7 @@ describe("o store real de permissão", () => {
   it("Responder… nega e manda o texto ao fio", async () => {
     invokeMock.on("chat_request_answer", true);
     invokeMock.on("chat_thread_send", true);
-    answerAsk(threadAsk, "deny", "use o pnpm");
+    await answerAsk(threadAsk, "deny", "use o pnpm");
     expect(invokeMock.calls("chat_request_answer")).toEqual([{ requestId: "q", choice: "deny" }]);
     expect(invokeMock.calls("chat_thread_send")[0]).toMatchObject({ threadId: "th", text: "use o pnpm" });
   });
