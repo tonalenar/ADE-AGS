@@ -30,6 +30,8 @@ interface StructuredState {
   goalNotices: Record<string, string | null>;
   /** As conversas cuja timeline já foi lida do banco. */
   hydrated: Record<string, boolean>;
+  /** A última falha de leitura de cada conversa, quando as tentativas se esgotaram (a timeline mostra e oferece tentar de novo). */
+  hydrateErrors: Record<string, string>;
   /** Falhas de gravação do log, por conversa, até a pessoa dispensá-las. Não entram no chat. */
   logFailures: Record<string, LogFailure[]>;
   /** Avisos de falha de resposta, por id de pedido. Ficam fora de `live.requests`: uma releitura do fio não os apaga. */
@@ -40,7 +42,7 @@ interface StructuredState {
   requestArrivalSeq: Record<string, Record<string, number>>;
 }
 
-export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, logFailures: {}, answerErrors: {}, arrivalSeq: 0, requestArrivalSeq: {} }));
+export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, hydrateErrors: {}, logFailures: {}, answerErrors: {}, arrivalSeq: 0, requestArrivalSeq: {} }));
 
 /** Um sinal de falha do log entra na conversa afetada, sem repetir o mesmo aviso. Sinal sem conversa é ignorado. */
 export function recordLogFailure(raw: unknown): void {
@@ -121,6 +123,7 @@ export function removeDeletedSideChat(id: string): void {
     threads: state.threads.filter((row) => row.id !== id),
     live: Object.fromEntries(Object.entries(state.live).filter(([threadId]) => threadId !== id)),
     hydrated: Object.fromEntries(Object.entries(state.hydrated).filter(([threadId]) => threadId !== id)),
+    hydrateErrors: withoutKey(state.hydrateErrors, id),
     answerErrors: forgetGoneAnswerErrors(state.live[id] ?? EMPTY_LIVE, EMPTY_LIVE, state.answerErrors),
     requestArrivalSeq: Object.fromEntries(Object.entries(state.requestArrivalSeq).filter(([threadId]) => threadId !== id)),
   }));
@@ -194,26 +197,66 @@ export function startStructured(): void {
   });
 }
 
-/** Lê do banco a timeline e os pendentes de uma conversa (uma vez). */
+/** Quantas vezes a leitura de uma conversa por protocolo é tentada antes de desistir. */
+const HYDRATE_ATTEMPTS = 3;
+
+function readThread(id: string) {
+  return Promise.all([chatThreadItems(id), chatThreadRequests(id), chatThreadStatus(id), chatThreadGoalGet(id), chatThreadProviderConfig(id)]);
+}
+
+/** Pausa entre as tentativas de leitura: cresce a cada falha, para não martelar o banco que acabou de falhar. */
+const HYDRATE_RETRY_MS = 300;
+
+/**
+ * Lê a conversa do banco. Tenta algumas vezes, com uma pausa crescente; se todas falharem, a conversa não fica
+ * «carregando» para sempre: a falha vai para `hydrateErrors`, a timeline mostra o erro e oferece tentar de novo
+ * (`retryThreadHydration`).
+ */
 export function hydrateThread(id: string): Promise<void> {
   if (useStructured.getState().hydrated[id]) return Promise.resolve();
   useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: true } }));
   const readSeq = useStructured.getState().arrivalSeq;
-  return Promise.all([chatThreadItems(id), chatThreadRequests(id), chatThreadStatus(id), chatThreadGoalGet(id), chatThreadProviderConfig(id)])
-    .then(([items, requests, status, goal, providerConfig]) => {
-      const requestArrivals = useStructured.getState().requestArrivalSeq[id] ?? {};
-      patchLive(id, (live) => ({
-        ...live,
-        // O que chegou por evento enquanto lia fica (é mais novo).
-        items: [...items.filter((i) => !live.items.some((x) => x.id === i.id)), ...live.items],
-        // Uma caixa vazia confirma a resolução dos pedidos anteriores à leitura; eventos recebidos depois prevalecem.
-        requests: requests.length > 0 ? requests : live.requests.filter((request) => (requestArrivals[request.id] ?? 0) > readSeq),
-        phase: status.working ? "working" : live.phase,
-        providerConfig: providerConfig ?? live.providerConfig,
-      }));
-      useStructured.setState((s) => ({ goals: { ...s.goals, [id]: Object.prototype.hasOwnProperty.call(s.goals, id) ? s.goals[id]! : goal } }));
-    })
-    .catch(() => useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: false } })));
+  return (async () => {
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < HYDRATE_ATTEMPTS; attempt++) {
+      try {
+        const [items, requests, status, goal, providerConfig] = await readThread(id);
+        const requestArrivals = useStructured.getState().requestArrivalSeq[id] ?? {};
+        patchLive(id, (live) => ({
+          ...live,
+          // O que chegou por evento enquanto lia fica (é mais novo).
+          items: [...items.filter((i) => !live.items.some((x) => x.id === i.id)), ...live.items],
+          // Uma caixa vazia confirma a resolução dos pedidos anteriores à leitura; eventos recebidos depois prevalecem.
+          requests: requests.length > 0 ? requests : live.requests.filter((request) => (requestArrivals[request.id] ?? 0) > readSeq),
+          phase: status.working ? "working" : live.phase,
+          providerConfig: providerConfig ?? live.providerConfig,
+        }));
+        useStructured.setState((s) => ({
+          goals: { ...s.goals, [id]: Object.prototype.hasOwnProperty.call(s.goals, id) ? s.goals[id]! : goal },
+          hydrateErrors: withoutKey(s.hydrateErrors, id),
+        }));
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < HYDRATE_ATTEMPTS - 1) await new Promise<void>((resolve) => setTimeout(resolve, HYDRATE_RETRY_MS * (attempt + 1)));
+      }
+    }
+    useStructured.setState((s) => ({
+      hydrated: { ...s.hydrated, [id]: false },
+      hydrateErrors: { ...s.hydrateErrors, [id]: String(lastError) },
+    }));
+  })();
+}
+
+/** Tenta de novo a leitura de uma conversa cuja timeline falhou (o botão «Tentar de novo»). */
+export function retryThreadHydration(id: string): void {
+  useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: false }, hydrateErrors: withoutKey(s.hydrateErrors, id) }));
+  void hydrateThread(id);
+}
+
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  const { [key]: _removed, ...rest } = record;
+  return rest;
 }
 
 /** Mostra uma conversa por protocolo. */
@@ -234,12 +277,38 @@ export interface NewThread {
   parentRef?: string | null;
 }
 
-/** Cria a conversa, mostra e manda a primeira mensagem. */
-export async function startThread(input: NewThread, text: string, images?: string[], background = false, fastMode?: boolean): Promise<string> {
-  const id = await createThread(input);
+/**
+ * Cria a conversa e manda a primeira mensagem. A conversa só abre depois de o backend aceitar a mensagem: se ele recusar,
+ * devolve `null` (a conversa vazia fica na lista, sem apagar nada) e quem chamou mantém o texto na caixa.
+ */
+export async function startThread(input: NewThread, text: string, images?: string[], background = false, fastMode?: boolean, onError?: (message: string) => void): Promise<string | null> {
+  const { id } = await createFirstThread(input);
+  const accepted = await sendToThread(id, text, onError, undefined, images, fastMode);
+  if (!accepted) return null;
+  firstMessageAccepted(input);
   if (!background) openThread(id);
-  sendToThread(id, text, undefined, undefined, images, fastMode);
   return id;
+}
+
+/** A conversa criada para a primeira mensagem, por entrada (a chave é o próprio pedido de criação), ainda sem mensagem aceita. */
+const unacceptedFirstThreads = new Map<string, string>();
+
+/**
+ * Cria a conversa da primeira mensagem. Se a tentativa anterior com a mesma entrada não teve a mensagem aceita, a mesma
+ * conversa é reaproveitada: uma recusa não deixa uma conversa vazia a mais a cada tentativa. `reused` diz qual foi o caso.
+ */
+export async function createFirstThread(input: NewThread): Promise<{ id: string; reused: boolean }> {
+  const key = JSON.stringify(input);
+  const reusedId = unacceptedFirstThreads.get(key);
+  if (reusedId) return { id: reusedId, reused: true };
+  const id = await createThread(input);
+  unacceptedFirstThreads.set(key, id);
+  return { id, reused: false };
+}
+
+/** A primeira mensagem foi aceita: a conversa deixa de ser reaproveitada por essa entrada. */
+export function firstMessageAccepted(input: NewThread): void {
+  unacceptedFirstThreads.delete(JSON.stringify(input));
 }
 
 /** Cria a conversa por protocolo sem abri-la nem mandar nada (o time é montado antes de a tela trocar). */
@@ -263,27 +332,33 @@ export async function forkSideChat(id: string): Promise<SideChatForkOutcome> {
   return outcome;
 }
 
-/** Manda uma mensagem (começa um turno, ou entra no que está em andamento). */
-export function sendToThread(id: string, text: string, onError?: (message: string) => void, onSent?: () => void, images?: string[], fastMode?: boolean): void {
+/**
+ * Manda uma mensagem (começa um turno, ou entra no que está em andamento). Resolve `true` só quando o backend aceita;
+ * `false` quando recusa (o erro vai para `onError` e para o aviso da conversa). Quem precisa saber se a mensagem saiu
+ * espera este resultado antes de limpar a caixa.
+ */
+export function sendToThread(id: string, text: string, onError?: (message: string) => void, onSent?: () => void, images?: string[], fastMode?: boolean): Promise<boolean> {
   const row = useStructured.getState().threads.find((thread) => thread.id === id);
   const effectiveFastMode = fastMode ?? (row ? fastModeForThread(row) : false);
   if (text.trim() || images?.length) unsnoozeConversation(threadKey(id));
   patchLive(id, (live) => ({ ...live, phase: "working", error: null }));
-  const send = (outgoing: string) => {
+  const send = (outgoing: string): Promise<boolean> =>
     // `onSent` só depois de o backend aceitar a mensagem; `onError` só se ele a recusar.
-    chatThreadSend(id, outgoing, images, effectiveFastMode).then(() => onSent?.(), (e) => {
+    chatThreadSend(id, outgoing, images, effectiveFastMode).then(() => {
+      onSent?.();
+      return true;
+    }, (e) => {
       onError?.(String(e));
       patchLive(id, (live) => ({ ...live, phase: "idle", error: String(e) }));
+      return false;
     });
-  };
   // Claude e Cursor precisam receber `/nome`; no composer os dois usam a menção portátil `$nome`.
   if ((row?.agentId === "claude-code" || row?.agentId === "cursor") && text.includes("$")) {
-    void useAgentSkillsStore.getState().load(row.cwd, row.agentId, id)
+    return useAgentSkillsStore.getState().load(row.cwd, row.agentId, id)
       .catch(() => [])
       .then((skills) => send(dispatchSkillMentions(row.agentId, text, skills.map((skill) => skill.name))));
-    return;
   }
-  send(text);
+  return send(text);
 }
 
 export function interruptThread(id: string): void {
@@ -330,36 +405,41 @@ export async function runThreadGoalAction(id: string, action: "show" | "set" | "
 }
 
 /**
- * Responde um pedido do protocolo. O pedido só sai da tela depois de o backend confirmar: se ele recusar (o agente
- * fechou o pedido, ou o IPC falhou), o pedido fica e o erro aparece. Devolve `true` quando o backend confirmou.
+ * Responde um pedido do protocolo. O pedido só sai da tela depois de o backend confirmar. Falha (erro, ou `false` do
+ * backend, que é "o pedido já não está aberto") não é sucesso: o pedido fica na conversa e o aviso vai ao mapa
+ * `answerErrors`, que sobrevive a uma releitura do fio. Devolve `true` quando o backend confirmou.
  */
+/** Pedidos com a resposta a caminho do backend: uma segunda resposta ao mesmo pedido, enquanto isso, não sai. */
+const answersInFlight = new Set<string>();
+
 /** Uma falha de resposta: o pedido fica na conversa, e o aviso vai ao mapa `answerErrors`, fora de `requests`. */
 function failAnswer(requestId: string): void {
   useStructured.setState((s) => ({ answerErrors: { ...s.answerErrors, [requestId]: "chat.permission.answerFailed" } }));
 }
 
-/**
- * Responde um pedido do protocolo. O pedido só sai da tela depois de o backend confirmar. Falha (erro, ou `false` do
- * backend, que é "o pedido já não está aberto") não é sucesso: o pedido fica na conversa e o aviso vai ao mapa
- * `answerErrors`, que sobrevive a uma releitura do fio. Devolve `true` quando o backend confirmou.
- */
 export async function answerRequest(threadId: string, requestId: string, choice: string): Promise<boolean> {
-  unsnoozeConversation(threadKey(threadId));
-  let confirmed: boolean;
+  if (answersInFlight.has(requestId)) return false;
+  answersInFlight.add(requestId);
   try {
-    confirmed = await chatRequestAnswer(requestId, choice);
-  } catch (e) {
-    patchLive(threadId, (live) => ({ ...live, error: String(e) }));
-    failAnswer(requestId);
-    return false;
+    unsnoozeConversation(threadKey(threadId));
+    let confirmed: boolean;
+    try {
+      confirmed = await chatRequestAnswer(requestId, choice);
+    } catch (e) {
+      patchLive(threadId, (live) => ({ ...live, error: String(e) }));
+      failAnswer(requestId);
+      return false;
+    }
+    if (confirmed !== true) {
+      failAnswer(requestId);
+      return false;
+    }
+    // Confirmada: o pedido sai da lista, e `patchLive` tira o aviso junto (ver `forgetGoneAnswerErrors`).
+    patchLive(threadId, (live) => ({ ...live, requests: live.requests.filter((r) => r.id !== requestId) }));
+    return true;
+  } finally {
+    answersInFlight.delete(requestId);
   }
-  if (confirmed !== true) {
-    failAnswer(requestId);
-    return false;
-  }
-  // Confirmada: o pedido sai da lista, e `patchLive` tira o aviso junto (ver `forgetGoneAnswerErrors`).
-  patchLive(threadId, (live) => ({ ...live, requests: live.requests.filter((r) => r.id !== requestId) }));
-  return true;
 }
 
 export async function retuneThread(id: string, model: string | null, effort: string | null, access: ThreadAccess): Promise<boolean> {

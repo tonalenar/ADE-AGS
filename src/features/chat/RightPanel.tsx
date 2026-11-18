@@ -65,6 +65,8 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   // A aba à vista: o `panel` é a superfície dela (o `reconcileColumn` garante que existe uma aba para ele).
   const activeTab = useChatStore((s) => s.columnTabs.find((tab) => tab.id === s.columnActive && tab.kind === s.panel) ?? null);
   const contentRef = useRef<HTMLDivElement>(null);
+  // Função estável para o `SelectionComment`: uma função nova a cada render reinstalava os listeners.
+  const contentOf = useCallback(() => contentRef.current, []);
   const panelRef = useRef<HTMLElement>(null);
   useShareDevices();
   // O atalho do Time (e quem mais pedir) leva o foco para dentro do painel.
@@ -114,7 +116,7 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
           </Suspense>
         )}
       </div>
-      {panel === "diff" && (conversation?.tabId ?? tabId) && <SelectionComment container={() => contentRef.current} quoteKey={conversation?.tabId ?? tabId!} />}
+      {panel === "diff" && (conversation?.tabId ?? tabId) && <SelectionComment container={contentOf} quoteKey={conversation?.tabId ?? tabId!} />}
     </aside>
   );
 }

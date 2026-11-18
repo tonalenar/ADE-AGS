@@ -75,6 +75,22 @@ export interface ThreadLive {
 export const EMPTY_LIVE: ThreadLive = { items: [], requests: [], phase: "idle", drafts: [], error: null, providerCommands: [], providerConfig: null };
 
 /**
+ * Um texto curto com o que as telas leem de cada conversa: o id, a fase, quantos pedidos pendentes (aprovação e
+ * pergunta) e se houve falha. Muda só quando uma dessas coisas muda, e não a cada pedaço de texto. Quem assina esta
+ * assinatura, em vez do `live` inteiro, não re-renderiza por causa do texto de outra conversa. Pura.
+ */
+export function threadStatusSignature(live: Record<string, ThreadLive>, ids: readonly string[]): string {
+  return ids.map((id) => {
+    const thread = live[id];
+    if (!thread) return `${id}:-`;
+    const pending = thread.requests.filter((r) => r.state === "pending");
+    const question = pending.filter((r) => r.kind === "question").length;
+    const awaiting = pending.length - question;
+    return `${id}:${thread.phase === "working" ? "w" : "i"}${awaiting}.${question}${thread.error !== null ? "!" : ""}`;
+  }).join(",");
+}
+
+/**
  * Os avisos de falha de resposta (`answerErrors`, por id de pedido, fora de `requests`) somem quando o pedido sai da
  * caixa: respondido, ou fechado pelo agente. Enquanto o pedido estiver na lista, o aviso fica, mesmo que o fio seja
  * relido. Devolve o mesmo mapa quando nada saiu. Pura.

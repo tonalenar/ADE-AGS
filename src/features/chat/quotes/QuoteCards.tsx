@@ -75,7 +75,7 @@ function restoreComposerFocus() {
  * posicionamento de `AssistantCitationChip` do T3 Code): abre imediatamente sobre o trecho citado
  * ou acima do chip ao editar pelo lápis, sem blockquote nem barra de dica redundante.
  */
-function CitationCommentPopover({
+export function CitationCommentPopover({
   item,
   anchorEl,
   sourceAnchor,
@@ -144,8 +144,8 @@ function CitationCommentPopover({
   const savedCommentRef = useRef(item.comment);
   savedCommentRef.current = item.comment;
 
-  // Monitora a fonte citada na timeline enquanto aberta: se desaparecer ou sair da área visível, tenta
-  // consolidar ou transfere a âncora para o chip do composer (igual ao `observeAssistantCitationCommentSource`).
+  // Monitora a fonte citada na timeline enquanto aberta. Se ela sai do DOM (remontada ou removida), o editor fica aberto
+  // com o rascunho, sem gravar: só a pessoa grava. Fora da área visível, a fonte continua na conversa e nada muda.
   useEffect(() => {
     if (!activeSourceAnchor) return;
     const checkSource = () => {
@@ -162,23 +162,12 @@ function CitationCommentPopover({
           ]);
         }
       }
+      // Só a fonte que saiu do DOM (remontada ou removida) tem o que fazer. Fora da área visível, a fonte ainda está na
+      // conversa: o editor espera, e rolar de volta o recoloca.
+      if (!visible && connected) return;
       if (!visible) {
-        const decision = resolveCommentDismissal({
-          reason: "none",
-          draft: draftRef.current,
-          savedComment: savedCommentRef.current,
-        });
-        if (decision.kind === "keep-open") {
-          setUnavailableSourceAnchor(activeSourceAnchor);
-        } else if (decision.kind === "commit") {
-          if (onSaveRef.current(decision.comment)) {
-            onCloseRef.current({ restoreFocus: false });
-          } else {
-            setUnavailableSourceAnchor(activeSourceAnchor);
-          }
-        } else {
-          onCloseRef.current({ restoreFocus: false });
-        }
+        // A fonte sumiu sem ação da pessoa: o rascunho fica aberto, sem gravar e sem fechar.
+        setUnavailableSourceAnchor(activeSourceAnchor);
         return;
       }
       const popup = popupRef.current;

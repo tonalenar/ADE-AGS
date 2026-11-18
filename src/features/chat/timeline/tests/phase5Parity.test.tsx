@@ -66,15 +66,11 @@ describe("Fase 5 - Desfecho desconhecido em ferramentas", () => {
 
   it("explica que a ferramenta pode ter rodado ou não e sugere conferir o estado antes de repetir", async () => {
     await render(<ToolRow tool={unknownTool} />);
-
-    // Se estiver fechado, clica para abrir (ou já vem visível)
-    const button = host.querySelector("button");
-    if (!host.textContent?.includes("chat.tool.outcomeUnknownHelp")) {
-      await act(async () => {
-        button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      });
-    }
-
+    // Fechada, a linha não mostra a explicação; ao abrir, ela aparece.
+    expect(host.textContent).not.toContain("chat.tool.outcomeUnknownHelp");
+    await act(async () => {
+      host.querySelector("button")!.click();
+    });
     expect(host.textContent).toContain("chat.tool.outcomeUnknownHelp");
   });
 

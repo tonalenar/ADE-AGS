@@ -94,6 +94,15 @@ export function PermissionCard({ ask, terminal }: { ask: PendingAsk; terminal: b
   const [replying, setReplying] = useState(false);
   const [reply, setReply] = useState("");
   const [expanded, setExpanded] = useState(false);
+  // O cartão pode receber outro pedido (o anterior foi respondido): o campo de resposta e o detalhe são do pedido de antes,
+  // então zeram quando o pedido muda. Ajuste de estado no render, sem um commit a mais.
+  const [askId, setAskId] = useState(ask.id);
+  if (askId !== ask.id) {
+    setAskId(ask.id);
+    setReplying(false);
+    setReply("");
+    setExpanded(false);
+  }
   const replyRef = useRef<HTMLTextAreaElement>(null);
   const replyButtonRef = useRef<HTMLButtonElement>(null);
   const allowRef = useRef<HTMLButtonElement>(null);

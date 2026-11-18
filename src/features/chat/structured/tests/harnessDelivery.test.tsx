@@ -135,7 +135,8 @@ describe("entrega, bloqueio e origem dos filhos no painel", () => {
     const button = host.querySelector<HTMLButtonElement>('button[aria-label*="pergunta pendente"]');
     expect(button).not.toBeNull();
     expect(button?.tabIndex).toBeGreaterThanOrEqual(0);
-    // Ativar um botão nativo pelo teclado dispara o mesmo clique.
+    // Um botão nativo recebe o mesmo clique de Enter e Espaço; o teste dispara esse clique direto (o teclado não é simulado).
+    expect(button?.tagName).toBe("BUTTON");
     button?.click();
     expect(mocks.select).toHaveBeenCalledWith(threadKey("filha"));
   });
