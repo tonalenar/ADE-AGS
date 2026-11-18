@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { allApproved, buildable, formatQueueForAgent, pendingComments } from "../commentQueue";
 import { normalizeDesign, type Artboard, type DesignComment } from "../designApi";
-import { DESIGN_CSP, DESIGN_SANDBOX, PICK_MESSAGE, buildSrcdoc, parsePick } from "../srcdoc";
+import { DESIGN_CSP, DESIGN_SANDBOX, PICKER_SCRIPT, PICK_MESSAGE, buildSrcdoc, parsePick } from "../srcdoc";
 import { INITIAL_VIEWPORT, MAX_ZOOM, MIN_ZOOM, fitViewport, viewportReducer, zoomPercent } from "../viewport";
 
 const board = (o: Partial<Artboard> = {}): Artboard => ({
@@ -37,8 +37,8 @@ describe("srcdoc", () => {
     expect(doc).toContain("<p>ok</p>");
   });
   it("só injeta o seletor no modo EDIT", () => {
-    expect(buildSrcdoc("<p/>")).not.toContain(PICK_MESSAGE);
-    expect(buildSrcdoc("<p/>", { picker: true })).toContain(PICK_MESSAGE);
+    expect(buildSrcdoc("<p/>")).not.toContain(PICKER_SCRIPT);
+    expect(buildSrcdoc("<p/>", { picker: true })).toContain(PICKER_SCRIPT);
   });
   it("parsePick valida a mensagem do iframe", () => {
     expect(parsePick({ type: PICK_MESSAGE, selector: "div > p:nth-of-type(1)", text: "oi" })).toEqual({ selector: "div > p:nth-of-type(1)", text: "oi" });

@@ -155,7 +155,7 @@ export const FolderNode = memo(function FolderNode({ data, selected }: NodeProps
           <span className="text-[11px] font-bold leading-none">.*</span>
         </IconButton>
         <IconButton label={t("canvas.folder.refresh")} onClick={refresh}><span className="text-[13px] leading-none">↻</span></IconButton>
-        <IconButton label={t("canvas.folder.change")} onClick={() => void change()}><span className="text-[12px] leading-none">⋯</span></IconButton>
+        <IconButton label={t("canvas.folder.change")} onClick={() => void change().catch((e) => setError(String(e)))}><span className="text-[12px] leading-none">⋯</span></IconButton>
         <Button variant="custom"
           onClick={() => (armed ? key && canvasActions.removeFolder(key, id) : setArmed(true))}
           title={armed ? t("canvas.folder.deleteConfirm") : t("canvas.folder.delete")}

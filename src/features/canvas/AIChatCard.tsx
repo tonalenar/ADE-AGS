@@ -84,7 +84,7 @@ export function AIChatCard({
                 onSend();
               }
             }}
-            disabled={disabled || busy}
+            disabled={disabled}
             placeholder={placeholder}
             aria-label={inputLabel}
             rows={2}

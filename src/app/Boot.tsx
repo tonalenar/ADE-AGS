@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 
 import App from "@/app/App";
+import { PanelBoundary } from "@/app/PanelBoundary";
 import { revealApp } from "@/app/splash";
 
 type DbPhase = "checking" | "upgrading" | "ready";
@@ -67,8 +68,14 @@ export function Boot({ appReady }: { appReady: Promise<void> }) {
     if (db === "upgrading") void revealApp();
   }, [db]);
 
-  if (db === "upgrading") return <UpdatingSplash />;
-  if (db !== "ready" || !catalogReady) return null;
+  // A fronteira só cerca o carregamento: a casca (e os PTYs) nunca são filhos dela.
+  if (db === "upgrading" || db !== "ready" || !catalogReady) {
+    return (
+      <PanelBoundary name="boot">
+        {db === "upgrading" ? <UpdatingSplash /> : null}
+      </PanelBoundary>
+    );
+  }
   return <App />;
 }
 

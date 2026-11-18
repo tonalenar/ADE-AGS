@@ -133,7 +133,16 @@ export const useUsageStore = create<UsageState>((set, get) => ({
       }
     } catch (e) {
       if (account.agentId === "claude-code") {
-        set(patch("claude", id, { available: false, session: null, week: null, weekModels: [], fetchedAt: 0, cached: false, problem: String(e) }));
+        const prev = get().claude[id];
+        set(patch("claude", id, {
+          available: prev?.available ?? false,
+          session: prev?.session ?? null,
+          week: prev?.week ?? null,
+          weekModels: prev?.weekModels ?? [],
+          fetchedAt: prev?.fetchedAt ?? 0,
+          cached: prev?.cached ?? false,
+          problem: String(e),
+        }));
       }
     } finally {
       set(patch("busy", id, false));
@@ -176,17 +185,23 @@ function stopUsagePolling(): void {
  */
 export function startUsagePolling(accounts: AgentAccount[]): () => void {
   const sig = accounts.map((a) => a.id).join("|");
-  if (sig === running && timer !== undefined) return stopUsagePolling;
+  if (sig === running && timer !== undefined) return () => {};
   stopUsagePolling();
   running = sig;
+  let sweeping = false;
   const sweep = async () => {
-    if (document.visibilityState === "hidden") return;
-    const { refresh, refreshAgy } = useUsageStore.getState();
-    await Promise.all([
-      refreshAgy(false),
-      ...accounts.filter((a) => a.agentId === "codex" || a.agentId === "antigravity").map((a) => refresh(a, false)),
-    ]);
-    for (const a of accounts.filter((x) => x.agentId === "claude-code")) await refresh(a, false);
+    if (document.visibilityState === "hidden" || sweeping) return;
+    sweeping = true;
+    try {
+      const { refresh, refreshAgy } = useUsageStore.getState();
+      await Promise.all([
+        refreshAgy(false),
+        ...accounts.filter((a) => a.agentId === "codex" || a.agentId === "antigravity").map((a) => refresh(a, false)),
+      ]);
+      for (const a of accounts.filter((x) => x.agentId === "claude-code")) await refresh(a, false);
+    } finally {
+      sweeping = false;
+    }
   };
   onVisible = () => {
     if (document.visibilityState === "visible") void sweep();

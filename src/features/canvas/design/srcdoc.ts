@@ -7,6 +7,8 @@ export const DESIGN_SANDBOX = "allow-scripts";
 export const DESIGN_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'unsafe-inline'; form-action 'none'; base-uri 'none'";
 /** Mensagem que o iframe manda ao app quando se escolhe um elemento. */
 export const PICK_MESSAGE = "ags-design-pick";
+/** Liga ou desliga o modo Escolher num documento já carregado, sem recarregar o srcdoc. */
+export const CHOOSER_MODE = "ags-design-chooser";
 
 /** Script injetado só no modo EDIT: hover/clique escolhem um elemento e mandam o seletor por postMessage. */
 export const PICKER_SCRIPT = `(function(){
@@ -39,7 +41,7 @@ document.addEventListener("click",function(e){
  * manda o seletor e o texto dele.
  */
 export const CHOOSER_SCRIPT = `(function(){
-var last=null;
+var last=null,on=false;
 function unit(el){
   var n=el;
   while(n&&n.parentElement&&n.tagName!=="BODY"&&n.tagName!=="HTML"){
@@ -62,11 +64,18 @@ function sel(el){
   }
   return parts.join(" > ");
 }
+window.addEventListener("message",function(e){
+  if(!e.data||e.data.type!=="${CHOOSER_MODE}")return;
+  on=!!e.data.on;
+  if(!on&&last){last.style.outline="";last.style.cursor="";last=null;}
+});
 document.addEventListener("mouseover",function(e){
+  if(!on)return;
   if(last)last.style.outline="";
   last=unit(e.target);last.style.outline="3px solid #ff8a3d";last.style.cursor="pointer";
 },true);
 document.addEventListener("click",function(e){
+  if(!on)return;
   e.preventDefault();e.stopPropagation();
   var t=unit(e.target);
   var first=((t.innerText||t.textContent||"").split(/\\n/).map(function(l){return l.trim();}).filter(Boolean)[0]||"").slice(0,80);
@@ -103,8 +112,10 @@ export interface SrcdocOptions {
 /** Monta o `srcdoc` do iframe: CSP primeiro, depois o HTML do agente, e o seletor se for modo EDIT. */
 export function buildSrcdoc(html: string, opts: SrcdocOptions = {}): string {
   const meta = `<meta http-equiv="Content-Security-Policy" content="${DESIGN_CSP}">`;
-  const picker = opts.picker ? `<script>${PICKER_SCRIPT}</script>` : opts.chooser ? `<script>${CHOOSER_SCRIPT}</script>` : opts.script ? `<script>${opts.script}</script>` : "";
-  return `<!doctype html><html><head><meta charset="utf-8">${meta}<style>html,body{margin:0}${SCROLLBAR_CSS}</style></head><body>${stripUnsafeHead(html)}${picker}</body></html>`;
+  const extra = opts.picker ? `<script>${PICKER_SCRIPT}</script>` : opts.script ? `<script>${opts.script}</script>` : "";
+  // No canvas o modo Escolher liga por postMessage (sem recarregar); script próprio (Design Studio) entra sozinho.
+  const chooser = opts.script ? "" : `<script>${CHOOSER_SCRIPT}</script>`;
+  return `<!doctype html><html><head><meta charset="utf-8">${meta}<style>html,body{margin:0}${SCROLLBAR_CSS}</style></head><body>${stripUnsafeHead(html)}${extra}${chooser}</body></html>`;
 }
 
 export interface PickMessage { selector: string; text: string }

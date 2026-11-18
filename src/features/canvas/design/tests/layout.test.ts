@@ -28,12 +28,12 @@ describe("spreadOverlapping", () => {
 import { CHOOSER_SCRIPT, PICKER_SCRIPT, PICK_MESSAGE, buildSrcdoc, parsePick } from "../srcdoc";
 
 describe("modo ESCOLHER (proposta dentro de uma prancheta)", () => {
-  it("só injeta o script de escolha quando pedido, e nunca junto do seletor do EDIT", () => {
-    expect(buildSrcdoc("<p>x</p>")).not.toContain(CHOOSER_SCRIPT);
-    const chooser = buildSrcdoc("<p>x</p>", { chooser: true });
-    expect(chooser).toContain(CHOOSER_SCRIPT);
-    expect(chooser).not.toContain(PICKER_SCRIPT);
-    expect(buildSrcdoc("<p>x</p>", { picker: true })).not.toContain(CHOOSER_SCRIPT);
+  it("o script de escolha fica no srcdoc, desligado até o app mandar a mensagem, e o EDIT pode ir junto", () => {
+    expect(buildSrcdoc("<p>x</p>")).toContain(CHOOSER_SCRIPT);
+    expect(buildSrcdoc("<p>x</p>")).not.toContain(PICKER_SCRIPT);
+    const edit = buildSrcdoc("<p>x</p>", { picker: true });
+    expect(edit).toContain(PICKER_SCRIPT);
+    expect(edit).toContain(CHOOSER_SCRIPT);
   });
 
   it("a CSP continua cortando a rede no modo escolher", () => {

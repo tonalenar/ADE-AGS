@@ -13,6 +13,7 @@ import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
 
 const TOOL = "cc-t flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white";
+import { loadChatHistory } from "./chatHistory";
 import { unreadOf, useUnreadStore, type ChatJump } from "./chatUnread";
 import { appendToDraft } from "@/features/terminal/terminalExcerpt";
 import { useActiveBoardKey, boardKeyOfTab, conversationOfKey, missionOfKey, useCanvasStore } from "./store";
@@ -204,7 +205,7 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
   const load = useCallback(() => {
     const mine = ++loadSeq.current;
     if (!currentId) return setConversation(null);
-    invoke<Conversation>("chat_history", { tabId: currentId })
+    loadChatHistory<Conversation>(currentId)
       .then((c) => { if (mine === loadSeq.current) setConversation(c); })
       .catch(() => { if (mine === loadSeq.current) setConversation(null); });
   }, [currentId]);

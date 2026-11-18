@@ -14,6 +14,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { spreadOverlapping } from "./layout";
 import { ownerProblem } from "./ownerLabel";
 import { defaultDesignId, resolveOwner } from "./owner";
+import { PREVIEW_DEBOUNCE_MS, scheduleDebounced } from "./previewDebounce";
 import { DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
 import { INITIAL_VIEWPORT, fitViewport, viewportReducer, zoomPercent } from "./viewport";
 import { designRoute } from "@/features/design/openRoute";
@@ -91,21 +92,26 @@ export function DesignPanel({ details, reload, initial, onClose }: {
     if (!detail) return;
     return chooseOnBoard({ t, board, design: detail.design, owner: ownerOf(detail.design), pick, reload });
   };
+  const acting = useRef(false);
   const sendQueue = async () => {
-    if (!detail || queue.length === 0) return;
+    if (!detail || queue.length === 0 || acting.current) return;
     const owner = ownerOf(detail.design);
     if (!owner) return fail(t("canvas.design.noOwner"));
+    acting.current = true;
     try {
       await designApi.tellOwner(owner, formatQueueForAgent(detail.design.title, detail.artboards, queue));
       AlertaToast(t("canvas.design.title"), t("canvas.design.sent", { count: queue.length }), "success", 3000);
     } catch (e) {
       fail(e);
+    } finally {
+      acting.current = false;
     }
   };
   const build = async () => {
-    if (!detail) return;
+    if (!detail || acting.current) return;
     const owner = ownerOf(detail.design);
     if (!owner) return fail(t("canvas.design.noOwner"));
+    acting.current = true;
     try {
       // Só as aprovadas viram tarefa; cada uma segue ao dono, que a constrói no seu worktree.
       const tasks = buildTasks({ ...detail.design, pages: detail.pages.map((pg) => ({ ...pg, artboards: detail.artboards.filter((a) => a.pageId === pg.id) })) });
@@ -113,6 +119,8 @@ export function DesignPanel({ details, reload, initial, onClose }: {
       AlertaToast(t("canvas.design.title"), t("canvas.design.built", { count: tasks.length }), "success", 4000);
     } catch (e) {
       fail(e);
+    } finally {
+      acting.current = false;
     }
   };
 
@@ -246,7 +254,13 @@ function EditPane({ board, versions, comments, onClose, onChanged, fail }: {
     return () => window.removeEventListener("message", onMsg);
   }, []);
 
-  const preview = useMemo(() => buildSrcdoc(draft, { picker: true }), [draft]);
+  const [previewHtml, setPreviewHtml] = useState(board.html);
+  const previewTimer = useRef<{ id?: ReturnType<typeof setTimeout> }>({});
+  useEffect(() => {
+    scheduleDebounced(previewTimer.current, PREVIEW_DEBOUNCE_MS, () => setPreviewHtml(draft));
+    return () => { if (previewTimer.current.id) clearTimeout(previewTimer.current.id); };
+  }, [draft]);
+  const preview = useMemo(() => buildSrcdoc(previewHtml, { picker: true }), [previewHtml]);
   const dirty = draft !== board.html;
   const act = (p: Promise<unknown>) => p.then(onChanged).catch(fail);
   const addComment = () => {

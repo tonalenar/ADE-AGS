@@ -3,12 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const harness = vi.hoisted(() => {
   const store = (state: Record<string, unknown>) => ({ getState: () => state, subscribe: vi.fn(() => () => undefined) });
   return {
-    tabs: store({ tabs: [{ id: "a", agentId: "codex" }] }),
+    tabList: [{ id: "a", agentId: "codex" }] as { id: string; agentId: string }[],
+    tabs: store({}),
     canvas: store({ boards: {} }),
     missions: store({ missions: [{ id: "m", status: "running", activeRunId: null }], details: {} }),
     runs: store({ tasks: [], approvals: [] }),
     alerts: store({ alerts: {} }),
     active: [] as string[], sustained: [] as string[], lines: [] as string[],
+    visible: new Set<string>(["a"]),
+    screenCalls: [] as string[],
     outputAt: 1_000_000,
     subscriptions: [] as (() => void)[],
     notifications: [] as ReturnType<typeof vi.fn>[],
@@ -23,18 +26,32 @@ vi.mock("react", () => ({
     return snapshot();
   },
 }));
-vi.mock("@/features/tabs/store", () => ({ useTabsStore: harness.tabs }));
+vi.mock("@/features/tabs/store", () => ({
+  useTabsStore: {
+    getState: () => ({ tabs: harness.tabList }),
+    subscribe: harness.tabs.subscribe,
+  },
+}));
 vi.mock("@/features/canvas/store", () => ({ useCanvasStore: harness.canvas }));
 vi.mock("@/features/missions/groups", () => ({ missionIndex: () => ({ a: "m" }) }));
 vi.mock("@/features/missions/store", () => ({ useMissionsStore: harness.missions }));
 vi.mock("@/features/missions/stallAlerts", () => ({ useStallAlerts: harness.alerts }));
 vi.mock("@/features/runs/store", () => ({ useRunsStore: harness.runs }));
-vi.mock("@/features/terminal/terminalRegistry", () => ({ screenOf: () => ({ lines: harness.lines }) }));
+vi.mock("@/features/tabs/layout/layoutStore", () => ({
+  currentVisibleAgentTabIds: () => harness.visible,
+}));
+vi.mock("@/features/terminal/terminalRegistry", () => ({
+  screenOf: (id: string) => {
+    harness.screenCalls.push(id);
+    return { lines: harness.lines };
+  },
+}));
 vi.mock("@/features/terminal/activity", () => ({
   activeTabIds: () => harness.active,
   sustainedTabIds: () => harness.sustained,
   lastOutputAt: () => harness.outputAt,
   lastInputAt: () => undefined,
+  useAgentActivity: { subscribe: vi.fn(() => () => undefined) },
 }));
 
 import { useMissionIndicatorSignals } from "../useMissionIndicatorSignals";
@@ -44,6 +61,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(1_000_000);
   harness.active = []; harness.sustained = []; harness.lines = []; harness.outputAt = 1_000_000;
+  harness.visible = new Set(["a"]); harness.screenCalls = [];
+  harness.tabList = [{ id: "a", agentId: "codex" }];
   harness.notifications = []; harness.subscriptions = [];
   documentStub = Object.assign(new EventTarget(), { visibilityState: "visible" });
   vi.stubGlobal("document", documentStub);
@@ -94,5 +113,14 @@ describe("shared mission signal subscription", () => {
     harness.active = ["a"];
     vi.advanceTimersByTime(1000);
     expect(useMissionIndicatorSignals("m").needsAttention).toBe(false);
+  });
+  it("não lê a tela das abas de missão que estão ocultas", () => {
+    harness.tabList = [{ id: "a", agentId: "codex" }, { id: "hidden", agentId: "codex" }];
+    harness.visible = new Set(["a"]);
+    useMissionIndicatorSignals("m");
+    harness.screenCalls = [];
+    vi.advanceTimersByTime(1000);
+    expect(harness.screenCalls).toEqual(["a"]);
+    expect(harness.screenCalls).not.toContain("hidden");
   });
 });

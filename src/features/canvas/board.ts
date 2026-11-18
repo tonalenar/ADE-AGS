@@ -742,6 +742,13 @@ export function undoStroke(board: Board): Board {
   return board.drawings.length === 0 ? board : { ...board, drawings: board.drawings.slice(0, -1) };
 }
 
+const STROKE_PATH_CACHE_MAX = 64;
+const strokePathCache = new Map<string, { points: number[]; d: string }>();
+
+export function strokePathCacheHas(id: string): boolean {
+  return strokePathCache.has(id);
+}
+
 /** El camino SVG de un trazo, suavizado con curvas entre los puntos medios. */
 export function strokePath(points: number[]): string {
   if (points.length < 4) return "";
@@ -753,6 +760,23 @@ export function strokePath(points: number[]): string {
     d += ` Q${points[i]} ${points[i + 1]} ${mx} ${my}`;
   }
   d += ` L${points[points.length - 2]} ${points[points.length - 1]}`;
+  return d;
+}
+
+/** Recalcula só quando o array de pontos (ou o id) muda. */
+export function cachedStrokePath(id: string, points: number[]): string {
+  const hit = strokePathCache.get(id);
+  if (hit && hit.points === points) {
+    strokePathCache.delete(id);
+    strokePathCache.set(id, hit);
+    return hit.d;
+  }
+  const d = strokePath(points);
+  strokePathCache.set(id, { points, d });
+  if (strokePathCache.size > STROKE_PATH_CACHE_MAX) {
+    const oldest = strokePathCache.keys().next().value;
+    if (oldest !== undefined) strokePathCache.delete(oldest);
+  }
   return d;
 }
 

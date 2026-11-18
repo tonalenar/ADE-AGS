@@ -3458,6 +3458,8 @@
   "canvas.design.newDesign": "Novo design: {{title}}",
   "canvas.design.open": "Abrir",
   "canvas.design.unseen": "Novo design ainda não aberto",
+  "canvas.design.reloadFailed": "Não deu para atualizar as pranchetas. As que já estavam na tela continuam.",
+  "canvas.design.retry": "Tentar de novo",
   "canvas.design.owner": "Dono: {{name}}",
   "canvas.design.ownerHint": "Quem recebe os comentários e as mensagens deste design",
   "canvas.design.noOwnerBadge": "Sem dono",

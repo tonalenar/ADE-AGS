@@ -42,8 +42,21 @@ export function useTerminalPrompts(tabs: { id: string; name: string }[], enabled
       });
     };
     scan();
-    const timer = window.setInterval(() => { if (alive) scan(); }, POLL_MS);
-    return () => { alive = false; window.clearInterval(timer); };
+    let timer: number | undefined;
+    const resume = () => {
+      if (timer !== undefined) window.clearInterval(timer);
+      timer = undefined;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      scan();
+      timer = window.setInterval(() => { if (alive) scan(); }, POLL_MS);
+    };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", resume);
+    resume();
+    return () => {
+      alive = false;
+      if (timer !== undefined) window.clearInterval(timer);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", resume);
+    };
     // `ids` resume a lista de terminais; `tabs` muda de identidade a cada render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, ids]);
