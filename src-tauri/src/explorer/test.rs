@@ -3,6 +3,78 @@ use std::collections::HashMap;
 use super::git::{mark_from_xy, parse_porcelain_v2, parse_status_z, repo_info_from_probes, FileMark};
 use super::tree::{is_noisy, sort_entries, DirEntry};
 
+#[test]
+fn renomear_so_caixa_em_volume_sensivel_nao_sobrescreve() {
+    let root = std::env::temp_dir().join(format!("ags-explorer-case-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let from = root.join("readme.md");
+    let to = root.join("README.md");
+    std::fs::write(&from, "origem").unwrap();
+    if std::fs::write(&to, "destino").is_err() {
+        // volume insensível: cenário não se aplica
+        let _ = std::fs::remove_dir_all(&root);
+        return;
+    }
+    if std::fs::canonicalize(&from).unwrap() == std::fs::canonicalize(&to).unwrap() {
+        // volume insensível: cenário não se aplica
+        let _ = std::fs::remove_dir_all(&root);
+        return;
+    }
+
+    let result = super::ops::explorer_rename(from.to_string_lossy().into_owned(), "README.md".into());
+    assert!(result.is_err(), "renomear não pode substituir o arquivo de destino");
+    assert_eq!(std::fs::read(&from).unwrap(), b"origem");
+    assert_eq!(std::fs::read(&to).unwrap(), b"destino");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn renomear_so_caixa_em_volume_insensivel_continua_funcionando() {
+    let root = std::env::temp_dir().join(format!("ags-explorer-case-only-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let from = root.join("a.md");
+    let to = root.join("A.md");
+    std::fs::write(&from, "conteúdo").unwrap();
+    let from_real = std::fs::canonicalize(&from).unwrap();
+    let case_insensitive = match std::fs::canonicalize(&to) {
+        Ok(to_real) => to_real == from_real,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
+        Err(err) => panic!("falha ao detectar sensibilidade a caixa do volume: {err}"),
+    };
+    if !case_insensitive {
+        // quarantine: volume sensível a caixa no CI Linux
+        let _ = std::fs::remove_dir_all(&root);
+        return;
+    }
+
+    let renamed = super::ops::explorer_rename(from.to_string_lossy().into_owned(), "A.md".into()).unwrap();
+
+    assert!(renamed.ends_with("A.md"));
+    assert_eq!(std::fs::read_to_string(&to).unwrap(), "conteúdo");
+    assert!(std::fs::canonicalize(&to).unwrap().ends_with("A.md"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn fallback_de_identidade_recusa_arquivos_distintos_e_links() {
+    let root = std::env::temp_dir().join(format!("ags-explorer-fallback-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    std::fs::write(&a, "um").unwrap();
+    std::fs::write(&b, "dois").unwrap();
+    assert!(!super::ops::same_file_fallback(&a, &b));
+
+    #[cfg(unix)]
+    {
+        let link = root.join("atalho.txt");
+        std::os::unix::fs::symlink(&a, &link).unwrap();
+        assert!(!super::ops::same_file_fallback(&link, &a));
+    }
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 fn entry(name: &str, is_dir: bool) -> DirEntry {
     DirEntry {
         name: name.to_string(),
@@ -449,6 +521,42 @@ mod ops {
         let copied = explorer_copy(s(&src), s(&dst)).unwrap();
         assert_eq!(fs::read_to_string(std::path::Path::new(&copied).join("deep/f.txt")).unwrap(), "hola");
         assert!(explorer_copy(s(&src), s(&src.join("deep"))).is_err());
+    }
+
+    #[test]
+    fn falha_de_copia_nao_apaga_destino_que_ja_existia() {
+        let d = tmp();
+        let src = d.path().join("origem");
+        let dst = d.path().join("destino");
+        fs::write(&src, "origem").unwrap();
+        let result = super::ops::copy_into_free_name(&src, "destino", d.path(), |_, to| {
+            fs::write(to, "arquivo preexistente")?;
+            Err(std::io::Error::other("falha simulada após concorrência"))
+        });
+
+        assert!(result.is_err());
+
+        assert_eq!(fs::read_to_string(dst).unwrap(), "arquivo preexistente");
+    }
+
+    #[test]
+    fn copia_parcial_falha_sem_deixar_destino() {
+        let d = tmp();
+        let src = d.path().join("origem");
+        fs::create_dir(&src).unwrap();
+        fs::write(src.join("a.txt"), "primeiro").unwrap();
+        fs::write(src.join("z.txt"), "segundo").unwrap();
+        let dst = d.path().join("destino");
+
+        let result = super::ops::copy_tree_with(&src, &dst, &mut |path| {
+            if path.file_name().is_some_and(|name| name == "z.txt") {
+                return Err(std::io::Error::other("falha simulada"));
+            }
+            Ok(())
+        });
+
+        assert!(result.is_err());
+        assert!(!dst.exists(), "a cópia parcial criada pela operação deve ser removida");
     }
 
     #[test]

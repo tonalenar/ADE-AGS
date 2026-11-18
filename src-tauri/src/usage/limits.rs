@@ -159,8 +159,9 @@ pub async fn plan_limits(
 ) -> Result<Vec<PlanLimits>, String> {
     let db = db.inner().clone();
     tauri::async_runtime::spawn_blocking(move|| {
+        let boards = crate::canvas::load_boards()?;
         let c=db.lock().map_err(|e|e.to_string())?;
-        super::capture_mission_tabs(&c,&crate::canvas::load_boards())?;
+        super::capture_mission_tabs(&c, &boards)?;
         let limits=for_conn(&c)?;
         for limit in &limits {
             let agent=if limit.provider=="codex" {"codex"} else {"claude-code"};

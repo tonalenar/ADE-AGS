@@ -627,7 +627,7 @@ impl Surface for IosSurface {
         }
         crate::terminal::authorize_actor(self.session.as_deref(), Some(&self.from), self.client_pid)
             .map_err(|_| Failure::OutsideScope)?;
-        let allowed = crate::surfaces::ios_allows(&self.from, &self.node, &self.udid, "act");
+        let allowed = crate::surfaces::ios_allows(&self.from, &self.node, &self.udid, "act").map_err(|_| Failure::Operation)?;
         if !allowed {
             return Err(Failure::OutsideScope);
         }

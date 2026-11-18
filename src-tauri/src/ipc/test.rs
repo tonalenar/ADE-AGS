@@ -2291,7 +2291,7 @@ mod autorizacao {
     /// Roda a autorização. `abriu` = pares `(recurso, quem abriu)`.
     fn decide(comando: &str, args: Value, quem: Result<Principal, String>, abriu: &[(&str, &str)]) -> Result<Value, String> {
         let boards = mundo();
-        authz::authorize(comando, &args, || quem, || boards, &|id| abriu.iter().find(|(r, _)| *r == id).map(|(_, o)| o.to_string()))
+        authz::authorize(comando, &args, || quem, || Ok(boards), &|id| abriu.iter().find(|(r, _)| *r == id).map(|(_, o)| o.to_string()))
     }
 
     fn passa(comando: &str, args: Value, quem: Result<Principal, String>) -> Value {
@@ -2391,7 +2391,7 @@ mod autorizacao {
             let chamadas = Cell::new(0);
             let boards = mundo();
             let args = json!({ "x": 1 });
-            let saida = authz::authorize(metodo, &args, || { chamadas.set(chamadas.get() + 1); Err("sem identidade".into()) }, || boards, &|_| None);
+            let saida = authz::authorize(metodo, &args, || { chamadas.set(chamadas.get() + 1); Err("sem identidade".into()) }, || Ok(boards), &|_| None);
             assert_eq!(saida.unwrap(), args, "{metodo}");
             assert_eq!(chamadas.get(), 0, "{metodo} resolveu a identidade sem precisar");
         }
