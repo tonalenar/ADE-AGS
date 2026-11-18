@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PanelBoundary } from "@/app/PanelBoundary";
+import { PANEL_AUTO_RETRY_LIMIT, PANEL_AUTO_RETRY_MS, PanelBoundary } from "@/app/PanelBoundary";
 import { lazyWithRetry } from "@/app/lazyWithRetry";
 import { routes } from "@/app/router";
 
@@ -112,6 +112,57 @@ describe("PanelBoundary", () => {
     // O irmão, fora do boundary, não pode ser desmontado nem remontado pelo erro.
     expect(irmao.montagens).toBe(1);
     expect(irmao.desmontagens).toBe(0);
+  });
+
+  it("painel_quebrado_se_recupera_sozinho_sem_clique", () => {
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        root.render(<PanelBoundary name="chat"><Explode /></PanelBoundary>);
+      });
+      expect(host.textContent).toContain("app.panelError.title");
+      // O laço era passageiro: na próxima montagem o painel já renderiza.
+      explodes = false;
+      act(() => {
+        vi.advanceTimersByTime(PANEL_AUTO_RETRY_MS);
+      });
+      expect(host.textContent).toContain("painel ok");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recuperacao_automatica_para_depois_do_limite", () => {
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        root.render(<PanelBoundary name="chat"><Explode /></PanelBoundary>);
+      });
+      for (let i = 0; i < PANEL_AUTO_RETRY_LIMIT; i++) {
+        act(() => {
+          vi.advanceTimersByTime(PANEL_AUTO_RETRY_MS);
+        });
+      }
+      // Erro permanente: o aviso fica, sem nova tentativa agendada (nada de laço de remontagens).
+      expect(host.textContent).toContain("app.panelError.title");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("copiar_detalhes_leva_painel_mensagem_e_pilha", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    act(() => {
+      root.render(<PanelBoundary name="chat"><Explode /></PanelBoundary>);
+    });
+    act(() => botao("app.panelError.copy").click());
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const texto = writeText.mock.calls[0][0] as string;
+    expect(texto).toContain("chat");
+    expect(texto).toContain("boom");
+    expect(texto).toContain("Explode");
   });
 
   it("chunk_lazy_que_falha_cai_no_boundary", async () => {

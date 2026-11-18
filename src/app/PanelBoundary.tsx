@@ -14,6 +14,8 @@ interface PanelBoundaryProps {
 interface PanelBoundaryState {
   failed: boolean;
   error: unknown;
+  /** A pilha de componentes do React no momento do erro: diz QUAL componente quebrou. */
+  stack: string;
   /** Quantas vezes o painel foi tentado de novo. Cada tentativa é um valor novo de `RetryAttemptContext`. */
   attempt: number;
 }
@@ -23,6 +25,14 @@ interface PanelBoundaryState {
  * cada "Tentar de novo": o `React.lazy` guarda a rejeição, então sem um lazy novo o chunk não é buscado de novo.
  */
 export const RetryAttemptContext = createContext(0);
+
+/** Quanto esperar antes de remontar sozinho um painel que quebrou. */
+export const PANEL_AUTO_RETRY_MS = 1500;
+/** Quantas remontagens automáticas cabem numa janela de `PANEL_AUTO_RETRY_WINDOW_MS`; depois, só o botão. */
+export const PANEL_AUTO_RETRY_LIMIT = 2;
+const PANEL_AUTO_RETRY_WINDOW_MS = 60_000;
+/** Onde fica o último erro de painel, para diagnóstico (a build não tem inspetor). */
+const LAST_ERROR_KEY = "ade:last-panel-error";
 
 /** Texto curto do erro, para o aviso não esconder o que aconteceu. */
 function errorDetail(error: unknown): string {
@@ -37,26 +47,66 @@ function errorDetail(error: unknown): string {
  * desmonta o que estiver dentro, e desmontar `<Terminal>` mata o PTY do agente.
  */
 export class PanelBoundary extends Component<PanelBoundaryProps, PanelBoundaryState> {
-  state: PanelBoundaryState = { failed: false, error: null, attempt: 0 };
+  state: PanelBoundaryState = { failed: false, error: null, stack: "", attempt: 0 };
+  /** Quando foram as remontagens automáticas recentes. */
+  private autoRetries: number[] = [];
+  private autoTimer: ReturnType<typeof setTimeout> | null = null;
 
   static getDerivedStateFromError(error: unknown): Partial<PanelBoundaryState> {
     return { failed: true, error };
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
+    const stack = info.componentStack ?? "";
     // O erro não é engolido: fica no console com o nome do painel, para depurar.
-    console.error(`[PanelBoundary:${this.props.name}]`, error, info.componentStack);
+    console.error(`[PanelBoundary:${this.props.name}]`, error, stack);
+    this.setState({ stack });
+    try {
+      localStorage.setItem(LAST_ERROR_KEY, JSON.stringify({ at: new Date().toISOString(), detail: this.details(error, stack) }));
+    } catch {
+      /* sem armazenamento: o botão "Copiar detalhes" ainda leva o erro */
+    }
+    this.scheduleAutoRetry();
+  }
+
+  componentWillUnmount() {
+    if (this.autoTimer) clearTimeout(this.autoTimer);
+  }
+
+  /**
+   * Um laço de atualização passageiro (o "Maximum update depth exceeded" que apareceu com um agente trabalhando)
+   * some na montagem seguinte: o painel tenta de novo sozinho, até `PANEL_AUTO_RETRY_LIMIT` vezes por minuto. Um erro
+   * permanente para no aviso, sem virar um laço de remontagens.
+   */
+  private scheduleAutoRetry() {
+    const now = Date.now();
+    this.autoRetries = this.autoRetries.filter((at) => now - at < PANEL_AUTO_RETRY_WINDOW_MS);
+    if (this.autoTimer || this.autoRetries.length >= PANEL_AUTO_RETRY_LIMIT) return;
+    this.autoTimer = setTimeout(() => {
+      this.autoTimer = null;
+      this.autoRetries.push(Date.now());
+      this.retry();
+    }, PANEL_AUTO_RETRY_MS);
+  }
+
+  private details(error: unknown, stack: string): string {
+    const message = error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error);
+    return `painel: ${this.props.name}\n${message}\ncomponentes:${stack}`;
   }
 
   // Tentar de novo: volta a renderizar os filhos com uma tentativa nova (ver `RetryAttemptContext`).
   private retry = () => {
-    this.setState((s) => ({ failed: false, error: null, attempt: s.attempt + 1 }));
+    this.setState((s) => ({ failed: false, error: null, stack: "", attempt: s.attempt + 1 }));
+  };
+
+  private copy = () => {
+    void navigator.clipboard?.writeText(this.details(this.state.error, this.state.stack)).catch(() => undefined);
   };
 
   render() {
     if (this.state.failed) {
       if (this.props.fallback !== undefined) return this.props.fallback;
-      return <PanelErrorView detail={errorDetail(this.state.error)} onRetry={this.retry} />;
+      return <PanelErrorView detail={errorDetail(this.state.error)} onRetry={this.retry} onCopy={this.copy} />;
     }
     return (
       <RetryAttemptContext value={this.state.attempt}>
@@ -86,7 +136,7 @@ export function ChildRouteError() {
 }
 
 /** Aviso mostrado no lugar de um painel ou de uma página que quebrou. */
-function PanelErrorView({ detail, onRetry, page = false }: { detail: string; onRetry: () => void; page?: boolean }) {
+function PanelErrorView({ detail, onRetry, onCopy, page = false }: { detail: string; onRetry: () => void; onCopy?: () => void; page?: boolean }) {
   const { t } = useTranslation();
   return (
     <div
@@ -98,7 +148,10 @@ function PanelErrorView({ detail, onRetry, page = false }: { detail: string; onR
     >
       <h2 className="text-[15px] font-semibold text-gray-900 dark:text-white">{t("app.panelError.title")}</h2>
       <code className="max-w-md truncate rounded-md bg-black/[0.05] px-2.5 py-1 font-mono text-[11px] text-gray-600 dark:bg-white/[0.07] dark:text-white/60" title={detail}>{detail}</code>
-      <Button variant="primary" onClick={onRetry}>{t("app.panelError.retry")}</Button>
+      <div className="flex items-center gap-2">
+        <Button variant="primary" onClick={onRetry}>{t("app.panelError.retry")}</Button>
+        {onCopy ? <Button variant="secondary" onClick={onCopy}>{t("app.panelError.copy")}</Button> : null}
+      </div>
     </div>
   );
 }

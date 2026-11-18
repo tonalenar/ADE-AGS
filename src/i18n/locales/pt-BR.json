@@ -1132,6 +1132,7 @@
   "app.routeError.reload": "Recarregar",
   "app.panelError.title": "Este painel encontrou um erro",
   "app.panelError.retry": "Tentar de novo",
+  "app.panelError.copy": "Copiar detalhes",
   "rail.workspaces": "Espaços de trabalho",
   "workspaces.changed": "{{n}} não confirmado",
   "workspaces.new": "Abra um novo agente",
