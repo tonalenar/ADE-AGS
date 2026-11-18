@@ -15,6 +15,11 @@ import { highlightAgent } from "./agentHighlight";
  * mismo que le prende la barra de arriba mientras está elegido o mientras se pasa el mouse
  * por su fila—, así que se elige mirando y no adivinando.
  */
+/** `true` se o retângulo já não cai dentro da janela (o botão rolou para fora): a lista não tem onde ficar. */
+function offscreen(r: DOMRect): boolean {
+  return r.bottom < 0 || r.right < 0 || r.top > window.innerHeight || r.left > window.innerWidth;
+}
+
 export function AgentPicker({ agents, value, onChange, compact }: {
   /** Los agentes de esta carpeta, en el orden de la barra de tabs. */
   agents: Tab[];
@@ -24,8 +29,41 @@ export function AgentPicker({ agents, value, onChange, compact }: {
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  // Onde está o botão, medido AO ABRIR (no clique), não no render: cada render forçava layout, mesmo fechado (A191).
+  const [rect, setRect] = useState<DOMRect | null>(null);
   const box = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const chosen = agents.find((a) => a.id === value) ?? null;
+
+  // Com a lista aberta, a posição acompanha o botão. A lista é `fixed`: se o botão se mexe e ela fica no lugar antigo, fica
+  // solta. Mexem o botão: a rolagem de um ancestral ou da página, redimensionar a janela, e um ancestral que muda de
+  // tamanho (o composer que cresce empurra o botão sem rolar a página). Se o botão sai da tela, a lista fecha.
+  useEffect(() => {
+    if (!open) return;
+    const follow = () => {
+      const current = box.current?.getBoundingClientRect();
+      if (!current || offscreen(current)) {
+        setOpen(false);
+        return;
+      }
+      setRect(current);
+    };
+    // Só a rolagem de um ancestral do botão, ou da página, o move. A rolagem da própria lista não conta, e a de uma
+    // parte que não contém o botão (o chat que escreve em streaming) tampouco.
+    const onScroll = (event: Event) => {
+      const from = event.target;
+      if (from === document || (from instanceof Node && box.current !== null && from.contains(box.current))) follow();
+    };
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", follow);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(follow);
+    for (let el: Element | null = box.current; el; el = el.parentElement) observer?.observe(el);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", follow);
+      observer?.disconnect();
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -49,13 +87,16 @@ export function AgentPicker({ agents, value, onChange, compact }: {
     if (!open && value) highlightAgent(value);
   }, [open, value]);
 
-  const rect = box.current?.getBoundingClientRect();
+  const toggle = () => {
+    if (!open) setRect(box.current?.getBoundingClientRect() ?? null);
+    setOpen(!open);
+  };
 
   return (
     <div ref={box} className="relative min-w-0">
       <Button
         variant="custom"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         aria-haspopup="listbox"
         aria-expanded={open}
         title={t("browser.sendTo")}
@@ -76,6 +117,7 @@ export function AgentPicker({ agents, value, onChange, compact }: {
         // `fixed`: el panel del mensaje scrollea y es bajito; una lista `absolute` quedaría
         // recortada adentro.
         <div
+          ref={list}
           role="listbox"
           className="fixed z-50 py-1 rounded-xl shadow-lg overflow-auto
             bg-white dark:bg-surface-overlay border border-gray-200 dark:border-white/10"

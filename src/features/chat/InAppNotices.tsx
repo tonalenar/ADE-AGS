@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useChatLive } from "@/features/chat/liveStore";
+import { useCanvasStore } from "@/features/canvas/store";
 import { noticesBetween, noticeStatesOf, type ConversationNotice, type NoticeKind, type NoticeState } from "@/features/chat/noticeRules";
 import { threadIdOf, threadStatusSignature } from "@/features/chat/structured/model";
 import { useStructured } from "@/features/chat/structured/store";
@@ -52,6 +53,8 @@ export function InAppNotices() {
   // Só a fase, os pedidos e a falha das conversas da central disparam o cálculo; o texto que chega numa delas não.
   const threadIds = useMemo(() => conversations.map((c) => threadIdOf(c.ref)).filter((id): id is string => id !== null), [conversations]);
   const liveSignature = useStructured((s) => threadStatusSignature(s.live, threadIds));
+  const canvasLoadError = useCanvasStore((s) => s.loadError);
+  const canvasSaveError = useCanvasStore((s) => s.saveError);
   const states = useMemo(
     () => noticeStatesOf(conversations.map((c) => c.ref), { phase, question, awaiting }, useStructured.getState().live),
     [conversations, phase, question, awaiting, liveSignature],
@@ -73,6 +76,18 @@ export function InAppNotices() {
       });
     }
   }, [states, selectedRef, enabled, conversations, t]);
+
+  useEffect(() => {
+    if (canvasLoadError) {
+      void AlertaToast(t("canvas.title"), t("canvas.loadError", { error: canvasLoadError }), "error", 15000);
+    }
+  }, [canvasLoadError, t]);
+
+  useEffect(() => {
+    if (canvasSaveError) {
+      void AlertaToast(t("canvas.title"), t("canvas.saveError", { error: canvasSaveError }), "error", 10000);
+    }
+  }, [canvasSaveError, t]);
 
   return null;
 }

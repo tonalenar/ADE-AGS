@@ -1269,10 +1269,10 @@ mod eventos {
     #[test]
     fn crear_y_editar_avisan_con_el_id() {
         let (app, vistos) = app_que_escucha(db());
-        let m = mission_create(app.handle().clone(), "w1".into(), pedido(), app.state()).unwrap();
+        let m = tauri::async_runtime::block_on(mission_create(app.handle().clone(), "w1".into(), pedido(), app.state())).unwrap();
         assert_eq!(*vistos.lock().unwrap(), vec![m.id.clone()]);
 
-        mission_update(
+        tauri::async_runtime::block_on(mission_update(
             app.handle().clone(),
             m.id.clone(),
             MissionInput {
@@ -1280,9 +1280,22 @@ mod eventos {
                 ..pedido()
             },
             app.state(),
-        )
+        ))
         .unwrap();
         assert_eq!(*vistos.lock().unwrap(), vec![m.id.clone(), m.id]);
+    }
+
+    #[test]
+    fn dica_de_entrega_nao_roda_git_com_o_banco_travado() {
+        let banco = db();
+        let travado_no_git = std::cell::Cell::new(false);
+        let probe = || {
+            if banco.try_lock().is_err() {
+                travado_no_git.set(true);
+            }
+        };
+        crate::missions::delivery::delivery_hint_with(&banco, "m1", std::path::Path::new("/nao/existe"), None, &probe);
+        assert!(!travado_no_git.get(), "git rev-parse rodou com o banco travado");
     }
 
     #[test]
@@ -1292,7 +1305,7 @@ mod eventos {
             objective: "  ".into(),
             ..pedido()
         };
-        assert!(mission_create(app.handle().clone(), "w1".into(), vacio, app.state()).is_err());
+        assert!(tauri::async_runtime::block_on(mission_create(app.handle().clone(), "w1".into(), vacio, app.state())).is_err());
         assert!(vistos.lock().unwrap().is_empty());
     }
 
@@ -1588,6 +1601,27 @@ fn no_se_acepta_una_entrega_con_cambios_sin_commitear() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// `git status` do worktree da tarefa roda sem o mutex do banco. A sonda confere o mutex na
+/// mesma thread, no instante da checagem: try_lock só passa se ele estiver solto.
+#[test]
+fn aceitar_nao_segura_o_banco_durante_o_git_status() {
+    let tmp = std::env::temp_dir().join(format!("cc-review-lock-{}", uuid::Uuid::new_v4()));
+    let base = tmp.join("worktrees");
+    let (db, project, run_id) = mision_en_repo(&tmp);
+    let task_id = tarea_aislada(&db, &run_id, &project, &base, "t", "c.txt", "c\n");
+    let probe = db.clone();
+    let mut verificado = false;
+    let err = super::review::accept_verificando(&db, &base, "m1", &task_id, |_, _| {
+        assert!(probe.try_lock().is_ok(), "git status rodou com o banco preso");
+        verificado = true;
+        Ok(vec!["olvidado.txt".into()])
+    })
+    .unwrap_err();
+    assert!(verificado, "a checagem de sujeira não rodou");
+    assert!(err.contains("olvidado.txt"), "{err}");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 // ── En terminales: sin run ──────────────────────────────────────
 
 #[test]
@@ -1764,6 +1798,48 @@ fn redeliver_promotes_done_without_delivery_when_merged_and_ci_green_and_test_pa
     assert_eq!(audit[1].action, "redeliver");
     assert!(audit[1].promoted);
     assert_eq!(audit[1].new_status, status::DONE);
+}
+
+#[test]
+fn redeliver_libera_o_banco_e_recusa_gravacao_com_estado_antigo() {
+    let db = db();
+    let id = borrador(&db);
+    {
+        let conn = db.lock().unwrap();
+        store::mark_started_terminals(&conn, &id).unwrap();
+        store::finish_terminals(
+            &conn,
+            &id,
+            &MissionDelivery {
+                test_result: TestResult::Passed,
+                pull_request: Some("68".into()),
+                ci_status: CiStatus::Pending,
+                checked_at: 100,
+            },
+        )
+        .unwrap();
+    }
+
+    let result = store::redeliver_db_with_checker(
+        &db,
+        &id,
+        Some("68"),
+        Some(TestResult::Passed),
+        |_, _| {
+            let conn = db.try_lock().expect("git/gh não deve reter o mutex do banco");
+            conn.execute(
+                "UPDATE missions SET status='cancelled', updated_at=updated_at+1 WHERE id=?1",
+                [&id],
+            )
+            .unwrap();
+            (super::delivery::PrState::Merged, CiStatus::Success)
+        },
+    );
+
+    assert!(result.unwrap_err().contains("mudou durante a reavaliação"));
+    let conn = db.lock().unwrap();
+    assert_eq!(store::get(&conn, &id).unwrap().unwrap().status, status::CANCELLED);
+    assert_eq!(store::delivery_for_mission(&conn, &id).unwrap().unwrap().ci_status, CiStatus::Pending);
 }
 
 #[test]
@@ -2018,4 +2094,34 @@ fn redeliver_reuses_existing_pr_and_test_result_when_overrides_are_none() {
     assert_eq!(outcome.pull_request.as_deref(), Some("99"));
     assert_eq!(outcome.test_result, TestResult::Passed);
     assert_eq!(outcome.new_status, status::DONE);
+}
+
+/// A eficiência é lida numa conexão lateral: a sonda confere, no instante em que a leitura
+/// vai começar, que o mutex do banco do app está solto. Base em arquivo, porque a conexão
+/// lateral precisa de um caminho.
+#[test]
+fn eficiencia_le_numa_conexao_lateral_sem_o_mutex_do_banco() {
+    let tmp = std::env::temp_dir().join(format!("cc-eficiencia-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let path = tmp.join("base.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        crate::database::migrate(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('w1', 'W', 0, 0);
+             INSERT INTO missions (id, workspace_id, title, objective, cwd, status, created_at, updated_at, started_at, ended_at)
+             VALUES ('m1', 'w1', 'M', 'O', '/repo', 'done', 0, 0, 1, 2000000000);",
+        )
+        .unwrap();
+    }
+    let db: DbConnection = Arc::new(Mutex::new(Connection::open(&path).unwrap()));
+    let probe = db.clone();
+    let mut leitura_iniciou = false;
+    let result = super::efficiency::get_db_with(&db, "m1", || {
+        assert!(probe.try_lock().is_ok(), "a leitura da eficiência rodou com o mutex do banco preso");
+        leitura_iniciou = true;
+    });
+    assert!(leitura_iniciou, "a sonda não foi alcançada");
+    assert!(result.is_ok(), "{result:?}");
+    let _ = std::fs::remove_dir_all(&tmp);
 }

@@ -4,7 +4,11 @@
  *
  * Função pura: não toca em DOM, PTY nem estado global.
  * Entrada típica: `screenOf(tabId, ...)?.lines` (terminalRegistry.ts).
+ *
+ * A forma do menu sozinha não basta: quem lê o texto é a saída do próprio agente (dado não confiável). Por isso o
+ * cartão só nasce com `promptDaTela`, que exige o modo de espera do detector das missões (`isWaitingForUser`).
  */
+import { isWaitingForUser } from "@/features/missions/stalled";
 
 export type PermissionChoiceId = "allow" | "allowSession" | "deny";
 
@@ -161,4 +165,23 @@ export function detectPermissionPrompt(lines: readonly string[] | null | undefin
     .toLowerCase();
 
   return { kind, title, detail, choices, signature };
+}
+
+/**
+ * O pedido de permissão da tela AGORA, só quando o detector de espera (`isWaitingForUser`, a mesma fonte do Vigia)
+ * reconhece um diálogo na tela. Sem isso, a forma de um menu impresso pelo agente bastaria para virar cartão de
+ * aprovação. Não há atalho fora do detector (rodada 1 do PR11). Pura.
+ */
+export function promptDaTela(lines: readonly string[] | null | undefined): PermissionPrompt | null {
+  if (!lines || lines.length === 0) return null;
+  if (!isWaitingForUser(lines)) return null;
+  return detectPermissionPrompt(lines);
+}
+
+/**
+ * Os pedidos das chaves (aba + assinatura) que já estavam na tela no tick anterior e continuam nela agora. Só eles
+ * viram cartão: um menu que aparece e some no mesmo tick não é pedido, e o cursor precisa ficar parado (rodada 1).
+ */
+export function pedidosEstaveis(previous: ReadonlySet<string>, current: readonly string[]): string[] {
+  return current.filter((key) => previous.has(key));
 }

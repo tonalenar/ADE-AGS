@@ -33,6 +33,13 @@ export interface PickedElement {
   component: PickedComponent | null;
 }
 
+/** Un diálogo de la página que un agente disparó: `key` es el que `dialogs allow` acepta. */
+export interface DialogAsk {
+  kind: "alert" | "confirm" | "prompt";
+  message: string;
+  key: string;
+}
+
 export type PageMessage =
   | { source: PageSource; type: "nav"; payload: { url: string; title: string } }
   /** Un enlace de la página lleva a otro sitio: la app lo abre con el proxy de ese sitio. */
@@ -44,6 +51,8 @@ export type PageMessage =
    *  página empieza a mandar lo que capturó. */
   | { source: PageSource; type: "page:ready"; payload: { doc: string; url: string } }
   | { source: PageSource; type: "page:reply"; payload: PageReply }
+  /** Un `alert`, `confirm` o `prompt` que disparó un agente. El runtime ya lo rechazó; la app pregunta a la persona. */
+  | { source: PageSource; type: "dialog:asked"; payload: DialogAsk }
   | { source: PageSource; type: "debug:batch"; payload: DebugBatch }
   /** Só no Chrome real: o runtime pede um toque ou uma tecla de verdade (o `Input` do CDP). Responde-se `input:done`. */
   | { source: PageSource; type: "input:request"; payload: NativeInput & { id: string } };
@@ -98,13 +107,15 @@ export type PageCommand =
   /** Pone un archivo en un `<input type=file>`. Los bytes van en base64: es lo único que
    *  cruza un `postMessage` sin depender de qué motor lo serialice. */
   | { op: "upload"; target: string; name: string; mime: string; data: string }
-  /** Qué contestar a los diálogos nativos de ahora en más, y qué apareció hasta ahora. */
-  | { op: "dialogs"; accept?: boolean; text?: string }
+  /** Lo que apareció hasta ahora en los diálogos. `allow` (`confirm:texto`) lo manda la app cuando la persona autoriza
+   *  ese diálogo: vale una vez. El agente no puede aceptar un diálogo por su cuenta. */
+  | { op: "dialogs"; allow?: string }
   | { op: "eval"; code: string }
   /** Emular (o dejar de emular) una pantalla táctil: `(hover)`, `(pointer)` y los eventos. */
   | { op: "touch"; on: boolean }
   | { op: "layout" }
-  | { op: "storage"; action: "list" }
+  /** Sin `values`, solo las claves y el tamaño: así se pide en un sitio real. */
+  | { op: "storage"; action: "list"; values?: boolean }
   | { op: "storage"; action: "set"; area: StorageArea; key: string; value: string }
   | { op: "storage"; action: "remove"; area: StorageArea; key: string }
   | { op: "storage"; action: "clear"; area: StorageArea }

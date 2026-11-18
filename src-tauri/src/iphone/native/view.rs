@@ -268,7 +268,10 @@ impl MirrorView {
             }
             model::Shortcut::Home => {
                 if let Some(g) = model::gesture("home") {
-                    crate::iphone::ops::drag(&input, g.from, g.to, g.ms, g.edge, g.hold_ms);
+                    // O gesto da própria pessoa não tem a quem responder aqui: a falha de entrega vai ao log.
+                    if let Err(error) = crate::iphone::ops::drag(&input, g.from, g.to, g.ms, g.edge, g.hold_ms) {
+                        eprintln!("[iphone] gesto da tela não entregue: {error}");
+                    }
                 }
             }
         });
@@ -374,6 +377,22 @@ pub struct Presenter {
     stats: Mutex<Stats>,
     /// Atraso da captura no aparelho até a chegada no Mac, por quadro (estimativa pelo RTCP), para o diagnóstico.
     capture: Mutex<HashMap<u64, f64>>,
+}
+
+fn latest<T: Clone>(held: &Mutex<VecDeque<(T, u64)>>) -> Option<(T, u64)> {
+    held.lock().ok()?.back().cloned()
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn copia_quadro_antes_de_liberar_mutex_held() {
+        let held = Mutex::new(VecDeque::from([(7usize, 9u64)]));
+        assert_eq!(latest(&held), Some((7, 9)));
+        assert!(held.try_lock().is_ok(), "a cópia não pode reter o mutex");
+    }
 }
 
 #[derive(Default)]
@@ -539,9 +558,8 @@ impl Presenter {
     /// a foto dos agentes. `None` = ainda não há quadro.
     pub fn snapshot(&self) -> Option<(Vec<u8>, usize, usize)> {
         const READ_ONLY: u32 = 1;
-        let held = self.held.lock().ok()?;
-        let (buffer, arrived_ns) = held.back()?;
-        if !self.capture_fence.trusts(*arrived_ns) {
+        let (buffer, arrived_ns) = latest(&self.held)?;
+        if !self.capture_fence.trusts(arrived_ns) {
             return None;
         }
         let surface = buffer.surface() as *const c_void;

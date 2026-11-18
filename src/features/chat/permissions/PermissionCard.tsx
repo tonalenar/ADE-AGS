@@ -106,6 +106,7 @@ export function PermissionCard({ ask, terminal }: { ask: PendingAsk; terminal: b
   const replyRef = useRef<HTMLTextAreaElement>(null);
   const replyButtonRef = useRef<HTMLButtonElement>(null);
   const allowRef = useRef<HTMLButtonElement>(null);
+  const cardRef = useRef<HTMLElement>(null);
   const pattern = ask.risk === "high" ? null : suggestPattern(ask);
   const detail = ask.detail || t("chat.permission.noDetail");
   const long = detail.length > LONG_CHARS || detail.split("\n").length > LONG_LINES;
@@ -126,17 +127,20 @@ export function PermissionCard({ ask, terminal }: { ask: PendingAsk; terminal: b
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || replying || typingIn(e.target)) return;
       // Na caixa de permissões as teclas são dela (o pedido em foco).
       if ((e.target as HTMLElement | null)?.closest?.("[data-permissions-inbox]")) return;
+      // Enter aprova só com o foco dentro deste cartão e com o comando inteiro à vista (A161): fora dele, quem aperta
+      // Enter pode nem estar vendo o que vai ser permitido.
+      const dentro = e.target instanceof Node && (cardRef.current?.contains(e.target) ?? false);
       if (e.key === "n" || e.key === "N") {
         e.preventDefault();
         answerAsk(ask, "deny");
-      } else if (e.key === "Enter" && !isInteractive(e.target) && !(e.target as HTMLElement | null)?.closest?.("[data-permission-command]")) {
+      } else if (e.key === "Enter" && dentro && (!long || expanded) && !isInteractive(e.target) && !(e.target as HTMLElement | null)?.closest?.("[data-permission-command]")) {
         e.preventDefault();
         answerAsk(ask, "allow");
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ask, replying]);
+  }, [ask, replying, long, expanded]);
 
   const closeReply = () => {
     setReplying(false);
@@ -151,7 +155,7 @@ export function PermissionCard({ ask, terminal }: { ask: PendingAsk; terminal: b
   };
 
   return (
-    <section role="group" aria-label={t("chat.permission.label")} data-permission-dock
+    <section role="group" aria-label={t("chat.permission.label")} data-permission-dock ref={cardRef}
       className="mb-2 rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-surface-raised shadow-sm overflow-hidden">
       <div className="flex items-center gap-2 px-3 pt-2.5 text-chat-note">
         <PadlockIcon className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -174,6 +178,9 @@ export function PermissionCard({ ask, terminal }: { ask: PendingAsk; terminal: b
           )}
         </div>
         <AskMeta ask={ask} />
+        {ask.errorKey && (
+          <p role="alert" className="m-0 text-chat-note text-red-700 dark:text-red-400">{t(ask.errorKey)}</p>
+        )}
         {replying && (
           <div className="flex flex-col gap-1.5">
             <label className="sr-only" htmlFor={`reply-${ask.id}`}>{t("chat.permission.replyLabel")}</label>
@@ -207,6 +214,8 @@ export function PermissionCard({ ask, terminal }: { ask: PendingAsk; terminal: b
             </button>
           )}
           <button ref={allowRef} type="button" onClick={() => answerAsk(ask, "allow")}
+            // O foco cai aqui ao chegar o pedido: um ⏎ com o comando colapsado não pode virar clique nativo em Permitir (C1).
+            onKeyDown={(e) => { if (e.key === "Enter" && long && !expanded) e.preventDefault(); }}
             className="h-7 px-3 inline-flex items-center rounded-lg bg-accent-600 text-white text-chat-note font-medium hover:bg-accent-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/70 focus-visible:ring-offset-1 dark:focus-visible:ring-offset-surface-raised">
             {t("chat.permission.allow")}<Kbd onPrimary>⏎</Kbd>
           </button>

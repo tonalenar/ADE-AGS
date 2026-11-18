@@ -6,6 +6,7 @@
  * Lógica pura, probada en `tests/networkDetail.test.ts`.
  */
 import { formatBytes, typeOf, type LoggedRequest, type RequestType } from "./debugLog";
+import { isSensitiveHeader, redactForAgent, redactUrlQuery } from "./egressPolicy";
 import type { ProxyRequestDetail } from "./ipc";
 import type { NetBody, NetErrorKind, NetHeader } from "./protocol";
 
@@ -208,8 +209,18 @@ export function curlCommand(detail: RequestDetail): string {
 
 const MAX_AGENT_BODY = 6000;
 
-function bodyForAgent(title: string, body: NetBody | null): string[] {
-  if (!body) return [];
+/** El cuerpo tal como puede salir hacia el agente: redigido si el origen es real (lo que decide `origin`). */
+function bodyFor(body: NetBody, origin: string | null | undefined, kind: "request-body" | "response-body"): NetBody {
+  return {
+    ...body,
+    text: typeof body.text === "string" ? redactForAgent(kind, origin, body.text) : body.text,
+    summary: body.summary ? redactForAgent(kind, origin, body.summary) : body.summary,
+  };
+}
+
+function bodyForAgent(title: string, rawBody: NetBody | null, origin: string | null | undefined, kind: "request-body" | "response-body"): string[] {
+  if (!rawBody) return [];
+  const body = bodyFor(rawBody, origin, kind);
   const view = bodyView(body);
   const meta = [body.contentType, body.size !== null ? formatBytes(body.size) : null].filter(Boolean).join(", ");
   const head = `${title}${meta ? ` (${meta})` : ""}:`;
@@ -236,40 +247,48 @@ function bodyForAgent(title: string, body: NetBody | null): string[] {
   }
 }
 
-function headersForAgent(title: string, headers: NetHeader[]): string[] {
+function headersForAgent(title: string, headers: NetHeader[], origin: string | null | undefined): string[] {
   if (headers.length === 0) return [];
   const note = (h: NetHeader) =>
     h.note === "rewritten" ? "   (la vista previa lo reescribe)"
       : h.note === "removed" ? "   (la vista previa lo quita)"
         : h.note === "kept" ? "   (stored in the preview's cookie jar; the page never receives this header)"
           : "";
-  return [`${title}:`, ...headers.map((h) => `  ${h.name}: ${h.value}${note(h)}`)];
+  // El valor de una cabecera sensible (por nombre o por valor, ver `isSensitiveHeader`) se redige; el nombre se deja para diagnosticar.
+  const value = (h: NetHeader) => (isSensitiveHeader(h.name, h.value) ? redactForAgent("header", origin, h.value) : h.value);
+  return [`${title}:`, ...headers.map((h) => `  ${h.name}: ${value(h)}${note(h)}`)];
 }
 
-export function detailForAgent(d: RequestDetail): string {
+/**
+ * El detalle de un pedido como lo lee un agente. `origin` decide la redacción: la origen real (ver
+ * `egressOriginFor`) redige cabeceras de sesión, la query y los corpos; una origen local sale entera.
+ */
+export function detailForAgent(d: RequestDetail, origin: string | null | undefined): string {
   const status = d.pending
     ? "pendiente"
     : d.error
       ? `sin respuesta${d.errorKind ? ` (${d.errorKind})` : ""}`
       : `${d.status ?? "—"}${d.statusText ? ` ${d.statusText}` : ""}`;
+  // La URL sale con los valores sensibles de la query redigidos (`?access_token=…`), y los parámetros salen de ella.
+  const url = redactUrlQuery(origin, d.url);
   const general = [
-    `[${d.key}] ${d.method} ${d.url}`,
+    `[${d.key}] ${d.method} ${url}`,
     `Estado: ${status}${d.httpVersion ? ` · ${d.httpVersion}` : ""}${d.remoteAddress ? ` · ${d.remoteAddress}` : ""} · ${d.via === "proxy" ? "visto por el proxy" : "visto desde la página (otro origen)"}`,
     `Tiempos: ${d.ttfbMs !== null ? `espera ${d.ttfbMs} ms · ` : ""}total ${d.durationMs ?? "—"} ms${d.size !== null ? ` · ${formatBytes(d.size)}` : ""}`,
   ];
   if (d.error) general.push(`Error: ${d.error}`);
-  if (d.redirected && d.finalUrl) general.push(`Redirigido a: ${d.finalUrl}`);
-  const params = queryParams(d.url);
+  if (d.redirected && d.finalUrl) general.push(`Redirigido a: ${redactUrlQuery(origin, d.finalUrl)}`);
+  const params = queryParams(url);
   const sections = [
     general,
     params.length ? ["Parámetros de la URL:", ...params.map(([k, v]) => `  ${k} = ${v}`)] : [],
-    headersForAgent("Encabezados de la solicitud", d.requestHeaders),
-    bodyForAgent("Cuerpo de la solicitud", d.requestBody),
-    headersForAgent("Encabezados de la respuesta", d.responseHeaders),
+    headersForAgent("Encabezados de la solicitud", d.requestHeaders, origin),
+    bodyForAgent("Cuerpo de la solicitud", d.requestBody, origin, "request-body"),
+    headersForAgent("Encabezados de la respuesta", d.responseHeaders, origin),
     d.headersLimited && d.responseHeaders.length > 0
       ? ["  (desde la página solo se ven las cabeceras que permite CORS)"]
       : [],
-    bodyForAgent("Cuerpo de la respuesta", d.responseBody),
+    bodyForAgent("Cuerpo de la respuesta", d.responseBody, origin, "response-body"),
   ];
   return sections.filter((s) => s.length).map((s) => s.join("\n")).join("\n\n");
 }

@@ -3,11 +3,13 @@ import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import { ArrowRightIcon, Badge, Button, ChevronDownIcon, DocumentIcon, StackIcon, Tooltip, TrashIcon } from "neogestify-ui-components";
 import { AlertaConfirmacion, AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 import { useSessionsStore } from "@/features/sessions/store";
 import type { SessionHistoryEntry } from "@/features/sessions/types";
 import { useAccountsStore } from "@/features/accounts/store";
 import { agentIcon } from "@/features/agents/agentIcons";
+import { pickAndExport } from "@/features/sessions/sessionExport";
 
 function formatDateTime(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleString(undefined, {
@@ -109,18 +111,19 @@ export function SessionRow({
   const hasDetail = entry.skills.length > 0 || entry.siblingTabs.length > 0;
 
   const handleExport = async () => {
-    const dest = await save({
-      title: t("sessions.export.title"),
-      defaultPath: suggestedFileName(entry),
-      filters: [{ name: "Markdown", extensions: ["md"] }],
-    });
-    if (!dest) return;
     setBusy(true);
     try {
-      await exportSession(entry.id, dest);
-      AlertaToast(t("sessions.export.title"), t("sessions.export.done"), "success", 4000);
+      const outcome = await pickAndExport(
+        () => save({
+          title: t("sessions.export.title"),
+          defaultPath: suggestedFileName(entry),
+          filters: [{ name: "Markdown", extensions: ["md"] }],
+        }),
+        (dest) => exportSession(entry.id, dest),
+      );
+      if (outcome === "ok") AlertaToast(t("sessions.export.title"), t("sessions.export.done"), "success", 4000);
     } catch (e) {
-      AlertaToast(t("sessions.export.title"), String(e), "error", 6000);
+      AlertaToast(t("sessions.export.title"), uiErrorText(e), "error", 6000);
     } finally {
       setBusy(false);
     }
@@ -136,7 +139,7 @@ export function SessionRow({
     try {
       await deleteSession(entry.id, workspaceId);
     } catch (e) {
-      AlertaToast(t("sessions.delete.action"), String(e), "error", 6000);
+      AlertaToast(t("sessions.delete.action"), uiErrorText(e), "error", 6000);
     } finally {
       setBusy(false);
     }

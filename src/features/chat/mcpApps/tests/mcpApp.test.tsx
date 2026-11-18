@@ -107,7 +107,8 @@ describe("contêiner isolado", () => {
     const doc = mcpAppSrcdoc(HTML, { dark: true, declarations: "--color-gray-50:#fff;--font-sans:sans-serif" });
     expect(doc).toContain("default-src 'none'");
     expect(doc).toContain("connect-src 'none'");
-    expect(doc).toContain("navigate-to 'none'");
+    // `navigate-to` nunca foi aplicada por navegador: a navegação para fora é o sandbox e o guarda, não a CSP.
+    expect(doc).not.toContain("navigate-to");
     expect(doc).toContain("frame-src 'none'");
     expect(doc).toContain("form-action 'none'");
     expect(doc).not.toMatch(/https:/);

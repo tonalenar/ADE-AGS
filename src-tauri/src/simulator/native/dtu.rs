@@ -12,7 +12,7 @@
 //! evento abre outra. Tudo roda na fila serial do HID, nunca na thread da interface.
 
 use std::ffi::{c_char, c_void, CString};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -131,6 +131,8 @@ pub struct Dtu {
     device: Shared,
     queue: DispatchRetained<DispatchQueue>,
     connection: Mutex<Option<Connection>>,
+    /// Quantas entregas não saíram (o `dtuhidd` não conectou). Quem age compara antes e depois.
+    failed: AtomicU64,
 }
 
 // SAFETY: a conexão XPC aceita mensagens de qualquer thread; o resto é retido e travado.
@@ -142,7 +144,7 @@ impl Dtu {
     pub fn open(device: &Shared) -> Result<Dtu, String> {
         // SAFETY: retém o SimDevice para reabrir a conexão depois.
         let device = Shared(unsafe { Retained::retain(device.ptr()) }.ok_or("aparelho nulo")?);
-        let dtu = Dtu { device, queue: DispatchQueue::new("ade.simulator.dtuhid", None), connection: Mutex::new(None) };
+        let dtu = Dtu { device, queue: DispatchQueue::new("ade.simulator.dtuhid", None), connection: Mutex::new(None), failed: AtomicU64::new(0) };
         let mut last = String::new();
         for _ in 0..LIVENESS_TRIES {
             match dtu.connect().and_then(|c| dtu.alive(&c).map(|()| c)) {
@@ -222,15 +224,32 @@ impl Dtu {
         let this = self.clone();
         self.queue.exec_async(move || {
             let event = event;
-            let Ok(mut current) = this.connection.lock() else { return };
+            let Ok(mut current) = this.connection.lock() else {
+                this.failed.fetch_add(1, Ordering::AcqRel);
+                return;
+            };
             if current.as_ref().is_none_or(|c| c.dead.load(Ordering::Acquire)) {
                 *current = this.connect().ok();
             }
-            if let Some(c) = current.as_ref() {
+            match current.as_ref() {
                 // SAFETY: conexão ativa; o XPC copia a mensagem.
-                unsafe { xpc_connection_send_message(c.xpc, event.0 .0) };
+                Some(c) => unsafe { xpc_connection_send_message(c.xpc, event.0 .0) },
+                // Sem conexão, o evento não sai: conta a falha para quem age ficar sabendo.
+                None => {
+                    this.failed.fetch_add(1, Ordering::AcqRel);
+                }
             }
         });
+    }
+
+    /// Quantas entregas falharam até agora.
+    pub fn failures(&self) -> u64 {
+        self.failed.load(Ordering::Acquire)
+    }
+
+    /// Espera a fila esvaziar: quando volta, o que foi mandado antes já foi entregue ou falhou.
+    pub fn drain(&self) {
+        self.queue.exec_sync(|| {});
     }
 
     /// Um dedo em `ratio` (0..1, origem no topo).

@@ -37,7 +37,13 @@ function startMini() {
 function click(label: string) {
   const button = host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
   if (!button) throw new Error(`Botão ausente: ${label}`);
-  act(() => button.click());
+  // Um clique real chega como ponteiro (pointerdown e pointerup) e depois como `click`: o botão tem que responder a isso.
+  act(() => {
+    button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1 }));
+    button.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, pointerId: 1 }));
+    // O happy-dom não gera o `click` depois do ponteiro; o navegador gera. Despacha-se o evento, não a ativação `.click()`.
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+  });
 }
 
 describe("controles da miniatura do navegador", () => {

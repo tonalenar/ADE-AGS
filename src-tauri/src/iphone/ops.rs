@@ -73,7 +73,15 @@ mod mac {
 
     fn pause(ms: u64) {
         // O ritmo do dedo: o HID não tem relógio próprio, e o iOS lê a velocidade do arrasto pelo intervalo.
-        std::thread::park_timeout(Duration::from_millis(ms));
+        // `park_timeout` pode acordar antes do prazo (sem motivo): volta a dormir só o que falta.
+        let deadline = std::time::Instant::now() + Duration::from_millis(ms);
+        loop {
+            let left = model::restante_ate(deadline, std::time::Instant::now());
+            if left.is_zero() {
+                return;
+            }
+            std::thread::park_timeout(left);
+        }
     }
 
     pub fn ready_now(app: &AppHandle, device: &str) -> Result<bool, String> {
@@ -88,14 +96,14 @@ mod mac {
     pub fn tap(app: &AppHandle, device: &str, x: f64, y: f64) -> Result<(), String> {
         let r = ready(app, device)?;
         let p = model::point_ratio(x, y, r.points()?)?;
-        r.input.send(vec![model::touch_line(TouchPhase::Start, p, None, Edge::None)]);
+        r.input.send_checked(vec![model::touch_line(TouchPhase::Start, p, None, Edge::None)])?;
         pause(60);
-        r.input.send(vec![model::touch_line(TouchPhase::End, p, None, Edge::None)]);
+        r.input.send_checked(vec![model::touch_line(TouchPhase::End, p, None, Edge::None)])?;
         Ok(())
     }
 
     /// Um arrasto de `from` a `to` em `ms`; `hold` = quanto o dedo fica parado no fim antes de soltar.
-    pub(crate) fn drag(input: &InputTx, from: (f64, f64), to: (f64, f64), ms: u64, edge: Edge, hold: u64) {
+    pub(crate) fn drag(input: &InputTx, from: (f64, f64), to: (f64, f64), ms: u64, edge: Edge, hold: u64) -> Result<(), String> {
         let steps = (ms / 16).clamp(4, 120) as u32;
         let lines = model::swipe_lines(from, to, steps, edge);
         let last = lines.len() - 1;
@@ -103,11 +111,12 @@ mod mac {
             if i == last && hold > 0 {
                 pause(hold);
             }
-            input.send(vec![line]);
+            input.send_checked(vec![line])?;
             if i < last {
                 pause(16);
             }
         }
+        Ok(())
     }
 
     /// Desliza de um ponto a outro em `ms` milissegundos (pontos do iOS).
@@ -115,19 +124,18 @@ mod mac {
         let r = ready(app, device)?;
         let size = r.points()?;
         let (a, b) = (model::point_ratio(from.0, from.1, size)?, model::point_ratio(to.0, to.1, size)?);
-        drag(&r.input, a, b, ms, Edge::None, 0);
-        Ok(())
+        drag(&r.input, a, b, ms, Edge::None, 0)
     }
 
     pub fn type_text(app: &AppHandle, device: &str, text: &str) -> Result<(), String> {
         let lines = model::text_lines(text)?;
-        ready(app, device)?.input.send(lines);
+        ready(app, device)?.input.send_checked(lines)?;
         Ok(())
     }
 
     pub fn key(app: &AppHandle, device: &str, name: &str) -> Result<(), String> {
         let lines = model::key_lines(name)?;
-        ready(app, device)?.input.send(lines.to_vec());
+        ready(app, device)?.input.send_checked(lines.to_vec())?;
         Ok(())
     }
 
@@ -135,9 +143,9 @@ mod mac {
     pub fn button(app: &AppHandle, device: &str, name: &str) -> Result<(), String> {
         let [down, up] = model::button_lines(name)?;
         let r = ready(app, device)?;
-        r.input.send(vec![down]);
+        r.input.send_checked(vec![down])?;
         pause(90);
-        r.input.send(vec![up]);
+        r.input.send_checked(vec![up])?;
         Ok(())
     }
 
@@ -145,14 +153,14 @@ mod mac {
     pub fn gesture(app: &AppHandle, device: &str, name: &str) -> Result<(), String> {
         let g = model::gesture(name).ok_or_else(|| format!("Gesto desconhecido: \"{name}\" (controlCenter, notificationCenter, spotlight, appSwitcher ou home)."))?;
         let r = ready(app, device)?;
-        drag(&r.input, g.from, g.to, g.ms, g.edge, g.hold_ms);
+        drag(&r.input, g.from, g.to, g.ms, g.edge, g.hold_ms)?;
         Ok(())
     }
 
     /// Aperta (`down`) ou solta um botão: para segurar (o lateral segurado chama a Siri).
     pub fn button_state(app: &AppHandle, device: &str, name: &str, down: bool) -> Result<(), String> {
         let line = model::button_state_line(name, down)?;
-        ready(app, device)?.input.send(vec![line]);
+        ready(app, device)?.input.send_checked(vec![line])?;
         Ok(())
     }
 
@@ -331,7 +339,7 @@ mod mac {
     }
 
     fn devicectl_json(args: &[&str]) -> Result<serde_json::Value, String> {
-        let path = std::env::temp_dir().join(format!("ade-devicectl-{}-{}.json", std::process::id(), crate::util::now_ts_ms()));
+        let path = model::temp_json_path(&std::env::temp_dir());
         let mut cmd = crate::util::spawn::hidden_command("xcrun");
         cmd.args(["devicectl"]).args(args).args(["--quiet", "--json-output"]).arg(&path);
         let out = crate::util::spawn::output(&mut cmd, Duration::from_secs(40))

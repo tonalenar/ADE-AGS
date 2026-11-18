@@ -10,6 +10,7 @@ import { versionSteps } from "@/features/scm/nextVersion";
 
 import { BranchPicker, compareRef, FieldAction, hostBranches, MarkdownField, type HostBranch } from "./composer";
 import { forgeCreateRelease, forgeDefaultBranch } from "./ipc";
+import { isSafeReleaseTag } from "./releaseTag";
 import { forgeErrorOf, type ForgeKind, type Release, type RepoTarget } from "./types";
 
 /**
@@ -61,7 +62,7 @@ export function CreateReleaseDialog({ cwd, target, kind, onClose, onCreated }: {
   // Notas ya escritas para este tag, si el repo las tiene.
   useEffect(() => {
     let alive = true;
-    if (!trimmed || trimmed.includes("..") || trimmed.includes("/")) { setNotesFile(null); return; }
+    if (!isSafeReleaseTag(trimmed)) { setNotesFile(null); return; }
     readFile(`${root}/.github/releases/${trimmed}.md`)
       .then((c) => { if (alive) setNotesFile(c.kind === "text" ? c.content : null); })
       .catch(() => { if (alive) setNotesFile(null); });
@@ -137,7 +138,7 @@ export function CreateReleaseDialog({ cwd, target, kind, onClose, onCreated }: {
           <Switch checked={prerelease} onChange={setPrerelease} label={t("forge.release.prerelease")} disabled={busy} />
           <div className="flex-1" />
           <Button variant="outline" disabled={busy} onClick={onClose}>{t("btn.cancel")}</Button>
-          <Button variant="primary" disabled={busy || !trimmed} onClick={create}>
+          <Button variant="primary" disabled={busy || !isSafeReleaseTag(trimmed)} onClick={create}>
             {busy ? t("forge.working") : draft ? t("forge.release.saveDraft") : t("forge.release.publish")}
           </Button>
         </div>

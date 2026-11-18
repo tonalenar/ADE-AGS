@@ -11,6 +11,7 @@ import type {
 interface SkillsState {
   skills: SkillSummary[];
   loading: boolean;
+  error: string | null;
   skillsDir: string;
   brokenSymlinks: SymlinkHealthEntry[];
 
@@ -34,14 +35,17 @@ interface SkillsState {
 export const useSkillsStore = create<SkillsState>((set, get) => ({
   skills: [],
   loading: false,
+  error: null,
   skillsDir: "",
   brokenSymlinks: [],
 
   loadSkills: async () => {
-    set({ loading: true });
+    set({ loading: true, error: null });
     try {
       const rows = await ipc.listSkills();
       set({ skills: rows });
+    } catch (e) {
+      set({ error: String(e) });
     } finally {
       set({ loading: false });
     }

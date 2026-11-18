@@ -316,7 +316,7 @@ pub(crate) fn merge_into(ground: &Path, branch: &str, target: &str) -> Result<()
 // ------------------------------------------------------------ commands
 
 fn find_floor(id: &str) -> Result<Floor, String> {
-    floors::all().into_iter().find(|f| f.id == id).ok_or_else(|| "Esse andar já não existe.".to_string())
+    floors::all()?.into_iter().find(|f| f.id == id).ok_or_else(|| "Esse andar já não existe.".to_string())
 }
 
 fn skills_dir(app: &AppHandle) -> Result<PathBuf, String> {

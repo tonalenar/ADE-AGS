@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { getSetting, setSetting } from "@/shared/ipc/settings";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 /** La clave que lee `runs/sandbox.rs`. Sin valor es "auto". */
 const SANDBOX_KEY = "runs.sandbox";
@@ -42,7 +43,7 @@ export function SandboxSetting() {
     // Se a gravação falha, o valor visível volta ao que está salvo e o erro aparece.
     setSetting(SANDBOX_KEY, value).then(refresh).catch((e) => {
       setMode(previous);
-      AlertaToast(t("settings.sandbox.label"), String(e), "error", 6000);
+      AlertaToast(t("settings.sandbox.label"), uiErrorText(e), "error", 6000);
     });
   };
 

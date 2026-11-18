@@ -20,7 +20,13 @@ export function formatBytes(bytes: number): string {
     unit += 1;
   }
   if (unit === 0) return `${Math.round(value)} B`;
-  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${UNITS[unit]}`;
+  let shown = value < 10 ? Number(value.toFixed(1)) : Math.round(value);
+  if (shown >= 1024 && unit < UNITS.length - 1) {
+    unit += 1;
+    shown = shown / 1024;
+    shown = shown < 10 ? Number(shown.toFixed(1)) : Math.round(shown);
+  }
+  return `${shown < 10 ? shown.toFixed(1) : shown} ${UNITS[unit]}`;
 }
 
 export interface StorageTotals {

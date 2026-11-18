@@ -1,11 +1,14 @@
 //! Dreaming v0 only proposes. The application owns all Markdown and Git writes.
 use crate::database::DbConnection;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tauri::Manager;
 
-#[expect(dead_code, reason = "reserved proposal budget; the current dreamer uses token and byte limits")]
+#[expect(
+    dead_code,
+    reason = "reserved proposal budget; the current dreamer uses token and byte limits"
+)]
 pub const PROPOSAL_MAX: i64 = 8;
 pub const HISTORY_MISSIONS: usize = 8;
 pub const HISTORY_BYTES: usize = 48 * 1024;
@@ -151,7 +154,11 @@ pub fn history(conn: &Connection, workspace: &str, n: usize) -> Result<Value, St
         let source = run
             .as_ref()
             .map(|run| format!("ags://run/{run}/task/{}", task.as_deref().unwrap_or("user")))
-            .or_else(|| source_mission.or(mission.clone()).map(|m| format!("ags://mission/{m}")));
+            .or_else(|| {
+                source_mission
+                    .or(mission.clone())
+                    .map(|m| format!("ags://mission/{m}"))
+            });
         if let Some(source) = &source {
             sources.push(source.clone());
         }
@@ -199,10 +206,24 @@ pub fn history(conn: &Connection, workspace: &str, n: usize) -> Result<Value, St
     }
     // As entregas estruturadas das missões em terminais (`ags peer deliver`): a evidência que o dream
     // não tinha (só via handoffs da Frota).
-    if conn.query_row("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mission_handoffs'", [], |_| Ok(())).is_ok() {
+    if conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='mission_handoffs'",
+            [],
+            |_| Ok(()),
+        )
+        .is_ok()
+    {
         let mut stmt=conn.prepare("SELECT h.id,h.mission_id,h.from_name,h.payload FROM mission_handoffs h WHERE h.mission_id IN (SELECT id FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT ?2) ORDER BY h.at_ms DESC,h.id LIMIT 32").map_err(|e|e.to_string())?;
         for row in stmt
-            .query_map(params![workspace, n], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))
+            .query_map(params![workspace, n], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            })
             .map_err(|e| e.to_string())?
         {
             let (id, mission, from, body) = row.map_err(|e| e.to_string())?;
@@ -260,6 +281,15 @@ pub fn validate_start(conn: &Connection, workspace: &str) -> Result<Value, Strin
         return Err("Este workspace ainda não tem histórico com fontes para sonhar.".into());
     }
     Ok(input)
+}
+
+/// O prompt do sonho: a instrução e o histórico (JSON com o texto das memórias) como DADO não confiável, no
+/// envelope único de `util::untrusted`. Um corpo com a tag de fechamento não fecha o bloco. Pura.
+pub fn prompt_for(input: &Value) -> String {
+    format!(
+        "Leia os dados e proponha somente melhorias justificadas.\n{}",
+        crate::util::untrusted::untrusted_block("historico-da-memoria", &input.to_string())
+    )
 }
 
 /// Called inside the proposal transaction, including direct core calls.
@@ -408,16 +438,21 @@ pub fn dreams_workspace(conn: &Connection, workspace: &str) -> Result<Vec<DreamR
 }
 
 #[tauri::command]
-pub fn memory_dreams_workspace(
+pub async fn memory_dreams_workspace(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<DreamReview>, String> {
-    let dreams = {
-        let conn = db.lock().map_err(|_| "database unavailable")?;
-        dreams_workspace(&conn, &workspace_id)?
-    };
-    crate::decisions::observe_dreams(db.inner().clone(), &dreams);
-    Ok(dreams)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let dreams = {
+            let conn = db.lock().map_err(|_| "database unavailable")?;
+            dreams_workspace(&conn, &workspace_id)?
+        };
+        crate::decisions::observe_dreams(db.clone(), &dreams);
+        Ok(dreams)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -430,10 +465,8 @@ pub async fn memory_dream_start(
         .ok_or("database unavailable")?
         .inner()
         .clone();
-    {
-        let conn = db.lock().map_err(|_| "database unavailable")?;
-        validate_start(&conn, &workspace_id)?;
-    }
+    let check_id = workspace_id.clone();
+    crate::database::blocking_db(&db, move |conn| validate_start(conn, &check_id)).await?;
     crate::runs::start_memory_dream(&app, &db, &workspace_id).await
 }
 

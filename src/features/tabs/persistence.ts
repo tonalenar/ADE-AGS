@@ -100,8 +100,14 @@ function enqueueSave(opts?: SaveOpts) {
 
 /** Escribe el scrollback de pestañas que están por desaparecer del store, antes de que
  *  el guardado siguiente las archive leyendo la fila vieja. */
+/** Leituras de scrollback pedidas ao sair uma aba (ver `enqueueSnapshot`), ainda não usadas pelo guardado. */
+const prefetchedScrollback = new Map<number, Promise<string | null>>();
+
 function enqueueSnapshot(tabs: Tab[], workspaceId: string, ptyIds: ReadonlySet<number>) {
   if (frozen) return;
+  // O pedido sai JÁ: o desmonte da aba manda `pty_kill`, e uma leitura que chega depois dele não acha o processo
+  // e grava a aba sem histórico (A086).
+  for (const ptyId of ptyIds) prefetchedScrollback.set(ptyId, fetchScrollback(ptyId));
   const run = () => saveNow({ tabs, workspaceId, onlyPtyIds: ptyIds, authoritative: false });
   saveChain = saveChain.then(run, run);
 }
@@ -146,6 +152,12 @@ async function scrollbackFor(
   // mandar `null` apagaria o histórico que a base já tem. Foi assim que o histórico de uma missão sumiu
   // depois de reiniciar o PC: o primeiro guardado, com as terminais do canvas ainda sem PTY, gravou vazio.
   if (ptyId == null) return { text: null, keep: true };
+  const pedido = prefetchedScrollback.get(ptyId);
+  if (pedido) {
+    prefetchedScrollback.delete(ptyId);
+    const text = await pedido;
+    return { text, keep: text === null };
+  }
   if (opts.refreshScrollback || extra.has(ptyId) || opts.onlyPtyIds?.has(ptyId)) {
     const text = await fetchScrollback(ptyId);
     return { text, keep: text === null };

@@ -687,10 +687,10 @@ pub async fn agent_skills_scan(
     agent_id: String,
     thread_id: Option<String>,
 ) -> Result<Vec<AgentSkill>, String> {
-    let account = match thread_id.as_deref() {
+    let account = match thread_id {
         Some(id) => {
-            let conn = db.lock().map_err(|_| "Não foi possível acessar o banco local.".to_string())?;
-            account_env_for_thread(&conn, id, &agent_id)
+            let agent = agent_id.clone();
+            crate::database::blocking_db(db.inner(), move |conn| Ok(account_env_for_thread(conn, &id, &agent))).await?
         }
         None => None,
     };

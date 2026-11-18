@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
@@ -52,9 +52,11 @@ export function announceResult(t: TFunction, label: string, result: AgentUpdateR
       sticky: true,
     });
   } else {
+    // A causa (o que o processo imprimiu, ou a exceção) vai junto: o motivo genérico sozinho não diz o que aconteceu (I2).
+    const cause = result.output?.trim().slice(0, 200);
     showBotToast({
       title: label,
-      text: t("agents.update.failed", { label, error: reasonText(t, result.error) }),
+      text: t("agents.update.failed", { label, error: cause ? `${reasonText(t, result.error)} (${cause})` : reasonText(t, result.error) }),
       tone: "warning",
       sticky: true,
     });
@@ -119,6 +121,15 @@ export async function runAgentUpdate(t: TFunction, info: AgentUpdateInfo): Promi
       appRestarting: false,
     }))
     .finally(stopCreeping);
+  // O reinício que falhou não some: a atualização ficou feita, mas a app não reiniciou (I1).
+  if (outcome.restartError) {
+    showBotToast({
+      title: info.label,
+      text: t("agents.update.restartFailed", { label: info.label, cause: outcome.restartError }),
+      tone: "warning",
+      sticky: true,
+    });
+  }
   // Con reinicio de la app el globo queda en 100% hasta que la app se cierra; si no, se retira.
   if (!outcome.appRestarting) useBotToastStore.getState().dismiss(progressId);
   if (!outcome.appRestarting) announceResult(t, info.label, outcome.result);
@@ -137,6 +148,9 @@ export async function runAgentUpdate(t: TFunction, info: AgentUpdateInfo): Promi
 export function AgentUpdateWatcher() {
   const { t } = useTranslation();
   const setDetectedAgents = useTabsStore((s) => s.setDetectedAgents);
+  // O idioma muda `t` sem mudar a checagem: o efeito lê o `t` atual por esta ref e não roda de novo (A174).
+  const tRef = useRef<TFunction>(t);
+  useEffect(() => { tRef.current = t; }, [t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,9 +159,12 @@ export function AgentUpdateWatcher() {
     const notified = new Set([...dismissed].map(([agentId, version]) => `${agentId}@${version}`));
 
     const runUpdate = async (info: AgentUpdateInfo) => {
-      const result = await agentUpdate(info.agentId);
+      // Falha de IPC aparece para a pessoa, não só no console (A173).
+      const result = await agentUpdate(info.agentId).catch((error: unknown): AgentUpdateResult => ({
+        agentId: info.agentId, ok: false, output: String(error), newVersion: null, error: "failed",
+      }));
       if (cancelled) return;
-      announceResult(t, info.label, result);
+      announceResult(tRef.current, info.label, result);
       if (result.ok) detectAgents(true).then(setDetectedAgents).catch(() => {});
     };
 
@@ -175,7 +192,7 @@ export function AgentUpdateWatcher() {
           let updateRun: Promise<unknown> | null = null;
           showBotToast({
             title: info.label,
-            text: t("agents.update.available", { label: info.label, version: versionLine(info.currentVersion, info.latestVersion) }),
+            text: tRef.current("agents.update.available", { label: info.label, version: versionLine(info.currentVersion, info.latestVersion) }),
             // O aviso persiste mesmo se houver mais de três notificações ou clicarem em Atualizar.
             sticky: true,
             keepOpenOnAction: true,
@@ -187,10 +204,10 @@ export function AgentUpdateWatcher() {
                 // O aviso continua dispensado nesta sessão mesmo se o armazenamento local falhar.
               }
             },
-            actionLabel: t("agents.update.action"),
+            actionLabel: tRef.current("agents.update.action"),
             onAction: () => {
               if (updateRun) return;
-              updateRun = runAgentUpdate(t, info).catch(console.error).finally(() => { updateRun = null; });
+              updateRun = runAgentUpdate(tRef.current, info).catch(console.error).finally(() => { updateRun = null; });
             },
           });
         }
@@ -208,7 +225,7 @@ export function AgentUpdateWatcher() {
       clearTimeout(first);
       clearInterval(timer);
     };
-  }, [t, setDetectedAgents]);
+  }, [setDetectedAgents]);
 
   return null;
 }

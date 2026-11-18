@@ -181,3 +181,12 @@ describe("a página está à vista, e não por baixo de outra coisa", () => {
     expect(Math.max(...points.map((p) => p.y))).toBe(page.top + page.height - 12);
   });
 });
+
+describe("recortar: página fora da própria coluna", () => {
+  it("cropFor_sem_interseccao_com_a_coluna_devolve_null", () => {
+    // A página está na janela, mas fora da coluna que a contém: não se recorta a janela inteira no lugar dela.
+    const page = { left: 100, top: 100, width: 200, height: 200 };
+    const column = { left: 500, top: 0, width: 300, height: 300 };
+    expect(cropFor(page, column, { width: 1280, height: 800 }, { width: 1280, height: 800 })).toBeNull();
+  });
+});

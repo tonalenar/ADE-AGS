@@ -149,6 +149,14 @@ impl Drop for PixelBuffer {
     }
 }
 
+impl Clone for PixelBuffer {
+    fn clone(&self) -> Self {
+        // SAFETY: `self` mantém o CVPixelBuffer vivo durante a retenção.
+        unsafe { CFRetain(self.0) };
+        Self(self.0)
+    }
+}
+
 /// Quem recebe os quadros decodificados (na thread do VideoToolbox).
 pub trait FrameSink: Send + Sync {
     fn frame(&self, buffer: PixelBuffer, arrived_ns: u64);

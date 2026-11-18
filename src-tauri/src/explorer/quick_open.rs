@@ -175,7 +175,8 @@ fn search(query: &QuickOpenQuery, is_stale: impl Fn() -> bool) -> Result<QuickOp
     let mut best = BinaryHeap::with_capacity(MAX_RESULTS);
 
     for entry in walker {
-        if is_stale() {
+        // A geração é conferida a cada 64 entradas: o mutex global não entra a cada arquivo.
+        if visited % 64 == 0 && is_stale() {
             return Ok(QuickOpenResult {
                 files: Vec::new(),
                 truncated: false,

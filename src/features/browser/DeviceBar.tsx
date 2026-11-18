@@ -17,7 +17,8 @@ function SideInput({ value, label, onCommit }: { value: number; label: string; o
   const commit = () => {
     const n = Number.parseInt(text, 10);
     if (Number.isFinite(n)) onCommit(n);
-    else setText(String(value));
+    // Repõe sempre o texto com o valor atual: se o clamp devolver o mesmo número, a prop não muda e o effect não rodaria.
+    setText(String(value));
   };
   return (
     <input

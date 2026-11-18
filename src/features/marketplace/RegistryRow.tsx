@@ -38,7 +38,7 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
 
   const commitRename = () => {
     const trimmed = nameDraft.trim();
-    if (trimmed && trimmed !== r.name) renameRegistry(r.id, trimmed);
+    if (trimmed && trimmed !== r.name) void renameRegistry(r.id, trimmed).catch(() => {});
     else setNameDraft(r.name);
     setEditing(false);
   };
@@ -127,13 +127,13 @@ export function RegistryRow({ registry: r }: RegistryRowProps) {
         <div className="flex items-center gap-1.5 shrink-0">
           <Switch
             checked={r.enabled}
-            onChange={(enabled) => setRegistryEnabled(r.id, enabled)}
+            onChange={(enabled) => { void setRegistryEnabled(r.id, enabled).catch(() => {}); }}
             size="sm"
             aria-label={r.enabled ? t("marketplace.registries.enabled") : t("marketplace.registries.disabled")}
           />
           <Tooltip content={t("marketplace.registries.refresh")} placement="bottom">
             <Button variant="icon"
-              onClick={() => refreshRegistry(r.id)}
+              onClick={() => { void refreshRegistry(r.id).catch(() => {}); }}
               disabled={refreshing}
               aria-label={t("marketplace.registries.refresh")}
               className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0

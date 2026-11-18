@@ -23,7 +23,8 @@ export const DIALOG_BODY_CLASS = "px-5 py-5 cc-scroll";
  * librería por su cuenta para poder portalearlo dentro de la vista.
  */
 export function DialogHeader({ title, icon, onClose }: {
-  title: string;
+  /** Texto, ou um nó (por exemplo, um título dentro de uma fronteira de erro). */
+  title: React.ReactNode;
   icon?: React.ReactNode;
   onClose: () => void;
 }) {
@@ -33,7 +34,7 @@ export function DialogHeader({ title, icon, onClose }: {
       border-b border-gray-200 dark:border-[rgba(84,84,88,0.55)]">
       {icon}
       <h2 className="flex-1 min-w-0 truncate text-center text-[15px] leading-5 font-semibold tracking-[-0.2px]
-        text-gray-900 dark:text-[#f5f5f7]" title={title}>
+        text-gray-900 dark:text-[#f5f5f7]" title={typeof title === "string" ? title : undefined}>
         {title}
       </h2>
       {/* Cerrar está siempre, incluso cuando el diálogo no se cierra con Escape ni
@@ -70,6 +71,7 @@ export function DialogHeader({ title, icon, onClose }: {
  */
 export function AppDialog({
   title,
+  ariaLabel,
   icon,
   size = "md",
   footer,
@@ -79,7 +81,10 @@ export function AppDialog({
   variant,
   children,
 }: {
-  title: string;
+  /** Texto, ou um nó (um título dentro de fronteira de erro). Com um nó, passe `ariaLabel`. */
+  title: React.ReactNode;
+  /** Nome acessível do diálogo. Se omitido e `title` for texto, usa o próprio texto. */
+  ariaLabel?: string;
   icon?: React.ReactNode;
   size?: DialogSize;
   footer?: React.ReactNode;
@@ -98,7 +103,7 @@ export function AppDialog({
       closeOnEsc={closeOnEsc}
       // La cabecera se sustituye entera, así que hace falta `aria-label`: ya no hay un
       // título de la librería al que apuntar.
-      aria-label={title}
+      aria-label={ariaLabel ?? (typeof title === "string" ? title : undefined)}
       className={DIALOG_PANEL_CLASS}
       bodyClassName={DIALOG_BODY_CLASS}
       header={<DialogHeader title={title} icon={icon} onClose={onClose} />}

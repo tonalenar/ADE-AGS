@@ -72,7 +72,8 @@ describe("espera por estado no runtime (E1)", () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(380);
     expect(result.settled).toBe("limit");
     expect(result.pendingRequests).toBe(1);
-    expect(result.waited).toMatch(/parou no teto de 0 s com a página ainda carregando|parou no teto de \d+ s com a página ainda carregando/);
+    // O teto pedido é de 400 ms: o texto tem de dizer exatamente isso, não qualquer duração (A202).
+    expect(result.waited).toContain("parou no teto de 0 s com a página ainda carregando");
   });
 
   it("navegação pendente (beforeunload) segura a espera até o teto", async () => {

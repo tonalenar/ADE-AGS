@@ -5,6 +5,7 @@ import { Button, FolderIcon } from "neogestify-ui-components";
 
 import i18n, { setLanguage } from "@/i18n/index";
 import { LANGUAGE_OPTIONS, persistLocale } from "@/i18n/locale";
+import { AlertaToast } from "@/shared/ui/alerts";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useTabsStore } from "@/features/tabs/store";
 import { useSkillsStore } from "@/features/skills/store";
@@ -373,9 +374,13 @@ function SkillsPage() {
   const skillsDir = useSkillsStore((s) => s.skillsDir);
   const setSkillsDir = useSkillsStore((s) => s.setSkillsDir);
   const handleChangeSkillsDir = async () => {
-    const selected = await open({ directory: true, multiple: false, title: t("settings.skillsDir") });
-    if (typeof selected === "string" && selected) {
-      await setSkillsDir(selected);
+    try {
+      const selected = await open({ directory: true, multiple: false, title: t("settings.skillsDir") });
+      if (typeof selected === "string" && selected) {
+        await setSkillsDir(selected);
+      }
+    } catch {
+      AlertaToast(t("settings.skillsDir"), t("settings.skillsDir.changeError"), "error", 6000);
     }
   };
   return (

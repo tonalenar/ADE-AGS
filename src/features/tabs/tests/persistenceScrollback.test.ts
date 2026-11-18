@@ -26,6 +26,7 @@ vi.mock("../layout/layoutStore", () => ({
 import { useTabsStore } from "@/features/tabs/store";
 import type { Tab } from "@/features/tabs/types";
 import {
+  initTabsPersistence,
   periodicScrollbackTargets,
   resetScrollbackScheduleForTests,
   flushPendingSave,
@@ -118,5 +119,17 @@ describe("histórico que a base já tem", () => {
     await flushPendingSave();
     const payload = save.mock.calls[save.mock.calls.length - 1][0] as { tabs: { scrollbackUnchanged: boolean }[] };
     expect(payload.tabs[0].scrollbackUnchanged).toBe(true);
+  });
+});
+
+describe("aba que sai do store", () => {
+  it("o scrollback é pedido na hora da saída, antes do desmonte mandar pty_kill", async () => {
+    initTabsPersistence();
+    useTabsStore.setState({ hydrated: true, tabs: [tab("gone", 7)] });
+    attach.mockClear();
+    useTabsStore.setState({ tabs: [] });
+    // Sem esperar nada: o `Terminal` desmonta logo depois e manda `pty_kill`.
+    expect(attach).toHaveBeenCalledWith(7);
+    await waitForSaves();
   });
 });

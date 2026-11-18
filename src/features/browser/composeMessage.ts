@@ -62,7 +62,8 @@ export function composePickMessage(
   if (captures.length > 0) {
     lines.push("Screenshots of the page annotated by the user (how they see it on screen; open each image to view it):", "");
     captures.forEach((capture, i) => {
-      lines.push(`${i + 1}. [${capture.id}] ${toDisplayUrl(capture.url)}`);
+      // A URL vem da página: uma linha só, como as demais (ver a regra do topo do arquivo).
+      lines.push(`${i + 1}. [${capture.id}] ${oneLine(toDisplayUrl(capture.url))}`);
       lines.push(capture.path);
       lines.push("");
     });
