@@ -268,7 +268,10 @@ impl MirrorView {
             }
             model::Shortcut::Home => {
                 if let Some(g) = model::gesture("home") {
-                    crate::iphone::ops::drag(&input, g.from, g.to, g.ms, g.edge, g.hold_ms);
+                    // O gesto da própria pessoa não tem a quem responder aqui: a falha de entrega vai ao log.
+                    if let Err(error) = crate::iphone::ops::drag(&input, g.from, g.to, g.ms, g.edge, g.hold_ms) {
+                        eprintln!("[iphone] gesto da tela não entregue: {error}");
+                    }
                 }
             }
         });

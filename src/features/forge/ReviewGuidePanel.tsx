@@ -59,6 +59,7 @@ export function ReviewGuidePanel({ cwd, item, workspaces }: { cwd: string; item:
   const [runError, setRunError] = useState("");
   const [choosing, setChoosing] = useState(false);
   const [roster, setRoster] = useState<Roster | null>(null);
+  const [rosterFailed, setRosterFailed] = useState(false);
   const [choice, setChoice] = useState<AgentChoice>(loadChoice);
 
   useEffect(() => {
@@ -84,9 +85,9 @@ export function ReviewGuidePanel({ cwd, item, workspaces }: { cwd: string; item:
   const entry = lookup?.entry ?? null;
   const showOptions = choosing || !entry;
   useEffect(() => {
-    if (!showOptions || roster) return;
-    getRoster(false).then(setRoster).catch(() => setRoster({ agents: [] }));
-  }, [showOptions, roster]);
+    if (!showOptions || roster || rosterFailed) return;
+    getRoster(false).then(setRoster).catch(() => setRosterFailed(true));
+  }, [showOptions, roster, rosterFailed]);
 
   const agents = useMemo(
     () => (roster?.agents ?? []).filter((a) => (GUIDE_AGENTS as readonly string[]).includes(a.agentId) && a.installed && a.launchable),
@@ -189,6 +190,7 @@ export function ReviewGuidePanel({ cwd, item, workspaces }: { cwd: string; item:
               )}
               <Button size="sm" variant="primary" onClick={generate}>{t("forge.guide.generate")}</Button>
             </div>
+            {rosterFailed && <p className="text-[12px] text-amber-700 dark:text-amber-300">{t("forge.guide.rosterError")}</p>}
             {roster && agents.length === 0 && <p className="text-[12px] text-amber-700 dark:text-amber-300">{t("forge.guide.noAgents")}</p>}
           </div>
         )}

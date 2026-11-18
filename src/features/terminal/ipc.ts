@@ -41,6 +41,13 @@ export const ptyForTab = (tabId: string) => invoke<number | null>("pty_for_tab",
 
 export const ptyWrite = (id: number, data: string) => invoke<void>("pty_write", { id, data });
 
+/** Um passo de um envio composto: texto para o PTY, ou uma pausa (ms). Espelha `PassoDeEscrita` em pty_manager.rs. */
+export type PassoDeEscrita = { tipo: "texto"; dados: string } | { tipo: "pausa"; ms: number };
+
+/** Manda os passos como um pedido só pela fila do PTY: entram todos, ou nenhum (A074). Rejeita se a fila recusar. */
+export const ptyWriteComposto = (id: number, passos: PassoDeEscrita[]) =>
+  invoke<void>("pty_write_composto", { id, passos });
+
 export const ptyResize = (id: number, cols: number, rows: number) =>
   invoke<void>("pty_resize", { id, cols, rows });
 

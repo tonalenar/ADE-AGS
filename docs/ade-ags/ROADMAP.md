@@ -1,5 +1,9 @@
 # Roadmap ADE AGS
 
+## Auditoria completa de 2026-11-16
+
+Leitura dos 2.217 arquivos de código, com os bugs confirmados (3 P0: erro de render que mata todos os terminais, a paleta que lança no render, o canvas apagado quando `canvas.json` não lê) e as causas dos sintomas de chat, PiP, navegador e travamento. Os próximos passos estão em fases: dados e agentes, travamento, sintomas visuais, segurança e aparelhos. Ver [AUDITORIA_2026-11-16.md](./AUDITORIA_2026-11-16.md) e o [status das correções](./AUDITORIA_2026-11-16.md#status-das-corre%C3%A7%C3%B5es).
+
 ## Controle de versão local
 
 O painel SCM pode sugerir uma mensagem de commit a partir apenas do diff staged. A chamada usa o agente já disponível no roteador local da ADE e a execução one-shot somente leitura; a sugestão volta ao campo editável e nunca confirma o commit. Estilo (Conventional Commits, convenção do repositório ou texto livre), idioma e instruções adicionais ficam em Configurações → Controle de versão, também encontrável pela busca. Preferências e montagem do prompt são locais; a validação da resposta com um modelo real depende do agente configurado pelo usuário. Paridade e limites em [CONTROLE_DE_VERSAO_PARIDADE.md](./CONTROLE_DE_VERSAO_PARIDADE.md).

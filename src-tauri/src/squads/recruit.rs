@@ -168,27 +168,31 @@ pub fn record(book: &mut RecruitBook, tab: &str, by: &str, depth: u32, at: i64) 
 
 static BOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static TEST_BOOK_PATH: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 fn book_path() -> Option<std::path::PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = TEST_BOOK_PATH.with(|path| path.borrow().clone()) {
+        return Some(path);
+    }
     crate::util::datadir::ags_home().map(|home| home.join("recruits.json"))
 }
 
-pub fn load_book() -> RecruitBook {
-    book_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+pub fn load_book() -> Result<RecruitBook, String> {
+    let path = book_path().ok_or("Pasta de dados indisponível.")?;
+    crate::util::user_json::read_user_json(&path)
+        .map(|book| book.unwrap_or_default())
+        .map_err(|e| e.to_string())
 }
 
 /// Lê, aplica `change` e grava com rename atômico, sob um mutex do processo.
 pub fn update_book(change: impl FnOnce(&mut RecruitBook)) -> Result<(), String> {
     let _guard = BOOK_LOCK.lock().map_err(|e| e.to_string())?;
     let path = book_path().ok_or("Home indisponível.")?;
-    let mut book = load_book();
+    let mut book = load_book()?;
     change(&mut book);
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(&book).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    crate::util::user_json::write_user_json(&path, &book)
 }

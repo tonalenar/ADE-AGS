@@ -22,9 +22,10 @@ export interface ProjectDefaultsState {
   readonly byKey: Readonly<Record<string, ProjectChatDefaultsDto>>;
   readonly versions: Readonly<Record<string, number>>;
   readonly hydrated: boolean;
+  readonly loadStatus: "unknown" | "loaded";
 }
 
-export const useProjectDefaultsStore = create<ProjectDefaultsState>(() => ({ byKey: {}, versions: {}, hydrated: false }));
+export const useProjectDefaultsStore = create<ProjectDefaultsState>(() => ({ byKey: {}, versions: {}, hydrated: false, loadStatus: "unknown" }));
 
 const sameDto = (a: ProjectChatDefaultsDto | undefined, b: ProjectChatDefaultsDto | undefined) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
@@ -85,9 +86,11 @@ export function hydrateProjectDefaults(force = false): Promise<void> {
         if (next) byKey[key] = next;
         if (!sameDto(state.byKey[key], next)) versions[key] = (versions[key] ?? 0) + 1;
       }
-      useProjectDefaultsStore.setState({ byKey, versions, hydrated: true });
+      useProjectDefaultsStore.setState({ byKey, versions, hydrated: true, loadStatus: "loaded" });
     })
-    .catch(() => undefined)
+    .catch(() => {
+      useProjectDefaultsStore.setState({ hydrated: false, loadStatus: "unknown" });
+    })
     .finally(() => {
       inflight = null;
     });

@@ -945,3 +945,830 @@ fn la_tab_encuentra_su_terminal_vivo_y_el_mas_nuevo_gana() {
     assert_eq!(newest_for_tab(sessions.iter().copied(), "tab-z"), None);
     assert_eq!(newest_for_tab(sessions.iter().copied(), ""), None);
 }
+
+// ── PTY robusto: escrita em fila, guarda de pânico e saída em lote ──
+
+/// Escritor falso: cada `write` espera um sinal do teste, como um TTY cuja TUI parou de ler.
+struct EscritorTravado {
+    portao: std::sync::mpsc::Receiver<()>,
+    escrito: std::sync::mpsc::Sender<()>,
+    saida: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+}
+
+impl std::io::Write for EscritorTravado {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.portao.recv().is_err() {
+            return Err(std::io::Error::other("portão fechado"));
+        }
+        self.saida.lock().unwrap().extend_from_slice(buf);
+        let _ = self.escrito.send(());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn fila_preserva_ordem_e_recusa_quando_cheia() {
+    use super::write_queue::{PtyWriteError, WriteQueue};
+    use std::sync::{mpsc, Arc, Mutex};
+
+    let (portao_tx, portao_rx) = mpsc::channel();
+    let (escrito_tx, escrito_rx) = mpsc::channel();
+    let saida = Arc::new(Mutex::new(Vec::new()));
+    let escritor = EscritorTravado { portao: portao_rx, escrito: escrito_tx, saida: saida.clone() };
+    let fila = WriteQueue::new(Box::new(escritor), Box::new(|| {}), Box::new(|_| {})).unwrap();
+
+    // 256 pedaços entram. O primeiro pode já estar sendo escrito, e conta na capacidade.
+    let mut esperado = String::new();
+    for i in 0..256 {
+        let pedaco = format!("{i:03},");
+        esperado.push_str(&pedaco);
+        assert_eq!(fila.enqueue(pedaco.as_bytes()), Ok(()), "item {i}");
+    }
+    assert_eq!(fila.enqueue(b"257"), Err(PtyWriteError::Full));
+
+    // Libera uma escrita por pedaço e espera as 256 terminarem.
+    for _ in 0..256 {
+        portao_tx.send(()).unwrap();
+    }
+    for _ in 0..256 {
+        escrito_rx.recv().unwrap();
+    }
+    let escrito = String::from_utf8(saida.lock().unwrap().clone()).unwrap();
+    assert_eq!(escrito, esperado);
+}
+
+#[test]
+fn fila_recusa_com_encerrado_depois_que_a_escrita_falha() {
+    use super::write_queue::{PtyWriteError, WriteQueue};
+    use std::sync::mpsc;
+
+    /// Escritor que falha no primeiro `write` (o processo fechou o TTY) e avisa ao ser solto.
+    struct EscritaQuebrada {
+        solta: mpsc::Sender<()>,
+    }
+    impl std::io::Write for EscritaQuebrada {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("tty fechado"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    impl Drop for EscritaQuebrada {
+        fn drop(&mut self) {
+            let _ = self.solta.send(());
+        }
+    }
+
+    let (solta_tx, solta_rx) = mpsc::channel();
+    let fila = WriteQueue::new(Box::new(EscritaQuebrada { solta: solta_tx }), Box::new(|| {}), Box::new(|_| {})).unwrap();
+    assert_eq!(fila.enqueue(b"x"), Ok(()));
+    // A thread solta o receptor antes da escrita: quando o aviso chega, a fila já está fechada.
+    solta_rx.recv().unwrap();
+    assert_eq!(fila.enqueue(b"y"), Err(PtyWriteError::Closed));
+}
+
+/// Escritor que cai no primeiro `write` depois de liberado: é o TTY que o processo fechou.
+struct EscritorQueQuebra {
+    portao: std::sync::mpsc::Receiver<()>,
+    solta: std::sync::mpsc::Sender<()>,
+}
+
+impl std::io::Write for EscritorQueQuebra {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        let _ = self.portao.recv();
+        Err(std::io::Error::other("tty fechado"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for EscritorQueQuebra {
+    fn drop(&mut self) {
+        let _ = self.solta.send(());
+    }
+}
+
+#[test]
+fn queda_da_escrita_conta_as_entradas_perdidas_e_avisa() {
+    use super::write_queue::{FalhaEscrita, PtyWriteError, WriteQueue};
+    use std::sync::mpsc;
+
+    let (portao_tx, portao_rx) = mpsc::channel();
+    let (solta_tx, solta_rx) = mpsc::channel();
+    let (aviso_tx, aviso_rx) = mpsc::channel::<FalhaEscrita>();
+    let escritor = EscritorQueQuebra { portao: portao_rx, solta: solta_tx };
+    let fila = WriteQueue::new(
+        Box::new(escritor),
+        Box::new(|| {}),
+        Box::new(move |falha| {
+            let _ = aviso_tx.send(falha);
+        }),
+    )
+    .unwrap();
+
+    // Três entradas aceitas antes de a escrita cair: nenhuma chegou ao processo.
+    let pedacos: [&[u8]; 3] = [b"a", b"b", b"c"];
+    for pedaco in pedacos {
+        assert_eq!(fila.enqueue(pedaco), Ok(()));
+    }
+    portao_tx.send(()).unwrap();
+    solta_rx.recv().unwrap();
+
+    let falha = aviso_rx.try_recv().expect("a queda avisa quem é dono da fila");
+    assert_eq!(falha.perdidas, 3, "a que falhou e as duas que estavam na fila");
+    assert_eq!(fila.enqueue(b"d"), Err(PtyWriteError::Closed));
+}
+
+/// Escritor que fica preso até o lado mestre fechar, como um TTY cuja TUI parou de ler.
+struct EscritorPreso {
+    liberacao: std::sync::mpsc::Receiver<()>,
+    entrou: std::sync::mpsc::Sender<()>,
+    solta: std::sync::mpsc::Sender<()>,
+}
+
+impl std::io::Write for EscritorPreso {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        let _ = self.entrou.send(());
+        let _ = self.liberacao.recv();
+        Err(std::io::Error::other("lado mestre fechado"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for EscritorPreso {
+    fn drop(&mut self) {
+        let _ = self.solta.send(());
+    }
+}
+
+#[test]
+fn remover_a_fila_fecha_o_lado_mestre_e_libera_a_escrita_presa() {
+    use super::write_queue::WriteQueue;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Arc};
+
+    let (liberacao_tx, liberacao_rx) = mpsc::channel::<()>();
+    let (entrou_tx, entrou_rx) = mpsc::channel();
+    let (solta_tx, solta_rx) = mpsc::channel();
+    let fechou = Arc::new(AtomicBool::new(false));
+    let fechou_no_fechar = fechou.clone();
+    let fila = WriteQueue::new(
+        Box::new(EscritorPreso { liberacao: liberacao_rx, entrou: entrou_tx, solta: solta_tx }),
+        Box::new(move || {
+            fechou_no_fechar.store(true, Ordering::SeqCst);
+            // Fechar o lado mestre: a escrita presa vê o fechamento e volta com erro.
+            drop(liberacao_tx);
+        }),
+        Box::new(|_| {}),
+    )
+    .unwrap();
+    fila.enqueue(b"x").unwrap();
+    // A escrita já está presa quando a sessão sai do registro.
+    entrou_rx.recv().unwrap();
+
+    drop(fila);
+    assert!(fechou.load(Ordering::SeqCst), "remover a fila fecha o lado mestre");
+    // Sem o fechamento a escrita ficaria presa para sempre; com ele, a thread termina.
+    solta_rx.recv().unwrap();
+}
+
+#[test]
+fn linha_entra_inteira_ou_nao_entra() {
+    use super::write_queue::WriteQueue;
+    use std::sync::{mpsc, Arc, Mutex};
+
+    let (portao_tx, portao_rx) = mpsc::channel();
+    let (escrito_tx, escrito_rx) = mpsc::channel();
+    let saida = Arc::new(Mutex::new(Vec::new()));
+    let escritor = EscritorTravado { portao: portao_rx, escrito: escrito_tx, saida: saida.clone() };
+    let fila = WriteQueue::new(Box::new(escritor), Box::new(|| {}), Box::new(|_| {})).unwrap();
+
+    // 255 entradas deixam uma vaga. A linha (texto + Enter) cabe inteira nela, como um pedido só.
+    for i in 0..255 {
+        fila.enqueue(format!("{i:03}").as_bytes()).unwrap();
+    }
+    assert_eq!(fila.enqueue_linha(b"ls"), Ok(()), "a linha cabe inteira na única vaga");
+
+    for _ in 0..256 {
+        portao_tx.send(()).unwrap();
+    }
+    for _ in 0..256 {
+        escrito_rx.recv().unwrap();
+    }
+    let escrito = String::from_utf8(saida.lock().unwrap().clone()).unwrap();
+    let mut esperado: String = (0..255).map(|i| format!("{i:03}")).collect();
+    esperado.push_str("ls\r");
+    assert_eq!(escrito, esperado);
+}
+
+/// `aguarda_saida_com` com relógio e pausa de teste: a espera é medida, nunca dormida.
+#[test]
+fn aguarda_saida_respeita_o_prazo_sem_relogio_real() {
+    use super::pty_manager::aguarda_saida_com;
+    use portable_pty::ExitStatus;
+    use std::cell::Cell;
+    use std::time::{Duration, Instant};
+
+    let relogio = Cell::new(Instant::now());
+    let agora = || {
+        let t = relogio.get();
+        relogio.set(t + Duration::from_millis(10));
+        t
+    };
+    let pausas = Cell::new(0u32);
+    let pausa = |_: Duration| pausas.set(pausas.get() + 1);
+
+    // Prazo zero: quem ainda está vivo volta na hora, sem pausa.
+    assert!(aguarda_saida_com(|| Ok(None), Duration::ZERO, &agora, &pausa).is_none());
+    assert_eq!(pausas.get(), 0);
+
+    // Sai na terceira consulta: duas pausas entre as consultas, e o status certo.
+    let mut consultas = 0;
+    let saida = aguarda_saida_com(
+        || {
+            consultas += 1;
+            Ok(if consultas < 3 { None } else { Some(ExitStatus::with_exit_code(3)) })
+        },
+        Duration::from_secs(30),
+        &agora,
+        &pausa,
+    );
+    assert_eq!(saida.map(|s| s.exit_code()), Some(3));
+    assert_eq!(pausas.get(), 2);
+}
+
+/// A080: uma aba com terminal vivo reaproveita o terminal, e nunca ganha um segundo com a mesma aba.
+#[test]
+fn aba_com_terminal_vivo_reaproveita_o_terminal_e_nao_cria_outro() {
+    use super::pty_manager::{entrada_da_aba, EntradaDaAba};
+    let vivos = vec![(3u32, Some("tab-a")), (9, Some("tab-a")), (7, Some("tab-b")), (11, None)];
+    assert_eq!(entrada_da_aba(vivos.iter().copied(), Some("tab-a")), EntradaDaAba::Reaproveitar(9));
+    assert_eq!(entrada_da_aba(vivos.iter().copied(), Some("tab-z")), EntradaDaAba::Criar);
+    assert_eq!(entrada_da_aba(vivos.iter().copied(), None), EntradaDaAba::Criar);
+}
+
+/// A092: os `.cmd` de lançamento velhos saem; os recentes e os de outra extensão ficam.
+#[test]
+fn lancamentos_antigos_saem_e_os_recentes_ficam() {
+    use super::pty_manager::limpa_lancamentos_antigos;
+    use std::time::{Duration, SystemTime};
+    let dir = std::env::temp_dir().join(format!("ade-launch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let agora = SystemTime::now();
+    let velho = dir.join("velho.cmd");
+    let recente = dir.join("recente.cmd");
+    let outro = dir.join("velho.txt");
+    for arquivo in [&velho, &recente, &outro] {
+        std::fs::write(arquivo, "x").unwrap();
+    }
+    let dois_dias = agora - Duration::from_secs(2 * 86_400);
+    std::fs::File::options().write(true).open(&velho).unwrap().set_modified(dois_dias).unwrap();
+    std::fs::File::options().write(true).open(&outro).unwrap().set_modified(dois_dias).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&recente)
+        .unwrap()
+        .set_modified(agora - Duration::from_secs(3600))
+        .unwrap();
+
+    let removidos = limpa_lancamentos_antigos(&dir, agora, Duration::from_secs(86_400));
+    assert_eq!(removidos, 1);
+    assert!(!velho.exists() && recente.exists() && outro.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── Rodada 2: composto, vaga reservada do Enter, remoção com descendente, aba viva e runtime ──
+
+#[test]
+fn composto_entra_inteiro_ou_e_recusado_inteiro() {
+    use super::write_queue::{Passo, PtyWriteError, WriteQueue};
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
+
+    let (portao_tx, portao_rx) = mpsc::channel();
+    let (escrito_tx, escrito_rx) = mpsc::channel();
+    let saida = Arc::new(Mutex::new(Vec::new()));
+    let escritor = EscritorTravado { portao: portao_rx, escrito: escrito_tx, saida: saida.clone() };
+    let fila = WriteQueue::new(Box::new(escritor), Box::new(|| {}), Box::new(|_| {})).unwrap();
+
+    // 255 pedidos ocupam quase tudo. O composto (texto, pausa, Enter) cabe inteiro na última vaga.
+    let mut esperado = String::new();
+    for i in 0..255 {
+        let pedaco = format!("{i:03}");
+        esperado.push_str(&pedaco);
+        fila.enqueue(pedaco.as_bytes()).unwrap();
+    }
+    let composto = vec![Passo::Escreve(b"ls".to_vec()), Passo::Pausa(Duration::ZERO), Passo::Escreve(b"\r".to_vec())];
+    assert_eq!(fila.enqueue_composto(composto), Ok(()), "o composto inteiro cabe na última vaga");
+    esperado.push_str("ls\r");
+
+    // Agora a fila está cheia: o próximo composto é recusado por inteiro, sem nenhum pedaço dele.
+    let outro = vec![Passo::Escreve(b"x".to_vec()), Passo::Escreve(b"\r".to_vec())];
+    assert_eq!(fila.enqueue_composto(outro), Err(PtyWriteError::Full));
+
+    // 255 pedidos de um passo, mais os 2 passos do composto: 257 escritas.
+    for _ in 0..257 {
+        portao_tx.send(()).unwrap();
+    }
+    for _ in 0..257 {
+        escrito_rx.recv().unwrap();
+    }
+    let escrito = String::from_utf8(saida.lock().unwrap().clone()).unwrap();
+    assert_eq!(escrito, esperado, "texto e Enter saem juntos, em ordem, e o composto recusado não saiu");
+}
+
+#[test]
+fn texto_aceito_leva_a_vaga_do_enter_reservada() {
+    use super::write_queue::{PtyWriteError, WriteQueue};
+    use std::sync::{mpsc, Arc, Mutex};
+
+    let (portao_tx, portao_rx) = mpsc::channel();
+    let (escrito_tx, escrito_rx) = mpsc::channel();
+    let saida = Arc::new(Mutex::new(Vec::new()));
+    let escritor = EscritorTravado { portao: portao_rx, escrito: escrito_tx, saida: saida.clone() };
+    let fila = WriteQueue::new(Box::new(escritor), Box::new(|| {}), Box::new(|_| {})).unwrap();
+
+    // 254 pedidos. O texto e a vaga do Enter cabem nas duas últimas.
+    let mut esperado = String::new();
+    for i in 0..254 {
+        let pedaco = format!("{i:03}");
+        esperado.push_str(&pedaco);
+        fila.enqueue(pedaco.as_bytes()).unwrap();
+    }
+    let envio = fila.reservar_envio(b"ls").expect("o texto e a vaga do Enter cabem juntos");
+    esperado.push_str("ls");
+
+    // Com a vaga do Enter reservada, nem outro envio nem outro pedido cabe: a fila está cheia.
+    assert_eq!(fila.reservar_envio(b"x").err(), Some(PtyWriteError::Full));
+    assert_eq!(fila.enqueue(b"y"), Err(PtyWriteError::Full));
+    // O Enter da vaga reservada nunca é recusado por falta de espaço.
+    assert_eq!(envio.enter(), Ok(()));
+    esperado.push_str("\r");
+
+    // 254 pedidos, o texto e o Enter: 256 escritas.
+    for _ in 0..256 {
+        portao_tx.send(()).unwrap();
+    }
+    for _ in 0..256 {
+        escrito_rx.recv().unwrap();
+    }
+    let escrito = String::from_utf8(saida.lock().unwrap().clone()).unwrap();
+    assert_eq!(escrito, esperado);
+}
+
+/// O envio composto que o front manda chega como passos na ordem certa, com a pausa em milissegundos.
+#[test]
+fn passos_do_front_viram_passos_da_fila_na_mesma_ordem() {
+    use super::pty_manager::{passos_do_front, PassoDeEscrita};
+    use super::write_queue::Passo;
+    use std::time::Duration;
+
+    let json = r#"[{"tipo":"texto","dados":"oi"},{"tipo":"pausa","ms":80},{"tipo":"texto","dados":"\r"}]"#;
+    let passos: Vec<PassoDeEscrita> = serde_json::from_str(json).expect("o formato do front é aceito");
+    let convertidos = passos_do_front(passos);
+    assert_eq!(
+        convertidos,
+        vec![Passo::Escreve(b"oi".to_vec()), Passo::Pausa(Duration::from_millis(80)), Passo::Escreve(b"\r".to_vec())]
+    );
+}
+
+/// Uma fila ociosa (a thread parada em `recv`) sai ao ser encerrada, sem esperar o limite inteiro.
+#[test]
+fn fila_ociosa_termina_ao_encerrar_sem_esperar_o_limite() {
+    use super::write_queue::WriteQueue;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    let (_portao_tx, portao_rx) = mpsc::channel();
+    let (escrito_tx, _escrito_rx) = mpsc::channel();
+    let saida = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let escritor = EscritorTravado { portao: portao_rx, escrito: escrito_tx, saida };
+    let mut fila = WriteQueue::new(Box::new(escritor), Box::new(|| {}), Box::new(|_| {})).unwrap();
+    let inicio = Instant::now();
+    assert!(fila.encerrar_e_esperar(Duration::from_secs(10)), "a thread ociosa não saiu");
+    // A espera não pode ter ido até o limite: sair ocioso é imediato. (Sem relógio de parede: só uma cota.)
+    assert!(inicio.elapsed() < Duration::from_secs(5), "esperou o limite inteiro");
+}
+
+/// Um envio reservado que sai sem o Enter fica registrado como não confirmado, e devolve a vaga à fila.
+#[test]
+fn envio_reservado_solto_sem_enter_fica_registrado_e_libera_a_vaga() {
+    use super::write_queue::WriteQueue;
+    use std::sync::{mpsc, Arc, Mutex};
+
+    let (portao_tx, portao_rx) = mpsc::channel();
+    let (escrito_tx, escrito_rx) = mpsc::channel();
+    let saida = Arc::new(Mutex::new(Vec::new()));
+    let escritor = EscritorTravado { portao: portao_rx, escrito: escrito_tx, saida: saida.clone() };
+    let fila = WriteQueue::new(Box::new(escritor), Box::new(|| {}), Box::new(|_| {})).unwrap();
+
+    // Reserva o texto e o Enter (2 vagas) e solta o envio sem mandar o Enter.
+    let envio = fila.reservar_envio(b"ls").expect("o texto e o Enter cabem");
+    drop(envio);
+    assert_eq!(fila.nao_confirmados(), 1, "o envio sem Enter precisa ficar registrado");
+
+    // As vagas voltaram: uma nova reserva inteira cabe, e o Enter dela é aceito.
+    let novo = fila.reservar_envio(b"x").expect("as vagas do envio solto voltaram");
+    assert_eq!(novo.enter(), Ok(()));
+    for _ in 0..3 {
+        portao_tx.send(()).unwrap();
+    }
+    for _ in 0..3 {
+        escrito_rx.recv().unwrap();
+    }
+    // O texto do envio solto saiu (sem Enter), e depois o texto e o Enter do envio novo.
+    assert_eq!(String::from_utf8(saida.lock().unwrap().clone()).unwrap(), "lsx\r");
+}
+
+/// Espera o descritor deixar de aceitar bytes (buffer cheio): sinal de que a escrita da fila já começou e está presa.
+#[cfg(unix)]
+fn fd_cheio(fd: std::os::fd::RawFd) -> bool {
+    for _ in 0..100_000 {
+        let mut pfd = libc::pollfd { fd, events: libc::POLLOUT, revents: 0 };
+        // SAFETY: `pfd` é um `pollfd` válido e vive durante a chamada; `nfds` é 1.
+        if unsafe { libc::poll(&mut pfd, 1, 0) } == 0 {
+            return true;
+        }
+        std::thread::yield_now();
+    }
+    false
+}
+
+/// A escrita presa num pipe cheio é solta ao remover a fila. O mecanismo (poll com cancelamento) é o mesmo do
+/// PTY, e um pipe trava em qualquer unix, então o teste roda no macOS e no Linux.
+#[cfg(unix)]
+#[test]
+fn remover_a_fila_libera_escrita_presa_num_pipe() {
+    use super::pty_manager::fila_sobre_fd;
+    use std::os::fd::AsRawFd;
+    use std::time::Duration;
+
+    let (leitura, escrita) = std::io::pipe().unwrap();
+    let mut fila = fila_sobre_fd(escrita.as_raw_fd(), Box::new(|_| {})).unwrap();
+    // Mais que o buffer do pipe: a escrita trava, porque ninguém lê a outra ponta.
+    fila.enqueue(&vec![b'x'; 1024 * 1024]).unwrap();
+    assert!(fd_cheio(escrita.as_raw_fd()), "a escrita grande não chegou a travar");
+    assert!(
+        fila.encerrar_e_esperar(Duration::from_secs(2)),
+        "a thread de escrita não terminou ao remover a fila"
+    );
+    drop(leitura);
+}
+
+/// A remoção de uma sessão precisa soltar a escrita presa, mesmo com um descendente segurando o escravo. Matar só o
+/// filho não basta: o `sleep` do descendente mantém o escravo aberto e o `write_all` continuaria preso. Só o Linux
+/// trava uma escrita num pty sem leitor: o macOS aceitou 256 MB sem travar (medido), por isso o teste é restrito.
+#[cfg(target_os = "linux")]
+#[test]
+fn remover_a_sessao_libera_escrita_presa_por_descendente() {
+    use super::pty_manager::fila_de_escrita;
+    use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+    use std::io::Read;
+    use std::time::Duration;
+
+    let pair = native_pty_system()
+        .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+        .unwrap();
+    // O filho larga um descendente que herda o escravo e só então escreve "pronto". Nenhum dos dois lê a entrada.
+    let mut comando = CommandBuilder::new("sh");
+    comando.arg("-c");
+    comando.arg("sleep 5 & echo pronto; sleep 5");
+    let filho = pair.slave.spawn_command(comando).unwrap();
+    // Lê a saída até "pronto": o descendente já existe quando a fila começa a escrever.
+    let mut saida = pair.master.try_clone_reader().unwrap();
+    let mut visto = Vec::new();
+    while !String::from_utf8_lossy(&visto).contains("pronto") {
+        let mut buf = [0u8; 256];
+        let n = saida.read(&mut buf).unwrap();
+        assert!(n > 0, "o filho saiu antes de avisar");
+        visto.extend_from_slice(&buf[..n]);
+    }
+
+    let mut fila = fila_de_escrita(pair.master.as_ref(), filho.clone_killer(), Box::new(|_| {})).unwrap();
+    // Mais que o buffer do tty: a escrita trava, porque ninguém lê a entrada do escravo.
+    fila.enqueue(&vec![b'x'; 512 * 1024]).unwrap();
+    assert!(fd_cheio(pair.master.as_raw_fd().unwrap()), "a escrita grande não chegou a travar");
+
+    // Remover a sessão: o lado mestre fecha e a escrita presa volta com erro, mesmo com o descendente vivo.
+    assert!(
+        fila.encerrar_e_esperar(Duration::from_secs(2)),
+        "a thread de escrita não terminou ao remover a sessão"
+    );
+}
+
+/// Uma aba que já tem terminal vivo não perde esse terminal para um lançamento concorrente.
+#[cfg(unix)]
+#[test]
+fn aba_com_terminal_vivo_nao_perde_o_terminal_para_um_lancamento_concorrente() {
+    use super::pty_manager::{registrar_sessao, sessao_de_teste};
+    use std::collections::HashMap;
+
+    let mut reg = HashMap::new();
+    // A aba já tem um terminal vivo (id 1). Um lançamento concorrente da mesma aba chega depois.
+    assert!(registrar_sessao(&mut reg, 1, Some("aba-a"), sessao_de_teste(1, Some("aba-a"))).is_ok());
+    match registrar_sessao(&mut reg, 2, Some("aba-a"), sessao_de_teste(2, Some("aba-a"))) {
+        Err((existente, _nao_inserida)) => assert_eq!(existente, 1),
+        Ok(()) => panic!("a aba já tinha terminal vivo: o lançamento concorrente não devia entrar"),
+    }
+    assert_eq!(reg.keys().copied().collect::<Vec<_>>(), vec![1], "o terminal vivo continua o único da aba");
+    // Outra aba, sem terminal vivo, registra normalmente.
+    assert!(registrar_sessao(&mut reg, 3, Some("aba-b"), sessao_de_teste(3, Some("aba-b"))).is_ok());
+    assert!(reg.contains_key(&3));
+}
+
+/// O lançamento bloqueante roda fora do runtime: outra tarefa do mesmo runtime progride enquanto ele espera.
+#[tokio::test(flavor = "current_thread")]
+async fn lancamento_bloqueante_nao_prende_o_runtime() {
+    use super::pty_manager::executar_fora_do_runtime;
+    use std::time::Duration;
+
+    let (liberar_tx, liberar_rx) = std::sync::mpsc::channel::<()>();
+    // O lançamento fica bloqueado até outra tarefa do mesmo runtime liberá-lo. Se ele rodasse no worker, essa
+    // tarefa nunca chegaria a rodar.
+    let lancamento = tokio::spawn(executar_fora_do_runtime(move || {
+        liberar_rx.recv_timeout(Duration::from_secs(5)).map_err(|e| e.to_string())?;
+        Ok(7u32)
+    }));
+    let liberou = tokio::spawn(async move { liberar_tx.send(()).is_ok() });
+    assert!(liberou.await.unwrap(), "a outra tarefa não rodou enquanto o lançamento esperava");
+    assert_eq!(lancamento.await.unwrap(), Ok(7));
+}
+
+/// Destino de teste: guarda os pedaços e os fins, na ordem em que chegam.
+#[derive(Default)]
+struct Gravador {
+    pedacos: Vec<Vec<u8>>,
+    fins: Vec<i32>,
+}
+
+impl super::pty_manager::Destino for Gravador {
+    fn pedaco(&mut self, bytes: Vec<u8>) -> bool {
+        self.pedacos.push(bytes);
+        true
+    }
+    fn fim(&mut self, code: i32) {
+        self.fins.push(code);
+    }
+}
+
+/// Um leitor que dá pânico no primeiro `read`, como um observador do caminho de saída que falha.
+struct LeitorQueEntraEmPanico;
+
+impl std::io::Read for LeitorQueEntraEmPanico {
+    fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+        panic!("pânico de teste no leitor")
+    }
+}
+
+#[test]
+fn panico_no_leitor_emite_pty_exit() {
+    use super::pty_manager::rodar_leitor;
+    // Id que nenhuma sessão real usa: a limpeza encontra o registro vazio.
+    const ID: u32 = 4_000_001;
+    let mut destino = Gravador::default();
+    rodar_leitor(ID, &mut LeitorQueEntraEmPanico, &mut destino);
+    assert_eq!(destino.fins, vec![-1]);
+    assert!(destino.pedacos.is_empty());
+}
+
+fn dados_de(eventos: &[super::pty_manager::Evento]) -> Vec<&super::pty_manager::PtyDataPayload> {
+    use super::pty_manager::Evento;
+    eventos
+        .iter()
+        .filter_map(|evento| match evento {
+            Evento::Dados(payload) => Some(payload),
+            Evento::Saida(_) => None,
+        })
+        .collect()
+}
+
+#[test]
+fn saida_rapida_vira_poucos_eventos() {
+    use super::pty_manager::{emissor, Evento, Mensagem};
+    use std::sync::mpsc;
+    use std::time::Instant;
+
+    let (tx, rx) = mpsc::channel();
+    let mut esperado = String::new();
+    for i in 0..1000 {
+        let pedaco = format!("{i:09}\n"); // 10 bytes por leitura
+        esperado.push_str(&pedaco);
+        tx.send(Mensagem::Pedaco(pedaco.into_bytes())).unwrap();
+    }
+    tx.send(Mensagem::Fim(0)).unwrap();
+
+    // Relógio parado: as 1000 leituras caem na mesma janela de 16 ms, qualquer que seja a máquina.
+    let t0 = Instant::now();
+    let mut eventos = Vec::new();
+    emissor(rx, &|| t0, &mut |evento| eventos.push(evento));
+
+    let dados = dados_de(&eventos);
+    assert!(dados.len() <= 2, "{} eventos para 1000 leituras", dados.len());
+    let texto: String = dados.iter().map(|d| d.data.as_str()).collect();
+    assert_eq!(texto, esperado);
+    assert_eq!(dados.last().and_then(|d| d.end), Some(10_000));
+    assert!(matches!(eventos.last(), Some(Evento::Saida(0))));
+}
+
+#[test]
+fn end_cresce_estritamente_e_a_saida_final_vem_por_ultimo() {
+    use super::pty_manager::{emissor, Evento, Mensagem};
+    use std::cell::Cell;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    // «€» (E2 82 AC) chega partido em duas leituras; no fim sobra um byte que nunca completa.
+    let pedacos: [&[u8]; 4] = [b"a\xE2", b"\x82\xAC", b"b", b"\xE2"];
+    let (tx, rx) = mpsc::channel();
+    for pedaco in pedacos {
+        tx.send(Mensagem::Pedaco(pedaco.to_vec())).unwrap();
+    }
+    tx.send(Mensagem::Fim(3)).unwrap();
+
+    // Cada consulta do relógio anda 20 ms: a janela de 16 ms fecha lotes no meio, e o teste vê mais de um evento.
+    let relogio = Cell::new(Instant::now());
+    let agora = || {
+        let t = relogio.get();
+        relogio.set(t + Duration::from_millis(20));
+        t
+    };
+    let mut eventos = Vec::new();
+    emissor(rx, &agora, &mut |evento| eventos.push(evento));
+
+    let dados = dados_de(&eventos);
+    assert!(dados.len() >= 2, "{} eventos de dados", dados.len());
+    let ends: Vec<u64> = dados.iter().map(|d| d.end.expect("todo pty-data de fluxo tem end")).collect();
+    assert!(ends.windows(2).all(|par| par[0] < par[1]), "end não cresce: {ends:?}");
+    let texto: String = dados.iter().map(|d| d.data.as_str()).collect();
+    assert_eq!(texto, "a€b\u{fffd}");
+    assert_eq!(ends.last(), Some(&6));
+    assert!(matches!(eventos.last(), Some(Evento::Saida(3))));
+}
+
+#[test]
+fn lote_fecha_pela_janela_de_16_ms_ou_pelo_limite() {
+    use super::pty_manager::{Lote, LIMITE_LOTE_BYTES};
+    use std::time::{Duration, Instant};
+
+    let t0 = Instant::now();
+    let mut lote = Lote::default();
+    assert!(lote.recebe("a", 1, t0).is_none());
+    assert!(lote.recebe("b", 2, t0 + Duration::from_millis(15)).is_none(), "antes da janela, o texto segura");
+    let ev = lote.recebe("c", 3, t0 + Duration::from_millis(16)).expect("a janela de 16 ms fecha o lote");
+    assert_eq!((ev.data.as_str(), ev.end), ("abc", Some(3)));
+
+    // Passou do limite de bytes: fecha sem esperar a janela.
+    let grande = "x".repeat(LIMITE_LOTE_BYTES);
+    let ev = lote
+        .recebe(&grande, 3 + LIMITE_LOTE_BYTES as u64, t0 + Duration::from_millis(17))
+        .expect("o limite de bytes fecha o lote");
+    assert_eq!(ev.data.len(), LIMITE_LOTE_BYTES);
+    assert!(lote.esvazia().is_none());
+}
+
+
+#[cfg(unix)]
+#[test]
+fn saida_de_um_processo_real_chega_inteira_e_o_fim_vem_por_ultimo() {
+    use super::pty_manager::{emissor, rodar_leitor, Destino, Evento, Mensagem};
+    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    use std::sync::mpsc;
+    use std::time::Instant;
+
+    /// Destino que manda a saída para o emissor, como a produção faz pelo `CanalDeSaida`.
+    struct PeloEmissor(mpsc::SyncSender<Mensagem>);
+    impl Destino for PeloEmissor {
+        fn pedaco(&mut self, bytes: Vec<u8>) -> bool {
+            self.0.send(Mensagem::Pedaco(bytes)).is_ok()
+        }
+        fn fim(&mut self, code: i32) {
+            let _ = self.0.send(Mensagem::Fim(code));
+        }
+    }
+
+    // Id que nenhuma sessão real usa: o registro não tem a sessão, e o código de saída é o do leitor.
+    const ID: u32 = 4_000_002;
+    let pair = native_pty_system()
+        .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+        .unwrap();
+    let mut comando = CommandBuilder::new("sh");
+    comando.arg("-c");
+    comando.arg("printf 'linha 1\\nlinha 2\\n'");
+    let mut filho = pair.slave.spawn_command(comando).unwrap();
+    // O pai solta o escravo: assim o EOF chega quando o filho sai, e não antes.
+    drop(pair.slave);
+    let mut reader = pair.master.try_clone_reader().unwrap();
+
+    let (tx, rx) = mpsc::sync_channel(64);
+    let emissor_thread = std::thread::spawn(move || {
+        let mut eventos = Vec::new();
+        emissor(rx, &Instant::now, &mut |evento| eventos.push(evento));
+        eventos
+    });
+    rodar_leitor(ID, reader.as_mut(), &mut PeloEmissor(tx));
+    let eventos = emissor_thread.join().unwrap();
+    let _ = filho.wait();
+
+    let texto: String = eventos
+        .iter()
+        .filter_map(|evento| match evento {
+            Evento::Dados(payload) => Some(payload.data.as_str()),
+            Evento::Saida(_) => None,
+        })
+        .collect();
+    assert!(texto.contains("linha 1") && texto.contains("linha 2"), "{texto:?}");
+    assert!(matches!(eventos.last(), Some(Evento::Saida(_))), "o pty-exit precisa ser o último evento");
+}
+
+#[test]
+fn el_recorte_del_buffer_no_deja_un_caracter_partido() {
+    use super::pty_manager::push_capped;
+    // «é» são dois bytes (C3 A9). Cortar com `max = 3` cairia entre os dois.
+    let mut data = b"ab\xC3\xA9cd".to_vec();
+    push_capped(&mut data, b"", 3, 0);
+    assert!(std::str::from_utf8(&data).is_ok(), "{data:?}");
+    assert_eq!(data, b"cd");
+}
+
+// ── Encerramento escalado (ACP): SIGTERM agora, SIGKILL depois do prazo, com relógio falso ──
+#[cfg(unix)]
+mod escalada_falsa {
+    use super::super::containment::{Adoptable, ProcessGroup, Sinais};
+    use std::cell::RefCell;
+    use std::time::Duration;
+
+    #[derive(Debug, PartialEq)]
+    enum Evento {
+        Sinal(i32, libc::c_int),
+        Espera(Duration),
+    }
+
+    /// Um mundo sem processos de verdade: quem ignora SIGTERM continua no grupo até o SIGKILL.
+    struct Falso {
+        vivos: RefCell<Vec<u32>>,
+        ignoram_term: Vec<u32>,
+        eventos: RefCell<Vec<Evento>>,
+    }
+
+    impl Falso {
+        fn novo(membros: Vec<u32>, ignoram_term: Vec<u32>) -> Self {
+            Falso { vivos: RefCell::new(membros), ignoram_term, eventos: RefCell::new(Vec::new()) }
+        }
+    }
+
+    impl Sinais for Falso {
+        fn enviar_grupo(&self, pgid: i32, sinal: libc::c_int) -> bool {
+            self.eventos.borrow_mut().push(Evento::Sinal(-pgid, sinal));
+            let encontrou_membros = !self.vivos.borrow().is_empty();
+            if sinal == libc::SIGTERM {
+                self.vivos.borrow_mut().retain(|pid| self.ignoram_term.contains(pid));
+            } else if sinal == libc::SIGKILL {
+                self.vivos.borrow_mut().clear();
+            }
+            encontrou_membros
+        }
+        fn esperar(&self, prazo: Duration) {
+            self.eventos.borrow_mut().push(Evento::Espera(prazo));
+        }
+    }
+
+    /// Um pid que não existe no kernel (acima do teto do Linux): o `adopt` só o anota, e nenhum processo real é tocado.
+    struct PidInexistente;
+    impl Adoptable for PidInexistente {
+        fn pid(&self) -> Option<u32> {
+            Some(0x7FFF_FFF0)
+        }
+    }
+
+    #[test]
+    fn escalada_manda_term_e_kill_ao_grupo_do_lider() {
+        const PGID: u32 = 0x7FFF_FFF0;
+        let falso = Falso::novo(vec![30, 20, 10], vec![30, 10]);
+        let mut grupo = ProcessGroup::new_acp();
+        grupo.adopt(&PidInexistente);
+        let prazo = Duration::from_secs(2);
+        let escalada = grupo.encerrar_escalando_com(&falso);
+        let forcados = escalada.concluir_com(&falso, prazo);
+
+        assert!(forcados, "o SIGKILL encontrou membros no grupo");
+        assert_eq!(
+            *falso.eventos.borrow(),
+            vec![
+                Evento::Sinal(-(PGID as i32), libc::SIGTERM),
+                Evento::Espera(prazo),
+                Evento::Sinal(-(PGID as i32), libc::SIGKILL),
+            ],
+            "os dois sinais vão ao PGID negativo, com a espera entre eles"
+        );
+    }
+}

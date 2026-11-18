@@ -213,6 +213,7 @@ pub async fn vigia_report(app: AppHandle, tab_id: String, text: String) -> Resul
 
 /// Corpo de `vigia_report`: lê o canvas e grava no chat e no banco, fora da thread principal.
 fn vigia_report_now(app: AppHandle, tab_id: String, text: String) -> Result<(), String> {
+    let boards = crate::canvas::load_boards()?;
     let text = crate::chat::clean_text(&text)?;
     let now = crate::util::now_ts();
     crate::chat::update(&tab_id, |conv| {
@@ -221,7 +222,6 @@ fn vigia_report_now(app: AppHandle, tab_id: String, text: String) -> Result<(), 
         Ok(())
     })?;
     let _ = app.emit(crate::ipc::commands::chat::CHANGED_EVENT, &tab_id);
-    let boards = crate::canvas::load_boards();
     let db = app.state::<crate::database::DbConnection>();
     let conn = db.lock().map_err(|e| e.to_string())?;
     let name: String = conn

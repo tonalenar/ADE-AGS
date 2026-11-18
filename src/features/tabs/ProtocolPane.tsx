@@ -15,7 +15,7 @@ export function ProtocolPane({ threadId, agentId, agentLabel }: { threadId: stri
   const { t } = useTranslation();
   const live = useStructured((s) => s.live[threadId]) ?? EMPTY_LIVE;
   const hydrated = useStructured((s) => !!s.hydrated[threadId]);
-  useEffect(() => hydrateThread(threadId), [threadId]);
+  useEffect(() => { void hydrateThread(threadId); }, [threadId]);
   const items = useMemo(() => withDrafts(live.items, live.drafts), [live.items, live.drafts]);
   const streaming = useMemo(() => new Set(live.drafts.map((d) => d.itemId)), [live.drafts]);
   const working = live.phase === "working";

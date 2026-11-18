@@ -69,6 +69,7 @@ pub struct Setup {
 pub struct Prepared {
     pub comparison: Comparison,
     pub setups: Vec<Setup>,
+    pub trust_warnings: Vec<String>,
 }
 
 /// Node_modules, target de cargo e o bloco de ambiente do worktree, como nas missões.
@@ -170,7 +171,7 @@ pub fn prepare_in(registry: &Path, base: &Path, cwd: &Path, title: &str, picks: 
     let mut all = read_registry(registry);
     all.push(comparison.clone());
     write_registry(registry, &all)?;
-    Ok(Prepared { comparison, setups })
+    Ok(Prepared { comparison, setups, trust_warnings: Vec::new() })
 }
 
 #[derive(Debug, Deserialize)]
@@ -315,12 +316,16 @@ pub async fn compare_prepare(
     blocking(move || {
         let _guard = lock();
         let base = worktrees_base()?;
-        if isolate {
+        let trust_warnings = if isolate {
             // O diálogo "confia nesta pasta?" do Claude Code travaria cada terminal da comparação.
-            crate::missions::team::trust_claude_worktrees(&db, &base);
-        }
+            crate::missions::team::trust_claude_worktrees(&db, &base)
+        } else {
+            Vec::new()
+        };
         let id = uuid::Uuid::new_v4().simple().to_string()[..6].to_string();
-        prepare_in(&registry_path()?, &base, Path::new(&cwd), &title, &picks, isolate, &id)
+        let mut prepared = prepare_in(&registry_path()?, &base, Path::new(&cwd), &title, &picks, isolate, &id)?;
+        prepared.trust_warnings = trust_warnings;
+        Ok(prepared)
     })
     .await
 }

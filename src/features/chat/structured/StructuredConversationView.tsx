@@ -36,7 +36,7 @@ import type { RequestRow, ThreadRow } from "./ipc";
 import { EMPTY_LIVE, isLocalAcpAgent, isPlanExit, menuAccess, questionOf, togglePlan } from "./model";
 import { AgentSwitchDialog } from "./AgentSwitchDialog";
 import { LogFailureNotice } from "./LogFailureNotice";
-import { answerRequest, autoCompactThreadOnReturn, clearThreadContext, compactThread, hydrateThread, interruptThread, retuneThread, runThreadGoalAction, sendToThread, switchThreadAgent, useStructured } from "./store";
+import { answerRequest, autoCompactThreadOnReturn, clearThreadContext, compactThread, hydrateThread, interruptThread, retryThreadHydration, retuneThread, runThreadGoalAction, sendToThread, switchThreadAgent, useStructured } from "./store";
 import { lacksApproval, switchableAgents } from "./switchModel";
 import { showBotToast } from "@/shared/brand/botToastStore";
 
@@ -62,6 +62,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   const team = side ? null : teamOfThread;
   const live = useStructured((s) => s.live[thread.id]) ?? EMPTY_LIVE;
   const hydrated = useStructured((s) => !!s.hydrated[thread.id]);
+  const hydrateError = useStructured((s) => s.hydrateErrors[thread.id] ?? null);
   const goal = useStructured((s) => s.goals[thread.id] ?? null);
   const goalNotice = useStructured((s) => s.goalNotices[thread.id] ?? null);
   // Trocar de agente na mesma conversa: a escolha espera a confirmação (a cada troca).
@@ -130,7 +131,8 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
     const mark = addPending(key, text, items);
     sendToThread(thread.id, text, () => dropPending(key, mark));
   }, [items, key, thread.id]);
-  const answer = useCallback((choice: string) => { if (request) answerRequest(thread.id, request.id, choice); }, [request, thread.id]);
+  // Responde o pedido aberto. Resolve `true` só quando o backend aceita (a caixa usa isso para limpar ou manter o texto).
+  const answer = useCallback((choice: string): Promise<boolean> => (request ? answerRequest(thread.id, request.id, choice) : Promise.resolve(false)), [request, thread.id]);
   const timelineAfter = useMemo(() => side ? null : <><TeamThreadFeed conversation={card} cards={cards} /><HarnessRunFeed threadId={thread.id} /></>, [side, card, cards, thread.id]);
   const handleGoalAction = (action: "show" | "set" | "pause" | "resume" | "clear", objective?: string) => {
     void runThreadGoalAction(thread.id, action, objective);
@@ -180,7 +182,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   const composer = (
       <ComposerColumn>
         {/* O pedido de permissão vai colado ao composer, sempre à vista. */}
-        {ask && <PermissionCard ask={ask} terminal={false} />}
+        {ask && <PermissionCard key={ask.id} ask={ask} terminal={false} />}
         {(goal || goalNotice === "none") && (
           <div className="mb-2 flex min-w-0 items-center gap-2 rounded-lg border border-gray-200/80 dark:border-white/10 bg-gray-50/80 dark:bg-white/[0.03] px-3 py-2 text-chat-caption">
             {goal ? (
@@ -208,7 +210,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
             ? t(queueHintKey(thread.agentId, followUpBehavior, steerCapability.support, interruptCapability.support), { key: QUEUE_KEY })
             : team?.placeholder ?? (side ? t("chat.sideChat.placeholder") : t("chat.composer.reply"))}
           onSubmit={async (text, attachments) => {
-            if (question) { requestTimelineFollow(key); answer(text); return; }
+            if (question) { requestTimelineFollow(key); return answer(text); }
             const planCommand = extractSlashCommand(text, "plan");
             if (planCommand.found && text.trim().toLowerCase() === "/plan" && attachments.length === 0) {
               if (locked) {
@@ -221,35 +223,40 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
               }
               return await retuneThread(thread.id, thread.model, thread.effort, togglePlan(thread.access));
             }
-            if (attachments.length === 0 && /^\/clear\s*$/i.test(text.trim())) { void clearThreadContext(thread.id); return; }
+            if (attachments.length === 0 && /^\/clear\s*$/i.test(text.trim())) { void clearThreadContext(thread.id); return true; }
             if (attachments.length === 0) {
               const command = /^\/(compact|goal)(?:\s+([\s\S]*))?\s*$/i.exec(text.trim());
-              if (command?.[1]?.toLowerCase() === "compact" && compactCapability.available) { requestTimelineFollow(key); void compactThread(thread.id, command[2]?.trim() || undefined); return; }
+              if (command?.[1]?.toLowerCase() === "compact" && compactCapability.available) { requestTimelineFollow(key); void compactThread(thread.id, command[2]?.trim() || undefined); return true; }
               if (command?.[1]?.toLowerCase() === "goal" && goalCapability.available) {
                 const argument = command[2]?.trim() ?? "";
-                if (!argument || /^edit$/i.test(argument)) { handleGoalAction("show"); return; }
+                if (!argument || /^edit$/i.test(argument)) { handleGoalAction("show"); return true; }
                 const action = /^(clear|pause|resume)$/i.exec(argument)?.[1]?.toLowerCase();
-                if (action === "clear" || action === "pause" || action === "resume") { handleGoalAction(action); return; }
-                if (isLegacyGoalClearAlias(matrixProvider, argument)) { handleGoalAction("clear"); return; }
+                if (action === "clear" || action === "pause" || action === "resume") { handleGoalAction(action); return true; }
+                if (isLegacyGoalClearAlias(matrixProvider, argument)) { handleGoalAction("clear"); return true; }
                 handleGoalAction("set", argument);
-                return;
+                return true;
               }
             }
             const prepared = team && text.trim() ? team.prepare(text, { key, items }, attachments) : { text, onSent: () => undefined };
-            if (prepared === null) return;
+            if (prepared === null) return false;
             // O caminho de cada anexo vai no texto (bloco `[Anexos]`) e as imagens também em linha, onde o motor aceita.
             const sent = messageFor(key, prepared.text, attachments);
             requestTimelineFollow(key);
-            const deliver = () => {
+            // Resolve `true` só quando o backend aceita; se recusa, a mensagem sai do fio, o erro aparece no aviso e o texto volta à caixa.
+            const deliver = (): Promise<boolean> => {
               // A mensagem aparece na hora; se o backend recusar, sai do fio e o erro aparece no aviso.
               const mark = sent.text.trim() ? addPending(key, sent.text.trim(), items) : null;
-              sendToThread(thread.id, sent.text, mark ? () => dropPending(key, mark) : undefined, prepared.onSent, sent.images);
+              return sendToThread(thread.id, sent.text, mark ? () => dropPending(key, mark) : undefined, prepared.onSent, sent.images);
             };
             // Com um pedido esperando a pessoa, a mensagem vai como sempre (redireciona o agente).
-            if (request) { deliver(); return; }
+            if (request) return deliver();
             // «Enviar agora»: no motor que não aceita entrada no meio do turno, o turno para e ela sai em seguida
             // (aparece acima da caixa até sair). As imagens em linha só existem no Claude, que entra no turno.
-            if (sendNow(key, sent.text, midTurn, deliver) !== "sent") prepared.onSent();
+            let delivery: Promise<boolean> | null = null;
+            const outcome = sendNow(key, sent.text, midTurn, () => { delivery = deliver(); });
+            // Na fila (ou interrompendo o turno) a mensagem já está guardada no app: a caixa pode limpar.
+            if (outcome !== "sent") { prepared.onSent(); return true; }
+            return delivery ?? true;
           }}
           onSendAndNewThread={side ? undefined : newConversationLocal}
           onQueue={question ? null : (text, attachments) => {
@@ -294,7 +301,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <ChatFrame composer={composer} list={(bottomInset) => (
-        <TimelineView quoteKey={card.tabId} bottomInset={bottomInset} items={shownItems} loaded={hydrated || (side?.history.length ?? 0) > 0} truncated={side?.truncated ?? false} working={working || !!request} live
+        <TimelineView quoteKey={card.tabId} bottomInset={bottomInset} items={shownItems} loaded={hydrated || (side?.history.length ?? 0) > 0} loadError={hydrateError} onRetryLoad={() => retryThreadHydration(thread.id)} truncated={side?.truncated ?? false} working={working || !!request} live
           approval={ask ? null : note} approvalDocked={!!ask}
           streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending} threadId={thread.id}
           conversationKey={key} searchTargetId={searchTarget?.itemId} searchTargetToken={searchTarget?.token} onSearchTargetApplied={clearThreadSearchJump}

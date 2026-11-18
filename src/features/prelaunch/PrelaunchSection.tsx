@@ -4,6 +4,7 @@ import { Button, Input, AddIcon, TrashIcon, EditIcon, InfoIcon } from "neogestif
 import { usePrelaunchStore } from "@/features/prelaunch/store";
 import type { PrelaunchPreset } from "@/features/prelaunch/types";
 import { SettingsSection } from "@/features/settings/SettingsSection";
+import { appConfirm } from "@/shared/ui/appConfirm";
 
 /** Alta y edición usan el mismo formulario; `initial` decide cuál de las dos es. */
 function PresetForm({
@@ -52,7 +53,7 @@ function PresetForm({
           value={command}
           onChange={(e) => setCommand(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && valid) submit();
+            if (e.key === "Enter" && valid && !saving) submit();
           }}
           placeholder={t("prelaunch.commandPlaceholder")}
           className="flex-1 font-mono text-xs"
@@ -88,12 +89,42 @@ export function PrelaunchSection() {
   const load = usePrelaunchStore((s) => s.load);
   const save = usePrelaunchStore((s) => s.save);
   const remove = usePrelaunchStore((s) => s.remove);
+  const loadError = usePrelaunchStore((s) => s.loadError);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
-  useEffect(() => { if (!loaded) load().catch(console.error); }, [loaded, load]);
+  useEffect(() => { if (!loaded) load().catch(() => undefined); }, [loaded, load]);
+
+  /** Apagar um preset quebra os passos que o usam: pede confirmação e mostra o erro na tela, não só no console. */
+  const removePreset = async (preset: PrelaunchPreset) => {
+    const ok = await appConfirm({
+      title: t("prelaunch.removeTitle"),
+      lead: t("prelaunch.removeLead", { name: preset.name }),
+      confirmLabel: t("btn.delete"),
+      cancelLabel: t("btn.cancel"),
+      tone: "danger",
+    });
+    if (!ok) return;
+    setRemoveError(null);
+    try {
+      await remove(preset.id);
+    } catch (cause) {
+      setRemoveError(t("prelaunch.removeFailed", { detail: String(cause) }));
+    }
+  };
 
   return (
     <SettingsSection title={t("settings.prelaunch")} description={t("settings.prelaunch.desc")}>
+      {loadError && (
+        <p role="alert" className="mb-3 rounded-md border border-red-400/60 px-2 py-1 text-xs text-red-600 dark:text-red-400">
+          {t("prelaunch.loadFailed", { detail: loadError })}
+        </p>
+      )}
+      {removeError && (
+        <p role="alert" className="mb-3 rounded-md border border-red-400/60 px-2 py-1 text-xs text-red-600 dark:text-red-400">
+          {removeError}
+        </p>
+      )}
 
       {presets.length > 0 && (
         <div className="flex flex-col gap-2 mb-4">
@@ -143,7 +174,7 @@ export function PrelaunchSection() {
                   </Button>
                   <Button variant="icon"
                     type="button"
-                    onClick={() => remove(preset.id).catch(console.error)}
+                    onClick={() => void removePreset(preset)}
                     aria-label={t("btn.delete")}
                     className="w-7 h-7 grid place-items-center rounded-lg text-gray-400
                       hover:text-red-500 hover:bg-red-500/10 p-0"

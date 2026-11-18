@@ -7,7 +7,8 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::sync::{Once, OnceLock, mpsc};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex, Once, OnceLock, mpsc};
 use tauri::Emitter;
 
 #[derive(Clone, Debug, Serialize)]
@@ -77,7 +78,6 @@ enum QueuedEvent {
     },
 }
 
-static WRITER: OnceLock<mpsc::Sender<QueuedEvent>> = OnceLock::new();
 /// A repetição das falhas pendentes roda uma vez por processo, no primeiro trabalho da fila.
 static REPLAY: Once = Once::new();
 
@@ -92,18 +92,237 @@ const PERSIST_ATTEMPTS: i64 = 3;
 /// Quantas falhas pendentes uma repetição leva por vez.
 const REPLAY_BATCH: i64 = 200;
 
-fn writer() -> &'static mpsc::Sender<QueuedEvent> {
+/// Canal da gravação, em trabalhos que esperam o gravador. Cheio, o produtor não espera: o trabalho vai para o
+/// excedente (transição) ou é coalescido/contado (atualização de alta frequência).
+pub(crate) const CANAL_CAP: usize = 4_096;
+/// Quantas chaves de atualização de alta frequência o excedente guarda. Passou disso, uma atualização de chave nova é
+/// contada e sai no resumo. Só as atualizações de item (texto, progresso) passam por aqui.
+pub(crate) const EXCEDENTE_ATUALIZACOES: usize = 1_024;
+
+/// O destino de um trabalho quando o canal não o aceita.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Destino {
+    /// Atualização de alta frequência de um item (pedaço de texto, progresso do subagente): só a mais recente da chave
+    /// fica no excedente. Pode virar resumo quando passa de `EXCEDENTE_ATUALIZACOES` chaves.
+    Atualizacao(String),
+    /// Transição de estado (pedido, criação, erro, fase, tarefa, meta, fechamento, Frota, replay). Nunca coalesce e
+    /// nunca é descartada: vai para o excedente na ordem de chegada. O excedente cresce com as transições reais enquanto
+    /// o SQLite estiver parado, sem teto. Elas são raras (por turno e por pedido, não por token), então o crescimento é
+    /// limitado pelo número delas.
+    Transicao,
+}
+
+/// O que a fila omitiu desde o último resumo. Só atualizações de alta frequência são omitidas.
+pub(crate) struct Resumo {
+    pub omitidos: u64,
+}
+
+struct Entrada<T> {
+    /// A chave da atualização (`None` para transição, que nunca coalesce).
+    chave: Option<String>,
+    trabalho: T,
+}
+
+struct Estado<T> {
+    /// O excedente, na ordem de chegada (a sequência é a chave). Cada chave de atualização aparece no máximo uma vez.
+    excedente: BTreeMap<u64, Entrada<T>>,
+    /// Chave de atualização → a sequência da entrada mais recente dela.
+    chaves: HashMap<String, u64>,
+    /// Quantas chaves de atualização estão no excedente.
+    atualizacoes: usize,
+    sequencia: u64,
+    omitidos: u64,
+    /// O último trabalho omitido: é dele que saem a conversa e o aplicativo do resumo.
+    ultimo: Option<T>,
+}
+
+impl<T> Estado<T> {
+    fn inserir(&mut self, chave: Option<String>, trabalho: T) {
+        self.sequencia += 1;
+        let seq = self.sequencia;
+        if let Some(chave) = &chave {
+            self.chaves.insert(chave.clone(), seq);
+        }
+        self.excedente.insert(seq, Entrada { chave, trabalho });
+    }
+}
+
+/// O lado que enfileira. Não bloqueia: com a fila cheia, a atualização coalesce ou é contada, e a transição vai para o
+/// excedente.
+pub(crate) struct Fila<T> {
+    canal: mpsc::SyncSender<T>,
+    estado: Arc<Mutex<Estado<T>>>,
+    atualizacoes_max: usize,
+}
+
+/// O lado que grava: tira os trabalhos na ordem de chegada e emite o resumo quando a fila esvazia.
+pub(crate) struct Gravador<T> {
+    recebe: mpsc::Receiver<T>,
+    estado: Arc<Mutex<Estado<T>>>,
+}
+
+fn trancar<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+pub(crate) fn fila_com<T>(canal: usize, atualizacoes_max: usize) -> (Fila<T>, Gravador<T>) {
+    let (envio, recebe) = mpsc::sync_channel(canal);
+    let estado = Arc::new(Mutex::new(Estado {
+        excedente: BTreeMap::new(),
+        chaves: HashMap::new(),
+        atualizacoes: 0,
+        sequencia: 0,
+        omitidos: 0,
+        ultimo: None,
+    }));
+    (Fila { canal: envio, estado: estado.clone(), atualizacoes_max }, Gravador { recebe, estado })
+}
+
+pub(crate) fn fila<T>() -> (Fila<T>, Gravador<T>) {
+    fila_com(CANAL_CAP, EXCEDENTE_ATUALIZACOES)
+}
+
+impl<T> Fila<T> {
+    /// Põe um trabalho na fila sem esperar. Devolve o trabalho se o gravador já caiu (quem chama grava por conta própria).
+    pub(crate) fn enviar(&self, trabalho: T, destino: Destino) -> Result<(), T> {
+        let mut estado = trancar(&self.estado);
+        // Com excedente, o canal fica de fora: a ordem de chegada é a do excedente.
+        let trabalho = if estado.excedente.is_empty() {
+            match self.canal.try_send(trabalho) {
+                Ok(()) => return Ok(()),
+                Err(mpsc::TrySendError::Disconnected(t)) => return Err(t),
+                Err(mpsc::TrySendError::Full(t)) => t,
+            }
+        } else {
+            trabalho
+        };
+        match destino {
+            Destino::Atualizacao(chave) => {
+                // A atualização nova substitui a anterior da mesma chave: fica com a sequência de agora.
+                if let Some(antiga) = estado.chaves.remove(&chave) {
+                    estado.excedente.remove(&antiga);
+                    estado.inserir(Some(chave), trabalho);
+                } else if estado.atualizacoes >= self.atualizacoes_max {
+                    estado.omitidos += 1;
+                    estado.ultimo = Some(trabalho);
+                } else {
+                    estado.atualizacoes += 1;
+                    estado.inserir(Some(chave), trabalho);
+                }
+            }
+            // Transição: nunca coalesce, nunca é descartada.
+            Destino::Transicao => estado.inserir(None, trabalho),
+        }
+        Ok(())
+    }
+
+    /// Quantas entradas o excedente tem agora (para o teste de limite).
+    #[cfg(test)]
+    pub(crate) fn excedente_len(&self) -> usize {
+        trancar(&self.estado).excedente.len()
+    }
+}
+
+impl<T> Gravador<T> {
+    /// O próximo trabalho, na ordem de chegada. Quando a fila esvazia com omitidos pendentes, devolve antes o resumo que
+    /// `resumo` monta a partir do último omitido. `None` quando não há mais nada e o produtor já caiu.
+    ///
+    /// `resumo` roda sem o lock da fila: ele pode gravar no banco, e quem emite pode estar com o banco preso.
+    pub(crate) fn proximo(&self, resumo: impl FnOnce(T, Resumo) -> Option<T>) -> Option<T> {
+        match self.recebe.try_recv() {
+            Ok(trabalho) => Some(trabalho),
+            Err(vazio) => {
+                // Só o resultado desta chamada: tentar de novo aqui poderia tirar um trabalho que chegou agora.
+                let caiu = matches!(vazio, mpsc::TryRecvError::Disconnected);
+                let pendente = {
+                    let mut estado = trancar(&self.estado);
+                    if let Some((seq, entrada)) = estado.excedente.pop_first() {
+                        if let Some(chave) = entrada.chave {
+                            estado.atualizacoes -= 1;
+                            if estado.chaves.get(&chave) == Some(&seq) {
+                                estado.chaves.remove(&chave);
+                            }
+                        }
+                        return Some(entrada.trabalho);
+                    }
+                    if estado.omitidos > 0 {
+                        let dados = Resumo { omitidos: std::mem::take(&mut estado.omitidos) };
+                        estado.ultimo.take().map(|ultimo| (ultimo, dados))
+                    } else {
+                        None
+                    }
+                };
+                if let Some((ultimo, dados)) = pendente
+                    && let Some(trabalho) = resumo(ultimo, dados)
+                {
+                    return Some(trabalho);
+                }
+                if caiu { None } else { self.recebe.recv().ok() }
+            }
+        }
+    }
+}
+
+static WRITER: OnceLock<Fila<QueuedEvent>> = OnceLock::new();
+
+fn writer() -> &'static Fila<QueuedEvent> {
     WRITER.get_or_init(|| {
-        let (sender, receiver) = mpsc::channel::<QueuedEvent>();
+        let (fila_gravacao, gravador) = fila::<QueuedEvent>();
         let _ = std::thread::Builder::new()
             .name("ags-harness-event-log".into())
             .spawn(move || {
-                while let Ok(event) = receiver.recv() {
+                while let Some(event) = gravador.proximo(resumo_de_omitidos) {
                     handle(event);
                 }
             });
-        sender
+        fila_gravacao
     })
+}
+
+/// O resumo das atualizações omitidas (só de item). A entrada `logOmitted` vai para a conversa da última omitida.
+fn resumo_de_omitidos(ultimo: QueuedEvent, dados: Resumo) -> Option<QueuedEvent> {
+    let texto = format!("{} atualizações omitidas", dados.omitidos);
+    let payload = json!({ "omitidos": dados.omitidos, "texto": texto });
+    match ultimo {
+        QueuedEvent::Chat { app, db, thread_id, .. } => Some(QueuedEvent::Chat {
+            app,
+            db,
+            thread_id,
+            event_type: "logOmitted".into(),
+            payload,
+            ui: None,
+        }),
+        // Só atualização de chat pode ser omitida: nada a resumir em outro caso.
+        _ => None,
+    }
+}
+
+/// O destino de um evento de chat quando o canal não o aceita. Só a atualização de alta frequência de um item (texto,
+/// progresso do subagente) pode coalescer ou virar resumo. Toda transição de estado vai para o excedente, sem coalescer e
+/// sem descartar: pedido, criação, erro, fase, tarefa, meta e fechamento.
+pub(crate) fn destino_do_chat(thread_id: &str, event_type: &str, payload: &Value) -> Destino {
+    match event_type {
+        "item" | "taskItem" => {
+            let item = payload.get("item").unwrap_or(payload);
+            let id = value_str(item, "id").unwrap_or_default();
+            Destino::Atualizacao(format!("chat:{thread_id}:{event_type}:{id}"))
+        }
+        _ => Destino::Transicao,
+    }
+}
+
+/// O destino de um trabalho da fila (ver `destino_do_chat`). A Frota e o replay são sempre transições.
+fn destino_de(job: &QueuedEvent) -> Destino {
+    match job {
+        QueuedEvent::Chat { thread_id, event_type, payload, .. } => destino_do_chat(thread_id, event_type, payload),
+        QueuedEvent::Fleet { .. } | QueuedEvent::Replay { .. } => Destino::Transicao,
+    }
+}
+
+/// Põe um trabalho na fila da gravação sem esperar. Devolve o trabalho se a gravação já caiu.
+fn send_to_writer(job: QueuedEvent) -> Result<(), QueuedEvent> {
+    let destino = destino_de(&job);
+    writer().enviar(job, destino)
 }
 
 /// Executa um trabalho da fila: tenta gravar (com repetição), registra a falha se houver, e só então entrega à janela
@@ -265,13 +484,13 @@ pub(crate) fn queue_fleet_event(
 /// reinício, ou as desta vida se a gravação voltou. Uma vez por processo, sem relógio nem polling.
 fn ensure_replay(app: &tauri::AppHandle, db: &crate::database::DbConnection) {
     REPLAY.call_once(|| {
-        let _ = writer().send(QueuedEvent::Replay { app: app.clone(), db: db.clone() });
+        let _ = send_to_writer(QueuedEvent::Replay { app: app.clone(), db: db.clone() });
     });
 }
 
 /// Entrega o trabalho à thread da fila. Se ela já caiu, faz no chamador: o evento não se perde.
 fn send_or_handle(job: QueuedEvent) {
-    if let Err(mpsc::SendError(job)) = writer().send(job) {
+    if let Err(job) = send_to_writer(job) {
         handle(job);
     }
 }
@@ -996,6 +1215,14 @@ pub(crate) fn record_chat_event(
             None,
             format!("thread.closed:{thread_id}:{now}"),
             json!({}),
+        )?,
+        // O resumo do que a fila omitiu (ver `Fila::enviar`): uma entrada do log, com quantas atualizações saíram.
+        "logOmitted" => record(
+            "log.omitted",
+            None,
+            None,
+            format!("log.omitted:{}", uuid::Uuid::new_v4()),
+            payload.clone(),
         )?,
         _ => {}
     }

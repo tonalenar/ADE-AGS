@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 
 import { WindowLights } from "@/app/WindowLights";
@@ -24,9 +25,6 @@ const rowCls = (current: boolean) => `w-full flex items-center gap-2 h-8 px-2 ro
   ${current ? "bg-white dark:bg-white/[0.07] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] font-medium text-gray-900 dark:text-white"
     : "text-gray-700 dark:text-white/75 hover:bg-gray-100 dark:hover:bg-white/[0.05]"}`;
 
-/** De quanto em quanto tempo o selo da Memória relê as sugestões pendentes. */
-const PENDING_REFRESH_MS = 30_000;
-
 /** Só o Linux tem a composição de GPU (e a busca só acha esse ajuste lá). */
 const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent) && !/android/i.test(navigator.userAgent);
 
@@ -38,8 +36,13 @@ function usePendingMemory(): number {
     if (!workspaceId) return;
     const load = () => { usePendingMemoryStore.getState().load(workspaceId).catch(() => undefined); };
     load();
-    const timer = window.setInterval(load, PENDING_REFRESH_MS);
-    return () => window.clearInterval(timer);
+    let active = true;
+    let off = () => {};
+    void listen("cc-memory-changed", load).then((unlisten) => {
+      if (!active) unlisten();
+      else off = unlisten;
+    }).catch(() => undefined);
+    return () => { active = false; off(); };
   }, [workspaceId]);
   return workspaceId ? total : 0;
 }

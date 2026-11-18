@@ -324,7 +324,14 @@ pub async fn mission_budget(
 }
 
 pub fn warn_lead(app: &tauri::AppHandle, mission: &str, message: &str) {
-    let boards = crate::canvas::load_boards();
+    let boards = match crate::canvas::load_boards() {
+        Ok(boards) => boards,
+        // Este caminho só mostra um aviso de orçamento; não há gravação a continuar sem canvas.
+        Err(error) => {
+            eprintln!("[ags] aviso: não foi possível mostrar o aviso de orçamento da missão {mission}: {error}");
+            return;
+        }
+    };
     for board in boards.values() {
         for tab in &board.orchestrators {
             if crate::canvas::mission_of_tab(&boards, tab).as_deref() == Some(mission) {

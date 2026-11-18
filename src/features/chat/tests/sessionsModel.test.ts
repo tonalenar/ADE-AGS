@@ -18,7 +18,7 @@ describe("as seções da barra de sessões", () => {
 
   it("agrupa por projeto: o projeto com a conversa mais recente primeiro, e dentro dele a mais recente primeiro", () => {
     const sections = buildSections(cards, base);
-    expect(sections.map((s) => s.id)).toEqual(["project:Outro", "project:ADE"]);
+    expect(sections.map((s) => s.id)).toEqual(["project:/p/Outro", "project:/p/ADE"]);
     expect(sections[0]!.items.map((c) => c.tabId)).toEqual(["b", "d"]);
     expect(sections[1]!.items.map((c) => c.tabId)).toEqual(["a", "c"]);
   });
@@ -31,15 +31,15 @@ describe("as seções da barra de sessões", () => {
   });
 
   it("aplica a ordem manual por projeto e põe conversas novas antes das ordenadas", () => {
-    const ordered = buildSections(cards, { ...base, orderBySection: { "project:ADE": ["c"] } });
-    expect(ordered.find((section) => section.id === "project:ADE")?.items.map((item) => item.tabId)).toEqual(["a", "c"]);
-    const moved = buildSections(cards, { ...base, orderBySection: { "project:ADE": ["c", "a"] } });
-    expect(moved.find((section) => section.id === "project:ADE")?.items.map((item) => item.tabId)).toEqual(["c", "a"]);
+    const ordered = buildSections(cards, { ...base, orderBySection: { "project:/p/ADE": ["c"] } });
+    expect(ordered.find((section) => section.id === "project:/p/ADE")?.items.map((item) => item.tabId)).toEqual(["a", "c"]);
+    const moved = buildSections(cards, { ...base, orderBySection: { "project:/p/ADE": ["c", "a"] } });
+    expect(moved.find((section) => section.id === "project:/p/ADE")?.items.map((item) => item.tabId)).toEqual(["c", "a"]);
   });
 
   it("busca, filtro por pasta, adiadas e integrantes do time (aninhados) ficam de fora", () => {
     expect(buildSections(cards, { ...base, query: "conversa a" }).flatMap((s) => s.items.map((c) => c.tabId))).toEqual(["a"]);
-    expect(buildSections(cards, { ...base, folder: "ADE" }).map((s) => s.id)).toEqual(["project:ADE"]);
+    expect(buildSections(cards, { ...base, folder: "ADE" }).map((s) => s.id)).toEqual(["project:/p/ADE"]);
     expect(buildSections(cards, { ...base, snoozed: ["a"] }).flatMap((s) => s.items.map((c) => c.tabId))).not.toContain("a");
     expect(buildSections(cards, { ...base, nested: new Set(["d"]) }).flatMap((s) => s.items.map((c) => c.tabId))).not.toContain("d");
   });
@@ -50,8 +50,8 @@ describe("as seções da barra de sessões", () => {
   });
 
   it("seção recolhida continua na lista, marcada, e seus itens não entram na navegação por teclado", () => {
-    const sections = buildSections(cards, { ...base, collapsed: ["project:Outro"] });
-    expect(sections[0]).toMatchObject({ id: "project:Outro", collapsed: true });
+    const sections = buildSections(cards, { ...base, collapsed: ["project:/p/Outro"] });
+    expect(sections[0]).toMatchObject({ id: "project:/p/Outro", collapsed: true });
     expect(visibleIds(sections)).toEqual(["a", "c"]);
   });
 });
@@ -109,10 +109,10 @@ describe("contagem, avatar e expandir/recolher todos", () => {
   });
   it("recolhe todos os projetos; com todos recolhidos, abre todos; Fixadas não é mexida", () => {
     const sections = buildSections(cards, { ...base, pinned: ["a"] });
-    expect(sections.map((s) => s.id)).toEqual(["pinned", "project:Outro", "project:ADE"]);
-    expect(toggleAllProjects(sections, [])).toEqual(["project:Outro", "project:ADE"]);
-    expect(toggleAllProjects(sections, ["project:Outro", "project:ADE"])).toEqual([]);
-    expect(toggleAllProjects(sections, ["pinned", "project:Outro"])).toEqual(["pinned", "project:Outro", "project:ADE"]);
+    expect(sections.map((s) => s.id)).toEqual(["pinned", "project:/p/Outro", "project:/p/ADE"]);
+    expect(toggleAllProjects(sections, [])).toEqual(["project:/p/Outro", "project:/p/ADE"]);
+    expect(toggleAllProjects(sections, ["project:/p/Outro", "project:/p/ADE"])).toEqual([]);
+    expect(toggleAllProjects(sections, ["pinned", "project:/p/Outro"])).toEqual(["pinned", "project:/p/Outro", "project:/p/ADE"]);
   });
 });
 
@@ -129,7 +129,7 @@ describe("a seção Trabalhando e a ordem por último pedido", () => {
 
   it("ligada: quem precisa de você sobe logo abaixo das fixadas, e quem trabalha vai para o fim", () => {
     const sections = buildSections(cards, { ...base, pinned: ["d"], shelf: shelf({ working: ["a"], needs: ["b"] }) });
-    expect(sections.map((s) => s.id)).toEqual([PINNED_ID, NEEDS_ID, "project:ADE", WORKING_ID]);
+    expect(sections.map((s) => s.id)).toEqual([PINNED_ID, NEEDS_ID, "project:/p/ADE", WORKING_ID]);
     expect(idsOfSection(sections, NEEDS_ID)).toEqual(["b"]);
     expect(idsOfSection(sections, WORKING_ID)).toEqual(["a"]);
   });
@@ -148,22 +148,47 @@ describe("a seção Trabalhando e a ordem por último pedido", () => {
   });
 
   it("ligada, a ordem salva à mão não vale: vale o último pedido seu; desligada, a ordem salva vale", () => {
-    const saved = { "project:ADE": ["a", "c"] };
+    const saved = { "project:/p/ADE": ["a", "c"] };
     const lastUserAt = { a: 10, c: 50 };
     const off = buildSections(cards, { ...base, orderBySection: saved, lastUserAt });
-    expect(idsOfSection(off, "project:ADE")).toEqual(["a", "c"]);
+    expect(idsOfSection(off, "project:/p/ADE")).toEqual(["a", "c"]);
     const on = buildSections(cards, { ...base, orderBySection: saved, lastUserAt, shelf: shelf() });
-    expect(idsOfSection(on, "project:ADE")).toEqual(["c", "a"]);
+    expect(idsOfSection(on, "project:/p/ADE")).toEqual(["c", "a"]);
   });
 
   it("os projetos ordenam pelo último pedido seu, e sem ele pela abertura", () => {
-    expect(buildSections(cards, base).map((s) => s.id)).toEqual(["project:Outro", "project:ADE"]);
+    expect(buildSections(cards, base).map((s) => s.id)).toEqual(["project:/p/Outro", "project:/p/ADE"]);
     const byUser = { a: 90, b: 20, c: 80, d: 10 };
-    expect(buildSections(cards, { ...base, lastUserAt: byUser }).map((s) => s.id)).toEqual(["project:ADE", "project:Outro"]);
+    expect(buildSections(cards, { ...base, lastUserAt: byUser }).map((s) => s.id)).toEqual(["project:/p/ADE", "project:/p/Outro"]);
   });
 
   it("a seção Trabalhando põe primeiro quem recebeu o último pedido seu", () => {
     const sections = buildSections(cards, { ...base, shelf: shelf({ working: ["a", "b"] }), lastUserAt: { a: 10, b: 40 } });
     expect(idsOfSection(sections, WORKING_ID)).toEqual(["b", "a"]);
+  });
+});
+
+describe("a seção de um projeto tem a identidade da pasta, não do rótulo", () => {
+  it("o recolhimento sobrevive quando o rótulo muda (a busca deixa só uma das duas pastas com o mesmo nome)", () => {
+    const twins = [card("a", "ADE", 3, { cwd: "/p/ade-1" }), card("c", "ADE", 1, { cwd: "/q/ade-2" })];
+    const both = buildSections(twins, base);
+    const first = both.find((s) => s.items.some((i) => i.tabId === "a"))!;
+    const folded = buildSections(twins, { ...base, collapsed: [first.id] });
+    expect(folded.find((s) => s.items.some((i) => i.tabId === "a"))!.collapsed).toBe(true);
+    // A busca deixa só a conversa "a": o rótulo volta a ser "ADE", e a seção continua a mesma.
+    const narrowed = buildSections(twins, { ...base, query: "Conversa a", collapsed: [first.id] });
+    const same = narrowed.find((s) => s.items.some((i) => i.tabId === "a"))!;
+    expect(same.id).toBe(first.id);
+    expect(same.collapsed).toBe(true);
+  });
+});
+
+describe("pastas com o mesmo nome são seções separadas", () => {
+  it("duas pastas chamadas ADE viram duas seções, com rótulos que as distinguem", () => {
+    const twins = [card("a", "ADE", 3, { cwd: "/p/ade-1" }), card("c", "ADE", 1, { cwd: "/q/ade-2" })];
+    const projects = buildSections(twins, base).filter((s) => s.kind === "project");
+    expect(projects).toHaveLength(2);
+    expect(new Set(projects.map((s) => s.id)).size).toBe(2);
+    expect(new Set(projects.map((s) => s.label)).size).toBe(2);
   });
 });

@@ -12,12 +12,13 @@ import { noticeDetail } from "./timelineModel";
 import type { TimelineItem } from "./types";
 
 /** Os códigos com frase própria no catálogo (`chat.timeline.notice.<código>`). */
-const KNOWN = ["resumeLost", "queueDropped", "optionIgnored", "toolOutcomeUnknown", "turnTimeout", "contextCleared", "autoCompact"];
+const KNOWN = ["resumeLost", "queueDropped", "optionIgnored", "toolOutcomeUnknown", "turnTimeout", "responseTruncated", "contextCleared", "autoCompact"];
 
 /**
  * Um aviso do app no fio: a sessão que não voltou (o agente recomeçou sem o histórico), a mensagem que saiu da
  * fila sem ser enviada (com «Reenviar»), uma opção que o agente não aplicou, a ferramenta
- * que ficou sem resultado (`toolOutcomeUnknown`), o turno que parou de responder (`turnTimeout`) ou a troca de
+ * que ficou sem resultado (`toolOutcomeUnknown`), o turno que parou de responder (`turnTimeout`), a resposta cortada
+ * no limite de tokens (`responseTruncated`) ou a troca de
  * agente («Agora com Codex»). A frase vem do código; o motivo, do item.
  */
 export function NoticeRow({ item, onResend, threadId }: { item: TimelineItem; onResend?: (text: string) => void; threadId?: string }) {

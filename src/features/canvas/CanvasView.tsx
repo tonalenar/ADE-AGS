@@ -19,7 +19,8 @@ import { openNewAgentWizard, requestCloseItem } from "@/features/tabs/tabActions
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import type { BrowserView } from "@/features/tabs/viewTabs";
 import type { Tab } from "@/features/tabs/types";
-import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { screenOf } from "@/features/terminal/terminalRegistry";
+import { sendAutonomous } from "@/features/terminal/safeWrite";
 import { announceToOrchestrators } from "./orchestratorAnnounce";
 import { portalConnectedNotice } from "./portalNotice";
 
@@ -70,6 +71,7 @@ import { RoleEditDialog } from "./RoleEditDialog";
 import { applyTabRole } from "./applyRole";
 import type { AgentRoleChoice } from "./agentRole";
 import { boardKeyOfTab, canvasActions, compareOfKey, missionOfKey, useActiveBoardKey, useCanvasStore } from "./store";
+import { usePortalViewLifetime } from "./portalLifetime";
 import { ThreadNode, type ThreadFlowNode } from "./ThreadNode";
 import { selectConversation } from "@/features/chat/unified/selectionActions";
 import { useSelectedRef } from "@/features/chat/unified/useConversations";
@@ -83,7 +85,7 @@ import { cleanPreviewLines } from "./previewText";
 function announcePortal(key: string, a: string, b: string): void {
   const board = useCanvasStore.getState().boards[key];
   const notice = board ? portalConnectedNotice(board, a, b) : null;
-  if (notice) sendWhenReady(notice.agent, notice.text);
+  if (notice) sendAutonomous(notice.agent, notice.text, "peer");
 }
 
 interface AgentNodeData extends Record<string, unknown> {
@@ -410,7 +412,7 @@ function CanvasInner() {
           if (!key) return;
           // O agente lê a nova função; os orquestradores ligados a ele recebem o aviso atualizado.
           void applyTabRole(id, choice).then((briefing) => {
-            if (briefing) sendWhenReady(id, briefing);
+            if (briefing) sendAutonomous(id, briefing, "peer");
             announceToOrchestrators(key, useCanvasStore.getState().boards[key]?.orchestrators ?? []);
           });
         },
@@ -1264,12 +1266,11 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
   const ensure = useViewTabsStore((s) => s.ensurePortalView);
   const drop = useViewTabsStore((s) => s.dropPortalView);
   const view = useViewTabsStore((s) => s.portalViews.find((v) => v.id === id));
-  useEffect(() => {
-    ensure(id, cwd, portal.url, portal.viewport, portal.realChrome);
-    // Al borrar el portal (o cerrar el canvas) se suelta la vista y con ella el navegador.
-    return () => drop(id);
-    // La URL inicial solo cuenta al crear la vista.
-  }, [id, cwd]);
+  // Ao apagar o Portal (ou fechar o canvas), a vista é solta e com ela o navegador. Trocar a pasta de referência não
+  // recria a vista: só atualiza o `cwd` dela. A URL inicial só conta ao criar a vista.
+  usePortalViewLifetime(id, cwd, (portalId, currentCwd) => {
+    ensure(portalId, currentCwd, portal.url, portal.viewport, portal.realChrome);
+  }, drop, (portalId, nextCwd) => useViewTabsStore.getState().updateView(portalId, { cwd: nextCwd }));
 
   // Lo que el navegador va visitando se guarda en el canvas, para reabrir donde estaba.
   const shown = view?.url ?? "";

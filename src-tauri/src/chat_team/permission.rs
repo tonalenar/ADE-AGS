@@ -479,6 +479,35 @@ fn part_is_read_only(part: &str) -> bool {
     }
 }
 
+/// Interpretadores de código (espelho de `permissionModel.ts`): com código na própria linha, o que roda não se lê no pedido.
+const INTERPRETERS: &[&str] = &[
+    "python", "python2", "python3", "node", "deno", "bun", "ruby", "perl", "php", "lua", "bash", "sh", "zsh", "dash", "fish", "pwsh", "powershell", "osascript",
+];
+/// As opções que trazem código inline.
+const INLINE_CODE: &[&str] = &["-c", "-e", "--eval", "-command", "-encodedcommand"];
+
+/// Uma parte do comando roda código inline de um interpretador (`python3 -c "…"`)? Pura.
+fn has_inline_code(part: &str) -> bool {
+    let plain = dequote(part);
+    let tokens = words(&plain);
+    tokens.iter().enumerate().any(|(i, t)| {
+        INTERPRETERS.contains(&base_name(t).as_str()) && tokens[i + 1..].iter().any(|r| INLINE_CODE.contains(&r.to_lowercase().as_str()))
+    })
+}
+
+/// Um comando que só lê, mas toca arquivo sensível ou fora da pasta, não é baixo risco: a leitura já põe o conteúdo
+/// (um segredo) no contexto do agente. Espelho de `readsSensitiveOrOutside` em `permissionModel.ts`. Pura.
+fn reads_sensitive_or_outside(part: &str, cwd: Option<&str>) -> bool {
+    let plain = dequote(part);
+    words(&plain).iter().skip(1).any(|t| {
+        if is_flag(t) {
+            return false;
+        }
+        let r = resolve_path(t, cwd);
+        !r.inside || sensitive_re().is_match(&r.full)
+    })
+}
+
 fn command_risk(command: &str, cwd: Option<&str>) -> Risk {
     if command.is_empty() {
         return Risk::Medium;
@@ -496,7 +525,11 @@ fn command_risk(command: &str, cwd: Option<&str>) -> Risk {
     if analysis.unsafe_meta || !analysis.writes.is_empty() || analysis.parts.is_empty() {
         return Risk::Medium;
     }
-    if analysis.parts.iter().all(|p| part_is_read_only(p)) { Risk::Low } else { Risk::Medium }
+    if analysis.parts.iter().all(|p| part_is_read_only(p)) && !analysis.parts.iter().any(|p| reads_sensitive_or_outside(p, cwd)) {
+        Risk::Low
+    } else {
+        Risk::Medium
+    }
 }
 
 fn escape(text: &str) -> String {
@@ -553,6 +586,10 @@ pub fn rule_matches(rule: &Rule, subject: &Subject) -> bool {
             // que escreve: a regra não decide, a pessoa decide.
             let analysis = analyze_command(&subject.detail);
             if analysis.unsafe_meta || !analysis.writes.is_empty() {
+                return false;
+            }
+            // Código inline de interpretador: o que roda não se lê no pedido, então regra nenhuma decide.
+            if analysis.parts.iter().any(|p| has_inline_code(p)) {
                 return false;
             }
             let parts: Vec<String> = analysis.parts.iter().map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ")).collect();

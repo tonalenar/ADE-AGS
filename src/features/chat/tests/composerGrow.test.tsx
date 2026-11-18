@@ -29,7 +29,7 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); });
 
-const mount = () => act(async () => { root.render(<ChatComposer placeholder="p" onSubmit={() => true} />); });
+const mount = () => act(async () => { root.render(<ChatComposer placeholder="p" onSubmit={async () => true} />); });
 const area = () => host.querySelector("textarea") as HTMLTextAreaElement;
 const type = (value: string) => act(async () => {
   Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(area(), value);

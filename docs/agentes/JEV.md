@@ -77,7 +77,7 @@ Todos nascem **desligados**.
   3. um único trabalhador processa a fila.
 - Cada job vai a todos os destinos (principal e secundário).
   - Destino que sai da máquina pula o que é sensível.
-  - Dedupe de 1 h e nenhum retry.
+  - Dedupe de 1 h (o `fleet_gate`, de 1 dia: a tarefa parada não paga o provedor a cada hora) e nenhum retry.
 - `decision_shadow_log` guarda:
   - o **hash** do state (nunca o texto);
   - a heurística e a decisão do provedor;
