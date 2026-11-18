@@ -10,7 +10,8 @@ import { canvasActions, missionBoardKey, setWorkMode } from "@/features/canvas/s
 import type { FunctionalRole, Squad, SubagentDefault } from "@/features/squads/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { neutralizeAngles, untrustedBlock } from "@/shared/untrusted";
-import { pasteIntoTab, sendWhenReady, type SendTimings } from "@/features/terminal/terminalRegistry";
+import type { SendTimings } from "@/features/terminal/terminalRegistry";
+import { mostraResultado, sendAutonomous, writeToAgent } from "@/features/terminal/safeWrite";
 
 import { getAutonomy, withAutonomy } from "./autonomy";
 import { mirrorInput, mirrorMission } from "./mirror";
@@ -542,7 +543,7 @@ export async function startMissionInTerminals(
           // Carência: o agente pode só estar iniciando (o Antigravity levou 15 s para a 1ª saída). Só avisa se continuar mudo.
           window.setTimeout(() => {
             if (!shouldWarnStalled(startup, actor)) return;
-            pasteIntoTab(leadTabId, `[AGS] ${actor} não mostrou atividade após o briefing (recebeu um Enter). Confirme se ele está trabalhando; se não, reenvie a tarefa dele com ags peer tell.`, true);
+            void writeToAgent(leadTabId, `[AGS] ${actor} não mostrou atividade após o briefing (recebeu um Enter). Confirme se ele está trabalhando; se não, reenvie a tarefa dele com ags peer tell.`, { submit: true, source: "stalled" }).then((result) => mostraResultado(leadTabId, "stalled", result));
           }, STALL_GRACE_MS);
         },
       onSent: (at) => {
@@ -555,7 +556,7 @@ export async function startMissionInTerminals(
   const sendBriefing = async (agentId: string, tabId: string, text: string, actor: string, lead = false) => {
     if (agentId === "gemini-desktop") {
       await invoke("gemini_desktop_consult_create", { cwd: mission.cwd, prompt: `${text}\n\nINTEGRAÇÃO ADE PELO GEMINI DESKTOP: você não executa comandos ADE diretamente. Use o plano de tarefas estruturado esperado pelo orquestrador; a ADE enviará os pedidos aos terminais e agentes conectados e capturará as respostas pelo aplicativo Gemini já conectado. O usuário ainda revisa e aplica o plano antes da execução. Não afirme ter executado comandos nem enviado mensagens.` });
-    } else sendWhenReady(tabId, briefingFor(agentId,text),timed(actor,tabId,lead));
+    } else sendAutonomous(tabId, briefingFor(agentId,text), "peer", timed(actor,tabId,lead));
   };
   await sendBriefing(leadAgentId,leadTabId,leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined, prepared.workspaces, hasVigia),LEAD_NAME,true);
   await Promise.all(memberTabIds.map((tabId,i) => sendBriefing(team[i].agentId,tabId,memberBriefing(mission,team[i],memberWorkspaces[i],findings,memory,qaOf(team)?.name),team[i].name)));

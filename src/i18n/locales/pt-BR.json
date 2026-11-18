@@ -6429,5 +6429,13 @@
   "providers.method.cursor.login": "Login do Cursor Agent",
   "providers.method.unavailable.agy": "O agy 1.5.5 só entra por login Google e ignora chave de API por variável (medido). Esse modo existe no runtime ACP do T3, não no agy.",
   "providers.method.unavailable.os": "Contas separadas do Antigravity só estão verificadas no macOS.",
-  "providers.method.unavailable.cursor": "Rode cursor-agent login num terminal: a ADE não isola contas do Cursor."
+  "providers.method.unavailable.cursor": "Rode cursor-agent login num terminal: a ADE não isola contas do Cursor.",
+  "terminal.write.blockedTitle": "Mensagem não enviada",
+  "terminal.write.blockedWaiting": "{{name}} está esperando a sua resposta num diálogo. Nada foi enviado a ele.",
+  "terminal.write.blockedBusy": "{{name}} está trabalhando. Não enviei agora.",
+  "terminal.write.noTerminal": "{{name}} não tem terminal aberto. Não enviei nada.",
+  "terminal.write.unconfirmed": "{{name}} não confirmou o envio. O texto ficou na caixa de entrada dele, sem enviar: aperte Enter lá quando ele parar. Não reenvie a mensagem.",
+  "terminal.write.retryAuto": "Tento de novo sozinho.",
+  "terminal.write.retryManual": "Reenvie quando ele parar.",
+  "agents.update.restartFailed": "A atualização de {{label}} ficou pronta, mas a app não reiniciou: {{cause}}. As abas foram reabertas."
 }

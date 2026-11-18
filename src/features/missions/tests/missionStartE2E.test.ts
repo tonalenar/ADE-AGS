@@ -377,9 +377,11 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     expect(frontendTerm.pastes[0]).toContain("Frontend");
     expect(qaTerm.pastes).toHaveLength(1);
     expect(qaTerm.pastes[0]).toContain("QA");
-
-    // 5. O composto escreve o briefing, pausa 80ms e só então envia o primeiro Enter (\r).
+    // O envio conta quando o Enter sai (PR08): colar sozinho ainda não é envio.
+    expect(recordedSpans.filter((s) => s.span.kind === "start_briefing")).toHaveLength(0);
     expect(leadTerm.inputs).not.toContain("\r");
+
+    // 5. Após 80ms, o primeiro Enter (\r) é disparado
     vi.advanceTimersByTime(80);
     await flushPromises();
     expect(leadTerm.inputs).toContain("\r");
@@ -387,7 +389,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     expect(frontendTerm.inputs).toContain("\r");
     expect(qaTerm.inputs).toContain("\r");
 
-    // Spans de start_briefing são registrados quando o composto termina (inclusive a pausa).
+    // Spans de start_briefing: registrados quando o Enter sai (PR08: o envio conta, não só a colagem).
     const briefingSpans = recordedSpans.filter((s) => s.span.kind === "start_briefing");
     expect(briefingSpans.map((s) => s.span.actor)).toEqual(["Orquestrador", "Backend", "Frontend", "QA"]);
 
@@ -473,7 +475,10 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     const qaInputsBeforeCheck = qaTerm.inputs.length;
     const leadPastesBeforeCheck = leadTerm.pastes.length;
 
+    // O relógio do início começa no Enter (80 ms depois da colagem, PR08): aos 25 s da colagem ainda não há aviso.
     vi.advanceTimersByTime(START_CHECK_MS - 4900);
+    expect(recordedSpans.filter((s) => s.span.kind === "start_stalled" && s.span.actor === "QA")).toHaveLength(0);
+    vi.advanceTimersByTime(80);
 
     // Backend e Frontend tiveram atividade detectada após ECHO_MS -> NÃO foram dados como stalled!
     // QA NUNCA arrancou:

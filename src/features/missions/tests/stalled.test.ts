@@ -239,6 +239,13 @@ describe("diagnóstico do silêncio e a interface atrasada", () => {
   });
 });
 
+describe("stallMessage: o nome da aba sai como rótulo limpo (A162)", () => {
+  it("aspas e ângulos do nome não quebram a frase do aviso", () => {
+    const text = stallMessage('QA "x" <y>', { tabId: "a", fromTabId: "l", sinceTaskMs: 1, quietMs: 1, worked: false, lastLine: "" });
+    expect(text).toContain('O agente "QA x y"');
+  });
+});
+
 // O menu de aprovação do Codex: o cursor › na opção 1 e a opção de recusar com (esc). Mesmo texto que o agente
 // pode imprimir, então o detector só aceita o menu no FIM da tela (rodada 1 do PR11).
 const CODEX_MENU = [

@@ -6429,5 +6429,13 @@
   "providers.method.cursor.login": "Cursor Agent sign-in",
   "providers.method.unavailable.agy": "agy 1.5.5 only signs in through Google and ignores API keys passed by variable (measured). That mode exists in T3's ACP runtime, not in agy.",
   "providers.method.unavailable.os": "Separate Antigravity accounts are only verified on macOS.",
-  "providers.method.unavailable.cursor": "Run cursor-agent login in a terminal: ADE does not isolate Cursor accounts."
+  "providers.method.unavailable.cursor": "Run cursor-agent login in a terminal: ADE does not isolate Cursor accounts.",
+  "terminal.write.blockedTitle": "Message not sent",
+  "terminal.write.blockedWaiting": "{{name}} is waiting for your answer in a dialog. Nothing was sent to it.",
+  "terminal.write.blockedBusy": "{{name}} is working. I didn't send it now.",
+  "terminal.write.noTerminal": "{{name}} has no open terminal. Nothing was sent.",
+  "terminal.write.unconfirmed": "{{name}} did not confirm the send. The text is still in its input box, unsent: press Enter there when it stops. Do not resend the message.",
+  "terminal.write.retryAuto": "I'll try again on my own.",
+  "terminal.write.retryManual": "Resend when it stops.",
+  "agents.update.restartFailed": "{{label}} was updated, but the app did not restart: {{cause}}. The tabs were reopened."
 }

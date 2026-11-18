@@ -7,6 +7,7 @@ O Vigia supervisiona as equipes em segundo plano, sem terminal próprio, e custa
 ## Regras (não podem quebrar)
 - **Nasce desligado.** Quando desligado, roda **só** a detecção de "equipe entregou", que gera um aviso do sistema. Não escreve no chat nem em terminal algum.
 - **Nunca escreve num terminal que está trabalhando**, e manda uma cutucada por vez.
+- **Pergunta de aprovação conta como ocupado**: a cutucada é conferida antes de colar e antes do Enter (`safeWrite.ts`). Bloqueada, não conta como cutucada e a pessoa é avisada.
 - **Só registra no chat depois que a cutucada foi colada de fato** (callback `onSent`).
 - "Entregou" e "parei de insistir" saem **uma vez só**. O contador de lembretes zera **só** com uma tarefa nova do Orquestrador; um "ok" não zera.
 - `taskAt` (tarefa recebida) só conta quando vem **do Orquestrador**.
