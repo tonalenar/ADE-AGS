@@ -6,6 +6,7 @@
 //! Si no hay fila `main`, se crea la usada más recientemente y el resto espera igual.
 
 use std::sync::Mutex;
+use std::time::Duration;
 
 use crate::database::WindowRow;
 
@@ -34,7 +35,7 @@ pub fn plan_startup_restore(rows: Vec<WindowRow>) -> (Vec<WindowRow>, Vec<Window
 
 /// Las filas que todavía no se convirtieron en WebView.
 ///
-/// `on_primary_frame` es el único camino que las suelta. Un aviso que llega antes
+/// `on_primary_frame` (ou o prazo do backend) es el único camino que las suelta. Un aviso que llega antes
 /// de `stage` no las descarta: el splash de migración pinta un cuadro antes de que
 /// las filas existan.
 #[derive(Debug)]
@@ -82,7 +83,18 @@ impl RestoreGate {
         self.released = true;
         std::mem::take(&mut self.deferred)
     }
+
+    /// Sem o quadro da principal, o prazo solta as mesmas janelas que `on_primary_frame`.
+    fn on_deadline(&mut self, decorrido: Duration, prazo: Duration) -> Vec<WindowRow> {
+        if decorrido < prazo {
+            return Vec::new();
+        }
+        self.on_primary_frame()
+    }
 }
+
+/// Prazo para o primeiro quadro da principal chegar. Passado, as janelas adiadas abrem mesmo sem o front confirmar.
+pub const DEFERRED_RESTORE_DEADLINE: Duration = Duration::from_secs(10);
 
 /// Estado de Tauri: las ventanas que el arranque dejó para después del primer cuadro.
 pub struct DeferredRestore {
@@ -106,6 +118,14 @@ impl DeferredRestore {
         self.gate
             .lock()
             .map(|mut gate| gate.on_primary_frame())
+            .unwrap_or_default()
+    }
+
+    /// Chamado pelo prazo do backend (ver `arm_deferred_deadline`). Quem cronometra passa o tempo decorrido.
+    pub fn on_deadline(&self, decorrido: Duration, prazo: Duration) -> Vec<WindowRow> {
+        self.gate
+            .lock()
+            .map(|mut gate| gate.on_deadline(decorrido, prazo))
             .unwrap_or_default()
     }
 }
@@ -168,5 +188,27 @@ mod tests {
         assert!(!gate.released);
         gate.stage(vec![row("a", 1), row("b", 2)]);
         assert_eq!(gate.on_primary_frame().len(), 2);
+    }
+
+    /// Sem o quadro da principal, o prazo abre as janelas adiadas. Antes do prazo, nada abre.
+    #[test]
+    fn sem_primeiro_quadro_o_prazo_abre_as_janelas_adiadas() {
+        let prazo = DEFERRED_RESTORE_DEADLINE;
+        let mut gate = RestoreGate::hold(vec![row("a", 1), row("b", 2)]);
+        assert!(
+            gate.on_deadline(prazo - Duration::from_millis(1), prazo).is_empty(),
+            "antes do prazo nada abre"
+        );
+        assert_eq!(gate.on_deadline(prazo, prazo).len(), 2, "no prazo, as adiadas abrem sem o quadro");
+        assert!(gate.on_primary_frame().is_empty(), "o quadro atrasado não abre de novo");
+    }
+
+    /// Se o quadro chega antes do prazo, o prazo depois não reabre nada.
+    #[test]
+    fn quadro_antes_do_prazo_nao_deixa_o_prazo_reabrir() {
+        let prazo = DEFERRED_RESTORE_DEADLINE;
+        let mut gate = RestoreGate::hold(vec![row("a", 1)]);
+        assert_eq!(gate.on_primary_frame().len(), 1);
+        assert!(gate.on_deadline(prazo * 2, prazo).is_empty());
     }
 }

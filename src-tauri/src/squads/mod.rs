@@ -17,58 +17,83 @@ fn notify<R: Runtime>(app: &AppHandle<R>, squad_id: &str) {
 }
 
 #[tauri::command]
-pub fn squad_create<R: Runtime>(
-    app: AppHandle<R>,
+pub async fn squad_create(
+    app: AppHandle,
     input: SquadInput,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Squad, String> {
-    let squad = {
-        let conn = db.lock().map_err(|error| error.to_string())?;
-        let valid = store::validate(&conn, &input)?;
-        store::create(&conn, &valid)?
-    };
-    notify(&app, &squad.id);
-    Ok(squad)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let squad = {
+            let conn = db.lock().map_err(|error| error.to_string())?;
+            let valid = store::validate(&conn, &input)?;
+            store::create(&conn, &valid)?
+        };
+        notify(&app, &squad.id);
+        Ok(squad)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn squad_update<R: Runtime>(
-    app: AppHandle<R>,
+pub async fn squad_update(
+    app: AppHandle,
     squad_id: String,
     input: SquadInput,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Squad, String> {
-    let squad = {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let squad = {
+            let conn = db.lock().map_err(|error| error.to_string())?;
+            let valid = store::validate(&conn, &input)?;
+            store::update(&conn, &squad_id, &valid)?
+        };
+        notify(&app, &squad.id);
+        Ok(squad)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn squad_list(db: tauri::State<'_, DbConnection>) -> Result<Vec<Squad>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
         let conn = db.lock().map_err(|error| error.to_string())?;
-        let valid = store::validate(&conn, &input)?;
-        store::update(&conn, &squad_id, &valid)?
-    };
-    notify(&app, &squad.id);
-    Ok(squad)
+        store::list(&conn)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn squad_list(db: tauri::State<DbConnection>) -> Result<Vec<Squad>, String> {
-    let conn = db.lock().map_err(|error| error.to_string())?;
-    store::list(&conn)
+pub async fn squad_get(squad_id: String, db: tauri::State<'_, DbConnection>) -> Result<Squad, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        store::get(&conn, &squad_id)?.ok_or_else(|| format!("no squad '{squad_id}' exists"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn squad_get(squad_id: String, db: tauri::State<DbConnection>) -> Result<Squad, String> {
-    let conn = db.lock().map_err(|error| error.to_string())?;
-    store::get(&conn, &squad_id)?.ok_or_else(|| format!("no squad '{squad_id}' exists"))
-}
-
-#[tauri::command]
-pub fn squad_delete<R: Runtime>(
-    app: AppHandle<R>,
+pub async fn squad_delete(
+    app: AppHandle,
     squad_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
-    {
-        let conn = db.lock().map_err(|error| error.to_string())?;
-        store::delete(&conn, &squad_id)?;
-    }
-    notify(&app, &squad_id);
-    Ok(())
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        {
+            let conn = db.lock().map_err(|error| error.to_string())?;
+            store::delete(&conn, &squad_id)?;
+        }
+        notify(&app, &squad_id);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

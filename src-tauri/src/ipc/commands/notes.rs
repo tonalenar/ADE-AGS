@@ -129,13 +129,13 @@ fn write(app: &AppHandle, target: &Reachable, content: &str) -> Result<(), Strin
 
 pub(super) fn note_list(_app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
-    let notes = reachable(&canvas::load_boards(), &from);
+    let notes = reachable(&canvas::load_boards()?, &from);
     Ok(json!({ "notes": notes.iter().map(describe).collect::<Vec<_>>() }))
 }
 
 pub(super) fn note_read(_app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
-    let notes = reachable(&canvas::load_boards(), &from);
+    let notes = reachable(&canvas::load_boards()?, &from);
     let target = resolve_note(&notes, &arg_str(args, "name")?)?;
     let start = arg_num(args, "start")?.unwrap_or(1);
     let (text, total) = numbered(&target.note.content, start, arg_num(args, "count")?);
@@ -156,7 +156,7 @@ pub(super) fn note_create(app: &AppHandle, args: &Value) -> Result<Value, String
     }
     // `--stack <nota>`: nace dentro de la pila de una nota que alcanza.
     if let Some(wanted) = arg_str_opt(args, "stack").filter(|n| !n.trim().is_empty()) {
-        let notes = reachable(&canvas::load_boards(), &from);
+        let notes = reachable(&canvas::load_boards()?, &from);
         req["stackWith"] = json!(resolve_note(&notes, &wanted)?.id);
     }
     let raw = ask_frontend(app, "canvas.note", &req, Some(&me.window))?;
@@ -166,7 +166,7 @@ pub(super) fn note_create(app: &AppHandle, args: &Value) -> Result<Value, String
 
 pub(super) fn note_write(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
-    let notes = reachable(&canvas::load_boards(), &from);
+    let notes = reachable(&canvas::load_boards()?, &from);
     let target = resolve_note(&notes, &arg_str(args, "name")?)?;
     let content = arg_str(args, "content")?;
     write(app, target, &content)?;
@@ -175,7 +175,7 @@ pub(super) fn note_write(app: &AppHandle, args: &Value) -> Result<Value, String>
 
 pub(super) fn note_edit(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
-    let notes = reachable(&canvas::load_boards(), &from);
+    let notes = reachable(&canvas::load_boards()?, &from);
     let target = resolve_note(&notes, &arg_str(args, "name")?)?;
     let updated = replace_once(&target.note.content, &arg_str(args, "old")?, &arg_str(args, "new")?)?;
     write(app, target, &updated)?;

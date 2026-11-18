@@ -25,6 +25,12 @@ pub struct PreparedTeam {
     pub workspaces: Vec<TeamWorkspace>,
     pub precheck: String,
     pub memory: String,
+    pub trust_warnings: Vec<String>,
+}
+
+pub(crate) struct PreparedRecruit {
+    pub workspace: TeamWorkspace,
+    pub trust_warnings: Vec<String>,
 }
 
 /// Esperas entre reintentos de un git que falló por un acceso momentáneo.
@@ -105,7 +111,7 @@ fn prepare_one(db: &crate::database::DbConnection, mission: &super::Mission, nam
 
 /// Pré-aprova a pasta dos worktrees em cada conta do Claude Code, para o diálogo "confia nesta
 /// pasta?" não travar os terminais da missão. Melhor esforço: não impede a missão.
-pub(crate) fn trust_claude_worktrees(db: &crate::database::DbConnection, base: &std::path::Path) {
+pub(crate) fn trust_claude_worktrees(db: &crate::database::DbConnection, base: &std::path::Path) -> Vec<String> {
     let dirs: Vec<String> = db
         .lock()
         .ok()
@@ -115,7 +121,7 @@ pub(crate) fn trust_claude_worktrees(db: &crate::database::DbConnection, base: &
             Some(rows.flatten().collect())
         })
         .unwrap_or_default();
-    crate::usage::trust::trust_worktrees_root(base, &dirs);
+    crate::usage::trust::trust_worktrees_root(base, &dirs)
 }
 
 /// Setting com a base dos worktrees das missões (uma ref git: `origin/dev`, `main`…). Vazio = automático.
@@ -140,7 +146,7 @@ fn mission_start(db: &crate::database::DbConnection, mission: &super::Mission, f
 }
 
 /// Recruits inherit the same isolation as the initial team, not the lead's cwd.
-pub(crate) fn prepare_recruit(db: &crate::database::DbConnection, mission_id: &str, name: &str) -> Result<TeamWorkspace, String> {
+pub(crate) fn prepare_recruit(db: &crate::database::DbConnection, mission_id: &str, name: &str) -> Result<PreparedRecruit, String> {
     validate_members(&[name.to_string()])?;
     let _preparing = PREPARING.lock().map_err(|e| e.to_string())?;
     let mission = {
@@ -148,11 +154,13 @@ pub(crate) fn prepare_recruit(db: &crate::database::DbConnection, mission_id: &s
         super::store::get(&conn, mission_id)?.ok_or("Missão não encontrada.")?
     };
     let base = dirs::home_dir().ok_or("Home indisponível.")?.join(".ags").join("worktrees");
-    trust_claude_worktrees(&db, &base);
+    let trust_warnings = trust_claude_worktrees(&db, &base);
     let start = mission_start(db, &mission, false);
     // Nome novo, gravado antes do worktree: um nome que a missão já usou é recusado.
     super::members::begin_recruit(&*db.lock().map_err(|e| e.to_string())?, mission_id, name, crate::util::now_ts_ms())?;
-    prepare_one(db, &mission, name, &base, &start).inspect_err(|error| record_failure(db, mission_id, name, error))
+    let workspace = prepare_one(db, &mission, name, &base, &start)
+        .inspect_err(|error| record_failure(db, mission_id, name, error))?;
+    Ok(PreparedRecruit { workspace, trust_warnings })
 }
 
 #[tauri::command]
@@ -168,7 +176,7 @@ pub async fn mission_prepare_team(app: AppHandle, mission_id: String, members: V
             super::store::get(&conn, &mission_id)?.ok_or("Missão não encontrada.")?
         };
         let base = dirs::home_dir().ok_or("Home indisponível.")?.join(".ags").join("worktrees");
-        trust_claude_worktrees(&db, &base);
+        let trust_warnings = trust_claude_worktrees(&db, &base);
         let start = mission_start(&db, &mission, true);
         // Los worktrees se crean en paralelo (cada `git worktree add` hace un checkout completo y en
         // serie eran ~1 s por integrante antes de que se abriera el canvas). Si git no logra un lock
@@ -197,7 +205,7 @@ pub async fn mission_prepare_team(app: AppHandle, mission_id: String, members: V
             super::precheck_text(&conn, &mission_id)?
         };
         let memory = super::memory_briefing(&db, &mission_id)?;
-        Ok(PreparedTeam { workspaces, precheck, memory })
+        Ok(PreparedTeam { workspaces, precheck, memory, trust_warnings })
     }).await.map_err(|e| e.to_string())?
 }
 

@@ -373,10 +373,12 @@ pub fn attach(window: &WebviewWindow, view: String, exe: &Path) -> Result<Deskto
         );
         SetParent(hwnd as HWND, host);
         if GetParent(hwnd as HWND) != host {
-            restore(&saved)?;
+            // O host e o mutex saem antes de qualquer `?`: um erro em `restore` não pode deixá-los presos.
+            let restored = restore(&saved);
             DestroyWindow(host);
             ReleaseMutex(lock);
             CloseHandle(lock);
+            restored?;
             return Err("Windows refused to attach the Gemini window".into());
         }
         *sessions().lock().map_err(|e| e.to_string())? = Some(Session {

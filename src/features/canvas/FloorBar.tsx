@@ -80,14 +80,19 @@ export function FloorBar({ inline = false }: { inline?: boolean }) {
   useEffect(() => {
     if (!cwd) return;
     let alive = true;
-    const load = () => invoke<FloorList>("floor_list", { cwd }).then((l) => alive && setList(l)).catch(() => undefined);
+    setList(null);
+    const load = () => invoke<FloorList>("floor_list", { cwd }).then((l) => alive && setList(l)).catch((error: unknown) => {
+      if (!alive) return;
+      setList(null);
+      AlertaToast(t("canvas.floor.title"), t("canvas.floor.loadError", { error: String(error) }), "warning", 9000);
+    });
     load();
     const off = listen("cc-floors-changed", () => { badgeAt.current = {}; load(); });
     return () => {
       alive = false;
       off.then((fn) => fn());
     };
-  }, [cwd]);
+  }, [cwd, t]);
 
   if (!active || !list) return null;
 
@@ -107,7 +112,14 @@ export function FloorBar({ inline = false }: { inline?: boolean }) {
     addTab({ cwd: target, agent, accountId: active.accountId });
   };
 
-  const refresh = async () => setList(await invoke<FloorList>("floor_list", { cwd: active.cwd }));
+  const refresh = async () => {
+    try {
+      setList(await invoke<FloorList>("floor_list", { cwd: active.cwd }));
+    } catch (error) {
+      setList(null);
+      AlertaToast(t("canvas.floor.title"), t("canvas.floor.loadError", { error: String(error) }), "warning", 9000);
+    }
+  };
 
   /** O resumo do andar (commits à frente, sujeira, conflito), pedido ao passar o mouse e reaproveitado por 15 s. */
   const loadBadge = (floor: Floor) => {

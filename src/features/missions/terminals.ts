@@ -9,7 +9,9 @@ import { BROWSER_HINT, computerUseHint } from "@/features/canvas/portalNotice";
 import { canvasActions, missionBoardKey, setWorkMode } from "@/features/canvas/store";
 import type { FunctionalRole, Squad, SubagentDefault } from "@/features/squads/types";
 import { useTabsStore } from "@/features/tabs/store";
-import { pasteIntoTab, sendWhenReady, type SendTimings } from "@/features/terminal/terminalRegistry";
+import { neutralizeAngles, untrustedBlock } from "@/shared/untrusted";
+import type { SendTimings } from "@/features/terminal/terminalRegistry";
+import { mostraResultado, sendAutonomous, writeToAgent } from "@/features/terminal/safeWrite";
 
 import { getAutonomy, withAutonomy } from "./autonomy";
 import { mirrorInput, mirrorMission } from "./mirror";
@@ -17,6 +19,7 @@ import { withModel } from "./modelFlags";
 import { STALL_GRACE_MS, shouldWarnStalled, startEventSpan, startupProgress, withActivity, allWorkingSpan, type StartupState } from "./startup";
 import { useStallAlerts } from "./stallAlerts";
 import { recordSpan } from "./timings";
+import { showWorktreeTrustWarnings } from "./trustWarning";
 import { missionTurns } from "./turns";
 import { VIGIA_NAME, vigiaAgentFor } from "./vigia";
 import { useVigiaSwitch } from "./vigiaSwitch";
@@ -115,6 +118,7 @@ export interface PreparedTeam {
   workspaces: TeamWorkspace[];
   precheck: string;
   memory: string;
+  trustWarnings?: string[];
 }
 
 /** Refuse incomplete isolation instead of opening any agent in the shared clone. */
@@ -165,10 +169,8 @@ const MEMORY_END = "<<<FIM_MEMORIA_APROVADA>>>";
  * (Mesma ideia do snapshot da Fleet: a memória é conteúdo de terceiros, nunca instrução.)
  */
 export function neutralizeMemoryText(text: string): string {
-  return text
+  return neutralizeAngles(text)
     .replace(/`/g, "'")
-    .replace(/</g, "‹")
-    .replace(/>/g, "›")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -258,7 +260,8 @@ export function leadBriefing(
     "",
     ...singleBranchRule("lead", workspaces.find((w) => w.name === LEAD_NAME)?.branch),
     "",
-    ...(findings.trim() ? [findings.trim(), ""] : []),
+    // Os achados vêm do pré-cheque: mensagens de commit e títulos de outras missões, escritos por agentes. Dado, não ordem.
+    ...(findings.trim() ? [untrustedBlock("achados prévios da missão", findings.trim()), ""] : []),
     ...(memoryEnvelope(memory, mission.id) ? [memoryEnvelope(memory, mission.id), ""] : []),
     "COMO COORDENAR (use SOMENTE o `ags`; não use `maestri` nem skills de outros apps)",
     "- `ags peers` — quem está conectado com você.",
@@ -351,7 +354,8 @@ export function memberBriefing(
     ...(member.subagent ? ["Você é um SUBAGENTE do orquestrador: execute o que ele enviar."] : []),
     "",
     ...(workspace ? [`SEU WORKTREE: ${workspace.cwd}; branch: ${workspace.branch}. Trabalhe somente nele.`, workspace.environment, ""] : []),
-    ...(findings.trim() ? [findings.trim(), ""] : []),
+    // Os achados vêm do pré-cheque: mensagens de commit e títulos de outras missões, escritos por agentes. Dado, não ordem.
+    ...(findings.trim() ? [untrustedBlock("achados prévios da missão", findings.trim()), ""] : []),
     ...(memoryEnvelope(memory, mission.id) ? [memoryEnvelope(memory, mission.id), ""] : []),
     "Ao receber a tarefa, leia o quadro da missão (`ags swarm read`): regras, contratos e decisões que valem para todos ficam lá, numerados. Publique ali (`ags swarm note --file <arquivo>`) o que outro integrante precisa saber, em vez de repetir em cada mensagem.",
     "Não explore nem edite antes de receber a tarefa do Orquestrador. Aguarde a delegação; use somente seu worktree e preserve a junction node_modules. Não abra PR nem faça merge sem pedido do usuário.",
@@ -467,6 +471,7 @@ export async function startMissionInTerminals(
   const prepared = await invoke<PreparedTeam>("mission_prepare_team", { missionId: mission.id, members: [LEAD_NAME, ...team.map((m) => m.name)] });
   const leadWorkspace = workspaceFor(prepared, LEAD_NAME);
   const memberWorkspaces = team.map((m) => workspaceFor(prepared, m.name));
+  showWorktreeTrustWarnings(prepared.trustWarnings);
   // Teste A/B: o braço "sem-memoria" (marcador no título) sai sem memória nem resumo de missões anteriores.
   const { findings, memory } = priorContext(mission.title, prepared);
 
@@ -538,7 +543,7 @@ export async function startMissionInTerminals(
           // Carência: o agente pode só estar iniciando (o Antigravity levou 15 s para a 1ª saída). Só avisa se continuar mudo.
           window.setTimeout(() => {
             if (!shouldWarnStalled(startup, actor)) return;
-            pasteIntoTab(leadTabId, `[AGS] ${actor} não mostrou atividade após o briefing (recebeu um Enter). Confirme se ele está trabalhando; se não, reenvie a tarefa dele com ags peer tell.`, true);
+            void writeToAgent(leadTabId, `[AGS] ${actor} não mostrou atividade após o briefing (recebeu um Enter). Confirme se ele está trabalhando; se não, reenvie a tarefa dele com ags peer tell.`, { submit: true, source: "stalled" }).then((result) => mostraResultado(leadTabId, "stalled", result));
           }, STALL_GRACE_MS);
         },
       onSent: (at) => {
@@ -551,7 +556,7 @@ export async function startMissionInTerminals(
   const sendBriefing = async (agentId: string, tabId: string, text: string, actor: string, lead = false) => {
     if (agentId === "gemini-desktop") {
       await invoke("gemini_desktop_consult_create", { cwd: mission.cwd, prompt: `${text}\n\nINTEGRAÇÃO ADE PELO GEMINI DESKTOP: você não executa comandos ADE diretamente. Use o plano de tarefas estruturado esperado pelo orquestrador; a ADE enviará os pedidos aos terminais e agentes conectados e capturará as respostas pelo aplicativo Gemini já conectado. O usuário ainda revisa e aplica o plano antes da execução. Não afirme ter executado comandos nem enviado mensagens.` });
-    } else sendWhenReady(tabId, briefingFor(agentId,text),timed(actor,tabId,lead));
+    } else sendAutonomous(tabId, briefingFor(agentId,text), "peer", timed(actor,tabId,lead));
   };
   await sendBriefing(leadAgentId,leadTabId,leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined, prepared.workspaces, hasVigia),LEAD_NAME,true);
   await Promise.all(memberTabIds.map((tabId,i) => sendBriefing(team[i].agentId,tabId,memberBriefing(mission,team[i],memberWorkspaces[i],findings,memory,qaOf(team)?.name),team[i].name)));

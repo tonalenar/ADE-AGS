@@ -4,12 +4,11 @@ use super::mission::{
     estimate_in_range, mission_snapshot, mission_transcripts, read_transcript_priced,
     sum_usage_in_range, total_for_agents, CostEstimate, MissionAgentTokens, MissionTokens,
 };
-use rusqlite::{Connection, OptionalExtension};
+use crate::missions::transcript_cache::read_incremental;
+use rusqlite::Connection;
 use serde::Serialize;
 use std::{
-    collections::{BTreeMap, HashSet},
-    fs::File,
-    io::{BufRead, BufReader},
+    collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -33,6 +32,27 @@ pub struct MissionTabTokens {
     pub estimate: Option<CostEstimate>,
 }
 
+type UsageTabRow = (
+    String, String, String, String, String, Option<String>, Option<String>, i64, Option<i64>, String,
+);
+type UsageLedgerRow = (
+    String, String, String, String, Option<String>, Option<i64>, Option<i64>, Option<f64>, Option<String>,
+);
+
+struct MissionUsageTabSnapshot {
+    row: UsageTabRow,
+    isolated: bool,
+    profile: Option<PathBuf>,
+    custom: bool,
+    custom_sessions_dir: Option<PathBuf>,
+}
+
+struct MissionUsageSnapshot {
+    mission: super::mission::MissionSnapshot,
+    tabs: Vec<MissionUsageTabSnapshot>,
+    ledger: Vec<UsageLedgerRow>,
+}
+
 pub(crate) fn path_key(path: &str) -> String {
     // Windows paths must compare identically even in Linux CI; Unix remains case sensitive.
     let normalized = path.replace('\\', "/").trim_end_matches('/').to_string();
@@ -49,7 +69,7 @@ pub fn capture_mission_tabs(
     boards: &crate::canvas::Boards,
 ) -> Result<(), String> {
     let mut stmt = conn.prepare("SELECT id,agent_id,COALESCE(title,agent_label),cwd,session_id,account_id,opened_at FROM tabs").map_err(|e| e.to_string())?;
-    let rows = stmt
+    let rows: Vec<_> = stmt
         .query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -61,39 +81,79 @@ pub fn capture_mission_tabs(
                 r.get::<_, i64>(6)?,
             ))
         })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
-    for row in rows {
-        let (id, agent, label, cwd, session, account, opened) = row.map_err(|e| e.to_string())?;
-        let workspace: Option<(String, String)> = conn
-            .query_row(
-                "SELECT mission_id,name FROM mission_team_workspaces WHERE cwd=?1",
-                [&cwd],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()
-            .map_err(|e| e.to_string())?;
+    let workspace_by_cwd = {
+        let mut statement = conn
+            .prepare("SELECT mission_id,name,cwd FROM mission_team_workspaces")
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut by_cwd = HashMap::new();
+        for row in rows {
+            let (mission_id, name, cwd) = row.map_err(|error| error.to_string())?;
+            by_cwd.entry(cwd).or_insert((mission_id, name));
+        }
+        by_cwd
+    };
+    let custom_agent_ids: HashSet<String> = crate::agents::list_for_conn(conn)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|agent| agent.id)
+        .collect();
+    let previous_tabs = {
+        let mut statement = conn
+            .prepare("SELECT mission_id,tab_id,label,session_id,account_id,session_ids FROM mission_usage_tabs")
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut previous = HashMap::new();
+        for row in rows {
+            let (mission_id, tab_id, label, session, account, sessions) =
+                row.map_err(|error| error.to_string())?;
+            previous.insert((mission_id, tab_id), (label, session, account, sessions));
+        }
+        previous
+    };
+    let mut upsert = conn
+        .prepare_cached("INSERT INTO mission_usage_tabs(mission_id,tab_id,agent_id,label,kind,cwd,session_id,account_id,opened_at,session_ids) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(mission_id,tab_id) DO UPDATE SET label=excluded.label,session_id=COALESCE(excluded.session_id,mission_usage_tabs.session_id),account_id=excluded.account_id,session_ids=excluded.session_ids WHERE mission_usage_tabs.label IS NOT excluded.label OR (excluded.session_id IS NOT NULL AND mission_usage_tabs.session_id IS NOT excluded.session_id) OR mission_usage_tabs.account_id IS NOT excluded.account_id OR mission_usage_tabs.session_ids IS NOT excluded.session_ids")
+        .map_err(|error| error.to_string())?;
+    for (id, agent, label, cwd, session, account, opened) in rows {
+        let workspace = workspace_by_cwd.get(&cwd);
         let mission = crate::canvas::mission_of_tab(boards, &id)
-            .or_else(|| workspace.as_ref().map(|w| w.0.clone()));
+            .or_else(|| workspace.map(|w| w.0.clone()));
         let Some(mission) = mission else { continue };
-        let kind = if crate::agents::find(conn, &agent).is_some() {
+        let kind = if custom_agent_ids.contains(&agent) {
             "custom"
-        } else if workspace.as_ref().is_some_and(|w| w.0 == mission) {
+        } else if workspace.is_some_and(|w| w.0 == mission) {
             "member"
         } else if boards.values().any(|b| b.roles.contains_key(&id)) {
             "recruit"
         } else {
             "loose"
         };
-        let previous: Option<String> = conn
-            .query_row(
-                "SELECT session_ids FROM mission_usage_tabs WHERE mission_id=?1 AND tab_id=?2",
-                rusqlite::params![mission, id],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(|e| e.to_string())?;
+        let key = (mission.clone(), id.clone());
+        let previous = previous_tabs.get(&key);
         let mut sessions: Vec<String> = previous
-            .and_then(|s| serde_json::from_str(&s).ok())
+            .and_then(|(_, _, _, sessions)| serde_json::from_str(sessions).ok())
             .unwrap_or_default();
         if let Some(s) = session.as_ref() {
             if !sessions.contains(s) {
@@ -101,7 +161,17 @@ pub fn capture_mission_tabs(
             }
         }
         let sessions = serde_json::to_string(&sessions).map_err(|e| e.to_string())?;
-        conn.execute("INSERT INTO mission_usage_tabs(mission_id,tab_id,agent_id,label,kind,cwd,session_id,account_id,opened_at,session_ids) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(mission_id,tab_id) DO UPDATE SET label=excluded.label,session_id=COALESCE(excluded.session_id,mission_usage_tabs.session_id),account_id=excluded.account_id,session_ids=excluded.session_ids", rusqlite::params![mission,id,agent,label,kind,cwd,session,account,opened,sessions]).map_err(|e|e.to_string())?;
+        let changed = previous.is_none_or(|(old_label, old_session, old_account, old_sessions)| {
+            old_label != &label
+                || (session.is_some() && old_session != &session)
+                || old_account != &account
+                || old_sessions != &sessions
+        });
+        if changed {
+            upsert
+                .execute(rusqlite::params![mission,id,agent,label,kind,cwd,session,account,opened,sessions])
+                .map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
@@ -124,7 +194,7 @@ fn jsonls(root: &Path, out: &mut Vec<PathBuf>) {
 
 /// Codex token_count reports cumulative totals repeatedly. Attribute only positive deltas.
 fn codex_records(path: &Path, cwd: &str) -> Vec<(UsageRecord, Option<String>)> {
-    let Ok(file) = File::open(path) else {
+    let Ok(parsed) = read_incremental(path) else {
         return vec![];
     };
     let mut session = None;
@@ -132,10 +202,7 @@ fn codex_records(path: &Path, cwd: &str) -> Vec<(UsageRecord, Option<String>)> {
     let mut matching = false;
     let mut previous = [0u64; 3];
     let mut out = vec![];
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue;
-        };
+    for v in parsed.lines.iter() {
         if v["type"] == "session_meta" {
             matching = v
                 .pointer("/payload/cwd")
@@ -202,14 +269,49 @@ fn codex_records(path: &Path, cwd: &str) -> Vec<(UsageRecord, Option<String>)> {
     out
 }
 
+#[cfg(test)]
 pub fn mission_tokens_for_conn(
     conn: &Connection,
     mission_id: &str,
 ) -> Result<MissionTokens, String> {
+    let boards = crate::canvas::load_boards()?;
+    let snapshot = mission_usage_snapshot(conn, mission_id, &boards)?;
+    mission_tokens_from_snapshot(mission_id, snapshot)
+}
+
+/// I/O de transcripts ocorre depois que o snapshot SQL foi copiado e o mutex foi solto.
+pub fn mission_tokens_for_db(
+    db: &crate::database::DbConnection,
+    mission_id: &str,
+) -> Result<MissionTokens, String> {
+    mission_tokens_for_db_with(db, mission_id, || {})
+}
+
+/// Como `mission_tokens_for_db`. `antes_do_io` roda no instante em que o mutex já foi solto
+/// e a leitura dos transcripts está para começar: o teste usa para provar isso.
+pub(crate) fn mission_tokens_for_db_with(
+    db: &crate::database::DbConnection,
+    mission_id: &str,
+    antes_do_io: impl FnOnce(),
+) -> Result<MissionTokens, String> {
+    let boards = crate::canvas::load_boards()?;
+    let snapshot = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        mission_usage_snapshot(&conn, mission_id, &boards)?
+    };
+    antes_do_io();
+    mission_tokens_from_snapshot(mission_id, snapshot)
+}
+
+fn mission_usage_snapshot(
+    conn: &Connection,
+    mission_id: &str,
+    boards: &crate::canvas::Boards,
+) -> Result<MissionUsageSnapshot, String> {
     let mission = mission_snapshot(conn, mission_id)?;
-    capture_mission_tabs(conn, &crate::canvas::load_boards())?;
+    capture_mission_tabs(conn, boards)?;
     let mut stmt = conn.prepare("SELECT tab_id,agent_id,label,kind,cwd,session_id,account_id,opened_at,closed_at,session_ids FROM mission_usage_tabs WHERE mission_id=?1 ORDER BY opened_at,tab_id").map_err(|e|e.to_string())?;
-    let rows = stmt
+    let rows: Vec<UsageTabRow> = stmt
         .query_map([mission_id], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -227,9 +329,111 @@ pub fn mission_tokens_for_conn(
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
+    let team_workspaces = {
+        let mut statement = conn
+            .prepare("SELECT cwd FROM mission_team_workspaces WHERE mission_id=?1")
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([mission_id], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?;
+        let mut counts = HashMap::<String, usize>::new();
+        for row in rows {
+            *counts
+                .entry(row.map_err(|error| error.to_string())?)
+                .or_default() += 1;
+        }
+        counts
+    };
+    let tabs_by_cwd = {
+        let mut statement = conn
+            .prepare("SELECT id,cwd FROM tabs")
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut by_cwd: HashMap<String, HashSet<String>> = HashMap::new();
+        for row in rows {
+            let (id, cwd) = row.map_err(|error| error.to_string())?;
+            by_cwd.entry(cwd).or_default().insert(id);
+        }
+        by_cwd
+    };
+    let account_dirs = {
+        let mut statement = conn
+            .prepare("SELECT id,dir FROM agent_accounts")
+            .map_err(|error| error.to_string())?;
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<HashMap<_, _>>>()
+            .map_err(|error| error.to_string())?
+    };
+    let custom_agents: HashMap<_, _> = crate::agents::list_for_conn(conn)?
+        .into_iter()
+        .map(|agent| (agent.id.clone(), agent))
+        .collect();
+    // Chaves de cwd das abas da missão, guardadas antes de `rows` ser consumido abaixo.
+    let cwd_keys: Vec<String> = rows.iter().map(|candidate| path_key(&candidate.4)).collect();
+    let mut tabs = Vec::with_capacity(rows.len());
+    for row in rows {
+        let (id, agent, _, _, cwd, _, account, _, _, _) = &row;
+        // Cwd fallback is allowed only for a proven worktree and no competing terminal.
+        let isolated = team_workspaces.get(cwd) == Some(&1)
+            && cwd_keys
+                .iter()
+                .filter(|key| key.as_str() == path_key(cwd))
+                .count()
+                == 1
+            && tabs_by_cwd
+                .get(cwd)
+                .is_none_or(|ids| ids.iter().all(|tab_id| tab_id == id));
+        let profile = account
+            .as_deref()
+            .and_then(|account_id| account_dirs.get(account_id).cloned())
+            .map(PathBuf::from);
+        let custom = custom_agents.get(agent);
+        tabs.push(MissionUsageTabSnapshot {
+            row,
+            isolated,
+            profile,
+            custom: custom.is_some(),
+            custom_sessions_dir: custom.and_then(|agent| agent.resolved_sessions_dir()),
+        });
+    }
+    let mut stmt=conn.prepare("SELECT t.id,t.agent_id,t.title,t.cwd,t.session_id,t.tokens_in,t.tokens_out,t.cost_usd,t.model FROM tasks t JOIN runs r ON r.id=t.run_id WHERE r.mission_id=?1 ORDER BY t.id").map_err(|e|e.to_string())?;
+    let ledger = stmt
+        .query_map([mission_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, Option<i64>>(5)?,
+                r.get::<_, Option<i64>>(6)?,
+                r.get::<_, Option<f64>>(7)?,
+                r.get::<_, Option<String>>(8)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    Ok(MissionUsageSnapshot { mission, tabs, ledger })
+}
+
+fn mission_tokens_from_snapshot(
+    mission_id: &str,
+    snapshot: MissionUsageSnapshot,
+) -> Result<MissionTokens, String> {
+    let MissionUsageSnapshot { mission, tabs, ledger } = snapshot;
     let mut groups: BTreeMap<String, Vec<MissionTabTokens>> = BTreeMap::new();
     let mut owned_records = HashSet::new();
-    for (id, agent, label, kind, cwd, session, account, opened, closed, sessions) in &rows {
+    for tab_snapshot in &tabs {
+        let (id, agent, label, kind, cwd, session, _, opened, closed, sessions) = &tab_snapshot.row;
         let mut tab = MissionTabTokens {
             tab_id: id.clone(),
             agent_id: agent.clone(),
@@ -252,35 +456,10 @@ pub fn mission_tokens_for_conn(
             .unwrap_or_else(crate::util::now_ts)
             .min(closed.unwrap_or(i64::MAX));
         let sessions: Vec<String> = serde_json::from_str(sessions).unwrap_or_default();
-        // Cwd fallback is allowed only for a proven worktree and no competing terminal.
-        let isolated = conn
-            .query_row(
-                "SELECT COUNT(*) FROM mission_team_workspaces WHERE mission_id=?1 AND cwd=?2",
-                rusqlite::params![mission_id, cwd],
-                |r| r.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-            == 1
-            && rows
-                .iter()
-                .filter(|r| path_key(&r.4) == path_key(cwd))
-                .count()
-                == 1
-            && conn
-                .query_row(
-                    "SELECT COUNT(*) FROM tabs WHERE cwd=?1 AND id<>?2",
-                    rusqlite::params![cwd, id],
-                    |r| r.get::<_, i64>(0),
-                )
-                .unwrap_or(1)
-                == 0;
+        let isolated = tab_snapshot.isolated;
         if start.is_some() && (session.is_some() || isolated) {
             let home = dirs::home_dir().unwrap_or_default();
-            let profile = account
-                .as_deref()
-                .and_then(|a| crate::accounts::dir_for_conn(conn, a))
-                .map(PathBuf::from);
-            let custom = crate::agents::find(conn, agent);
+            let profile = tab_snapshot.profile.clone();
             let roots = if agent == "claude-code" {
                 vec![profile.unwrap_or_else(|| home.join(".claude"))]
             } else if agent == "codex" {
@@ -295,9 +474,9 @@ pub fn mission_tokens_for_conn(
                 });
                 vec![data.join("opencode/opencode.db")]
             } else {
-                custom
-                    .as_ref()
-                    .and_then(|c| c.resolved_sessions_dir())
+                tab_snapshot
+                    .custom_sessions_dir
+                    .clone()
                     .into_iter()
                     .collect()
             };
@@ -321,7 +500,7 @@ pub fn mission_tokens_for_conn(
                     codex_records(&file, cwd)
                 } else {
                     let records = read_transcript_priced(&file, cwd);
-                    if records.is_empty() && custom.is_some() {
+                    if records.is_empty() && tab_snapshot.custom {
                         codex_records(&file, cwd)
                     } else {
                         records
@@ -378,25 +557,7 @@ pub fn mission_tokens_for_conn(
         groups.entry(agent.clone()).or_default().push(tab);
     }
     // Headless ledger rows are already task/session scoped. Never also read their transcripts.
-    let mut stmt=conn.prepare("SELECT t.id,t.agent_id,t.title,t.cwd,t.session_id,t.tokens_in,t.tokens_out,t.cost_usd,t.model FROM tasks t JOIN runs r ON r.id=t.run_id WHERE r.mission_id=?1 ORDER BY t.id").map_err(|e|e.to_string())?;
-    let ledger = stmt
-        .query_map([mission_id], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, Option<String>>(4)?,
-                r.get::<_, Option<i64>>(5)?,
-                r.get::<_, Option<i64>>(6)?,
-                r.get::<_, Option<f64>>(7)?,
-                r.get::<_, Option<String>>(8)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-    for row in ledger {
-        let (id, agent, label, cwd, session, input, output, cost, model) =
-            row.map_err(|e| e.to_string())?;
+    for (id, agent, label, cwd, session, input, output, cost, model) in ledger {
         // A task reopened as a terminal is a single session, not a second bill.
         if let Some(tab) = groups.get_mut(&agent).and_then(|tabs| {
             tabs.iter_mut()
@@ -536,6 +697,25 @@ mod tests {
         );
         crate::canvas::Boards::from([("main|/repo#m:m".into(), b)])
     }
+    #[test]
+    fn tokens_da_missao_leem_transcripts_sem_o_mutex_do_banco() {
+        // A sonda roda quando o snapshot já saiu do banco e a leitura do disco vai começar.
+        // Na mesma thread, try_lock só funciona se o mutex estiver solto: sem tempo, sem espera.
+        let db: crate::database::DbConnection = std::sync::Arc::new(std::sync::Mutex::new(db()));
+        {
+            let c = db.lock().unwrap();
+            add_tab(&c, "custom", "unknown", "/repo", Some("s"));
+        }
+        let probe = db.clone();
+        let mut io_iniciado = false;
+        let result = mission_tokens_for_db_with(&db, "m", || {
+            assert!(probe.try_lock().is_ok(), "transcripts lidos com o banco preso");
+            io_iniciado = true;
+        });
+        assert!(result.is_ok());
+        assert!(io_iniciado, "a fase de I/O não foi alcançada");
+    }
+
     #[test]
     fn closed_tabs_keep_identity_and_unknown_usage_is_null() {
         let c = db();

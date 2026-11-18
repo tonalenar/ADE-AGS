@@ -5,8 +5,15 @@ const COLOR_TOKENS = [
 const FONT_TOKENS = ["--font-sans", "--font-chat", "--font-mono", "--font-chat-mono"];
 
 /**
- * CSP do documento isolado (prévia visual e app MCP). Sem rede, sem navegação,
- * sem frame aninhado e sem formulário. O sandbox do iframe continua sem `allow-same-origin`.
+ * O sandbox de quem exibe o documento isolado: só scripts. Sem `allow-same-origin` (origem opaca, sem acesso à
+ * ADE), sem `allow-top-navigation` (a página da ADE não é trocada) e sem `allow-popups` (nenhuma janela nova).
+ */
+export const ISOLATED_FRAME_SANDBOX = "allow-scripts";
+
+/**
+ * CSP do documento isolado (prévia visual, render e app MCP). Sem rede, sem frame aninhado e sem formulário.
+ * A navegação para fora não está aqui: a diretiva `navigate-to` nunca foi aplicada por navegador. Quem segura
+ * a navegação é o sandbox (`ISOLATED_FRAME_SANDBOX`) e o guarda de links e de `beforeunload` de cada quadro.
  */
 export const ISOLATED_FRAME_CSP = [
   "default-src 'none'",
@@ -20,7 +27,6 @@ export const ISOLATED_FRAME_CSP = [
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
-  "navigate-to 'none'",
 ].join("; ");
 
 /** Só leva cores/fontes validadas para o documento isolado; tokens não viram marcação HTML. */

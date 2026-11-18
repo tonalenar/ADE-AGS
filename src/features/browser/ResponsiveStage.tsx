@@ -6,6 +6,7 @@ import { DEVICE_BEZEL, type DeviceSpec } from "./devices";
 import { PhoneChrome, type Platform } from "./PhoneChrome";
 import type { PhoneActions } from "./deviceActions";
 import { NativeCornerRadius } from "./nativeCorner";
+import { useChatStore } from "@/features/chat/store";
 
 type Edge = "x" | "y" | "xy";
 
@@ -41,7 +42,18 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
 }) {
   const stage = useRef<HTMLDivElement>(null);
   /** O espaço inteiro do palco (sem a margem do quadro): é o que a página ocupa no modo de preencher. */
-  const [box, setBox] = useState<Viewport>({ width: 0, height: 0 });
+  const floatRect = useChatStore((s) => floatingPreview ? s.browserFloatRect : null);
+  const [box, setBox] = useState<Viewport>(() => {
+    if (floatingPreview) {
+      const fr = useChatStore.getState().browserFloatRect;
+      if (fr && fr.width > 0 && fr.height > 0) return { width: fr.width, height: fr.height };
+    }
+    return { width: 0, height: 0 };
+  });
+  /** Enquanto flutuante, o palco acompanha diretamente o retângulo da miniatura sem atraso de medição. */
+  const effectiveBox: Viewport = floatingPreview && floatRect && floatRect.width > 0 && floatRect.height > 0
+    ? { width: floatRect.width, height: floatRect.height }
+    : box;
   /** Mientras se arrastra: el tamaño en curso y la escala congelada al empezar. Si la
    *  escala se recalculara con cada movimiento, el borde se escaparía del puntero. */
   const [drag, setDrag] = useState<{ draft: Viewport; scale: number } | null>(null);
@@ -62,7 +74,7 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [viewport]);
 
   const shown = drag?.draft ?? viewport;
   const z = clampZoom(zoom);
@@ -71,13 +83,13 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
   // El padding del escenario y el rótulo de abajo no son espacio para el marco. Na miniatura, só a moldura do celular.
   const stagePad = mini ? (phoneShown ? (BEZEL + 4) * 2 : 0) : null;
   const available: Viewport = stagePad === null
-    ? { width: box.width - 56, height: box.height - 64 }
-    : { width: box.width - stagePad, height: box.height - stagePad };
+    ? { width: effectiveBox.width - 56, height: effectiveBox.height - 64 }
+    : { width: effectiveBox.width - stagePad, height: effectiveBox.height - stagePad };
   // `overflow: clip` (não `hidden`): `hidden` ainda é um contêiner de rolagem, e o navegador o rola sozinho (foco ou scrollIntoView
   // dentro do iframe), deslocando a página para fora da coluna; `clip` não rola.
   // 1920×1080 preenche a janela inteira, sem margem (ver `FILL_VIEWPORT`); arrastar o quadro sai desse modo.
   const fill = !drag && isFillViewport(viewport);
-  const filled = fill && viewport ? fillLayout(viewport, box, z) : null;
+  const filled = fill && viewport ? fillLayout(viewport, effectiveBox, z) : null;
   const scale = shown ? (drag?.scale ?? Math.max(0.1, fitScale(shown, available) * z)) : 1;
   // Num tamanho de celular o quadro vira o aparelho (moldura, cantos, ilha, botões), como num mockup.
   const phone = !!shown && !fill && isPhoneViewport(shown);
@@ -86,7 +98,7 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
   const chrome: Platform | null = phone && !device ? platform : null;
   // No celular solto a escala é a que cabe o aparelho inteiro (com a moldura) no espaço do palco.
   const pad = (DEVICE_BEZEL + 10) * 2;
-  const deviceScale = device ? Math.max(0.1, Math.min((box.width - pad) / device.width, (box.height - pad) / device.height)) : 1;
+  const deviceScale = device ? Math.max(0.1, Math.min((effectiveBox.width - pad) / device.width, (effectiveBox.height - pad) / device.height)) : 1;
   // Os cantos da tela, em px da janela, para a vista nativa não vazar pelos cantos arredondados.
   const cornerRadius = device ? device.radius * deviceScale : phone ? (chrome === "android" ? 34 : SCREEN_RADIUS) * scale : 0;
 

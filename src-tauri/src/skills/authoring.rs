@@ -44,7 +44,10 @@ const COPY_SUFFIX: &str = "-local";
 
 /// Crea una skill propia, de origen local, desde el constructor.
 #[tauri::command]
-pub fn create_skill(draft: SkillDraft, db: tauri::State<DbConnection>) -> Result<SkillInfo, String> {
+pub fn create_skill(
+    draft: SkillDraft,
+    db: tauri::State<DbConnection>,
+) -> Result<SkillInfo, String> {
     let name = draft
         .meta
         .name
@@ -87,12 +90,11 @@ pub fn create_skill(draft: SkillDraft, db: tauri::State<DbConnection>) -> Result
 /// `name` vacío = el nombre de la original con [`COPY_SUFFIX`]. `content` vacío = el
 /// contenido actual (copiar sin editar es un caso válido: partir de una skill de un repo
 /// para después modificarla).
-#[tauri::command]
-pub fn fork_skill(
+pub(crate) fn fork_skill_now(
     skill_id: String,
     name: Option<String>,
     content: Option<String>,
-    db: tauri::State<DbConnection>,
+    db: &DbConnection,
 ) -> Result<SkillInfo, String> {
     let (source_path, original_name) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -108,12 +110,9 @@ pub fn fork_skill(
         &Path::new(&source_path).join("SKILL.md").to_string_lossy(),
         None,
         None,
-        &db,
+        db,
     )?;
 
-    // El contenido y el nombre se aplican DESPUÉS de copiar: `install_skill_internal`
-    // parte del archivo original, y lo que el usuario acaba de escribir todavía no está en
-    // disco en ningún lado.
     let new_name = name
         .as_deref()
         .map(str::trim)
@@ -130,4 +129,17 @@ pub fn fork_skill(
     let conn = db.lock().map_err(|e| e.to_string())?;
     update_skill_content_inner(&conn, &copy.id, &final_content)?;
     super::links::fetch_skill_row(&conn, &copy.id)
+}
+
+#[tauri::command]
+pub async fn fork_skill(
+    skill_id: String,
+    name: Option<String>,
+    content: Option<String>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<SkillInfo, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || fork_skill_now(skill_id, name, content, &db))
+        .await
+        .map_err(|e| e.to_string())?
 }

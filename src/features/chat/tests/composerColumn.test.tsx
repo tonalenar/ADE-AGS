@@ -47,7 +47,7 @@ describe("a coluna do composer", () => {
 
 describe("a linha de controles do composer", () => {
   const mount = (controls: React.ReactNode, leading?: React.ReactNode) => act(async () => {
-    root.render(<ChatComposer placeholder="p" onSubmit={() => undefined} controls={controls} leading={leading} />);
+    root.render(<ChatComposer placeholder="p" onSubmit={async () => true} controls={controls} leading={leading} />);
   });
 
   it("fica numa linha só e só quebra na coluna muito estreita, com o enviar por último no grupo da direita", async () => {

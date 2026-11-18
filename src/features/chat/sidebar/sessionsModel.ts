@@ -8,7 +8,7 @@ import { normalizeProjectPath } from "../chatProjectPrefs";
 import { DEFAULT_PROJECT_ORDER_PREFS, orderProjects, type ProjectOrderPrefs } from "./projectOrder";
 
 export interface SessionSection {
-  /** `pinned`, `needs`, `working` ou `project:<nome>` (é também o que se guarda para lembrar a seção recolhida). */
+  /** `pinned`, `needs`, `working` ou `project:<pasta>`, a raiz do repositório (é também o que se guarda para lembrar a seção recolhida). */
   id: string;
   kind: "pinned" | "needs" | "working" | "project";
   label: string;
@@ -19,7 +19,8 @@ export interface SessionSection {
 export const PINNED_ID = "pinned";
 export const NEEDS_ID = "needs";
 export const WORKING_ID = "working";
-export const projectSectionId = (project: string) => `project:${project}`;
+/** O id da seção de um projeto é a pasta (a raiz do repositório), não o nome: o rótulo pode mudar com a busca ou o arquivo. */
+export const projectSectionId = (folder: string) => `project:${folder}`;
 
 /**
  * A seção Trabalhando (Configurações → Geral → Barra lateral). Ligada, a seção vai ao fim da lista com as
@@ -94,11 +95,21 @@ export function buildSections(cards: ConversationCard[], opts: SectionOptions): 
       sections.push({ id: NEEDS_ID, kind: "needs", label: "", items: needsCards, collapsed: opts.collapsed.includes(NEEDS_ID) });
     }
   }
-  const byProject = new Map<string, ConversationCard[]>();
+  // Agrupa pela pasta (a raiz do repositório): dois projetos com o mesmo nome são duas seções.
+  const byFolder = new Map<string, ConversationCard[]>();
   for (const c of shown) {
     if (outOfProjects(c)) continue;
-    byProject.set(c.project, [...(byProject.get(c.project) ?? []), c]);
+    const key = normalizeProjectPath(c.repoKey ?? c.cwd);
+    byFolder.set(key, [...(byFolder.get(key) ?? []), c]);
   }
+  // Quando o nome se repete, o rótulo leva as duas últimas pastas do caminho para a seção ficar distinguível.
+  const names = [...byFolder.values()].map((items) => items[0]!.project);
+  const repeated = new Set(names.filter((name, index) => names.indexOf(name) !== index));
+  const labelOf = (items: ConversationCard[]): string => {
+    const first = items[0]!;
+    if (!repeated.has(first.project)) return first.project;
+    return `${first.project} · ${first.cwd.split(/[\\/]/).filter(Boolean).slice(-2).join("/")}`;
+  };
   const newest = (items: ConversationCard[]) => Math.max(...items.map(activity));
   // Com a seção ligada, a ordem da lista é a de quando cada conversa voltou para você; a ordem salva volta ao desligar.
   const ordered = (items: ConversationCard[], sectionId: string) => {
@@ -114,17 +125,20 @@ export function buildSections(cards: ConversationCard[], opts: SectionOptions): 
     });
   };
   const projects = orderProjects(
-    [...byProject.entries()].map(([project, items]) => ({
-      project,
-      items: ordered(items, projectSectionId(project)),
-      // Agrupada por repositório, a identidade da seção é a raiz dele, e não a pasta da primeira conversa.
-      key: normalizeProjectPath(items[0].repoKey ?? items[0].cwd),
-      latest: newest(items),
-    })),
+    [...byFolder.values()].map((items) => {
+      const project = labelOf(items);
+      return {
+        project,
+        items: ordered(items, projectSectionId(normalizeProjectPath(items[0]!.repoKey ?? items[0]!.cwd))),
+        // Agrupada por repositório, a identidade da seção é a raiz dele, e não a pasta da primeira conversa.
+        key: normalizeProjectPath(items[0]!.repoKey ?? items[0]!.cwd),
+        latest: newest(items),
+      };
+    }),
     opts.projectOrder ?? DEFAULT_PROJECT_ORDER_PREFS,
-  ).map(({ project, items }) => ({ project, items }));
-  for (const { project, items } of projects) {
-    const id = projectSectionId(project);
+  ).map(({ project, items, key }) => ({ project, items, key }));
+  for (const { project, items, key } of projects) {
+    const id = projectSectionId(key);
     sections.push({ id, kind: "project", label: project, items, collapsed: opts.collapsed.includes(id) });
   }
   if (shelfOn) {

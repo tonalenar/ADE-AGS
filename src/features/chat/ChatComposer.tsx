@@ -80,10 +80,10 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   addon?: (ctx: ComposerAddonContext) => React.ReactNode;
   /** Entre o espaço vazio e o botão de enviar. Pode ler o rascunho sem duplicar seu estado. */
   controls?: React.ReactNode | ((context: ComposerControlsContext) => React.ReactNode);
-  /** `false` (ou erro) = não foi: o texto e os anexos continuam na caixa. */
-  onSubmit: (text: string, attachments: Attachment[]) => boolean | void | Promise<boolean | void>;
+  /** `true` só quando o envio foi aceito (o backend confirmou). Qualquer outro resultado = não foi: o texto e os anexos continuam na caixa. */
+  onSubmit: (text: string, attachments: Attachment[]) => Promise<boolean>;
   /** Inicia uma nova conversa sem selecioná-la e mantém o composer limpo para outro rascunho. */
-  onBackgroundSubmit?: ((text: string, attachments: Attachment[]) => boolean | void | Promise<boolean | void>) | null;
+  onBackgroundSubmit?: ((text: string, attachments: Attachment[]) => Promise<boolean>) | null;
   /** Inicia outro rascunho local depois que o envio ao fio atual for aceito. */
   onSendAndNewThread?: (() => void) | null;
   /** O agente está trabalhando: o botão vira Parar (com a caixa vazia). */
@@ -214,20 +214,25 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     return true;
   };
   const attachments = useAttachments();
+  // A lista de anexos mais recente, para o envio em andamento saber se a caixa mudou (ver `submit`).
+  const attachmentsNowRef = useRef(attachments.list);
+  attachmentsNowRef.current = attachments.list;
   const quotes = useQuotes(quoteKey);
   const quotesRef = useRef(quotes);
   quotesRef.current = quotes;
   const stashes = usePromptStash((s) => s.items);
   const stashLoaded = usePromptStash((s) => s.loaded);
   const hasStashContent = text.trim().length > 0 || attachments.list.length > 0 || quotes.length > 0;
-  const stashContentRef = useRef("");
-  stashContentRef.current = JSON.stringify({
+  // O rascunho do cofre só é serializado quando é comparado (ao guardar ou ao restaurar), e não a cada render.
+  const stashInputRef = useRef<Record<string, unknown>>({});
+  stashInputRef.current = {
     text,
     attachmentPaths: attachments.list.map((attachment) => attachment.path),
     quotes: quotes.map(({ text: quoteText, comment, originItemId }) => ({ text: quoteText, comment, originItemId })),
     quoteKey,
     cwd,
-  });
+  };
+  const stashContentOf = () => JSON.stringify(stashInputRef.current);
   const quoteCards = quotes.map((quote) => ({
     ...quote,
     originItemId: quote.originItemId && quoteSourceIds?.has(quote.originItemId) ? quote.originItemId : undefined,
@@ -257,7 +262,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     try {
       await savePromptStash(input);
       // Se o conteúdo mudou enquanto o chaveiro gravava, preservamos a edição nova no composer.
-      if (stashContentRef.current === savedSnapshot) {
+      if (stashContentOf() === savedSnapshot) {
         historyDraft.current = null;
         setHistoryIndex(null);
         setText("");
@@ -347,7 +352,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
       return;
     }
     setStashStatus("");
-    const startingContent = stashContentRef.current;
+    const startingContent = stashContentOf();
     setStashBusy(true);
     try {
       const stash = await getPromptStash(id);
@@ -355,7 +360,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
         setStashStatus(t("chat.stash.restoreFailed"));
         return;
       }
-      if (stashContentRef.current !== startingContent || (ref.current?.value ?? text) !== text) {
+      if (stashContentOf() !== startingContent || (ref.current?.value ?? text) !== text) {
         setStashStatus(t("chat.stash.composerChanged"));
         return;
       }
@@ -561,15 +566,25 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     try {
       // As citações vão depois do texto (o `@agente` do começo continua valendo) e antes dos anexos.
       const send = background && onBackgroundSubmit ? onBackgroundSubmit : onSubmit;
-      if ((await send(withQuotes(text, quotes), attachments.list)) === false) return false;
+      // O texto só sai da caixa depois de o envio ser aceito: se o backend recusar, ele continua aqui para tentar de novo.
+      const sentText = text;
+      const sentAttachments = attachments.list;
+      const sentQuotes = quotes;
+      if ((await send(withQuotes(sentText, quotes), sentAttachments)) !== true) return false;
       historyDraft.current = null;
       setHistoryIndex(null);
-      setText("");
-      setRestoredCaptureNotice(null);
+      // Limpa por campo, como o cofre: o texto sai só se ainda for o enviado; anexos e citações saem só os que foram
+      // enviados (por identidade). O que a pessoa acrescentou no meio do envio fica na caixa.
+      if ((ref.current?.value ?? sentText) === sentText) {
+        setText("");
+        setRestoredCaptureNotice(null);
+      }
+      const stillInBox = attachmentsNowRef.current;
+      const sentStillInBox = sentAttachments.filter((item) => stillInBox.includes(item));
       // Pode rodar depois de a conversa já ter trocado (o envio cria a conversa): o registro sai aqui, não no efeito.
-      forgetPendingCaptures(eventTarget, attachments.list.map((item) => item.path));
-      attachments.clear();
-      if (quoteKey) clearQuotesFor(quoteKey);
+      forgetPendingCaptures(eventTarget, sentStillInBox.map((item) => item.path));
+      for (const item of sentStillInBox) attachments.remove(item.id);
+      if (quoteKey) for (const quote of sentQuotes) removeQuoteFor(quoteKey, quote.id);
       return true;
     } catch {
       /* quem envia mostra o erro; o texto fica para tentar de novo */

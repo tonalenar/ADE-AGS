@@ -17,7 +17,8 @@ describe("injectTabMemory", () => {
     mocks.invoke.mockResolvedValue("DADOS\n[\"a\"]\nFIM");
     expect(await injectTabMemory({ id: "t", agentId: "codex", memoryBlock: true }, "ws")).toBe(true);
     expect(mocks.invoke).toHaveBeenCalledWith("memory_index", { workspaceId: "ws" });
-    expect(mocks.sendWhenReady).toHaveBeenCalledWith("t", "DADOS | [\"a\"] | FIM");
+    // O índice sai com a conferência de quem escreve sem digitar (PR08): a política é o terceiro argumento.
+    expect(mocks.sendWhenReady).toHaveBeenCalledWith("t", "DADOS | [\"a\"] | FIM", expect.objectContaining({ policy: expect.any(Object) }));
   });
   it("shell: nunca consulta nem envia, mesmo com a flag ligada (P1)", async () => {
     mocks.invoke.mockResolvedValue("DADOS");

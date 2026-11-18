@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
@@ -623,15 +623,22 @@ describe("buscas que exigem Enter", () => {
 
 describe("tempo por fase", () => {
   it("o resultado soma o tempo de cada fase e o relatório traz a linha TEMPOS legível por máquina", async () => {
-    const h = harness([ok("click", "e4"), ok("done")]);
-    const slow = (fn: () => Promise<unknown>) => async () => { await new Promise((r) => setTimeout(r, 5)); return fn(); };
-    h.deps.snapshot = slow(h.deps.snapshot) as PilotDeps["snapshot"];
-    const result = await runPilot("entrar", [], undefined, h.deps);
-    expect(result.timings?.consultas).toBe(2);
-    expect(result.timings?.snapshot).toBeGreaterThan(0);
-    expect(result.timings?.total).toBeGreaterThanOrEqual(result.timings!.snapshot);
-    const line = formatResult("entrar", result).split("\n").find((l) => l.startsWith("TEMPOS: "));
-    expect(JSON.parse(line!.slice("TEMPOS: ".length))).toMatchObject({ consultas: 2, fotos: 0 });
+    // Relógio virtual: cada consulta gasta 5 ms de relógio, sem esperar de verdade (A199).
+    let clock = 1_000;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    try {
+      const h = harness([ok("click", "e4"), ok("done")]);
+      const slow = (fn: () => Promise<unknown>) => async () => { clock += 5; return fn(); };
+      h.deps.snapshot = slow(h.deps.snapshot) as PilotDeps["snapshot"];
+      const result = await runPilot("entrar", [], undefined, h.deps);
+      expect(result.timings?.consultas).toBe(2);
+      expect(result.timings?.snapshot).toBeGreaterThan(0);
+      expect(result.timings?.total).toBeGreaterThanOrEqual(result.timings!.snapshot);
+      const line = formatResult("entrar", result).split("\n").find((l) => l.startsWith("TEMPOS: "));
+      expect(JSON.parse(line!.slice("TEMPOS: ".length))).toMatchObject({ consultas: 2, fotos: 0 });
+    } finally {
+      now.mockRestore();
+    }
   });
 });
 
@@ -1515,5 +1522,22 @@ describe("dois ícones sem nome: o segundo toque (L01)", () => {
     const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
     expect(calls).toEqual(["500,300"]);
     expect(result.steps.join("\n")).toContain("compra ou pagamento");
+  });
+});
+
+describe("um add pendente não sobra para o passo seguinte (A196)", () => {
+  const cartPage = (count: number) => [
+    'page: "Loja" http://shop.test/p/1', "viewport: 1000×600 · scroll 0/600", "", '- button "Adicionar" [ref=e1]', `- text "${count} itens no carrinho"`,
+  ].join("\n");
+
+  it("um clique coberto em Adicionar não registra add: o clique seguinte no mesmo botão chega ao toque", async () => {
+    const h = harness([ok("click", "e1"), ok("scroll"), ok("click", "e1"), ok("done")], [cartPage(0), cartPage(1), cartPage(1), cartPage(1)]);
+    h.deps.click = async (ref) => {
+      h.calls.push(`click ${ref}`);
+      if (h.calls.length === 1) throw new Error('button "Adicionar" está coberto por div "Cookies" (div#banner). Feche o que está na frente.');
+    };
+    await runPilot("comprar", [], undefined, h.deps);
+    // O add do primeiro clique (que não adicionou nada) não pode recusar o segundo.
+    expect(h.calls.filter((c) => c === "click e1")).toHaveLength(2);
   });
 });

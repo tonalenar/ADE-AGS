@@ -3,7 +3,7 @@ import { sendToConversation } from "./chatActions";
 import { useChatLive } from "./liveStore";
 import { usePermissions } from "./permissions/permissionsStore";
 import { dequeueMessage, enqueueMessage, useChatStore } from "./store";
-import { isCompacting } from "./autocompact/model";
+import { compactionDeadline, isCompacting } from "./autocompact/model";
 import { threadIdOf } from "./structured/model";
 import { interruptThread, sendToThread, useStructured } from "./structured/store";
 import type { MidTurn } from "./chatModel";
@@ -21,17 +21,26 @@ function send(key: string, text: string): void {
   else sendToConversation(key, text);
 }
 
-function stateOf(key: string): { working: boolean; waiting: boolean; compacting?: boolean } {
+/**
+ * O estado de uma conversa para a fila. `deadline` é quando a compactação em andamento expira (o TTL), para a fila
+ * reavaliar sozinha. Com o agente trabalhando, não se procura compactação: já é «ocupado». `full` pede o
+ * detalhe mesmo assim (o «enviar agora» precisa saber se está compactando).
+ */
+function stateOf(key: string, full = false): { working: boolean; waiting: boolean; compacting: boolean; deadline: number | null } {
   const threadId = threadIdOf(key);
   if (threadId) {
     const live = useStructured.getState().live[threadId];
     const waiting = (live?.requests.length ?? 0) > 0;
+    const busy = live?.phase === "working";
+    if (busy && !full) return { working: true, waiting, compacting: false, deadline: null };
     // Compactando o contexto (autocompact) também é estar ocupado: a mensagem espera e sai quando o aviso fecha.
-    return { working: live?.phase === "working" || isCompacting(live?.items ?? [], Date.now()), waiting, compacting: isCompacting(live?.items ?? [], Date.now()) };
+    const items = live?.items ?? [];
+    const compacting = isCompacting(items, Date.now());
+    return { working: busy || compacting, waiting, compacting, deadline: compacting ? compactionDeadline(items) : null };
   }
   const live = useChatLive.getState();
   const waiting = !!live.question[key] || key in live.awaiting || usePermissions.getState().tui.some((p) => p.tabId === key);
-  return { working: live.phase[key] === "working", waiting };
+  return { working: live.phase[key] === "working", waiting, compacting: false, deadline: null };
 }
 
 /** ⌘⏎: com o agente trabalhando, para a fila; ocioso, sai agora. */
@@ -49,7 +58,7 @@ export function queueOrSend(key: string, text: string): void {
  */
 export function sendNow(key: string, text: string, midTurn: MidTurn, deliver: () => void): "sent" | "interrupting" | "queued" {
   const threadId = threadIdOf(key);
-  const { working, compacting } = stateOf(key);
+  const { working, compacting } = stateOf(key, true);
   // Compactando o contexto: a compactação não é um turno que se guia nem se interrompe; a mensagem espera e sai depois.
   if (threadId && compacting) {
     enqueueMessage(key, text);
@@ -71,14 +80,18 @@ export function startQueueRunner(): void {
   if (started) return;
   started = true;
   const prev: Record<string, boolean> = {};
+  // A reavaliação no prazo da compactação em andamento (ver `stateOf`): uma só por vez.
+  let expiry: ReturnType<typeof setTimeout> | null = null;
   const check = () => {
     const keys = new Set([
       ...Object.keys(useChatStore.getState().queues),
       ...Object.keys(useChatLive.getState().phase),
       ...Object.keys(useStructured.getState().live).map((id) => `thread:${id}`),
     ]);
+    let deadline: number | null = null;
     for (const key of keys) {
-      const { working, waiting } = stateOf(key);
+      const { working, waiting, deadline: keyDeadline } = stateOf(key);
+      if (keyDeadline !== null) deadline = deadline === null ? keyDeadline : Math.min(deadline, keyDeadline);
       const queued = useChatStore.getState().queues[key]?.length ?? 0;
       if (shouldFlushQueue(prev[key], working, waiting, queued)) {
         const text = dequeueMessage(key);
@@ -86,6 +99,9 @@ export function startQueueRunner(): void {
       }
       prev[key] = working;
     }
+    // Uma compactação em andamento expira pelo tempo, não por um evento: agenda a reavaliação para o prazo.
+    if (expiry !== null) clearTimeout(expiry);
+    expiry = deadline === null ? null : setTimeout(check, Math.max(0, deadline - Date.now()) + 1);
   };
   useChatLive.subscribe(check);
   useStructured.subscribe(check);

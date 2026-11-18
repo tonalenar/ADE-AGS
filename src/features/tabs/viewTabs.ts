@@ -10,16 +10,7 @@
  * Este archivo es la lógica pura (probada en `tests/viewTabs.test.ts`); el store la usa.
  */
 
-import { isLocalOrigin } from "./localOrigin";
-
-function bareHost(text: string): string {
-  const first = text.split(/[/?#]/)[0];
-  if (first.startsWith("[")) {
-    const end = first.indexOf("]");
-    return end >= 0 ? first.slice(1, end) : first;
-  }
-  return first.replace(/:\d+$/, "");
-}
+import { isLocalOrigin } from "@/features/browser/egressPolicy";
 
 interface ViewBase {
   id: string;
@@ -195,7 +186,7 @@ export function normalizeUrl(input: string): string | null {
   if (/^:\d+/.test(text)) return `http://localhost${text}`;
   if (/^\d+$/.test(text)) return `http://localhost:${text}`;
   const host = text.split(/[/?#]/)[0];
-  const local = isLocalOrigin(bareHost(text));
+  const local = isLocalOrigin(/^(?:https?|tauri):\/\//i.test(text) ? text : `http://${text}`);
   if (local) return `http://${text}`;
   // Algo que no parece un host (sin punto ni puerto) no es una dirección.
   if (!host.includes(".") && !host.includes(":")) return null;
@@ -203,13 +194,10 @@ export function normalizeUrl(input: string): string | null {
 }
 
 /** ¿Es un servidor de esta máquina? Es lo que se abre en una tab en vez del navegador del
- *  sistema al hacer click en un link de la terminal. */
+ *  sistema al hacer click en un link de la terminal. Es la MISMA regra de origem local de la
+ *  política de saída (`egressPolicy.ts`): así `0.0.0.0` y `127.0.0.1.evil.com` no son locales. */
 export function isLocalUrl(url: string): boolean {
-  try {
-    return isLocalOrigin(new URL(url).hostname);
-  } catch {
-    return false;
-  }
+  return isLocalOrigin(url);
 }
 
 /**

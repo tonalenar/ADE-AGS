@@ -49,7 +49,10 @@ pub struct ProjectChatDefaults {
 
 impl ProjectChatDefaults {
     fn is_empty(&self) -> bool {
-        self.primary.is_none() && self.fallback.is_none() && self.workspace.is_none() && self.access.is_none()
+        self.primary.is_none()
+            && self.fallback.is_none()
+            && self.workspace.is_none()
+            && self.access.is_none()
     }
 }
 
@@ -68,7 +71,10 @@ fn clean_choice(choice: ModelChoice) -> Result<ModelChoice, String> {
         }
         Some(model) => Some(model.to_owned()),
     };
-    Ok(ModelChoice { agent_id: choice.agent_id, model })
+    Ok(ModelChoice {
+        agent_id: choice.agent_id,
+        model,
+    })
 }
 
 /// Confere e normaliza o que a tela mandou. Pura. O modelo reserva não pode ser igual ao principal: seria
@@ -92,18 +98,32 @@ pub(crate) fn validate(raw: ProjectChatDefaults) -> Result<ProjectChatDefaults, 
         Some(mode @ ("ask" | "safe" | "edits" | "full")) => Some(mode.to_owned()),
         Some(_) => return Err("A permissão padrão é inválida".into()),
     };
-    Ok(ProjectChatDefaults { cwd, primary, fallback, workspace, access })
+    Ok(ProjectChatDefaults {
+        cwd,
+        primary,
+        fallback,
+        workspace,
+        access,
+    })
 }
 
-fn read_exact(conn: &Connection, normalized_cwd: &str) -> Result<Option<ProjectChatDefaults>, String> {
+fn read_exact(
+    conn: &Connection,
+    normalized_cwd: &str,
+) -> Result<Option<ProjectChatDefaults>, String> {
     let raw: Option<String> = conn
-        .query_row("SELECT value FROM settings WHERE key = ?1", [setting_key(normalized_cwd)], |row| row.get(0))
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [setting_key(normalized_cwd)],
+            |row| row.get(0),
+        )
         .optional()
         .map_err(|error| error.to_string())?;
     let Some(raw) = raw else { return Ok(None) };
-    let parsed: ProjectChatDefaults =
-        serde_json::from_str(&raw).map_err(|_| "Os padrões deste projeto estão inválidos".to_string())?;
-    let defaults = validate(parsed).map_err(|_| "Os padrões deste projeto estão inválidos".to_string())?;
+    let parsed: ProjectChatDefaults = serde_json::from_str(&raw)
+        .map_err(|_| "Os padrões deste projeto estão inválidos".to_string())?;
+    let defaults =
+        validate(parsed).map_err(|_| "Os padrões deste projeto estão inválidos".to_string())?;
     // O registro de outro caminho (hash colidido ou arquivo editado à mão) não vale para este.
     if defaults.cwd != normalized_cwd {
         return Err("Os padrões deste projeto estão inválidos".into());
@@ -134,7 +154,10 @@ pub struct EffectiveSelection {
 
 /// Escolhe o agente e o modelo: o principal, ou o reserva se o principal está sem limite e o reserva está livre.
 /// Sem reserva livre, fica o principal (o limite aparece no turno, como sempre) e `limited_until` avisa. Pura.
-pub(crate) fn effective(defaults: &ProjectChatDefaults, limited: LimitProbe) -> Option<EffectiveSelection> {
+pub(crate) fn effective(
+    defaults: &ProjectChatDefaults,
+    limited: LimitProbe,
+) -> Option<EffectiveSelection> {
     let primary = defaults.primary.as_ref()?;
     let primary_limit = limited(&primary.agent_id);
     if let (Some(until), Some(fallback)) = (primary_limit, defaults.fallback.as_ref())
@@ -168,11 +191,17 @@ pub(crate) fn inherit_for_agent_open(
     limited: LimitProbe,
 ) -> (Option<String>, Option<String>) {
     let (agent, model) = (agent.map(str::to_owned), model.map(str::to_owned));
-    let Some(defaults) = defaults else { return (agent, model) };
-    let Some(selection) = effective(defaults, limited) else { return (agent, model) };
+    let Some(defaults) = defaults else {
+        return (agent, model);
+    };
+    let Some(selection) = effective(defaults, limited) else {
+        return (agent, model);
+    };
     match agent {
         None => (Some(selection.agent_id), model.or(selection.model)),
-        Some(asked) if model.is_none() && asked == selection.agent_id => (Some(asked), selection.model),
+        Some(asked) if model.is_none() && asked == selection.agent_id => {
+            (Some(asked), selection.model)
+        }
         Some(asked) => (Some(asked), model),
     }
 }
@@ -185,23 +214,47 @@ pub struct EffectiveDefaults {
     pub selection: Option<EffectiveSelection>,
 }
 
-fn limited_probe<'a>(conn: &'a Connection, account_id: Option<&'a str>, now: i64) -> impl Fn(&str) -> Option<i64> + 'a {
+fn limited_probe<'a>(
+    conn: &'a Connection,
+    account_id: Option<&'a str>,
+    now: i64,
+) -> impl Fn(&str) -> Option<i64> + 'a {
     move |agent_id| crate::conversa::limite::limited_until(conn, agent_id, account_id, now)
 }
 
 /// Para quem abre conversa sem tela: lê os padrões e devolve o agente e o modelo a usar. Erro de leitura não
 /// impede abrir: vale o que foi pedido.
-pub(crate) fn inherit_for_open(db: &DbConnection, cwd: &str, agent: Option<&str>, model: Option<&str>) -> (Option<String>, Option<String>) {
-    let Ok(conn) = db.lock() else { return (agent.map(str::to_owned), model.map(str::to_owned)) };
+pub(crate) fn inherit_for_open(
+    db: &DbConnection,
+    cwd: &str,
+    agent: Option<&str>,
+    model: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    let Ok(conn) = db.lock() else {
+        return (agent.map(str::to_owned), model.map(str::to_owned));
+    };
     let defaults = read(&conn, cwd).ok().flatten();
     let probe = limited_probe(&conn, None, crate::util::now_ts());
     inherit_for_agent_open(defaults.as_ref(), agent, model, &probe)
 }
 
-#[tauri::command]
-pub fn chat_project_defaults_get(db: State<'_, DbConnection>, cwd: String) -> Result<Option<ProjectChatDefaults>, String> {
+pub(crate) fn chat_project_defaults_get_now(
+    db: &crate::database::DbConnection,
+    cwd: String,
+) -> Result<Option<ProjectChatDefaults>, String> {
     let conn = db.lock().map_err(|error| error.to_string())?;
     read(&conn, &cwd)
+}
+
+#[tauri::command]
+pub async fn chat_project_defaults_get(
+    db: State<'_, DbConnection>,
+    cwd: String,
+) -> Result<Option<ProjectChatDefaults>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || chat_project_defaults_get_now(&db, cwd))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Todos os padrões gravados. Um registro que não lê (arquivo editado à mão) some da lista, sem derrubar os outros.
@@ -210,7 +263,10 @@ pub(crate) fn read_all(conn: &Connection) -> Result<Vec<ProjectChatDefaults>, St
         .prepare("SELECT value FROM settings WHERE key LIKE ?1 LIMIT ?2")
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map(rusqlite::params![format!("{SETTINGS_PREFIX}%"), MAX_PROJECTS as i64], |row| row.get::<_, String>(0))
+        .query_map(
+            rusqlite::params![format!("{SETTINGS_PREFIX}%"), MAX_PROJECTS as i64],
+            |row| row.get::<_, String>(0),
+        )
         .map_err(|error| error.to_string())?;
     Ok(rows
         .filter_map(Result::ok)
@@ -220,32 +276,65 @@ pub(crate) fn read_all(conn: &Connection) -> Result<Vec<ProjectChatDefaults>, St
 }
 
 /// Todos os padrões gravados (a tela os lê ao abrir e guarda um espelho).
-#[tauri::command]
-pub fn chat_project_defaults_list(db: State<'_, DbConnection>) -> Result<Vec<ProjectChatDefaults>, String> {
+pub(crate) fn chat_project_defaults_list_now(
+    db: &crate::database::DbConnection,
+) -> Result<Vec<ProjectChatDefaults>, String> {
     let conn = db.lock().map_err(|error| error.to_string())?;
     read_all(&conn)
 }
 
-/// O que valeria numa conversa nova agora: os padrões e o agente/modelo já com o reserva aplicado.
 #[tauri::command]
-pub fn chat_project_defaults_effective(
+pub async fn chat_project_defaults_list(
     db: State<'_, DbConnection>,
+) -> Result<Vec<ProjectChatDefaults>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || chat_project_defaults_list_now(&db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// O que valeria numa conversa nova agora: os padrões e o agente/modelo já com o reserva aplicado.
+pub(crate) fn chat_project_defaults_effective_now(
+    db: &crate::database::DbConnection,
     cwd: String,
     account_id: Option<String>,
 ) -> Result<EffectiveDefaults, String> {
     let conn = db.lock().map_err(|error| error.to_string())?;
     let defaults = read(&conn, &cwd)?;
     let probe = limited_probe(&conn, account_id.as_deref(), crate::util::now_ts());
-    let selection = defaults.as_ref().and_then(|defaults| effective(defaults, &probe));
-    Ok(EffectiveDefaults { defaults, selection })
+    let selection = defaults
+        .as_ref()
+        .and_then(|defaults| effective(defaults, &probe));
+    Ok(EffectiveDefaults {
+        defaults,
+        selection,
+    })
+}
+
+#[tauri::command]
+pub async fn chat_project_defaults_effective(
+    db: State<'_, DbConnection>,
+    cwd: String,
+    account_id: Option<String>,
+) -> Result<EffectiveDefaults, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        chat_project_defaults_effective_now(&db, cwd, account_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Grava os padrões do projeto (substitui o registro). Um registro vazio apaga a chave, como «Redefinir».
-pub(crate) fn write(conn: &Connection, defaults: ProjectChatDefaults) -> Result<Option<ProjectChatDefaults>, String> {
+pub(crate) fn write(
+    conn: &Connection,
+    defaults: ProjectChatDefaults,
+) -> Result<Option<ProjectChatDefaults>, String> {
     let defaults = validate(defaults)?;
     let key = setting_key(&defaults.cwd);
     if defaults.is_empty() {
-        conn.execute("DELETE FROM settings WHERE key = ?1", [&key]).map_err(|error| error.to_string())?;
+        conn.execute("DELETE FROM settings WHERE key = ?1", [&key])
+            .map_err(|error| error.to_string())?;
         return Ok(None);
     }
     let value = serde_json::to_string(&defaults).map_err(|error| error.to_string())?;
@@ -259,22 +348,49 @@ pub(crate) fn write(conn: &Connection, defaults: ProjectChatDefaults) -> Result<
 
 pub(crate) fn remove(conn: &Connection, cwd: &str) -> Result<(), String> {
     let cwd = normalize_cwd(cwd)?;
-    conn.execute("DELETE FROM settings WHERE key = ?1", [setting_key(&cwd)]).map_err(|error| error.to_string())?;
+    conn.execute("DELETE FROM settings WHERE key = ?1", [setting_key(&cwd)])
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
-#[tauri::command]
-pub fn chat_project_defaults_save(db: State<'_, DbConnection>, defaults: ProjectChatDefaults) -> Result<Option<ProjectChatDefaults>, String> {
+pub(crate) fn chat_project_defaults_save_now(
+    db: &crate::database::DbConnection,
+    defaults: ProjectChatDefaults,
+) -> Result<Option<ProjectChatDefaults>, String> {
     crate::database::wait_until_db_ready();
     let conn = db.lock().map_err(|error| error.to_string())?;
     write(&conn, defaults)
 }
 
 #[tauri::command]
-pub fn chat_project_defaults_clear(db: State<'_, DbConnection>, cwd: String) -> Result<(), String> {
+pub async fn chat_project_defaults_save(
+    db: State<'_, DbConnection>,
+    defaults: ProjectChatDefaults,
+) -> Result<Option<ProjectChatDefaults>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || chat_project_defaults_save_now(&db, defaults))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn chat_project_defaults_clear_now(
+    db: &crate::database::DbConnection,
+    cwd: String,
+) -> Result<(), String> {
     crate::database::wait_until_db_ready();
     let conn = db.lock().map_err(|error| error.to_string())?;
     remove(&conn, &cwd)
+}
+
+#[tauri::command]
+pub async fn chat_project_defaults_clear(
+    db: State<'_, DbConnection>,
+    cwd: String,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || chat_project_defaults_clear_now(&db, cwd))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

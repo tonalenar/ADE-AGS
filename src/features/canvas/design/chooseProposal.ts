@@ -1,6 +1,8 @@
 import { AlertaToast } from "@/shared/ui/alerts";
 import type { TFunction } from "i18next";
 
+import { untrustedInline } from "@/shared/untrusted";
+
 import { designApi, type Artboard, type Design } from "./designApi";
 
 /** Escolhas em andamento ou recém-enviadas (`prancheta|seletor`): um duplo clique ou reenvio não manda de novo. */
@@ -15,6 +17,15 @@ export function claimChoice(key: string, now = Date.now()): boolean {
   return true;
 }
 export const releaseChoice = (key: string) => { recent.delete(key); };
+
+/**
+ * A mensagem que o dono recebe quando a pessoa escolhe uma proposta. Título da prancheta, do design, a proposta e o
+ * seletor vêm do HTML do agente: entram como dado numa linha só (um `tellOwner` com quebra enviaria antes do fim). Pura.
+ */
+export function choiceForOwner(args: { designTitle: string; boardTitle: string; boardId: string; what: string; selector: string }): string {
+  const { designTitle, boardTitle, boardId, what, selector } = args;
+  return `Design ${untrustedInline("título do design", designTitle)}: o usuário ESCOLHEU na prancheta ${untrustedInline("título da prancheta", boardTitle)} (id ${boardId}) a proposta ${untrustedInline("proposta escolhida", what)} [${untrustedInline("seletor", selector)}]. A prancheta foi APROVADA com essa escolha: construa SOMENTE essa proposta (as outras estão descartadas).`;
+}
 
 /**
  * O usuário clicou na proposta que escolhe numa prancheta com várias: registra o comentário, aprova a
@@ -46,7 +57,7 @@ export async function chooseOnBoard(args: {
     return;
   }
   try {
-    await designApi.tellOwner(owner, `Design "${design.title}": o usuário ESCOLHEU na prancheta "${board.title}" (id ${board.id}) a proposta "${what}" [${pick.selector}]. A prancheta foi APROVADA com essa escolha: construa SOMENTE essa proposta (as outras estão descartadas).`);
+    await designApi.tellOwner(owner, choiceForOwner({ designTitle: design.title, boardTitle: board.title, boardId: board.id, what, selector: pick.selector }));
     AlertaToast(t("canvas.design.title"), t("canvas.design.chosen", { what }), "success", 4000);
   } catch {
     // A escolha já está gravada; só não chegou ao dono (aba fechada, por exemplo).
