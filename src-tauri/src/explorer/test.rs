@@ -35,8 +35,14 @@ fn renomear_so_caixa_em_volume_insensivel_continua_funcionando() {
     let from = root.join("a.md");
     let to = root.join("A.md");
     std::fs::write(&from, "conteúdo").unwrap();
-    if std::fs::canonicalize(&from).unwrap() != std::fs::canonicalize(&to).unwrap() {
-        // volume sensível a caixa: o outro teste cobre esse cenário.
+    let from_real = std::fs::canonicalize(&from).unwrap();
+    let case_insensitive = match std::fs::canonicalize(&to) {
+        Ok(to_real) => to_real == from_real,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
+        Err(err) => panic!("falha ao detectar sensibilidade a caixa do volume: {err}"),
+    };
+    if !case_insensitive {
+        // quarantine: volume sensível a caixa no CI Linux
         let _ = std::fs::remove_dir_all(&root);
         return;
     }
@@ -45,6 +51,27 @@ fn renomear_so_caixa_em_volume_insensivel_continua_funcionando() {
 
     assert!(renamed.ends_with("A.md"));
     assert_eq!(std::fs::read_to_string(&to).unwrap(), "conteúdo");
+    assert!(std::fs::canonicalize(&to).unwrap().ends_with("A.md"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn fallback_de_identidade_recusa_arquivos_distintos_e_links() {
+    let root = std::env::temp_dir().join(format!("ags-explorer-fallback-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    std::fs::write(&a, "um").unwrap();
+    std::fs::write(&b, "dois").unwrap();
+    assert!(!super::ops::same_file_fallback(&a, &b));
+
+    #[cfg(unix)]
+    {
+        let link = root.join("atalho.txt");
+        std::os::unix::fs::symlink(&a, &link).unwrap();
+        assert!(!super::ops::same_file_fallback(&link, &a));
+    }
+
     std::fs::remove_dir_all(root).unwrap();
 }
 

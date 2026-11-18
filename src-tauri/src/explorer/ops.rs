@@ -43,33 +43,58 @@ fn out(p: &Path) -> String {
     p.to_string_lossy().to_string()
 }
 
-fn same_file(from: &Path, to: &Path) -> bool {
+fn same_file_identity(from: &Path, to: &Path) -> Option<bool> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        return match (fs::metadata(from), fs::metadata(to)) {
-            (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
-            _ => false,
+        return match (fs::symlink_metadata(from), fs::symlink_metadata(to)) {
+            (Ok(a), Ok(b)) => Some(a.dev() == b.dev() && a.ino() == b.ino()),
+            _ => Some(false),
         };
+    }
+    #[cfg(not(unix))]
+    {
+        // No Windows estável, `MetadataExt::{volume_serial_number, file_index}` exige a feature
+        // instável `windows_by_handle`. Sem adicionar dependência nova, tratamos a identidade por
+        // handle/inode como desconhecida (`None`) e usamos `same_file_fallback` como fallback seguro.
+        let _ = (from, to);
+        None
+    }
+}
+
+fn is_link_or_reparse(meta: &fs::Metadata) -> bool {
+    if meta.file_type().is_symlink() {
+        return true;
     }
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
-        return match (fs::metadata(from), fs::metadata(to)) {
-            (Ok(a), Ok(b)) => match (a.volume_serial_number(), a.file_index(), b.volume_serial_number(), b.file_index()) {
-                (Some(av), Some(ai), Some(bv), Some(bi)) => av == bv && ai == bi,
-                _ => false,
-            },
-            _ => false,
-        };
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        match (from.canonicalize(), to.canonicalize()) {
-            (Ok(from), Ok(to)) => from == to,
-            _ => false,
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return true;
         }
     }
+    false
+}
+
+pub(super) fn same_file_fallback(from: &Path, to: &Path) -> bool {
+    // Fallback seguro quando a identidade por handle/inode é desconhecida: recusa symlinks e
+    // reparse points para que `canonicalize` não iguale atalho e alvo, e exige o mesmo caminho
+    // real em disco (qualquer erro ou dúvida devolve `false` para nunca sobrescrever `to`).
+    let (Ok(a), Ok(b)) = (fs::symlink_metadata(from), fs::symlink_metadata(to)) else {
+        return false;
+    };
+    if is_link_or_reparse(&a) || is_link_or_reparse(&b) {
+        return false;
+    }
+    match (from.canonicalize(), to.canonicalize()) {
+        (Ok(from), Ok(to)) => from.as_os_str() == to.as_os_str(),
+        _ => false,
+    }
+}
+
+fn same_file(from: &Path, to: &Path) -> bool {
+    same_file_identity(from, to).unwrap_or_else(|| same_file_fallback(from, to))
 }
 
 #[tauri::command]
