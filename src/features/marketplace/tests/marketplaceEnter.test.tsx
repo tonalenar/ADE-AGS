@@ -36,7 +36,7 @@ function baseState(extra: Record<string, unknown>) {
     searchingRemote: false,
     installingKey: null,
     refreshingId: null,
-    loadRegistries: () => {},
+    loadRegistries: () => Promise.resolve(),
     loadSkills: () => {},
     searchRemote: () => {},
     installSkill: vi.fn(),
