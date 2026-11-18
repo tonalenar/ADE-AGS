@@ -44,9 +44,10 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
   const chatBrowser = useChatStore((state) => floatingPreview ? state.browser : null);
   const floatingRect = useChatStore((state) => floatingPreview ? state.browserFloatRect : null);
   const sourceRect = chatBrowser?.viewId === viewId ? chatBrowser.rect : null;
+  const effectiveSourceRect = sourceRect ?? (floatingPreview ? { left: 0, top: 0, width: 1280, height: 800 } : null);
   const miniZoom = miniBrowserZoom(
     zoom,
-    sourceRect ? { x: sourceRect.left, y: sourceRect.top, width: sourceRect.width, height: sourceRect.height } : null,
+    effectiveSourceRect ? { x: effectiveSourceRect.left, y: effectiveSourceRect.top, width: effectiveSourceRect.width, height: effectiveSourceRect.height } : null,
     floatingRect ? { x: floatingRect.left, y: floatingRect.top, width: floatingRect.width, height: floatingRect.height } : null,
   );
   const screenRadius = useContext(NativeCornerRadius);
@@ -70,6 +71,7 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     let frame = 0;
     let placeInFlight = false;
     let lastPlaceAt = Number.NEGATIVE_INFINITY;
+    let lastRect: Box | null = null;
 
     const measure = (): Place => {
       const rect = boxOf(el);
@@ -78,15 +80,18 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       // desenhando para as fotos dos agentes.
       const shown = document.visibilityState !== "hidden" && rect.width > 1 && rect.height > 1
         && el.checkVisibility({ visibilityProperty: true, opacityProperty: true });
-      if (shown && now - coveredAt > COVER_MS) {
+      const rectChanged = !lastRect || rect.x !== lastRect.x || rect.y !== lastRect.y || rect.width !== lastRect.width || rect.height !== lastRect.height;
+      if (shown && (rectChanged || now - coveredAt > COVER_MS)) {
         coveredAt = now;
+        lastRect = rect;
         clips = clippingAncestors(el);
         covers = coversOf(el, rect);
       }
       const windowBox = { x: 0, y: 0, width: innerWidth, height: innerHeight };
+      const clipsToUse = latest.current.floatingPreview ? [] : clips.map(boxOf);
       return {
         // Com o aparelho emoldurado na miniatura, o palco já escala a página: vale o zoom dele, não o da miniatura.
-        ...placeOf(rect, el.offsetWidth, latest.current.floatingPreview && latest.current.screenRadius <= 0 ? latest.current.miniZoom : latest.current.zoom, [windowBox, ...clips.map(boxOf)], shown ? covers : [], shown),
+        ...placeOf(rect, el.offsetWidth, latest.current.floatingPreview && latest.current.screenRadius <= 0 ? latest.current.miniZoom : latest.current.zoom, [windowBox, ...clipsToUse], shown ? covers : [], shown),
         clickToExpand: latest.current.floatingPreview,
         // A tela do aparelho manda nos cantos, também na miniatura.
         cornerRadius: latest.current.screenRadius > 0 ? latest.current.screenRadius : latest.current.floatingPreview ? FLOATING_PREVIEW_CORNER_RADIUS : 0,
