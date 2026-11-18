@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>ADE AGS uses Bluetooth only when a page asks to sign in with a passkey from a nearby phone.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>ADE AGS lets pages use the camera after you approve access.</string>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>ADE AGS lets pages use your location after you approve access.</string>
+  <key>NSWebBrowserPublicKeyCredentialUsageDescription</key>
+  <string>ADE AGS uses passkeys when the site and system support them.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>ADE AGS uses the microphone only when you start dictation in the composer.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
