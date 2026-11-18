@@ -146,3 +146,125 @@ Sobre o `AUDITORIA_2026-10-17_PERFORMANCE_E_JEV.md`, o lock do SQLite durante I/
   - nenhuma execução do app, nenhuma captura de tela e nenhuma medição;
   - nenhum teste rodado;
   - os sintomas visuais seguem "explicados por leitura" até a captura de antes e depois na instância isolada (AGENTS.md §6.2).
+
+## Status das correções
+
+Os 600 achados inventariados (`A001`–`A600`) foram distribuídos entre os PRs `#346` a `#370`, todos abertos contra `dev` (nenhum mesclado até aqui; o `#345` é o próprio documento da auditoria). Contagem final por destino: **481 corrigidos**, **11 duplicados**, **93 perguntas ao Ton** e **15 retirados**.
+
+### Resumo por PR
+
+| PR | Tema | IDs cobertos | Empilhamento |
+|---|---|---|---|
+| #346 | Base visual de streaming do chat e miniatura PiP | A156 (mais commits-base de #354 e #359) | Direto em `dev`; base de #354 e #359 |
+| #347 | Envelope único de dado não confiável e iframe isolado (PR09) | A103, A176–A179 | Direto em `dev`; base de #353 |
+| #348 | Fronteiras de erro por painel, TDZ da paleta e spawn de terminal (PR01) | A001–A003 | Direto em `dev`; base de #355 e #356 |
+| #349 | Leitura e escrita segura de JSON do usuário, explorer e SCM (PR02) | A004–A013, A015, A017–A018, A020–A025 | Direto em `dev` |
+| #350 | Runs e conversa: UTF-8, rollback, log limitado, corte e grupo ACP (PR16) | A288–A298 | Direto em `dev` |
+| #351 | Confirmação por categoria no computer use e permissões confirmadas (PR11) | A207–A211, A213–A216 | Direto em `dev` |
+| #352 | Política de saída do navegador para o agente, diálogos e reset (PR10) | A180–A206 | Direto em `dev` |
+| #353 | Guarda única antes de apertar Enter em terminal (PR08) | A160–A175 | Empilhado sobre #347 |
+| #354 | Timeline do chat sem salto e composer que só limpa envio aceito (PR06) | A099–A102, A104–A129 | Empilhado sobre #346; base de #360 |
+| #355 | Varredura do front da casca: canvas, abas, missões e boot (PR20, parte A) | A014, A075, A217, A250, A261, A419–A428, A458–A488, A589 | Empilhado sobre #348 |
+| #356 | Varredura do front: forge, settings, skills, marketplace e sessões (PR21, parte A) | A489–A490, A499, A505–A506, A510–A513, A523–A524, A533, A538–A546, A548–A550, A553–A562, A564–A567, A579–A580, A582, A585–A588 | Empilhado sobre #348; base de #358 |
+| #357 | Diagnóstico tipado e entrega confirmada em iPhone, simulador e Android (PR14) | A249, A251–A260, A262–A278 | Direto em `dev` |
+| #358 | Varredura do front: bot, design, editor, compare, memória, SCM e workspaces (PR21, parte B) | A491–A498, A500–A504, A507–A509, A514–A522, A525–A532, A534–A537, A547, A551–A552, A563, A568–A578, A581, A583–A584, A590–A592 | Empilhado sobre #356 (→ #348); base de #364 |
+| #359 | Superfície nativa do navegador e PiP sem piscar nem quinas quadradas (PR07) | A130–A155, A157–A159 | Empilhado sobre #346; base de #365 |
+| #360 | Varredura do front do chat: pedidos, equipes, composer e anexos (PR20, parte B) | A212, A415–A418, A429–A457 | Empilhado sobre #354 (→ #346) |
+| #361 | PTY robusto: escrita em fila, guarda de pânico e saída em lote (PR04) | A056, A072–A074, A076–A080, A082–A093 | Direto em `dev` |
+| #362 | Boot e encerramento com aviso visível e parada de gravação com teto (PR15) | A279–A287 | Direto em `dev` |
+| #363 | Identidade no TCP legado, cursor do bus e limites do IPC/MCP (PR12) | A222–A227 | Direto em `dev` (merge aguarda OK do Ton); base de #370 |
+| #364 | Catálogos i18n nos 3 idiomas, locale de datas/números, tokens de cor e graphify (PR22) | A593–A598 | Empilhado sobre #358 (→ #356 → #348) |
+| #365 | Testes de comportamento no lugar de cópias de lógica e regex (PR17) | A094, A299–A321 | Empilhado sobre #359 (→ #346) |
+| #366 | Banco sem mutex preso durante I/O e comandos fora da thread principal (PR03) | A016, A026–A055, A057–A071 | Direto em `dev`; base de #367, #368 e #369 |
+| #367 | Cache incremental de transcripts JSONL (PR05) | A095–A098 | Empilhado sobre #366 |
+| #368 | Varredura Rust de dados: memória, sessões, decisões, missões, harness e squads (PR18) | A325–A361 | Empilhado sobre #366 |
+| #369 | Varredura Rust restante: skills, forja, explorer, sync, marketplace e segurança (PR19) | A019, A218–A221, A322–A324, A363–A364, A366–A414 | Empilhado sobre #366 |
+| #370 | Intermediário local de credenciais com prova por identidade de processo (PR13) | A081, A228–A248, A362 | Empilhado sobre #363 |
+| PR próprio (em andamento) | Encerramento gracioso de sessões de terminal antes de `SIGKILL` | A365 | Retirado do #369; aguarda abertura |
+
+### Destino por ID
+
+Agrupado em intervalos por PR e destino (`corrigido`, `duplicado`, `pergunta ao Ton`, `retirado`):
+
+| ID | Destino | PR |
+|---|---|---|
+| A156 | corrigido | #346 |
+| A103, A176–A179 | corrigido | #347 |
+| A001–A003 | corrigido | #348 |
+| A004, A006–A013, A017–A018, A021–A024 | corrigido | #349 |
+| A005 | duplicado | #349 |
+| A015, A020, A025 | pergunta ao Ton | #349 |
+| A288–A297 | corrigido | #350 |
+| A298 | pergunta ao Ton | #350 |
+| A207–A211, A213–A215 | corrigido | #351 |
+| A216 | retirado | #351 |
+| A180–A196, A198–A202, A204–A206 | corrigido | #352 |
+| A197, A203 | pergunta ao Ton | #352 |
+| A160–A164, A166–A175 | corrigido | #353 |
+| A165 | retirado | #353 |
+| A099–A102, A104–A122, A124–A128 | corrigido | #354 |
+| A123 | pergunta ao Ton | #354 |
+| A129 | retirado | #354 |
+| A014, A075, A217, A250, A261, A419–A428, A458–A470, A472–A480, A482, A589 | corrigido | #355 |
+| A471, A481, A483–A488 | pergunta ao Ton | #355 |
+| A489–A490, A499, A505–A506, A510–A513, A523–A524, A533, A538–A544, A546, A548–A550, A553–A554, A556–A557, A559–A562, A564–A567, A580, A582, A587–A588 | corrigido | #356 |
+| A545, A555, A558, A579, A585–A586 | pergunta ao Ton | #356 |
+| A249, A251–A256, A258–A260, A262–A273, A275, A277–A278 | corrigido | #357 |
+| A257 | duplicado | #357 |
+| A274, A276 | pergunta ao Ton | #357 |
+| A491–A498, A500–A504, A507–A509, A514–A522, A525, A530, A534–A537, A547, A551–A552, A563, A568–A577 | corrigido | #358 |
+| A527–A529, A531–A532, A578, A581, A583–A584, A590–A592 | pergunta ao Ton | #358 |
+| A526 | retirado | #358 |
+| A130–A141, A144–A151, A153–A155, A158 | corrigido | #359 |
+| A152 | duplicado | #359 |
+| A142–A143, A157 | pergunta ao Ton | #359 |
+| A159 | retirado | #359 |
+| A212, A415–A418, A429–A431, A433–A436, A438–A439, A441–A443, A445–A446, A448–A449, A453–A456 | corrigido | #360 |
+| A432, A437, A440, A444, A450–A452, A457 | pergunta ao Ton | #360 |
+| A447 | retirado | #360 |
+| A072–A074, A076–A080, A082, A084–A088, A090–A092 | corrigido | #361 |
+| A083 | duplicado | #361 |
+| A056, A089, A093 | retirado | #361 |
+| A280–A286 | corrigido | #362 |
+| A279 | duplicado | #362 |
+| A287 | pergunta ao Ton | #362 |
+| A222–A227 | corrigido | #363 |
+| A593, A595–A598 | corrigido | #364 |
+| A594 | duplicado | #364 |
+| A094, A299–A321 | corrigido | #365 |
+| A016, A026–A039, A041–A044, A046–A048, A050–A053, A055, A057–A059, A061–A062, A064, A066–A071 | corrigido | #366 |
+| A040, A045, A049 | duplicado | #366 |
+| A060, A063, A065 | pergunta ao Ton | #366 |
+| A054 | retirado | #366 |
+| A095–A098 | corrigido | #367 |
+| A325–A337, A341–A342, A345–A347, A349, A352–A356 | corrigido | #368 |
+| A338–A340, A343–A344, A348, A350–A351, A357–A361 | pergunta ao Ton | #368 |
+| A019, A324, A364, A366–A372, A374, A376, A379, A382–A390, A392, A394, A400–A401, A403–A406, A410, A412–A413 | corrigido | #369 |
+| A378 | duplicado | #369 |
+| A218–A221, A322–A323, A363, A373, A375, A377, A380–A381, A391, A393, A395–A399, A402, A407–A409, A411, A414 | pergunta ao Ton | #369 |
+| A081, A228, A230–A240, A243, A362 | corrigido | #370 |
+| A229 | duplicado | #370 |
+| A241, A244–A246, A248 | pergunta ao Ton | #370 |
+| A242, A247 | retirado | #370 |
+| A365 | retirado | PR próprio (em andamento) |
+| A599–A600 | retirado | — |
+
+### Decisões pendentes do Ton
+
+- **A298 (#350):** definir se a TUI do Antigravity continua sempre com `--dangerously-skip-permissions` ou passa a seguir o modo de acesso escolhido.
+- **Formato do `canvas.json` por quadro (A015/A025, #349):** decidir se `canvas.json` passa a um arquivo por quadro para não regravar todos os quadros a cada edição.
+- **CSP `frame-src "http:"` (#347):** decidir o ajuste de `frame-src: "http:"` em `tauri.conf.json`, que pela especificação também aceita `https:`.
+- **A287 (#362):** decidir se o helper de gravação de tela deixa de compilar via `swift -e` a cada início e passa a ir pré-compilado no bundle.
+- **Abas de compare quando o attach falha (#358):** confirmar se as abas já abertas pela comparação continuam abertas quando `compareAttach` falha, evitando matar PTYs sem confirmação.
+- **Merge do #363 (TCP legado):** autorizar o bloqueio de métodos não livres no TCP legado onde há socket local (CLIs antigas fora do socket perdem `tab.send`/`tab.create`).
+- **A373 (#369):** definir o desenho e a migração de schema para tirar as variáveis `env` das TUIs customizadas do SQLite e guardá-las no keyring.
+- **A338/A350/A351 (#368):** decidir se entram as refatorações maiores de `execute_batch(SCHEMA)` em `memory/usage.rs`, N+1 de spans na lista de missões e leitura integral de revisões no cartão de juiz.
+- **P3 grandes listados em cada PR:** decidir quais itens P3 de desempenho, refatoração (>20 linhas) ou desenho marcados como `pergunta ao Ton` nos PRs #349, #352, #354–#360, #366 e #368–#370 entram numa próxima leva.
+- **Lint de CI do PR22 (#364):** decidir se entra no CI o lint estático para textos fora dos 3 catálogos i18n, datas sem locale e cores hex/rgba fora de tokens.
+- **Teste manual do broker com chave real (#370):** rodar junto com o Ton o teste manual de ponta a ponta com keyring real e chaves reais de Claude e Codex.
+
+### Não verificado
+
+- **Capturas visuais de antes e depois:** pendentes na instância isolada para chat (#346, #354, #360), superfície nativa do navegador e PiP (#346, #359), fronteiras de erro (#348), canvas (#355), avisos de boot/saída (#362) e tokens de cor (#364).
+- **Windows e Linux com cgroup:** compilação e execução dos caminhos `cfg(windows)` (ConPTY, Job Object, `GetProcessTimes`/Toolhelp, WebView2 e UI Automation do Gemini Desktop em #350, #359, #366, #369 e #370) e contenção em Linux com cgroup v2 (#350 e o PR próprio do A365).
+- **Desempenho do "Iniciar missão":** tempo real de "Iniciar missão" no app e uso de heap do JSON parseado no cache de transcripts (#367) continuam não medidos (apenas o benchmark sintético pós-correção foi rodado em debug).

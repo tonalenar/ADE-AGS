@@ -2,7 +2,7 @@
 
 ## Auditoria completa de 2026-11-16
 
-Leitura dos 2.217 arquivos de código, com os bugs confirmados (3 P0: erro de render que mata todos os terminais, a paleta que lança no render, o canvas apagado quando `canvas.json` não lê) e as causas dos sintomas de chat, PiP, navegador e travamento. Os próximos passos estão em fases: dados e agentes, travamento, sintomas visuais, segurança e aparelhos. Ver [AUDITORIA_2026-11-16.md](./AUDITORIA_2026-11-16.md).
+Leitura dos 2.217 arquivos de código, com os bugs confirmados (3 P0: erro de render que mata todos os terminais, a paleta que lança no render, o canvas apagado quando `canvas.json` não lê) e as causas dos sintomas de chat, PiP, navegador e travamento. Os próximos passos estão em fases: dados e agentes, travamento, sintomas visuais, segurança e aparelhos. Ver [AUDITORIA_2026-11-16.md](./AUDITORIA_2026-11-16.md) e o [status das correções](./AUDITORIA_2026-11-16.md#status-das-corre%C3%A7%C3%B5es).
 
 ## Controle de versão local
 
