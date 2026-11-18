@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 struct Tmp(PathBuf);
 impl Tmp {
     fn new(name: &str) -> Tmp {
-        let p = std::env::temp_dir().join(format!("cc-cp-{name}-{}", uuid::Uuid::new_v4().simple()));
+        let p =
+            std::env::temp_dir().join(format!("cc-cp-{name}-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&p).unwrap();
         Tmp(p)
     }
@@ -25,7 +26,11 @@ fn sh(dir: &Path, args: &[&str]) -> String {
         .args(args)
         .output()
         .expect("git instalado");
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
@@ -42,7 +47,9 @@ fn repo() -> Tmp {
 
 fn read(dir: &Path, f: &str) -> Option<String> {
     // Git en Windows puede devolver CRLF según `core.autocrlf`: el contenido es lo que importa.
-    std::fs::read_to_string(dir.join(f)).ok().map(|c| c.replace("\r\n", "\n"))
+    std::fs::read_to_string(dir.join(f))
+        .ok()
+        .map(|c| c.replace("\r\n", "\n"))
 }
 
 #[test]
@@ -55,14 +62,30 @@ fn la_foto_no_toca_el_indice_ni_la_rama_ni_el_arbol() {
 
     let snap = snapshot(&r.0, "t1", "prueba").unwrap();
 
-    assert_eq!(sh(&r.0, &["status", "--porcelain"]), status_antes, "el estado no cambió");
+    assert_eq!(
+        sh(&r.0, &["status", "--porcelain"]),
+        status_antes,
+        "el estado no cambió"
+    );
     assert_eq!(sh(&r.0, &["rev-parse", "HEAD"]), head_antes);
     assert_eq!(snap.head, head_antes);
     // La foto lleva lo modificado y lo nuevo, con el HEAD como padre; y cuelga de una ref.
-    assert_eq!(sh(&r.0, &["show", &format!("{}:a.txt", snap.commit)]), "uno cambiado");
-    assert_eq!(sh(&r.0, &["show", &format!("{}:nuevo.txt", snap.commit)]), "nuevo");
-    assert_eq!(sh(&r.0, &["rev-parse", &format!("{}^", snap.commit)]), head_antes);
-    assert_eq!(sh(&r.0, &["rev-parse", "refs/controlcode/checkpoints/t1"]), snap.commit);
+    assert_eq!(
+        sh(&r.0, &["show", &format!("{}:a.txt", snap.commit)]),
+        "uno cambiado"
+    );
+    assert_eq!(
+        sh(&r.0, &["show", &format!("{}:nuevo.txt", snap.commit)]),
+        "nuevo"
+    );
+    assert_eq!(
+        sh(&r.0, &["rev-parse", &format!("{}^", snap.commit)]),
+        head_antes
+    );
+    assert_eq!(
+        sh(&r.0, &["rev-parse", "refs/controlcode/checkpoints/t1"]),
+        snap.commit
+    );
     // Sin restos del índice temporal.
     let leftovers: Vec<_> = std::fs::read_dir(r.0.join(".git"))
         .unwrap()
@@ -97,14 +120,25 @@ fn restaurar_devuelve_los_archivos_el_head_y_borra_lo_nuevo_sin_tocar_lo_ignorad
 
     assert_eq!(sh(&r.0, &["rev-parse", "HEAD"]), head, "HEAD de vuelta");
     assert_eq!(read(&r.0, "a.txt").as_deref(), Some("uno en la foto\n"));
-    assert_eq!(read(&r.0, "b.txt").as_deref(), Some("dos\n"), "lo borrado vuelve");
+    assert_eq!(
+        read(&r.0, "b.txt").as_deref(),
+        Some("dos\n"),
+        "lo borrado vuelve"
+    );
     assert_eq!(read(&r.0, "c.txt").as_deref(), Some("c de la foto\n"));
     assert!(read(&r.0, "d.txt").is_none(), "lo que nació después se va");
     assert!(!r.0.join("sub").exists());
-    assert_eq!(read(&r.0, "ignorado.log").as_deref(), Some("no se toca\n"), "lo ignorado no se toca");
+    assert_eq!(
+        read(&r.0, "ignorado.log").as_deref(),
+        Some("no se toca\n"),
+        "lo ignorado no se toca"
+    );
     // Los cambios quedan sin commitear y sin preparar, como estaban.
     let status = sh(&r.0, &["status", "--porcelain"]);
-    assert!(status.contains("M a.txt") && status.contains("?? c.txt"), "{status}");
+    assert!(
+        status.contains("M a.txt") && status.contains("?? c.txt"),
+        "{status}"
+    );
 }
 
 #[test]
@@ -114,14 +148,22 @@ fn restaurar_una_foto_que_ya_no_esta_falla_sin_tocar_nada() {
     let head = sh(&r.0, &["rev-parse", "HEAD"]);
     let err = restore(&r.0, "0123456789012345678901234567890123456789", &head).unwrap_err();
     assert!(err.contains("não está mais"), "{err}");
-    assert_eq!(read(&r.0, "a.txt").as_deref(), Some("cambiado\n"), "no se perdió nada");
+    assert_eq!(
+        read(&r.0, "a.txt").as_deref(),
+        Some("cambiado\n"),
+        "no se perdió nada"
+    );
 }
 
 #[test]
 fn sin_commits_no_hay_foto_y_lo_dice() {
     let t = Tmp::new("vacio");
     sh(&t.0, &["init", "-q", "-b", "main"]);
-    assert!(snapshot(&t.0, "x", "l").unwrap_err().contains("nenhum commit"));
+    assert!(
+        snapshot(&t.0, "x", "l")
+            .unwrap_err()
+            .contains("nenhum commit")
+    );
     let fuera = Tmp::new("no-repo");
     assert!(snapshot(&fuera.0, "x", "l").is_err());
 }
@@ -143,14 +185,23 @@ fn item(id: &str, status: &str, deps: &[&str], dir: &str, before: Option<(&str, 
 fn volver_atras_arrastra_a_las_que_dependen_y_deja_las_independientes() {
     let items = vec![
         item("api", "done", &[], "/wt/api", Some(("cp-api", 10))),
-        item("tests", "done", &["api"], "/wt/tests", Some(("cp-tests", 20))),
+        item(
+            "tests",
+            "done",
+            &["api"],
+            "/wt/tests",
+            Some(("cp-tests", 20)),
+        ),
         item("docs", "done", &[], "/wt/docs", Some(("cp-docs", 15))),
     ];
     let p = plan(&items, "api").unwrap();
     assert_eq!(p.tasks, vec!["api", "tests"]);
     assert_eq!(p.restores.len(), 2);
     assert!(p.restores.contains(&("/wt/api".into(), "cp-api".into())));
-    assert!(p.restores.contains(&("/wt/tests".into(), "cp-tests".into())));
+    assert!(
+        p.restores
+            .contains(&("/wt/tests".into(), "cp-tests".into()))
+    );
     assert!(p.without_checkpoint.is_empty());
 }
 
@@ -163,11 +214,24 @@ fn las_que_corrieron_despues_en_la_misma_carpeta_se_rehacen_y_se_restaura_la_fot
         item("antes", "done", &[], "/proy", Some(("cp-antes", 5))),
     ];
     let p = plan(&items, "dos").unwrap();
-    assert_eq!(p.tasks, vec!["dos", "tres"], "la anterior ('antes', 'uno') no se toca");
-    assert_eq!(p.restores, vec![("/proy".to_string(), "cp-dos".to_string())]);
+    assert_eq!(
+        p.tasks,
+        vec!["dos", "tres"],
+        "la anterior ('antes', 'uno') no se toca"
+    );
+    assert_eq!(
+        p.restores,
+        vec![("/proy".to_string(), "cp-dos".to_string())]
+    );
     // Y la transitividad: lo que depende de una arrastrada también.
     let mut items = items;
-    items.push(item("cola", "done", &["tres"], "/otra", Some(("cp-cola", 40))));
+    items.push(item(
+        "cola",
+        "done",
+        &["tres"],
+        "/otra",
+        Some(("cp-cola", 40)),
+    ));
     let p = plan(&items, "dos").unwrap();
     assert_eq!(p.tasks, vec!["dos", "tres", "cola"]);
     assert_eq!(p.restores.len(), 2);
@@ -183,7 +247,11 @@ fn con_dos_afectadas_en_una_carpeta_gana_la_foto_mas_vieja() {
     assert_eq!(p.tasks, vec!["b"]);
     let p = plan(&items, "a").unwrap();
     assert_eq!(p.tasks, vec!["a", "b"]);
-    assert_eq!(p.restores, vec![("/proy".to_string(), "cp-a".to_string())], "la de a, que es la más vieja");
+    assert_eq!(
+        p.restores,
+        vec![("/proy".to_string(), "cp-a".to_string())],
+        "la de a, que es la más vieja"
+    );
 }
 
 #[test]
@@ -196,7 +264,11 @@ fn sin_foto_hay_error_y_una_afectada_sin_foto_se_avisa() {
 
     let items = vec![
         item("a", "done", &[], "/wt/a", Some(("cp-a", 10))),
-        Item { before: None, dir: None, ..item("b", "done", &["a"], "", None) },
+        Item {
+            before: None,
+            dir: None,
+            ..item("b", "done", &["a"], "", None)
+        },
     ];
     let p = plan(&items, "a").unwrap();
     assert_eq!(p.tasks, vec!["a", "b"]);
@@ -210,7 +282,10 @@ fn con_algo_corriendo_o_con_un_lider_no_se_puede() {
         item("b", "running", &[], "/wt/b", Some(("cp-b", 20))),
     ];
     assert!(plan(&items, "a").unwrap_err().contains("está rodando"));
-    let lider = Item { lead: true, ..item("l", "done", &[], "/p", Some(("cp-l", 1))) };
+    let lider = Item {
+        lead: true,
+        ..item("l", "done", &[], "/p", Some(("cp-l", 1)))
+    };
     assert!(plan(&[lider.clone()], "l").unwrap_err().contains("líder"));
     // Y el líder nunca entra en lo que se rehace.
     let items = vec![lider, item("a", "done", &[], "/p", Some(("cp-a", 5)))];
@@ -222,12 +297,22 @@ fn con_algo_corriendo_o_con_un_lider_no_se_puede() {
 
 fn db_con_run(cwd: &str) -> (crate::database::DbConnection, String) {
     let conn = crate::database::test_db();
-    conn.execute("INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('w1','W',0,0)", []).unwrap();
+    conn.execute(
+        "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('w1','W',0,0)",
+        [],
+    )
+    .unwrap();
     let run = crate::runs::store::create_run(&conn, "w1", "objetivo", cwd).unwrap();
     (Arc::new(Mutex::new(conn)), run.id)
 }
 
-fn tarea(db: &crate::database::DbConnection, run: &str, title: &str, cwd: &str, deps: &[&str]) -> String {
+fn tarea(
+    db: &crate::database::DbConnection,
+    run: &str,
+    title: &str,
+    cwd: &str,
+    deps: &[&str],
+) -> String {
     let conn = db.lock().unwrap();
     let t = crate::runs::store::create_task(
         &conn,
@@ -243,7 +328,11 @@ fn tarea(db: &crate::database::DbConnection, run: &str, title: &str, cwd: &str, 
     )
     .unwrap();
     for d in deps {
-        conn.execute("INSERT INTO task_deps (task_id, depends_on) VALUES (?1, ?2)", rusqlite::params![t.id, d]).unwrap();
+        conn.execute(
+            "INSERT INTO task_deps (task_id, depends_on) VALUES (?1, ?2)",
+            rusqlite::params![t.id, d],
+        )
+        .unwrap();
     }
     t.id
 }
@@ -293,13 +382,28 @@ fn rollback_de_punta_a_punta_restaura_la_carpeta_y_deja_las_tareas_en_cola() {
     let conn = db.lock().unwrap();
     for id in [&a, &b] {
         let t = crate::runs::store::task_by_id(&conn, id).unwrap().unwrap();
-        assert_eq!((t.status.as_str(), t.result, t.session_id, t.ended_at), ("pending", None, None, None));
+        assert_eq!(
+            (t.status.as_str(), t.result, t.session_id, t.ended_at),
+            ("pending", None, None, None)
+        );
     }
-    assert_eq!(crate::runs::store::run_by_id(&conn, &run).unwrap().unwrap().status, "running");
+    assert_eq!(
+        crate::runs::store::run_by_id(&conn, &run)
+            .unwrap()
+            .unwrap()
+            .status,
+        "running"
+    );
     // Y quedó la foto de seguridad para deshacer el rollback: tiene el trabajo que se perdió.
     assert_eq!(safeties.len(), 1);
     assert_eq!(safeties[0].kind, kind::SAFETY);
-    assert_eq!(sh(&r.0, &["show", &format!("{}:b.txt", safeties[0].commit_sha)]), "b rompió");
+    assert_eq!(
+        sh(
+            &r.0,
+            &["show", &format!("{}:b.txt", safeties[0].commit_sha)]
+        ),
+        "b rompió"
+    );
 }
 
 #[test]
@@ -311,14 +415,150 @@ fn si_la_carpeta_ya_no_existe_no_se_toca_nada() {
     take(&db, &run, Some(&a), &r.0, kind::BEFORE, "antes").unwrap();
     {
         let conn = db.lock().unwrap();
-        conn.execute("UPDATE tasks SET status = 'done' WHERE id = ?1", [&a]).unwrap();
+        conn.execute("UPDATE tasks SET status = 'done' WHERE id = ?1", [&a])
+            .unwrap();
     }
     let mut p = plan_de(&db, &run, &a).unwrap();
     p.restores[0].0 = r.0.join("no-existe").to_string_lossy().to_string();
     let err = rollback(&db, &run, &p).unwrap_err();
     assert!(err.contains("já não existe"), "{err}");
     let conn = db.lock().unwrap();
-    assert_eq!(crate::runs::store::task_by_id(&conn, &a).unwrap().unwrap().status, "done", "la tarea no se tocó");
+    assert_eq!(
+        crate::runs::store::task_by_id(&conn, &a)
+            .unwrap()
+            .unwrap()
+            .status,
+        "done",
+        "la tarea no se tocó"
+    );
+}
+
+/// O plano é calculado com a tarefa parada. Antes de o rollback restaurar a pasta, o tick a despacha (o
+/// `mark_dispatched` a deixa `ready`) segurando o lock do agendador. O rollback tem que esperar esse lock e revalidar:
+/// com a tarefa viva, não pode restaurar nada.
+#[test]
+fn rollback_nao_corre_com_dispatch() {
+    let r = repo();
+    let cwd = r.0.to_string_lossy().to_string();
+    let (db, run) = db_con_run(&cwd);
+    let a = tarea(&db, &run, "a", &cwd, &[]);
+    take(&db, &run, Some(&a), &r.0, kind::BEFORE, "antes de a").unwrap();
+    std::fs::write(r.0.join("a.txt"), "a trabalhou\n").unwrap();
+    {
+        let conn = db.lock().unwrap();
+        conn.execute("UPDATE tasks SET status = 'done' WHERE id = ?1", [&a]).unwrap();
+    }
+    let p = plan_de(&db, &run, &a).unwrap();
+
+    let tick = crate::runs::scheduler::tick_lock();
+    let (db2, run2) = (db.clone(), run.clone());
+    let voltar = std::thread::spawn(move || rollback(&db2, &run2, &p));
+    {
+        let conn = db.lock().unwrap();
+        conn.execute("UPDATE tasks SET status = 'ready' WHERE id = ?1", [&a]).unwrap();
+    }
+    drop(tick);
+    let resultado = voltar.join().unwrap();
+
+    assert!(resultado.is_err(), "o rollback correu com a tarefa despachada: {resultado:?}");
+    assert_eq!(read(&r.0, "a.txt").as_deref(), Some("a trabalhou\n"), "a pasta não pode ser restaurada com a tarefa viva");
+}
+
+/// O git do rollback fica bloqueado no meio (o gancho segura o I/O). Enquanto isso, o lock do tick tem que estar livre
+/// e o run tem que estar marcado: o tick não despacha nada dele. Liberar o git só depois das checagens evita deixar
+/// uma thread presa segurando o lock se algo falhar.
+#[test]
+fn rollback_com_git_bloqueado_nao_prende_o_lock_do_tick() {
+    let r = repo();
+    let cwd = r.0.to_string_lossy().to_string();
+    let (db, run) = db_con_run(&cwd);
+    let a = tarea(&db, &run, "a", &cwd, &[]);
+    take(&db, &run, Some(&a), &r.0, kind::BEFORE, "antes de a").unwrap();
+    std::fs::write(r.0.join("a.txt"), "a trabalhou\n").unwrap();
+    {
+        let conn = db.lock().unwrap();
+        conn.execute("UPDATE tasks SET status = 'done' WHERE id = ?1", [&a]).unwrap();
+    }
+    let p = plan_de(&db, &run, &a).unwrap();
+
+    let (no_git_tx, no_git_rx) = std::sync::mpsc::channel::<()>();
+    let (liberar_tx, liberar_rx) = std::sync::mpsc::channel::<()>();
+    let (db2, run2, p2) = (db.clone(), run.clone(), p.clone());
+    let voltar = std::thread::spawn(move || {
+        rollback_com(&db2, &run2, &p2, move || {
+            no_git_tx.send(()).unwrap();
+            liberar_rx.recv().unwrap();
+        })
+    });
+    no_git_rx.recv().unwrap();
+    // Tentativas limitadas, sem espera: com o lock livre a primeira já passa.
+    let livre = (0..1_000).any(|_| crate::runs::scheduler::try_tick_lock().is_some());
+    let marcado = crate::runs::scheduler::em_manutencao(&run);
+    liberar_tx.send(()).unwrap();
+    let primeiro = voltar.join().unwrap();
+
+    assert!(livre, "o lock do tick ficou preso durante o git do rollback");
+    assert!(marcado, "o run tem que estar marcado enquanto o git roda");
+    assert!(primeiro.is_ok(), "{primeiro:?}");
+    assert!(!crate::runs::scheduler::em_manutencao(&run), "a marca sai quando o rollback termina");
+}
+
+/// Um run já marcado (outro rollback ou restauração em curso) recusa o segundo rollback, sem tocar em arquivo.
+#[test]
+fn segundo_rollback_do_mesmo_run_e_recusado_enquanto_o_primeiro_roda() {
+    let r = repo();
+    let cwd = r.0.to_string_lossy().to_string();
+    let (db, run) = db_con_run(&cwd);
+    let a = tarea(&db, &run, "a", &cwd, &[]);
+    take(&db, &run, Some(&a), &r.0, kind::BEFORE, "antes de a").unwrap();
+    std::fs::write(r.0.join("a.txt"), "a trabalhou\n").unwrap();
+    {
+        let conn = db.lock().unwrap();
+        conn.execute("UPDATE tasks SET status = 'done' WHERE id = ?1", [&a]).unwrap();
+    }
+    let p = plan_de(&db, &run, &a).unwrap();
+    assert!(crate::runs::scheduler::marcar_manutencao(&run));
+    let resultado = rollback(&db, &run, &p);
+    crate::runs::scheduler::desmarcar_manutencao(&run);
+
+    assert!(resultado.is_err(), "o segundo rollback correu junto com outro: {resultado:?}");
+    assert_eq!(read(&r.0, "a.txt").as_deref(), Some("a trabalhou\n"), "nenhum arquivo pode ser tocado");
+}
+
+/// A restauração de uma foto também fica fora do lock do tick enquanto o git roda.
+#[test]
+fn restauracao_com_git_bloqueado_nao_prende_o_lock_do_tick() {
+    let r = repo();
+    let cwd = r.0.to_string_lossy().to_string();
+    let (db, run) = db_con_run(&cwd);
+    let a = tarea(&db, &run, "a", &cwd, &[]);
+    let cp = take(&db, &run, Some(&a), &r.0, kind::BEFORE, "antes de a").unwrap();
+    std::fs::write(r.0.join("a.txt"), "a trabalhou\n").unwrap();
+    {
+        let conn = db.lock().unwrap();
+        conn.execute("UPDATE tasks SET status = 'done' WHERE id = ?1", [&a]).unwrap();
+    }
+
+    let (no_git_tx, no_git_rx) = std::sync::mpsc::channel::<()>();
+    let (liberar_tx, liberar_rx) = std::sync::mpsc::channel::<()>();
+    let (db2, id) = (db.clone(), cp.id.clone());
+    let restaurar = std::thread::spawn(move || {
+        restaurar_com(&db2, &id, move || {
+            no_git_tx.send(()).unwrap();
+            liberar_rx.recv().unwrap();
+        })
+    });
+    no_git_rx.recv().unwrap();
+    let livre = (0..1_000).any(|_| crate::runs::scheduler::try_tick_lock().is_some());
+    let marcado = crate::runs::scheduler::em_manutencao(&run);
+    liberar_tx.send(()).unwrap();
+    let resultado = restaurar.join().unwrap();
+
+    assert!(livre, "o lock do tick ficou preso durante o git da restauração");
+    assert!(marcado, "o run tem que estar marcado enquanto a restauração roda");
+    assert!(resultado.is_ok(), "{resultado:?}");
+    assert!(!crate::runs::scheduler::em_manutencao(&run), "a marca sai quando a restauração termina");
+    assert_eq!(read(&r.0, "a.txt").as_deref(), Some("uno\n"), "a foto foi restaurada");
 }
 
 #[test]

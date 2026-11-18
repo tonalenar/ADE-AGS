@@ -3,12 +3,12 @@
 use crate::database::DbConnection;
 use tauri::AppHandle;
 
-use super::profiles::{spec_for, PROFILES};
+use super::profiles::{PROFILES, spec_for};
 use crate::util::now_ts;
 
 use super::store::{
-    accounts_root, row_to_account, validate_name, AccountCapableAgent, AccountKind, AccountRow,
-    AgentAccount, ACCOUNT_COLUMNS,
+    ACCOUNT_COLUMNS, AccountCapableAgent, AccountKind, AccountRow, AgentAccount, accounts_root,
+    row_to_account, validate_name,
 };
 
 /// TUIs que pueden tener varias cuentas, marcando cuáles están instaladas.
@@ -38,83 +38,145 @@ pub async fn account_capable_agents() -> Result<Vec<AccountCapableAgent>, String
 }
 
 #[tauri::command]
-pub fn list_agent_accounts(db: tauri::State<DbConnection>) -> Result<Vec<AgentAccount>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    list_accounts(&conn)
+pub async fn list_agent_accounts(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<AgentAccount>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (rows, identities) = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let rows = account_rows(&conn)?;
+            let identities = rows
+                .iter()
+                .map(|row| {
+                    (
+                        row.id.clone(),
+                        super::health::load_identity(&conn, &row.id)
+                            .and_then(|identity| identity.email),
+                    )
+                })
+                .collect::<std::collections::HashMap<_, _>>();
+            (rows, identities)
+        };
+        Ok(accounts_from_rows(rows, &identities))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
-/// Las cuentas creadas en la app, sobre una conexión ya tomada. Es lo que usa también el
-/// roster de la flota, que necesita la lista sin pasar por un comando.
-pub fn list_accounts(conn: &rusqlite::Connection) -> Result<Vec<AgentAccount>, String> {
-    let mut stmt = conn
-        .prepare(&format!("SELECT {ACCOUNT_COLUMNS} FROM agent_accounts ORDER BY agent_id, name"))
-        .map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], AccountRow::from_row).map_err(|e| e.to_string())?;
+/// Las cuentas creadas en la app. Es lo que usa también el roster de la flota, que necesita
+/// la lista sin pasar por un comando.
+pub fn list_accounts(db: &crate::database::DbConnection) -> Result<Vec<AgentAccount>, String> {
+    list_accounts_with(db, &|| {})
+}
 
-    let mut accounts = Vec::new();
-    for row in rows {
-        let row = row.map_err(|e| e.to_string())?;
-        // Una cuenta de una TUI que ya no está en PROFILES se omite en vez de romper la
-        // lista entera: no hay forma de lanzarla, pero su carpeta sigue en el disco.
-        if let Some(account) = row_to_account(row) {
-            accounts.push(account);
-        }
-    }
-    label_from_identity(conn, &mut accounts);
-    Ok(accounts)
+// `antes_do_io` roda logo antes de ler disco e Keychain de cada conta (ver `row_to_account`).
+pub(crate) fn list_accounts_with(
+    db: &crate::database::DbConnection,
+    antes_do_io: &dyn Fn(),
+) -> Result<Vec<AgentAccount>, String> {
+    let (rows, identities) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let rows = account_rows(&conn)?;
+        let identities = rows
+            .iter()
+            .map(|row| {
+                (
+                    row.id.clone(),
+                    super::health::load_identity(&conn, &row.id).and_then(|identity| identity.email),
+                )
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        (rows, identities)
+    };
+    antes_do_io();
+    Ok(accounts_from_rows(rows, &identities))
+}
+
+fn account_rows(conn: &rusqlite::Connection) -> Result<Vec<AccountRow>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {ACCOUNT_COLUMNS} FROM agent_accounts ORDER BY agent_id, name"
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], AccountRow::from_row)
+        .map_err(|e| e.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())
+}
+
+fn accounts_from_rows(
+    rows: Vec<AccountRow>,
+    identities: &std::collections::HashMap<String, Option<String>>,
+) -> Vec<AgentAccount> {
+    rows.into_iter()
+        .filter_map(row_to_account)
+        .map(|mut account| {
+            if account.label.is_none() {
+                account.label = identities.get(&account.id).cloned().flatten();
+            }
+            account
+        })
+        .collect()
 }
 
 #[tauri::command]
-pub fn create_agent_account(
+pub async fn create_agent_account(
     agent_id: String,
     name: String,
     app: AppHandle,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<AgentAccount, String> {
-    if spec_for(&agent_id).is_none() {
-        return Err(format!("'{agent_id}' no soporta varias cuentas"));
-    }
-    let name = name.trim().to_string();
-    validate_name(&name)?;
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if spec_for(&agent_id).is_none() {
+            return Err(format!("'{agent_id}' no soporta varias cuentas"));
+        }
+        let name = name.trim().to_string();
+        validate_name(&name)?;
 
-    let dir = accounts_root(&app)?.join(&agent_id).join(&name);
-    // El directorio se crea vacío y la TUI lo inicializa sola en su primer arranque. Si ya
-    // existía (cuenta borrada de la base pero no del disco), se reutiliza tal cual: sus
-    // credenciales siguen ahí y volver a loguearse sería trabajo de más.
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("No se pudo crear la carpeta de la cuenta: {e}"))?;
+        let dir = accounts_root(&app)?.join(&agent_id).join(&name);
+        // El directorio se crea vacío y la TUI lo inicializa sola en su primer arranque. Si ya
+        // existía (cuenta borrada de la base pero no del disco), se reutiliza tal cual: sus
+        // credenciales siguen ahí y volver a loguearse sería trabajo de más.
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("No se pudo crear la carpeta de la cuenta: {e}"))?;
 
-    let id = uuid::Uuid::new_v4().to_string();
-    let created_at = now_ts();
-    let dir_str = dir.to_string_lossy().to_string();
+        let id = uuid::Uuid::new_v4().to_string();
+        let created_at = now_ts();
+        let dir_str = dir.to_string_lossy().to_string();
 
-    {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        conn.execute(
-            "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![id, agent_id, name, dir_str, created_at],
-        )
-        .map_err(|e| {
-            if e.to_string().contains("UNIQUE") {
-                format!("Ya existe una cuenta '{name}' para esta TUI")
-            } else {
-                e.to_string()
-            }
-        })?;
-    }
+        {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            conn.execute(
+                "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![id, agent_id, name, dir_str, created_at],
+            )
+            .map_err(|e| {
+                if e.to_string().contains("UNIQUE") {
+                    format!("Ya existe una cuenta '{name}' para esta TUI")
+                } else {
+                    e.to_string()
+                }
+            })?;
+        }
 
-    row_to_account(AccountRow {
-        id,
-        agent_id,
-        name,
-        dir: dir_str,
-        created_at,
-        kind: AccountKind::Login,
-        base_url: None,
-        key_hint: None,
+        row_to_account(AccountRow {
+            id,
+            agent_id,
+            name,
+            dir: dir_str,
+            created_at,
+            kind: AccountKind::Login,
+            base_url: None,
+            key_hint: None,
+        })
+        .ok_or_else(|| "No se pudo leer la cuenta recién creada".to_string())
     })
-    .ok_or_else(|| "No se pudo leer la cuenta recién creada".to_string())
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Las TUIs que aceptan una cuenta por API key, y cómo la guarda cada una.
@@ -143,14 +205,19 @@ pub async fn create_agent_api_key_account(
     db: tauri::State<'_, DbConnection>,
 ) -> Result<AgentAccount, String> {
     if !supports_api_key(&agent_id) {
-        return Err(format!("'{agent_id}' no acepta cuentas por API key: usá el login de la TUI"));
+        return Err(format!(
+            "'{agent_id}' no acepta cuentas por API key: usá el login de la TUI"
+        ));
     }
     let name = name.trim().to_string();
     validate_name(&name)?;
     let api_key = api_key.trim().to_string();
     super::secrets::validate_key(&api_key)?;
     let base_url = match base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-        Some(_) if !crate::agents::adapter_for(&agent_id).is_some_and(|adapter| adapter.supports_custom_api_base_url()) => {
+        Some(_)
+            if !crate::agents::adapter_for(&agent_id)
+                .is_some_and(|adapter| adapter.supports_custom_api_base_url()) =>
+        {
             return Err("Un endpoint propio solo se admite en cuentas de Claude Code".into());
         }
         Some(url) => Some(super::secrets::validate_base_url(url)?),
@@ -158,7 +225,8 @@ pub async fn create_agent_api_key_account(
     };
 
     let dir = accounts_root(&app)?.join(&agent_id).join(&name);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("No se pudo crear la carpeta de la cuenta: {e}"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("No se pudo crear la carpeta de la cuenta: {e}"))?;
     let id = uuid::Uuid::new_v4().to_string();
     let created_at = now_ts();
     let dir_str = dir.to_string_lossy().to_string();
@@ -166,7 +234,8 @@ pub async fn create_agent_api_key_account(
 
     // Primero el secreto, después la fila: una fila sin su key sería una cuenta que no
     // arranca. Si la fila falla después, se borra lo guardado.
-    let (secret_id, store_key, login_dir, login_key) = (id.clone(), api_key.clone(), dir.clone(), api_key);
+    let (secret_id, store_key, login_dir, login_key) =
+        (id.clone(), api_key.clone(), dir.clone(), api_key);
     let agent = agent_id.clone();
     tokio::task::spawn_blocking(move || match agent.as_str() {
         "claude-code" => super::secrets::save(&secret_id, &store_key),
@@ -175,14 +244,17 @@ pub async fn create_agent_api_key_account(
     .await
     .map_err(|e| e.to_string())??;
 
-    let inserted = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
+    let row = (id.clone(), agent_id.clone(), name.clone(), dir_str.clone(), base_url.clone(), hint.clone());
+    let inserted = crate::database::blocking_db(&db, move |conn| {
+        let (id, agent_id, name, dir_str, base_url, hint) = row;
         conn.execute(
             "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at, kind, base_url, key_hint)
              VALUES (?1, ?2, ?3, ?4, ?5, 'api_key', ?6, ?7)",
             rusqlite::params![id, agent_id, name, dir_str, created_at, base_url, hint],
         )
-    };
+        .map_err(|e| e.to_string())
+    })
+    .await;
     if let Err(e) = inserted {
         super::secrets::delete(&id);
         return Err(if e.to_string().contains("UNIQUE") {
@@ -210,35 +282,41 @@ pub async fn create_agent_api_key_account(
 /// Están separados a propósito: sacarla de la app es reversible (se vuelve a agregar con el
 /// mismo nombre y el login sigue ahí), borrar la carpeta no lo es.
 #[tauri::command]
-pub fn delete_agent_account(
+pub async fn delete_agent_account(
     id: String,
     delete_files: bool,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
-    let dir: Option<String> = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        let dir = conn
-            .query_row(
-                "SELECT dir FROM agent_accounts WHERE id = ?1",
-                [&id],
-                |row| row.get::<_, String>(0),
-            )
-            .ok();
-        conn.execute("DELETE FROM agent_accounts WHERE id = ?1", [&id])
-            .map_err(|e| e.to_string())?;
-        dir
-    };
-    // La key de una cuenta de Claude Code vive en el llavero, no en la carpeta: sin la fila
-    // no la usa nadie, así que se va siempre (no hay nada que "conservar" para re-agregarla).
-    super::secrets::delete(&id);
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir: Option<String> = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let dir = conn
+                .query_row(
+                    "SELECT dir FROM agent_accounts WHERE id = ?1",
+                    [&id],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok();
+            conn.execute("DELETE FROM agent_accounts WHERE id = ?1", [&id])
+                .map_err(|e| e.to_string())?;
+            dir
+        };
+        // La key de una cuenta de Claude Code vive en el llavero, no en la carpeta: sin la fila
+        // no la usa nadie, así que se va siempre (no hay nada que "conservar" para re-agregarla).
+        super::secrets::delete(&id);
 
-    if delete_files {
-        if let Some(dir) = dir {
-            std::fs::remove_dir_all(&dir)
-                .map_err(|e| format!("La cuenta se quitó, pero no se pudo borrar {dir}: {e}"))?;
+        if delete_files {
+            if let Some(dir) = dir {
+                std::fs::remove_dir_all(&dir).map_err(|e| {
+                    format!("La cuenta se quitó, pero no se pudo borrar {dir}: {e}")
+                })?;
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// La cuenta PRINCIPAL de cada TUI instalada: la que usa cuando no se le apunta la variable
@@ -248,7 +326,9 @@ pub fn delete_agent_account(
 /// esta app, existía antes. Sin esto, la barra de cuentas mostraba los perfiles alternativos
 /// y escondía justo la que el usuario usa siempre.
 #[tauri::command]
-pub async fn system_accounts(db: tauri::State<'_, DbConnection>) -> Result<Vec<AgentAccount>, String> {
+pub async fn system_accounts(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<AgentAccount>, String> {
     let db = (*db).clone();
     tokio::task::spawn_blocking(move || {
         let mut accounts: Vec<AgentAccount> = PROFILES

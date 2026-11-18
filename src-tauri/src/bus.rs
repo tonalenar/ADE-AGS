@@ -152,7 +152,8 @@ impl Filter {
 #[serde(rename_all = "camelCase")]
 pub struct Page {
     pub events: Vec<BusEvent>,
-    /// El último `seq` que se publicó (haya pasado el filtro o no): el próximo `after`.
+    /// Cursor: o `seq` do último evento **entregue** nesta página (quando ela encheu o `limit`);
+    /// se a varredura chegou ao fim do anel, o `seq` global, para não reler o que só não passou no filtro.
     pub last_seq: u64,
     /// Se pidió desde un `seq` que ya salió del buffer: puede faltar algo en el medio.
     pub truncated: bool,
@@ -160,13 +161,37 @@ pub struct Page {
 
 fn page_after(ring: &VecDeque<BusEvent>, after: u64, filter: &Filter, limit: usize) -> Page {
     let oldest = ring.front().map(|e| e.seq).unwrap_or(0);
-    let events: Vec<BusEvent> = ring
-        .iter()
-        .filter(|e| e.seq > after && filter.matches(e))
-        .take(limit)
-        .cloned()
-        .collect();
-    Page { events, last_seq: SEQ.load(Ordering::SeqCst), truncated: after > 0 && oldest > after.saturating_add(1) }
+    let truncated = after > 0 && oldest > after.saturating_add(1);
+    let head = SEQ.load(Ordering::SeqCst);
+    // `limit=0` é só o cursor da cabeça: quem espera começa do que já foi publicado, sem histórico.
+    if limit == 0 {
+        return Page { events: Vec::new(), last_seq: head, truncated };
+    }
+    let mut events = Vec::new();
+    let mut last_delivered: Option<u64> = None;
+    let mut scanned_to = after;
+    for event in ring.iter() {
+        if event.seq <= after {
+            continue;
+        }
+        scanned_to = event.seq;
+        if !filter.matches(event) {
+            continue;
+        }
+        if events.len() >= limit {
+            // A página encheu: o cursor fica no último entregue, para a próxima chamada pegar este.
+            break;
+        }
+        last_delivered = Some(event.seq);
+        events.push(event.clone());
+    }
+    let last_seq = if events.len() >= limit {
+        last_delivered.unwrap_or(after)
+    } else {
+        // Varreu o anel inteiro: avança até o fim, inclusive o que não passou no filtro.
+        head.max(scanned_to)
+    };
+    Page { events, last_seq, truncated }
 }
 
 /// Lo que pasó después de `after`, hasta `limit` eventos.
@@ -254,6 +279,50 @@ mod tests {
 
     /// Sobre un buffer propio y no el global: llenar el global en un test expulsaría los
     /// eventos de los otros tests que corren en paralelo.
+    /// A223: a página que não cabe no `limit` não pode fazer o cursor pular o que sobrou. 10 eventos com `limit=3`:
+    /// 4 chamadas, seguindo `last_seq`, devolvem os 10 na ordem, sem buraco.
+    #[test]
+    fn cursor_nao_pula_eventos_alem_do_limit() {
+        let run = format!("r-{}", uuid::Uuid::new_v4());
+        let filter = Filter { run_id: Some(run.clone()), ..Default::default() };
+        let mut after = since(0, &filter, 0).last_seq;
+        let publicados: Vec<u64> = (0..10).map(|_| pub_("task.changed", &run)).collect();
+        let mut lidos = Vec::new();
+        for _ in 0..4 {
+            let page = since(after, &filter, 3);
+            lidos.extend(page.events.iter().map(|e| e.seq));
+            after = page.last_seq;
+        }
+        assert_eq!(lidos, publicados, "um evento ficou para trás entre as páginas");
+    }
+
+    /// A página que esgota as correspondências avança o cursor até o fim do anel, para não reler o que só não passou
+    /// no filtro (e não marcar `truncated` por isso). Sem isso, um filtro raro reportava perda que não existe.
+    #[test]
+    fn pagina_que_esgota_as_correspondencias_avanca_ate_o_fim_do_anel() {
+        let run = format!("r-{}", uuid::Uuid::new_v4());
+        let filter = Filter { run_id: Some(run.clone()), ..Default::default() };
+        let after = since(0, &filter, 0).last_seq;
+        let mine = pub_("task.changed", &run);
+        let other = pub_("task.changed", &format!("{run}-outro"));
+        let page = since(after, &filter, 10);
+        assert_eq!(page.events.iter().map(|e| e.seq).collect::<Vec<_>>(), vec![mine]);
+        assert!(page.last_seq >= other, "o cursor parou antes de um evento que a varredura já examinou");
+    }
+
+    /// `limit=0` é o "cabeça" do anel: quem só quer o cursor (o notificador, os esperadores) começa do que já foi
+    /// publicado, sem receber o histórico do filtro.
+    #[test]
+    fn limite_zero_devolve_a_cabeca_do_anel() {
+        let run = format!("r-{}", uuid::Uuid::new_v4());
+        let filter = Filter { run_id: Some(run.clone()), ..Default::default() };
+        pub_("task.changed", &run);
+        let last = pub_("task.changed", &run);
+        let page = since(0, &filter, 0);
+        assert!(page.events.is_empty());
+        assert!(page.last_seq >= last);
+    }
+
     #[test]
     fn avisa_cuando_lo_pedido_ya_salio_del_buffer() {
         let evento = |seq| BusEvent { seq, at: 0, topic: "task.changed".into(), task_id: None, run_id: None, mission_id: None, data: Value::Null };

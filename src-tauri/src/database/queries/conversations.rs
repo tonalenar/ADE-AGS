@@ -78,7 +78,10 @@ fn db_err(e: rusqlite::Error) -> String {
 
 /// Quita controles (saltos de línea incluidos) y espacios de los extremos. Vacío = `None`.
 fn clean_title(raw: &str) -> Option<String> {
-    let spaced: String = raw.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let spaced: String = raw
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
     let t = spaced.trim();
     if t.is_empty() {
         None
@@ -91,13 +94,18 @@ fn clean_title(raw: &str) -> Option<String> {
 /// porque lo escribió la persona a propósito.
 fn clean_custom_title(raw: Option<String>) -> Result<Option<String>, String> {
     let Some(raw) = raw else { return Ok(None) };
-    let spaced: String = raw.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let spaced: String = raw
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
     let t = spaced.trim();
     if t.is_empty() {
         return Ok(None);
     }
     if t.chars().count() > TITLE_MAX_CHARS {
-        return Err(format!("O título personalizado passa de {TITLE_MAX_CHARS} caracteres."));
+        return Err(format!(
+            "O título personalizado passa de {TITLE_MAX_CHARS} caracteres."
+        ));
     }
     Ok(Some(t.to_string()))
 }
@@ -116,7 +124,9 @@ fn check_text(what: &str, value: &str) -> Result<(), String> {
 fn validate_state(state: &str) -> Result<String, String> {
     match state {
         "active" | "saved" => Ok(state.to_string()),
-        otro => Err(format!("Estado inválido '{otro}': use 'active' ou 'saved'.")),
+        otro => Err(format!(
+            "Estado inválido '{otro}': use 'active' ou 'saved'."
+        )),
     }
 }
 
@@ -140,7 +150,9 @@ fn validate_terminals(value: &Value) -> Result<String, String> {
         _ => return Err("Os terminais da conversa precisam ser uma lista.".to_string()),
     };
     if items.len() > TERMINALS_MAX_ITEMS {
-        return Err(format!("Uma conversa guarda no máximo {TERMINALS_MAX_ITEMS} terminais."));
+        return Err(format!(
+            "Uma conversa guarda no máximo {TERMINALS_MAX_ITEMS} terminais."
+        ));
     }
     if items.iter().any(|item| !item.is_object()) {
         return Err("Cada terminal da conversa precisa ser um objeto.".to_string());
@@ -150,10 +162,16 @@ fn validate_terminals(value: &Value) -> Result<String, String> {
             .as_array()
             .ok_or_else(|| "As conexões da conversa precisam ser uma lista.".to_string())?;
         let valid = |pair: &Value| {
-            pair.as_array().is_some_and(|p| p.len() == 2 && p.iter().all(|n| n.as_u64().is_some_and(|i| (i as usize) < items.len())))
+            pair.as_array().is_some_and(|p| {
+                p.len() == 2
+                    && p.iter()
+                        .all(|n| n.as_u64().is_some_and(|i| (i as usize) < items.len()))
+            })
         };
         if pairs.len() > LINKS_MAX_ITEMS || !pairs.iter().all(valid) {
-            return Err("As conexões da conversa precisam ser pares de posições de terminais.".to_string());
+            return Err(
+                "As conexões da conversa precisam ser pares de posições de terminais.".to_string(),
+            );
         }
     }
     let json = serde_json::to_string(value).map_err(|e| e.to_string())?;
@@ -222,8 +240,12 @@ pub(crate) fn create_conversation(
 }
 
 fn workspace_exists(conn: &Connection, workspace_id: &str) -> bool {
-    conn.query_row("SELECT 1 FROM workspaces WHERE id = ?1", [workspace_id], |_| Ok(()))
-        .is_ok()
+    conn.query_row(
+        "SELECT 1 FROM workspaces WHERE id = ?1",
+        [workspace_id],
+        |_| Ok(()),
+    )
+    .is_ok()
 }
 
 /// Fijadas primero, después la más reciente. Incluye las ocultas: el frontend las filtra.
@@ -276,7 +298,11 @@ pub(crate) fn update_conversation(
     };
 
     let touch = patch.touch == Some(true) || state != current.state || terminals_changed;
-    let last_active_at = if touch { now_ts() } else { current.last_active_at };
+    let last_active_at = if touch {
+        now_ts()
+    } else {
+        current.last_active_at
+    };
 
     tx.execute(
         "UPDATE project_conversations
@@ -348,53 +374,119 @@ pub(crate) fn set_active_conversation(
     tx.commit().map_err(db_err)
 }
 
-#[tauri::command]
-pub fn db_conversation_create(
+pub(crate) fn db_conversation_create_now(
     workspace_id: String,
     project_key: String,
     cwd: String,
     title: Option<String>,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<Conversation, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     create_conversation(&conn, &workspace_id, &project_key, &cwd, title.as_deref())
 }
 
 #[tauri::command]
-pub fn db_conversation_list(
+pub async fn db_conversation_create(
+    workspace_id: String,
+    project_key: String,
+    cwd: String,
+    title: Option<String>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Conversation, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        db_conversation_create_now(workspace_id, project_key, cwd, title, &db)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn db_conversation_list_now(
     workspace_id: String,
     project_key: Option<String>,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<Vec<Conversation>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     list_conversations(&conn, &workspace_id, project_key.as_deref())
 }
 
 #[tauri::command]
-pub fn db_conversation_update(
+pub async fn db_conversation_list(
+    workspace_id: String,
+    project_key: Option<String>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<Conversation>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        db_conversation_list_now(workspace_id, project_key, &db)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn db_conversation_update_now(
     id: String,
     patch: ConversationPatch,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<Conversation, String> {
     let mut conn = db.lock().map_err(|e| e.to_string())?;
     update_conversation(&mut conn, &id, &patch)
 }
 
 #[tauri::command]
-pub fn db_conversation_delete(id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+pub async fn db_conversation_update(
+    id: String,
+    patch: ConversationPatch,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Conversation, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db_conversation_update_now(id, patch, &db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn db_conversation_delete_now(
+    id: String,
+    db: &crate::database::DbConnection,
+) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     delete_conversation(&conn, &id)
 }
 
 #[tauri::command]
-pub fn db_conversation_set_active(
+pub async fn db_conversation_delete(
+    id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db_conversation_delete_now(id, &db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn db_conversation_set_active_now(
     workspace_id: String,
     project_key: String,
     id: Option<String>,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<(), String> {
     let mut conn = db.lock().map_err(|e| e.to_string())?;
     set_active_conversation(&mut conn, &workspace_id, &project_key, id.as_deref())
+}
+
+#[tauri::command]
+pub async fn db_conversation_set_active(
+    workspace_id: String,
+    project_key: String,
+    id: Option<String>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        db_conversation_set_active_now(workspace_id, project_key, id, &db)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -434,7 +526,14 @@ mod tests {
     fn crear_deja_la_conversacion_activa_y_recorta_el_titulo() {
         let conn = setup();
         let largo = "x".repeat(200);
-        let c = create_conversation(&conn, "ws", "/proj", "/proj/sub", Some(&format!("  a\nb {largo}  "))).unwrap();
+        let c = create_conversation(
+            &conn,
+            "ws",
+            "/proj",
+            "/proj/sub",
+            Some(&format!("  a\nb {largo}  ")),
+        )
+        .unwrap();
         assert_eq!(c.state, "active");
         assert!(!c.pinned && !c.hidden);
         assert_eq!(c.terminals, json!([]));
@@ -489,16 +588,33 @@ mod tests {
     fn patch_custom_title_distingue_ausente_de_null() {
         let mut conn = setup();
         let c = new(&conn, "/p", None);
-        let up = |conn: &mut Connection, v: Value| update_conversation(conn, &c.id, &patch(v)).unwrap();
+        let up =
+            |conn: &mut Connection, v: Value| update_conversation(conn, &c.id, &patch(v)).unwrap();
 
-        assert_eq!(up(&mut conn, json!({"customTitle": "Mi título"})).custom_title.as_deref(), Some("Mi título"));
+        assert_eq!(
+            up(&mut conn, json!({"customTitle": "Mi título"}))
+                .custom_title
+                .as_deref(),
+            Some("Mi título")
+        );
         // Ausente: no toca.
-        assert_eq!(up(&mut conn, json!({"pinned": true})).custom_title.as_deref(), Some("Mi título"));
+        assert_eq!(
+            up(&mut conn, json!({"pinned": true}))
+                .custom_title
+                .as_deref(),
+            Some("Mi título")
+        );
         // Vacío: se guarda como NULL.
-        assert_eq!(up(&mut conn, json!({"customTitle": "   "})).custom_title, None);
+        assert_eq!(
+            up(&mut conn, json!({"customTitle": "   "})).custom_title,
+            None
+        );
         // null: limpia.
         up(&mut conn, json!({"customTitle": "otro"}));
-        assert_eq!(up(&mut conn, json!({"customTitle": null})).custom_title, None);
+        assert_eq!(
+            up(&mut conn, json!({"customTitle": null})).custom_title,
+            None
+        );
 
         let largo = "t".repeat(TITLE_MAX_CHARS + 1);
         let err = update_conversation(&mut conn, &c.id, &patch(json!({"customTitle": largo})));
@@ -509,36 +625,77 @@ mod tests {
     fn patch_pinned_hidden_state_y_errores() {
         let mut conn = setup();
         let c = new(&conn, "/p", None);
-        let r = update_conversation(&mut conn, &c.id, &patch(json!({"pinned": true, "hidden": true}))).unwrap();
+        let r = update_conversation(
+            &mut conn,
+            &c.id,
+            &patch(json!({"pinned": true, "hidden": true})),
+        )
+        .unwrap();
         assert!(r.pinned && r.hidden);
         let r = update_conversation(&mut conn, &c.id, &patch(json!({"pinned": false}))).unwrap();
         assert!(!r.pinned && r.hidden);
-        assert_eq!(update_conversation(&mut conn, &c.id, &patch(json!({"state": "saved"}))).unwrap().state, "saved");
+        assert_eq!(
+            update_conversation(&mut conn, &c.id, &patch(json!({"state": "saved"})))
+                .unwrap()
+                .state,
+            "saved"
+        );
         assert!(update_conversation(&mut conn, &c.id, &patch(json!({"state": "rota"}))).is_err());
-        assert!(update_conversation(&mut conn, "no-existe", &patch(json!({"pinned": true}))).is_err());
+        assert!(
+            update_conversation(&mut conn, "no-existe", &patch(json!({"pinned": true}))).is_err()
+        );
     }
 
     #[test]
     fn terminals_aceptan_lista_de_objetos_y_rechazan_lo_demas() {
         let mut conn = setup();
         let c = new(&conn, "/p", None);
-        let up = |conn: &mut Connection, v: Value| update_conversation(conn, &c.id, &patch(json!({"terminals": v})));
+        let up = |conn: &mut Connection, v: Value| {
+            update_conversation(conn, &c.id, &patch(json!({"terminals": v})))
+        };
 
-        let ok = up(&mut conn, json!([{"tabId": "t1", "cwd": "/a"}, {"tabId": "t2"}])).unwrap();
-        assert_eq!(ok.terminals, json!([{"tabId": "t1", "cwd": "/a"}, {"tabId": "t2"}]));
+        let ok = up(
+            &mut conn,
+            json!([{"tabId": "t1", "cwd": "/a"}, {"tabId": "t2"}]),
+        )
+        .unwrap();
+        assert_eq!(
+            ok.terminals,
+            json!([{"tabId": "t1", "cwd": "/a"}, {"tabId": "t2"}])
+        );
 
         let veinticuatro: Vec<Value> = (0..TERMINALS_MAX_ITEMS).map(|i| json!({"n": i})).collect();
         assert!(up(&mut conn, Value::Array(veinticuatro)).is_ok());
 
         let veinticinco: Vec<Value> = (0..=TERMINALS_MAX_ITEMS).map(|i| json!({"n": i})).collect();
         assert!(up(&mut conn, Value::Array(veinticinco)).is_err());
-        assert!(up(&mut conn, json!({"tabId": "t1"})).is_err(), "objeto sem a lista de terminais");
-        let com_cordas = json!({"terminals": [{"tabId": "t1"}, {"tabId": "t2"}], "links": [[0, 1]]});
-        assert_eq!(up(&mut conn, com_cordas.clone()).unwrap().terminals, com_cordas);
-        assert!(up(&mut conn, json!({"terminals": [{"tabId": "t1"}], "links": [[0, 5]]})).is_err(), "corda para um terminal que não existe");
-        assert!(up(&mut conn, json!({"terminals": [], "links": "x"})).is_err(), "cordas fora de lista");
+        assert!(
+            up(&mut conn, json!({"tabId": "t1"})).is_err(),
+            "objeto sem a lista de terminais"
+        );
+        let com_cordas =
+            json!({"terminals": [{"tabId": "t1"}, {"tabId": "t2"}], "links": [[0, 1]]});
+        assert_eq!(
+            up(&mut conn, com_cordas.clone()).unwrap().terminals,
+            com_cordas
+        );
+        assert!(
+            up(
+                &mut conn,
+                json!({"terminals": [{"tabId": "t1"}], "links": [[0, 5]]})
+            )
+            .is_err(),
+            "corda para um terminal que não existe"
+        );
+        assert!(
+            up(&mut conn, json!({"terminals": [], "links": "x"})).is_err(),
+            "cordas fora de lista"
+        );
         assert!(up(&mut conn, json!("texto")).is_err(), "string no es array");
-        assert!(up(&mut conn, json!([{"ok": 1}, 7])).is_err(), "item no objeto");
+        assert!(
+            up(&mut conn, json!([{"ok": 1}, 7])).is_err(),
+            "item no objeto"
+        );
         assert!(up(&mut conn, json!([null])).is_err(), "null no es objeto");
         let grande = json!([{"dato": "a".repeat(TERMINALS_MAX_BYTES)}]);
         assert!(up(&mut conn, grande).is_err(), "más de 64 KB");
@@ -550,13 +707,21 @@ mod tests {
         let c = new(&conn, "/p", None);
         set_last_active(&conn, &c.id, 1);
         let last = |conn: &mut Connection, v: Value| {
-            update_conversation(conn, &c.id, &patch(v)).unwrap().last_active_at
+            update_conversation(conn, &c.id, &patch(v))
+                .unwrap()
+                .last_active_at
         };
 
         // Cambios que no son de actividad: no mueven el reloj.
-        assert_eq!(last(&mut conn, json!({"pinned": true, "customTitle": "x"})), 1);
+        assert_eq!(
+            last(&mut conn, json!({"pinned": true, "customTitle": "x"})),
+            1
+        );
         // Mismo estado y mismos terminales: no es un cambio.
-        assert_eq!(last(&mut conn, json!({"state": "active", "terminals": []})), 1);
+        assert_eq!(
+            last(&mut conn, json!({"state": "active", "terminals": []})),
+            1
+        );
         // touch explícito.
         assert!(last(&mut conn, json!({"touch": true})) > 1);
 
@@ -607,7 +772,8 @@ mod tests {
         let conn = setup();
         new(&conn, "/p", None);
         create_conversation(&conn, "ws2", "/p", "/c", None).unwrap();
-        conn.execute("DELETE FROM workspaces WHERE id = 'ws'", []).unwrap();
+        conn.execute("DELETE FROM workspaces WHERE id = 'ws'", [])
+            .unwrap();
         assert!(list_conversations(&conn, "ws", None).unwrap().is_empty());
         assert_eq!(list_conversations(&conn, "ws2", None).unwrap().len(), 1);
     }
@@ -615,9 +781,12 @@ mod tests {
     #[test]
     fn migracion_v43_crea_la_tabla_sin_tocar_lo_existente() {
         let conn = setup();
-        conn.execute_batch("DROP TABLE project_conversations; PRAGMA user_version = 42;").unwrap();
+        conn.execute_batch("DROP TABLE project_conversations; PRAGMA user_version = 42;")
+            .unwrap();
         crate::database::migrate_for_tests(&conn).unwrap();
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(version, 45);
         assert!(list_conversations(&conn, "ws", None).unwrap().is_empty());
         // Idempotente: migrar otra vez no falla.

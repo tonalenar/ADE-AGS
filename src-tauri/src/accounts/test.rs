@@ -30,6 +30,28 @@ impl Drop for TempDir {
     }
 }
 
+#[test]
+fn listar_contas_nao_segura_o_banco_durante_disco_e_keychain() {
+    let db: crate::database::DbConnection =
+        std::sync::Arc::new(std::sync::Mutex::new(crate::database::test_db()));
+    db.lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at, kind) VALUES ('acc1', 'codex', 'main', '/nao/existe', 0, 'login')",
+            [],
+        )
+        .unwrap();
+    let travado_no_io = std::cell::Cell::new(false);
+    let probe = || {
+        if db.try_lock().is_err() {
+            travado_no_io.set(true);
+        }
+    };
+    let contas = super::commands::list_accounts_with(&db, &probe).unwrap();
+    assert_eq!(contas.len(), 1);
+    assert!(!travado_no_io.get(), "disco e Keychain das contas rodaram com o banco travado");
+}
+
 fn spec(agent: &str) -> &'static ProfileSpec {
     spec_for(agent).unwrap()
 }

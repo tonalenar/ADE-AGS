@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::Serialize;
 
 use crate::database::DbConnection;
@@ -49,7 +49,10 @@ pub struct UsageRow<'a> {
 
 /// Segundos Unix agora.
 pub fn now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// Registra uma leitura. Nunca falha: qualquer erro só vai para o log.
@@ -62,7 +65,13 @@ pub fn record(conn: &Connection, row: &UsageRow) {
 fn try_record(conn: &Connection, row: &UsageRow) -> rusqlite::Result<()> {
     conn.execute_batch(SCHEMA)?;
     let query: Option<String> = row.query.map(|q| q.chars().take(QUERY_CHARS).collect());
-    let entry_keys = row.entry_keys.iter().take(ENTRY_KEYS_MAX).cloned().collect::<Vec<_>>().join("\n");
+    let entry_keys = row
+        .entry_keys
+        .iter()
+        .take(ENTRY_KEYS_MAX)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
     conn.execute(
         "INSERT INTO memory_usage(ts,workspace_id,mission_id,tab_id,action,query,hits,entry_keys) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
         params![row.ts, row.workspace_id, row.mission_id, row.tab_id, row.action, query, row.hits, entry_keys],
@@ -119,7 +128,11 @@ struct Stored {
 
 /// O relatório do workspace. `since_ts` limita às leituras a partir desse instante; `None` é
 /// tudo que há.
-pub fn report(conn: &Connection, workspace_id: &str, since_ts: Option<i64>) -> Result<UsageReport, String> {
+pub fn report(
+    conn: &Connection,
+    workspace_id: &str,
+    since_ts: Option<i64>,
+) -> Result<UsageReport, String> {
     let read_err = |e: rusqlite::Error| format!("não foi possível ler o uso da memória: {e}");
     conn.execute_batch(SCHEMA).map_err(read_err)?;
     let since = since_ts.unwrap_or(i64::MIN);
@@ -196,7 +209,13 @@ pub fn report(conn: &Connection, workspace_id: &str, since_ts: Option<i64>) -> R
     }
     report.distinct_agents = agents.len() as u32;
 
-    let mut top: Vec<KeyCount> = reads.iter().map(|(key, count)| KeyCount { key: key.clone(), count: *count }).collect();
+    let mut top: Vec<KeyCount> = reads
+        .iter()
+        .map(|(key, count)| KeyCount {
+            key: key.clone(),
+            count: *count,
+        })
+        .collect();
     top.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.key.cmp(&b.key)));
     top.truncate(TOP_READ_LIMIT);
     report.top_read = top;
@@ -205,23 +224,33 @@ pub fn report(conn: &Connection, workspace_id: &str, since_ts: Option<i64>) -> R
         let mut stmt = conn
             .prepare("SELECT key FROM memory_entries WHERE workspace_id=?1 AND status='active'")
             .map_err(read_err)?;
-        let rows = stmt.query_map(params![workspace_id], |r| r.get::<_, String>(0)).map_err(read_err)?;
+        let rows = stmt
+            .query_map(params![workspace_id], |r| r.get::<_, String>(0))
+            .map_err(read_err)?;
         rows.collect::<rusqlite::Result<_>>().map_err(read_err)?
     };
     report.active_entries = active.len() as u32;
-    report.never_read = active.iter().filter(|key| !reads.contains_key(key.as_str())).count() as u32;
+    report.never_read = active
+        .iter()
+        .filter(|key| !reads.contains_key(key.as_str()))
+        .count() as u32;
 
     let titles: HashMap<String, String> = {
         let mut stmt = conn
             .prepare("SELECT id,title FROM missions WHERE workspace_id=?1")
             .map_err(read_err)?;
         let rows = stmt
-            .query_map(params![workspace_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .query_map(params![workspace_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })
             .map_err(read_err)?;
         rows.collect::<rusqlite::Result<_>>().map_err(read_err)?
     };
     let mut ordered: Vec<(i64, MissionUsage)> = missions.into_values().collect();
-    ordered.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.mission_id.cmp(&b.1.mission_id)));
+    ordered.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1.mission_id.cmp(&b.1.mission_id))
+    });
     report.missions = ordered
         .into_iter()
         .take(MISSIONS_LIMIT)
@@ -235,10 +264,19 @@ pub fn report(conn: &Connection, workspace_id: &str, since_ts: Option<i64>) -> R
 
 /// `memory_usage_report`: o relatório de uso do workspace, para a interface.
 #[tauri::command]
-pub fn memory_usage_report(workspace_id: String, since_ts: Option<i64>, db: tauri::State<DbConnection>) -> Result<UsageReport, String> {
-    let conn = db.lock().map_err(|_| "database unavailable")?;
-    super::validate_owner(&conn, "workspace", &workspace_id, None)?;
-    report(&conn, &workspace_id, since_ts)
+pub async fn memory_usage_report(
+    workspace_id: String,
+    since_ts: Option<i64>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<UsageReport, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|_| "database unavailable")?;
+        super::validate_owner(&conn, "workspace", &workspace_id, None)?;
+        report(&conn, &workspace_id, since_ts)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -255,8 +293,24 @@ mod test {
         conn
     }
 
-    fn row<'a>(ts: i64, action: &'a str, mission: Option<&'a str>, tab: Option<&'a str>, hits: u32, keys: &'a [String]) -> UsageRow<'a> {
-        UsageRow { ts, workspace_id: "w1", mission_id: mission, tab_id: tab, action, query: None, hits, entry_keys: keys }
+    fn row<'a>(
+        ts: i64,
+        action: &'a str,
+        mission: Option<&'a str>,
+        tab: Option<&'a str>,
+        hits: u32,
+        keys: &'a [String],
+    ) -> UsageRow<'a> {
+        UsageRow {
+            ts,
+            workspace_id: "w1",
+            mission_id: mission,
+            tab_id: tab,
+            action,
+            query: None,
+            hits,
+            entry_keys: keys,
+        }
     }
 
     fn keys(list: &[&str]) -> Vec<String> {
@@ -271,16 +325,35 @@ mod test {
             let query = format!("q{i}");
             record(
                 &conn,
-                &UsageRow { query: Some(query.as_str()), ..row(i, "search", None, Some("t1"), 1, &empty) },
+                &UsageRow {
+                    query: Some(query.as_str()),
+                    ..row(i, "search", None, Some("t1"), 1, &empty)
+                },
             );
         }
         // Outro workspace não empurra as linhas do w1 para fora.
-        record(&conn, &UsageRow { workspace_id: "w2", ..row(1, "index", None, None, 0, &empty) });
+        record(
+            &conn,
+            &UsageRow {
+                workspace_id: "w2",
+                ..row(1, "index", None, None, 0, &empty)
+            },
+        );
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM memory_usage WHERE workspace_id='w1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM memory_usage WHERE workspace_id='w1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, RETAIN_PER_WORKSPACE);
-        let oldest: String = conn.query_row("SELECT query FROM memory_usage WHERE workspace_id='w1' ORDER BY id LIMIT 1", [], |r| r.get(0)).unwrap();
+        let oldest: String = conn
+            .query_row(
+                "SELECT query FROM memory_usage WHERE workspace_id='w1' ORDER BY id LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(oldest, "q5", "as cinco primeiras saíram");
     }
 
@@ -289,9 +362,17 @@ mod test {
         let conn = setup();
         let long = "x".repeat(300);
         let many: Vec<String> = (0..50).map(|i| format!("k{i}")).collect();
-        record(&conn, &UsageRow { query: Some(long.as_str()), ..row(1, "search", None, None, 0, &many) });
+        record(
+            &conn,
+            &UsageRow {
+                query: Some(long.as_str()),
+                ..row(1, "search", None, None, 0, &many)
+            },
+        );
         let (query, stored): (String, String) = conn
-            .query_row("SELECT query,entry_keys FROM memory_usage", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_row("SELECT query,entry_keys FROM memory_usage", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
             .unwrap();
         assert_eq!(query.chars().count(), QUERY_CHARS);
         assert_eq!(stored.split('\n').count(), ENTRY_KEYS_MAX);
@@ -305,7 +386,9 @@ mod test {
         record(&conn, &row(1, "bogus", None, None, 0, &empty));
         // Sem memory_entries nem missions, gravar uma leitura ainda funciona.
         record(&conn, &row(2, "open", None, Some("t1"), 1, &keys(&["a"])));
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM memory_usage", [], |r| r.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memory_usage", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(count, 1);
     }
 
@@ -322,7 +405,10 @@ mod test {
         record(&conn, &row(10, "injected", Some("m1"), None, 3, &none));
         record(&conn, &row(11, "search", Some("m1"), Some("t1"), 2, &ab));
         record(&conn, &row(12, "search", Some("m1"), Some("t2"), 0, &none));
-        record(&conn, &row(13, "open", Some("m1"), Some("t2"), 1, &keys(&["b"])));
+        record(
+            &conn,
+            &row(13, "open", Some("m1"), Some("t2"), 1, &keys(&["b"])),
+        );
         record(&conn, &row(14, "index", None, Some("t3"), 2, &none));
 
         let r = report(&conn, "w1", None).unwrap();
@@ -337,35 +423,73 @@ mod test {
         assert_eq!(r.never_read, 1, "só 'c' nunca foi lida");
         assert_eq!(
             r.missions,
-            vec![MissionUsage { mission_id: "m1".into(), title: "Missão um".into(), injected: 1, searches: 2, opens: 1, hits_total: 6 }]
+            vec![MissionUsage {
+                mission_id: "m1".into(),
+                title: "Missão um".into(),
+                injected: 1,
+                searches: 2,
+                opens: 1,
+                hits_total: 6
+            }]
         );
     }
 
     #[test]
     fn report_ordena_os_mais_lidos_e_respeita_since() {
         let conn = setup();
-        conn.execute_batch("INSERT INTO memory_entries VALUES('ea','w1','a','active'),('eb','w1','b','active');").unwrap();
-        record(&conn, &row(100, "search", None, Some("t1"), 1, &keys(&["a"])));
-        record(&conn, &row(200, "search", None, Some("t1"), 1, &keys(&["b", "a"])));
+        conn.execute_batch(
+            "INSERT INTO memory_entries VALUES('ea','w1','a','active'),('eb','w1','b','active');",
+        )
+        .unwrap();
+        record(
+            &conn,
+            &row(100, "search", None, Some("t1"), 1, &keys(&["a"])),
+        );
+        record(
+            &conn,
+            &row(200, "search", None, Some("t1"), 1, &keys(&["b", "a"])),
+        );
         record(&conn, &row(300, "open", None, Some("t2"), 1, &keys(&["b"])));
 
         let all = report(&conn, "w1", None).unwrap();
         // Empate de contagem: ordem alfabética.
         assert_eq!(
             all.top_read,
-            vec![KeyCount { key: "a".into(), count: 2 }, KeyCount { key: "b".into(), count: 2 }]
+            vec![
+                KeyCount {
+                    key: "a".into(),
+                    count: 2
+                },
+                KeyCount {
+                    key: "b".into(),
+                    count: 2
+                }
+            ]
         );
         assert_eq!(all.never_read, 0);
 
         let recent = report(&conn, "w1", Some(150)).unwrap();
         assert_eq!(recent.total, 2);
-        assert_eq!(recent.top_read, vec![KeyCount { key: "b".into(), count: 2 }, KeyCount { key: "a".into(), count: 1 }]);
+        assert_eq!(
+            recent.top_read,
+            vec![
+                KeyCount {
+                    key: "b".into(),
+                    count: 2
+                },
+                KeyCount {
+                    key: "a".into(),
+                    count: 1
+                }
+            ]
+        );
     }
 
     #[test]
     fn relatorio_sem_nenhuma_leitura_marca_todas_como_nunca_lidas() {
         let conn = setup();
-        conn.execute_batch("INSERT INTO memory_entries VALUES('ea','w1','a','active');").unwrap();
+        conn.execute_batch("INSERT INTO memory_entries VALUES('ea','w1','a','active');")
+            .unwrap();
         let r = report(&conn, "w1", None).unwrap();
         assert_eq!(r.total, 0);
         assert_eq!(r.never_read, 1);

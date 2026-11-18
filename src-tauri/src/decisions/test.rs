@@ -1621,3 +1621,31 @@ fn falha_ou_resposta_desconhecida_vira_nada() {
     settings.turn_routing = true;
     assert_eq!(routing::route_with(&memory_db(), &settings, None, "mensagem ao time", &equipe(), None), None);
 }
+
+/// O `fleet_gate` pergunta de novo a um mesmo estado só depois de um dia, e não de hora em hora: a tarefa parada não
+/// paga o provedor a cada hora. Os outros pontos continuam com o dedupe de 1 h.
+#[test]
+fn dedupe_do_fleet_dura_um_dia_e_o_dos_outros_pontos_uma_hora() {
+    let conn = crate::database::test_db();
+    let linha = |point: &str, ts: i64| super::log::LogRow {
+        ts,
+        point: point.into(),
+        provider: "p".into(),
+        model: "m".into(),
+        state_hash: "h".into(),
+        heuristic: "x".into(),
+        provider_decision: None,
+        probability: None,
+        confidence: None,
+        latency_ms: None,
+        error: None,
+        input_tokens: None,
+        output_tokens: None,
+    };
+    let agora = 1_000_000;
+    super::log::record(&conn, &linha(super::points::POINT_FLEET, agora - 2 * 3_600)).unwrap();
+    super::log::record(&conn, &linha("memory", agora - 2 * 3_600)).unwrap();
+    assert!(super::log::recent(&conn, super::points::POINT_FLEET, "h", "p", agora).unwrap(), "fleet: 2 h ainda é repetição");
+    assert!(!super::log::recent(&conn, "memory", "h", "p", agora).unwrap(), "memory: 2 h já expirou o dedupe de 1 h");
+    assert!(!super::log::recent(&conn, super::points::POINT_FLEET, "h", "p", agora + 86_400).unwrap(), "fleet: passado um dia, pergunta de novo");
+}

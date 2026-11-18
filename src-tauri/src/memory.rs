@@ -10,7 +10,7 @@ use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
 use crate::database::DbConnection;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 pub const MEMORY_CHANGED: &str = "cc-memory-changed";
 pub fn notify_changed(app: &tauri::AppHandle) { let _ = app.emit(MEMORY_CHANGED, ()); }
 
@@ -835,11 +835,23 @@ pub fn detail_for_owner(
     Ok(MemoryDetail { entry, revisions })
 }
 
+#[cfg(test)]
 pub fn snapshot_run(
     conn: &Connection,
     run_id: &str,
     workspace_id: &str,
     mission_id: Option<&str>,
+) -> Result<(), String> {
+    let repository_commit = repo::current_commit(conn, workspace_id);
+    snapshot_run_with_commit(conn, run_id, workspace_id, mission_id, repository_commit)
+}
+
+pub fn snapshot_run_with_commit(
+    conn: &Connection,
+    run_id: &str,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    repository_commit: Option<String>,
 ) -> Result<(), String> {
     validate_owner(conn, "workspace", workspace_id, None)?;
     if let Some(mid) = mission_id {
@@ -888,7 +900,7 @@ pub fn snapshot_run(
     if candidates.len() > 36 { index.push_str("- More entries: use memory_search.\n"); }
     let relevant = ranked.iter().filter_map(|hit| candidates.iter().find(|row| row.0 == hit.entry_id).cloned()).collect::<Vec<_>>();
     let mut selected = select_snapshot(run_id, relevant, RELEVANT_LIMIT, SnapshotMeta {
-        memory_index: index, repository_commit: repo::current_commit(conn, workspace_id),
+        memory_index: index, repository_commit,
         baseline_bytes: baseline.meta.context_bytes, baseline_tokens: baseline.meta.context_tokens,
         ..SnapshotMeta::default()
     });
@@ -1032,26 +1044,41 @@ pub fn context_metrics(conn: &Connection, run_id: Option<&str>, mission_id: Opti
 }
 
 #[tauri::command]
-pub fn memory_context_metrics(run_id: Option<String>, mission_id: Option<String>, db: tauri::State<DbConnection>) -> Result<serde_json::Value, String> {
-    let conn = db.lock().map_err(|_| "database unavailable")?;
-    context_metrics(&conn, run_id.as_deref(), mission_id.as_deref())
+pub async fn memory_context_metrics(run_id: Option<String>, mission_id: Option<String>, db: tauri::State<'_, DbConnection>) -> Result<serde_json::Value, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|_| "database unavailable")?;
+        context_metrics(&conn, run_id.as_deref(), mission_id.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn memory_query(workspace_id:String,mission_id:Option<String>,cursor:Option<String>,limit:Option<usize>,filter:MemoryFilter,db:tauri::State<DbConnection>) -> Result<MemoryPage,String> {
-    let conn=db.lock().map_err(|e|e.to_string())?;
-    list_filtered(&conn,&workspace_id,mission_id.as_deref(),cursor.as_deref(),limit.unwrap_or(LIST_LIMIT),&filter)
+pub async fn memory_query(workspace_id:String,mission_id:Option<String>,cursor:Option<String>,limit:Option<usize>,filter:MemoryFilter,db:tauri::State<'_, DbConnection>) -> Result<MemoryPage,String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn=db.lock().map_err(|e|e.to_string())?;
+        list_filtered(&conn,&workspace_id,mission_id.as_deref(),cursor.as_deref(),limit.unwrap_or(LIST_LIMIT),&filter)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn memory_index(workspace_id: String, mission_id: Option<String>, db: tauri::State<DbConnection>) -> Result<String, String> {
-    let conn = db.lock().map_err(|_| "database unavailable")?;
-    validate_owner(&conn, if mission_id.is_some() { "mission" } else { "workspace" }, &workspace_id, mission_id.as_deref())?;
-    let text = repo::approved_open(&conn, &workspace_id, mission_id.as_deref(), "MEMORY.md")?;
-    // Injeção do índice no início da sessão: quantas linhas de memória o agente recebeu.
-    let injected = text.lines().filter(|line| line.starts_with("- ")).count() as u32;
-    usage::record(&conn, &usage::UsageRow { ts: usage::now(), workspace_id: &workspace_id, mission_id: mission_id.as_deref(), tab_id: None, action: "injected", query: None, hits: injected, entry_keys: &[] });
-    Ok(text)
+pub async fn memory_index(workspace_id: String, mission_id: Option<String>, db: tauri::State<'_, DbConnection>) -> Result<String, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|_| "database unavailable")?;
+        validate_owner(&conn, if mission_id.is_some() { "mission" } else { "workspace" }, &workspace_id, mission_id.as_deref())?;
+        let text = repo::approved_open(&conn, &workspace_id, mission_id.as_deref(), "MEMORY.md")?;
+        // Injeção do índice no início da sessão: quantas linhas de memória o agente recebeu.
+        let injected = text.lines().filter(|line| line.starts_with("- ")).count() as u32;
+        usage::record(&conn, &usage::UsageRow { ts: usage::now(), workspace_id: &workspace_id, mission_id: mission_id.as_deref(), tab_id: None, action: "injected", query: None, hits: injected, entry_keys: &[] });
+        Ok(text)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 pub fn promote_fact(
@@ -1524,12 +1551,17 @@ pub fn task_tool(
 }
 
 #[tauri::command]
-pub fn memory_pending_counts(
+pub async fn memory_pending_counts(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<MemoryPendingCounts, String> {
-    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    pending_counts_for_workspace(&conn, &workspace_id)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        pending_counts_for_workspace(&conn, &workspace_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn pending_counts_for_workspace(
@@ -1568,119 +1600,143 @@ fn pending_counts_for_workspace(
 }
 
 #[tauri::command]
-pub fn memory_list(
+pub async fn memory_list(
     workspace_id: String,
     mission_id: Option<String>,
     cursor: Option<String>,
     limit: Option<usize>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<MemoryPage, String> {
-    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    list_for_owner(
-        &conn,
-        &workspace_id,
-        mission_id.as_deref(),
-        cursor.as_deref(),
-        limit.unwrap_or(LIST_LIMIT),
-    )
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        list_for_owner(
+            &conn,
+            &workspace_id,
+            mission_id.as_deref(),
+            cursor.as_deref(),
+            limit.unwrap_or(LIST_LIMIT),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub fn memory_get(
+pub async fn memory_get(
     entry_id: String,
     workspace_id: String,
     mission_id: Option<String>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<MemoryDetail, String> {
-    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    detail_for_owner(&conn, &entry_id, &workspace_id, mission_id.as_deref())
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        detail_for_owner(&conn, &entry_id, &workspace_id, mission_id.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn memory_history(
+pub async fn memory_history(
     entry_id: String,
     workspace_id: String,
     mission_id: Option<String>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<history::MemoryValidityInterval>, String> {
-    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    history::history_for_entry(&conn, &workspace_id, mission_id.as_deref(), &entry_id)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        history::history_for_entry(&conn, &workspace_id, mission_id.as_deref(), &entry_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn memory_propose_user(
+pub async fn memory_propose_user(
     workspace_id: String,
     mission_id: Option<String>,
     input: ProposalInput,
     app: tauri::AppHandle,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<ProposalResult, String> {
-    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    let result = propose(
-        &conn,
-        &input.scope,
-        &workspace_id,
-        mission_id.as_deref(),
-        &input,
-        ProposalActor {
-            kind: "user",
-            run_id: None,
-            task_id: None,
-            fact_id: None,
-        },
-    );
-    drop(conn);
-    if result.is_ok() { notify_changed(&app); }
-    result
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        let result = propose(
+            &conn,
+            &input.scope,
+            &workspace_id,
+            mission_id.as_deref(),
+            &input,
+            ProposalActor {
+                kind: "user",
+                run_id: None,
+                task_id: None,
+                fact_id: None,
+            },
+        );
+        drop(conn);
+        if result.is_ok() { notify_changed(&app); }
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub fn memory_decide_user(
+pub async fn memory_decide_user(
     entry_id: String,
     revision: i64,
     approve: bool,
     acknowledge_secret: Option<bool>,
     app: tauri::AppHandle,
-    db: tauri::State<DbConnection>,
-    sync: tauri::State<repo_sync::RepoSync>,
 ) -> Result<(), String> {
-    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    // O que a pessoa vai decidir, para a Laya e o Jev serem comparados com ela (só o hash é guardado).
-    let proposal: Option<(String, String, String, String)> = conn
-        .query_row(
-            "SELECT e.key, r.kind, r.body, r.operation FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id WHERE e.id=?1 AND r.revision=?2",
-            params![entry_id, revision],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )
-        .ok();
-    if approve {
-        let (key, body, reason): (String, String, Option<String>) = conn
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<DbConnection>();
+        let sync = app.state::<repo_sync::RepoSync>();
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        // O que a pessoa vai decidir, para a Laya e o Jev serem comparados com ela (só o hash é guardado).
+        let proposal: Option<(String, String, String, String)> = conn
             .query_row(
-                "SELECT e.key, r.body, r.reason FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id WHERE e.id=?1 AND r.revision=?2",
+                "SELECT e.key, r.kind, r.body, r.operation FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id WHERE e.id=?1 AND r.revision=?2",
                 params![entry_id, revision],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
-            .map_err(|_| "memory proposal not found".to_string())?;
-        // Mesmo critério relaxado da proposta no painel. O git fica na fila do #115.
-        let secret = agent::looks_like_user_secret(&key)
-            || agent::looks_like_user_secret(&body)
-            || reason.as_deref().is_some_and(agent::looks_like_user_secret);
-        let acknowledged = secret_acknowledged(&conn, &entry_id, revision);
-        if secret && !acknowledged && !acknowledge_secret.unwrap_or(false) {
-            return Err(agent::secret_confirmation_error());
+            .ok();
+        if approve {
+            let (key, body, reason): (String, String, Option<String>) = conn
+                .query_row(
+                    "SELECT e.key, r.body, r.reason FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id WHERE e.id=?1 AND r.revision=?2",
+                    params![entry_id, revision],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .map_err(|_| "memory proposal not found".to_string())?;
+            // Mesmo critério relaxado da proposta no painel. O git fica na fila do #115.
+            let secret = agent::looks_like_user_secret(&key)
+                || agent::looks_like_user_secret(&body)
+                || reason.as_deref().is_some_and(agent::looks_like_user_secret);
+            let acknowledged = secret_acknowledged(&conn, &entry_id, revision);
+            if secret && !acknowledged && !acknowledge_secret.unwrap_or(false) {
+                return Err(agent::secret_confirmation_error());
+            }
+            if secret && acknowledge_secret.unwrap_or(false) {
+                remember_secret_override(&conn, &entry_id, revision)?;
+            }
         }
-        if secret && acknowledge_secret.unwrap_or(false) {
-            remember_secret_override(&conn, &entry_id, revision)?;
+        // A decisão grava no banco. A exportação entra na fila e solta o lock antes do git.
+        let result = repo_sync::decide_and_schedule(&conn, &sync, &entry_id, revision, approve);
+        if result.is_ok() {
+            if let Some((key, kind, body, operation)) = &proposal {
+                crate::decisions::record_memory_decision(&conn, key, kind, operation, body, approve);
+            }
         }
-    }
-    // A decisão grava no banco. A exportação entra na fila e solta o lock antes do git.
-    let result = repo_sync::decide_and_schedule(&conn, &sync, &entry_id, revision, approve);
-    if result.is_ok() {
-        if let Some((key, kind, body, operation)) = &proposal {
-            crate::decisions::record_memory_decision(&conn, key, kind, operation, body, approve);
-        }
-    }
-    drop(conn);
-    notify_changed(&app);
-    result
+        drop(conn);
+        notify_changed(&app);
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Only the native user command invokes this; deliberately absent from agent IPC/MCP.
@@ -1696,37 +1752,46 @@ pub fn purge_revisions_user(conn: &Connection, entry_id: &str, revision: Option<
 }
 
 #[tauri::command]
-pub fn memory_purge_user(
+pub async fn memory_purge_user(
     entry_id: String,
     revision: Option<i64>,
     app: tauri::AppHandle,
-    db: tauri::State<DbConnection>,
-    sync: tauri::State<repo_sync::RepoSync>,
 ) -> Result<(), String> {
-    let scope = {
-        let conn = db.lock().map_err(|_| "database unavailable")?;
-        purge::Scope {
-            memory_root: repo::default_root()?,
-            database_file: purge::main_database_file(&conn),
-            events_root: crate::util::datadir::ags_home().map(|home| home.join("runs")),
-        }
-    };
-    let result = purge::revisions_coordinated(&db, &sync, &entry_id, revision, &scope);
-    notify_changed(&app);
-    result
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<DbConnection>();
+        let sync = app.state::<repo_sync::RepoSync>();
+        let scope = {
+            let conn = db.lock().map_err(|_| "database unavailable")?;
+            purge::Scope {
+                memory_root: repo::default_root()?,
+                database_file: purge::main_database_file(&conn),
+                events_root: crate::util::datadir::ags_home().map(|home| home.join("runs")),
+            }
+        };
+        let result = purge::revisions_coordinated(&db, &sync, &entry_id, revision, &scope);
+        notify_changed(&app);
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn run_list_memory_snapshot(
+pub async fn run_list_memory_snapshot(
     run_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<MemorySnapshot, String> {
-    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    snapshot_for_run(&conn, &run_id)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        snapshot_for_run(&conn, &run_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn memory_promote_fact_user(
+pub async fn memory_promote_fact_user(
     run_id: String,
     fact_id: String,
     scope: String,
@@ -1734,23 +1799,28 @@ pub fn memory_promote_fact_user(
     priority: i64,
     reason: Option<String>,
     app: tauri::AppHandle,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<ProposalResult, String> {
-    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    let result = promote_fact(
-        &conn,
-        &run_id,
-        &fact_id,
-        &scope,
-        &key,
-        priority,
-        reason.as_deref(),
-        "user",
-        None,
-    );
-    drop(conn);
-    if result.is_ok() { notify_changed(&app); }
-    result
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        let result = promote_fact(
+            &conn,
+            &run_id,
+            &fact_id,
+            &scope,
+            &key,
+            priority,
+            reason.as_deref(),
+            "user",
+            None,
+        );
+        drop(conn);
+        if result.is_ok() { notify_changed(&app); }
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 pub mod agent;

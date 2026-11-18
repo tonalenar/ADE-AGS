@@ -185,10 +185,23 @@ pub(crate) fn last_pr_mention(texts: &[String]) -> Option<String> {
     })
 }
 
-pub(crate) fn delivery_hint(conn: &rusqlite::Connection, mission_id: &str, cwd: &Path, started_at_sec: Option<i64>) -> DeliveryHint {
+// `antes_do_io` roda antes do `git rev-parse` do repositório (ver `repository_key`).
+pub(crate) fn delivery_hint_with(
+    db: &crate::database::DbConnection,
+    mission_id: &str,
+    cwd: &Path,
+    started_at_sec: Option<i64>,
+    antes_do_io: &dyn Fn(),
+) -> DeliveryHint {
+    antes_do_io();
+    let repo = crate::testspeed::run::repository_key(cwd).ok();
+    let Ok(conn) = db.lock() else { return DeliveryHint::default() };
+    hint_from_rows(&conn, mission_id, repo, started_at_sec)
+}
+
+fn hint_from_rows(conn: &rusqlite::Connection, mission_id: &str, repo: Option<String>, started_at_sec: Option<i64>) -> DeliveryHint {
     let since_ms = started_at_sec.unwrap_or(0) * 1000;
-    let latest: Vec<(String, bool)> = crate::testspeed::run::repository_key(cwd)
-        .ok()
+    let latest: Vec<(String, bool)> = repo
         .and_then(|repo| {
             let mut stmt = conn
                 .prepare(

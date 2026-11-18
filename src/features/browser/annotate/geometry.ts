@@ -48,7 +48,10 @@ function intersect(a: Box, b: Box): Box | null {
  * que no es la de CSS: la escala sale de comparar su ancho con el de la ventana.
  */
 export function cropFor(page: Box, clip: Box, viewport: Size, image: Size): Crop | null {
-  const visible = intersect(intersect(page, clip) ?? page, { left: 0, top: 0, ...viewport });
+  // Fora da própria coluna a página não está à vista: não se cai para a página inteira (outro painel apareceria na foto).
+  const inColumn = intersect(page, clip);
+  if (!inColumn) return null;
+  const visible = intersect(inColumn, { left: 0, top: 0, ...viewport });
   if (!visible || viewport.width <= 0 || viewport.height <= 0) return null;
   const sx = image.width / viewport.width;
   const sy = image.height / viewport.height;

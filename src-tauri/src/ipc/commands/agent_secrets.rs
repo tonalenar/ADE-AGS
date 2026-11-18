@@ -22,7 +22,7 @@ fn authorized_owner(args: &Value) -> Result<String, String> {
 
 pub(super) fn request(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let owner = authorized_owner(args)?;
-    if let Some(refusal) = super::ask::member_refusal(super::ask::lead_of(app, &owner).as_deref()) {
+    if let Some(refusal) = super::ask::member_refusal(super::ask::lead_of(app, &owner)?.as_deref()) {
         return Ok(refusal);
     }
     let raw_label = arg_str(args, "label")?;

@@ -16,7 +16,21 @@ pub(super) fn git_raw(root: &Path, args: &[&str]) -> Result<std::process::Output
 
 /// `index`: um `GIT_INDEX_FILE` próprio (temporário). O índice do worktree, que é de um
 /// agente trabalhando nele, nunca é tocado.
+#[cfg(test)]
+thread_local! {
+    /// Teste: roda antes de cada git do gate, na mesma thread. Serve para provar, sem tempo
+    /// nem espera, que o mutex do banco está livre enquanto o git roda.
+    pub(crate) static ANTES_DO_GIT: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        std::cell::RefCell::new(None);
+}
+
 fn git_raw_with_index(root: &Path, args: &[&str], index: Option<&Path>) -> Result<std::process::Output, String> {
+    #[cfg(test)]
+    ANTES_DO_GIT.with(|hook| {
+        if let Some(hook) = hook.borrow().as_ref() {
+            hook();
+        }
+    });
     let mut cmd = crate::util::spawn::hidden_command("git");
     if let Some(index) = index {
         cmd.env("GIT_INDEX_FILE", index);
@@ -427,6 +441,22 @@ pub const FULL_GATE_SUITES: [&str; 3] = ["rust", "tsc", "frontend"];
 /// aceitava as frases "ags test run …" no relato, e um agente que já tinha o verde (pelo affected
 /// cheio ou de outro integrante) rodava tudo de novo com `--force` só para poder escrevê-las.
 pub fn full_gate_green(conn: &Connection, root: &Path) -> bool {
+    full_gate_green_with(root, |repo, scope, suite, command| {
+        matches!(cached_green(conn, repo, Some(scope), suite, command), Ok(Some(_)))
+    })
+}
+
+pub fn full_gate_green_db(db: &crate::database::DbConnection, root: &Path) -> bool {
+    full_gate_green_with(root, |repo, scope, suite, command| {
+        let Ok(conn) = db.lock() else { return false };
+        matches!(cached_green(&conn, repo, Some(scope), suite, command), Ok(Some(_)))
+    })
+}
+
+fn full_gate_green_with(
+    root: &Path,
+    mut cached: impl FnMut(&str, &str, &str, &str) -> bool,
+) -> bool {
     let (Ok(repo), Ok(Some(tree))) = (repository_key(root), clean_tree(root)) else {
         return false;
     };
@@ -434,7 +464,7 @@ pub fn full_gate_green(conn: &Connection, root: &Path) -> bool {
     !suites.is_empty() && suites.iter().all(|suite| {
         let Ok(commands) = suite_commands_in(root, suite) else { return false };
         let scope = super::scope::scoped_identity(root, &tree, suite);
-        matches!(cached_green(conn, &repo, Some(&scope), suite, &command_key(&commands)), Ok(Some(_)))
+        cached(&repo, &scope, suite, &command_key(&commands))
     })
 }
 
@@ -707,6 +737,7 @@ pub fn status(conn: &Connection, root: &Path) -> Result<serde_json::Value, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
     fn repository() -> std::path::PathBuf {
         let root = std::env::temp_dir().join(format!("ags-test-cache-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
@@ -718,6 +749,28 @@ mod tests {
         git(&root, &["add", "tracked"]).unwrap();
         git(&root, &["commit", "-m", "initial"]).unwrap();
         root
+    }
+
+    #[test]
+    fn full_gate_green_db_roda_git_sem_o_mutex_do_banco() {
+        let root = repository();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("Cargo.toml"), "[package]\nname='fixture'\nversion='0.1.0'\nedition='2024'\n").unwrap();
+        std::fs::write(root.join("src/lib.rs"), "").unwrap();
+        git(&root, &["add", "-A"]).unwrap();
+        git(&root, &["commit", "-m", "project"]).unwrap();
+        let db = Arc::new(Mutex::new(Connection::open_in_memory().unwrap()));
+        let probe = db.clone();
+        // Cada git do gate confere o mutex na mesma thread: com o banco preso, try_lock falha.
+        ANTES_DO_GIT.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                assert!(probe.try_lock().is_ok(), "git do gate rodou com o banco preso");
+            }));
+        });
+        let green = full_gate_green_db(&db, &root);
+        ANTES_DO_GIT.with(|hook| *hook.borrow_mut() = None);
+        assert!(!green, "sem verde gravado no cache, o gate não está verde");
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn a_frontend_only_change_keeps_the_rust_green_and_vice_versa() {

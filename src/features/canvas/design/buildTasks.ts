@@ -9,6 +9,8 @@
  * 5. O HTML da prancheta é incluído como referência visual, com escape de construções hostis e limite de tamanho.
  */
 
+import { untrustedInline } from "@/shared/untrusted";
+
 export interface ArtboardInput {
   id: string;
   title: string;
@@ -149,7 +151,8 @@ export function formatBuildPrompt(
     : null;
 
   return [
-    `Tarefa de construção para a prancheta "${artboard.title}" do Design "${design.title}".`,
+    // Título e nome vêm da prancheta, escritos pelo agente: entram como dado numa linha só (não quebram o prompt).
+    `Tarefa de construção para a prancheta ${untrustedInline("título da prancheta", artboard.title)} do Design ${untrustedInline("título do design", design.title)}.`,
     "",
     "INSTRUÇÕES OBRIGATÓRIAS:",
     worktreeInstruction,
@@ -158,9 +161,9 @@ export function formatBuildPrompt(
     "- Implemente a interface fielmente no projeto de acordo com o design visual da prancheta aprovada.",
     "",
     "METADADOS DA PRANCHETA:",
-    `- Design: ${design.title} (ID: ${design.id})`,
-    `- Página: ${page.name}`,
-    `- Prancheta: ${artboard.title} (ID: ${artboard.id})`,
+    `- Design: ${untrustedInline("título do design", design.title)} (ID: ${design.id})`,
+    `- Página: ${untrustedInline("nome da página", page.name)}`,
+    `- Prancheta: ${untrustedInline("título da prancheta", artboard.title)} (ID: ${artboard.id})`,
     dimensionLine,
     "",
     "REFERÊNCIA VISUAL (HTML):",

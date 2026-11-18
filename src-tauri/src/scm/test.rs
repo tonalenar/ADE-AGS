@@ -4,6 +4,39 @@ use super::parse::{
     LOG_FORMAT,
 };
 use super::remote::{host_and_path, parse_remotes, provider_of, remote_from, Provider};
+use std::path::Path;
+
+#[test]
+fn descartar_colchetes_nao_atinge_outros() {
+    use super::commands::with_paths;
+    use super::git::{run, LOCAL};
+
+    let root = std::env::temp_dir().join(format!("ags-scm-pathspec-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.to_string_lossy().into_owned();
+    for args in [
+        vec!["init", "-q"],
+        vec!["config", "user.email", "ags-test@example.invalid"],
+        vec!["config", "user.name", "AGS test"],
+    ] {
+        run(&root, &args, LOCAL).unwrap();
+    }
+    for name in ["[id].tsx", "i.tsx", "d.tsx"] {
+        std::fs::write(Path::new(&root).join(name), "original").unwrap();
+    }
+    run(&root, &["add", "."], LOCAL).unwrap();
+    run(&root, &["commit", "-m", "base"], LOCAL).unwrap();
+    for name in ["[id].tsx", "i.tsx", "d.tsx"] {
+        std::fs::write(Path::new(&root).join(name), "modificado").unwrap();
+    }
+
+    run(&root, &with_paths(&["restore", "--worktree"], &["[id].tsx".into()]), LOCAL).unwrap();
+    assert_eq!(std::fs::read(Path::new(&root).join("[id].tsx")).unwrap(), b"original");
+    for name in ["i.tsx", "d.tsx"] {
+        assert_eq!(std::fs::read(Path::new(&root).join(name)).unwrap(), b"modificado");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
 
 fn entry(path: &str, status: &str) -> ScmEntry {
     ScmEntry { path: path.to_string(), orig_path: None, status: status.to_string() }

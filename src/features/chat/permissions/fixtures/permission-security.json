@@ -1390,6 +1390,34 @@
    "files": [],
    "cwd": "/proj",
    "expected": "high"
+  },
+  {
+    "kind": "command",
+    "detail": "cat ~/.aws/credentials",
+    "files": [],
+    "cwd": "/proj",
+    "expected": "medium"
+  },
+  {
+    "kind": "command",
+    "detail": "cat /etc/hosts",
+    "files": [],
+    "cwd": "/proj",
+    "expected": "medium"
+  },
+  {
+    "kind": "command",
+    "detail": "cat .env",
+    "files": [],
+    "cwd": "/proj",
+    "expected": "medium"
+  },
+  {
+    "kind": "command",
+    "detail": "cat src/a.ts",
+    "files": [],
+    "cwd": "/proj",
+    "expected": "low"
   }
  ],
  "match": [
@@ -2273,6 +2301,36 @@
     "agentId": "codex"
    },
    "expected": true
+  },
+  {
+    "rule": {
+      "kind": "command",
+      "pattern": "python3 *",
+      "agentId": null
+    },
+    "ask": {
+      "kind": "command",
+      "detail": "python3 -c \"print(1)\"",
+      "files": [],
+      "cwd": "/proj",
+      "agentId": "codex"
+    },
+    "expected": false
+  },
+  {
+    "rule": {
+      "kind": "command",
+      "pattern": "python3 *",
+      "agentId": null
+    },
+    "ask": {
+      "kind": "command",
+      "detail": "python3 script.py",
+      "files": [],
+      "cwd": "/proj",
+      "agentId": "codex"
+    },
+    "expected": true
   }
  ],
  "shell": [
