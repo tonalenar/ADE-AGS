@@ -94,6 +94,7 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     // ANTES de tomar el lock: resolver la sesión lee disco y puede lanzar un proceso, y
     // hacerlo con el mutex tomado bloquea la base para toda la app (ver `ResolvedSession`).
     let resolved = resolve_closing_tabs(&state, db);
+    let boards = crate::canvas::load_boards()?;
 
     let conn = db.lock().map_err(|e| e.to_string())?;
     // Una sola transacción: un commit (un fsync) por guardado y no uno por fila, y un
@@ -173,10 +174,10 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     } else {
         Vec::new()
     };
-    crate::usage::capture_mission_tabs(&conn, &crate::canvas::load_boards())?;
+    crate::usage::capture_mission_tabs(&conn, &boards)?;
     for closed_id in closed_ids {
         let resolved = resolved.get(closed_id.as_str()).cloned().unwrap_or_default();
-        archive_tab_row(&conn, closed_id, &state.workspace_id, &resolved)?;
+        archive_tab_row(&conn, closed_id, &state.workspace_id, &resolved, &boards)?;
         if let Ok(pair) = conn.query_row(
             "SELECT cwd, agent_id FROM tabs WHERE id = ?1",
             [closed_id],
@@ -236,7 +237,7 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
         .map_err(|e| e.to_string())?;
     }
 
-    crate::usage::capture_mission_tabs(&conn, &crate::canvas::load_boards())?;
+    crate::usage::capture_mission_tabs(&conn, &boards)?;
     tx.commit().map_err(|e| e.to_string())?;
     crate::skills::reconcile_link_dirs(&conn, &orphaned_dirs);
 
@@ -332,6 +333,7 @@ pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<O
     // Antes del lock: si esta ventana pierde sus tabs, hay que resolverles la sesión, y eso
     // lee disco y puede lanzar procesos (ver `ResolvedSession`).
     let resolved = resolve_tabs_of_window(db, label);
+    let boards = crate::canvas::load_boards()?;
 
     let conn = db.lock().map_err(|e| e.to_string())?;
 
@@ -373,7 +375,7 @@ pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<O
         drop(tab_ids_stmt);
         for tab_id in &tab_ids {
             let r = resolved.get(tab_id.as_str()).cloned().unwrap_or_default();
-            archive_tab_row(&conn, tab_id, &workspace_id, &r)?;
+            archive_tab_row(&conn, tab_id, &workspace_id, &r, &boards)?;
         }
 
         conn.execute("DELETE FROM windows WHERE id = ?1", [&window_id])

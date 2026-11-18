@@ -130,6 +130,8 @@ struct Inner {
     stop: AtomicBool,
     running: AtomicBool,
     notify: Mutex<Option<Arc<dyn Fn(&RepoSyncStatus) + Send + Sync>>>,
+    /// Falha ao criar a thread do worker: a sincronização fica desligada até um `retry` conseguir subí-la.
+    worker_error: Mutex<Option<String>>,
     /// Só em teste: quanto o worker fica parado, COM a trava do estado, entre conferir `stop` e dormir sem prazo. Imita a
     /// thread perdendo a CPU nessa janela, que é onde o aviso do `Drop` se perdia num runner de CI carregado.
     #[cfg(test)]
@@ -165,6 +167,7 @@ impl RepoSync {
                 before_idle_wait_ms: std::sync::atomic::AtomicU64::new(0),
                 running: AtomicBool::new(false),
                 notify: Mutex::new(None),
+                worker_error: Mutex::new(None),
             }),
             worker: Mutex::new(None),
         }
@@ -174,19 +177,47 @@ impl RepoSync {
         *self.inner.notify.lock().unwrap_or_else(|err| err.into_inner()) = Some(notify);
     }
 
-    pub fn spawn(&self) {
-        let mut worker = self.worker.lock().unwrap_or_else(|err| err.into_inner());
-        if worker.is_some() {
-            return;
-        }
-        self.inner.running.store(true, Ordering::SeqCst);
-        let inner = Arc::clone(&self.inner);
-        *worker = Some(
+    /// Sobe o worker de exportação. Sem ele a memória continua no banco, mas nada vai para o repositório Markdown.
+    /// A falha vai para o status (ver `snapshot`) e pode ser tentada de novo com `retry`.
+    pub fn spawn(&self) -> Result<(), String> {
+        self.spawn_com(|inner| {
             std::thread::Builder::new()
                 .name("memory-repo-sync".into())
                 .spawn(move || worker_loop(inner))
-                .expect("memory repo sync thread"),
-        );
+        })
+    }
+
+    /// Núcleo de `spawn`, com a criação da thread injetada: o teste força a falha sem depender do sistema.
+    fn spawn_com(&self, criar: impl FnOnce(Arc<Inner>) -> std::io::Result<JoinHandle<()>>) -> Result<(), String> {
+        let mut worker = self.worker.lock().unwrap_or_else(|err| err.into_inner());
+        if worker.is_some() {
+            return Ok(());
+        }
+        self.inner.running.store(true, Ordering::SeqCst);
+        let inner = Arc::clone(&self.inner);
+        match criar(inner) {
+            Ok(handle) => {
+                *self.inner.worker_error.lock().unwrap_or_else(|err| err.into_inner()) = None;
+                *worker = Some(handle);
+                Ok(())
+            }
+            Err(erro) => {
+                self.inner.running.store(false, Ordering::SeqCst);
+                let motivo = erro.to_string();
+                *self.inner.worker_error.lock().unwrap_or_else(|err| err.into_inner()) = Some(motivo.clone());
+                drop(worker);
+                self.emit(&self.status(""));
+                Err(motivo)
+            }
+        }
+    }
+
+    fn falha_do_worker(&self) -> Option<String> {
+        self.inner
+            .worker_error
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .clone()
     }
 
     /// Anota que `workspace` precisa de exportação. Devolve a geração que o chamador espera.
@@ -221,6 +252,7 @@ impl RepoSync {
     }
 
     pub fn retry(&self, workspace: &str) -> RepoSyncStatus {
+        let _ = self.spawn();
         let status = {
             let mut state = self.lock_state();
             if let Some(slot) = state.slots.get_mut(workspace) {
@@ -231,12 +263,23 @@ impl RepoSync {
             }
             snapshot(&state, workspace)
         };
+        let status = if self.falha_do_worker().is_some() {
+            self.status(workspace)
+        } else {
+            status
+        };
         self.emit(&status);
         status
     }
 
     pub fn status(&self, workspace: &str) -> RepoSyncStatus {
-        snapshot(&self.lock_state(), workspace)
+        let falha = self.falha_do_worker();
+        let mut status = snapshot(&self.lock_state(), workspace);
+        if let Some(error) = falha {
+            status.phase = "failed".into();
+            status.error = Some(format!("A sincronização de memória está desligada: {error}"));
+        }
+        status
     }
 
     /// Pausa o workspace para o purge reescrever o repositório. Ver o contrato no módulo.
@@ -761,17 +804,23 @@ fn dirty_workspaces(conn: &rusqlite::Connection) -> Result<Vec<String>, String> 
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
-pub fn install(app: &tauri::App) {
+/// Sem pasta do usuário a memória não tem onde morar: o erro sobe para o `setup` (ver `app::run`),
+/// que mostra o aviso de boot, em vez de um `expect` que fecharia o app sem mensagem.
+pub fn install(app: &tauri::App) -> Result<(), String> {
     let db = app.state::<DbConnection>().inner().clone();
-    let root = repo::default_root().expect("home unavailable");
+    let root = repo::default_root()?;
     let sync = RepoSync::new(db, root);
     let handle = app.handle().clone();
     sync.set_notifier(Arc::new(move |status: &RepoSyncStatus| {
         let _ = handle.emit(SYNC_EVENT, status);
     }));
-    sync.spawn();
+    if let Err(error) = sync.spawn() {
+        // A sincronização é opcional: o app abre, a memória fica no banco, e o status mostra o motivo.
+        eprintln!("[memory] sincronização de memória desligada: {error}");
+    }
     sync.reconcile_pending();
     app.manage(sync);
+    Ok(())
 }
 
 #[tauri::command]
@@ -996,7 +1045,7 @@ mod tests {
             }
         }
         let started = Instant::now();
-        sync.spawn();
+        sync.spawn().unwrap();
         let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(30)).unwrap();
         assert!(started.elapsed() < Duration::from_secs(3));
         assert_eq!(probe.commits.load(Ordering::SeqCst), 1, "a batch must become one commit");
@@ -1017,7 +1066,7 @@ mod tests {
         let probe = Probe::new(db.clone());
         probe.block_commit.store(true, Ordering::SeqCst);
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         {
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "first", "approved body 0");
@@ -1058,7 +1107,7 @@ mod tests {
         let probe = Probe::new(db.clone());
         probe.fail_commits.store(true, Ordering::SeqCst);
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         let proposal = {
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "kept", "approved body kept");
@@ -1121,7 +1170,7 @@ mod tests {
             Ok(hash)
         });
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), runner, hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         std::thread::scope(|scope| {
             for index in 0..4 {
                 let db = &db;
@@ -1217,7 +1266,7 @@ mod tests {
         probe.fail_commits.store(true, Ordering::SeqCst);
         {
             let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
-            sync.spawn();
+            sync.spawn().unwrap();
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "kept", "survives restart");
             decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
@@ -1228,7 +1277,7 @@ mod tests {
         }
         probe.fail_commits.store(false, Ordering::SeqCst);
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         sync.reconcile_pending();
         let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(3)).unwrap();
         assert!(status.error.is_none(), "{:?}", status.error);
@@ -1253,7 +1302,7 @@ mod tests {
         let probe = Probe::new(db.clone());
         let sync = RepoSync::with_runner(db, root.path().to_path_buf(), probe.runner(), hour());
         sync.inner.before_idle_wait_ms.store(400, Ordering::SeqCst);
-        sync.spawn();
+        sync.spawn().unwrap();
         // O worker já conferiu `stop` e está parado no gancho, segurando a trava, prestes a dormir.
         std::thread::sleep(Duration::from_millis(150));
         let (done_tx, done_rx) = std::sync::mpsc::channel();
@@ -1277,7 +1326,7 @@ mod tests {
         }
         sync.pause_workspace("w").unwrap();
         assert_eq!(sync.status("w").pending, 0);
-        sync.spawn();
+        sync.spawn().unwrap();
         sync.resume_workspace("w");
         let replayed = sync.wait_until("w", |item| item.phase == "synced", Duration::from_millis(300));
         assert!(replayed.is_err(), "a pausa tem de descartar o que ainda não entrou no git");
@@ -1301,7 +1350,7 @@ mod tests {
         let probe = Probe::new(db.clone());
         probe.block_commit.store(true, Ordering::SeqCst);
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         {
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "first", "inflight body");
@@ -1341,7 +1390,7 @@ mod tests {
         let probe = Probe::new(db.clone());
         probe.block_commit.store(true, Ordering::SeqCst);
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         {
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "cli", "cli body");
@@ -1382,7 +1431,7 @@ mod tests {
             events_root: None,
         };
         crate::memory::purge::revisions_coordinated(&db, &sync, &entry.entry_id, Some(entry.revision), &scope).unwrap();
-        sync.spawn();
+        sync.spawn().unwrap();
         std::thread::sleep(Duration::from_millis(400));
         assert_eq!(probe.commits.load(Ordering::SeqCst), 0, "a fila descartada não pode commitar depois do purge");
         let repo = root.path().join(repo::workspace_repo_name("w"));
@@ -1426,7 +1475,7 @@ mod tests {
             real(path, args)
         });
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), runner, hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         let entry = {
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "target", sentinel);
@@ -1504,7 +1553,7 @@ mod tests {
         let db = fixture();
         let root = TempDir::new();
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), repo::real_git_runner(), hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         let entry = {
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "kept", "body before the failed rewrite");
@@ -1534,5 +1583,56 @@ mod tests {
         let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(30)).unwrap();
         assert!(status.error.is_none(), "{:?}", status.error);
         assert!(notes(root.path()).contains("after the failed purge"));
+    }
+
+    /// A thread do worker não pode subir: a falha tem que aparecer no status do workspace, e não derrubar o boot.
+    #[test]
+    fn thread_que_nao_sobe_vira_falha_visivel_no_status() {
+        let sync = RepoSync::new(fixture(), std::env::temp_dir().join(format!("ade-sync-{}", uuid::Uuid::new_v4())));
+        let erro = sync.spawn_com(|_| Err(std::io::Error::other("sem recurso"))).unwrap_err();
+        assert!(erro.contains("sem recurso"), "{erro}");
+        let status = sync.status("w");
+        assert_eq!(status.phase, "failed", "{status:?}");
+        assert!(status.error.as_deref().unwrap_or_default().contains("sem recurso"), "{status:?}");
+    }
+
+    /// O `install` avisa a UI pelo mesmo evento do toast: spawn falho também emite `cc-memory-repo-sync`.
+    #[test]
+    fn spawn_falho_emite_cc_memory_repo_sync() {
+        let sync = RepoSync::new(fixture(), std::env::temp_dir().join(format!("ade-sync-{}", uuid::Uuid::new_v4())));
+        let (tx, rx) = std::sync::mpsc::channel();
+        sync.set_notifier(Arc::new(move |status: &RepoSyncStatus| {
+            let _ = tx.send(status.clone());
+        }));
+        let _ = sync.spawn_com(|_| Err(std::io::Error::other("sem recurso")));
+        let status = rx.try_recv().expect("cc-memory-repo-sync não saiu na falha do spawn");
+        assert_eq!(status.phase, "failed", "{status:?}");
+        assert!(
+            status.error.as_deref().unwrap_or_default().contains("sem recurso"),
+            "{status:?}"
+        );
+    }
+
+    /// Com o worker caído, o status mostra o erro e mantém a fila real: a pendência não some da tela.
+    #[test]
+    fn falha_do_worker_mantem_a_pendencia_real() {
+        let sync = RepoSync::new(fixture(), std::env::temp_dir().join(format!("ade-sync-{}", uuid::Uuid::new_v4())));
+        sync.enqueue("w", None);
+        sync.enqueue("w", None);
+        sync.spawn_com(|_| Err(std::io::Error::other("sem recurso"))).unwrap_err();
+        let status = sync.status("w");
+        assert_eq!(status.phase, "failed", "{status:?}");
+        assert!(status.error.as_deref().unwrap_or_default().contains("sem recurso"), "{status:?}");
+        assert_eq!(status.pending, 2, "a pendência real sumiu do status: {status:?}");
+    }
+
+    /// `retry` tenta subir o worker de novo; quando ele sobe, a falha sai do status.
+    #[test]
+    fn retry_sobe_o_worker_que_falhou() {
+        let sync = RepoSync::new(fixture(), std::env::temp_dir().join(format!("ade-sync-{}", uuid::Uuid::new_v4())));
+        sync.spawn_com(|_| Err(std::io::Error::other("sem recurso"))).unwrap_err();
+        let depois = sync.retry("w");
+        assert_ne!(depois.phase, "failed", "{depois:?}");
+        assert_ne!(sync.status("w").phase, "failed");
     }
 }

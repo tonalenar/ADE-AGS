@@ -33,6 +33,7 @@ export interface CompareSetup {
 export interface PreparedComparison {
   comparison: Comparison;
   setups: CompareSetup[];
+  trustWarnings?: string[];
 }
 
 export interface RepoCheck {

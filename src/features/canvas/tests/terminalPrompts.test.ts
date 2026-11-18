@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectPermissionPrompt } from "../terminalPrompts";
+import { detectPermissionPrompt, pedidosEstaveis, promptDaTela } from "../terminalPrompts";
 
 const ESC = "\u001b";
 
@@ -159,5 +159,39 @@ describe("detectPermissionPrompt", () => {
     expect(p).not.toBeNull();
     expect(p?.detail.length).toBeLessThanOrEqual(400);
     expect(p?.detail.split("\n").length).toBeLessThanOrEqual(6);
+  });
+});
+
+describe("promptDaTela: o cartão só nasce de um prompt em modo de espera", () => {
+  it("menu que o detector de espera não reconhece não vira pedido, mesmo com a forma de um menu de permissão", () => {
+    // A forma (pergunta + "1. Proceed") bastaria para `detectPermissionPrompt`; sem o modo de espera, não é pedido.
+    const printed = ["Would you like to share this output?", "  1. Proceed", "  2. Cancel"];
+    expect(detectPermissionPrompt(printed)).not.toBeNull();
+    expect(promptDaTela(printed)).toBeNull();
+  });
+
+  it("os menus reais do Claude Code e do Codex continuam pedidos", () => {
+    expect(promptDaTela(CLAUDE_CMD)).not.toBeNull();
+    // O Codex marca o cursor com ›, e o detector das missões não lê isso: o modo de espera precisa cobri-lo.
+    expect(promptDaTela(CODEX_CMD)?.choices[0]?.keys).toBe("1");
+    expect(promptDaTela(CODEX_MCP)?.choices[0]?.keys).toBe("1");
+  });
+
+  it("tela sem menu nenhum não vira pedido", () => {
+    expect(promptDaTela(["$ bun test", "ok 12 testes"])).toBeNull();
+    expect(promptDaTela(null)).toBeNull();
+  });
+});
+
+describe("cartão: detector único e cursor parado (rodada 1)", () => {
+  it("marcas_do_codex_impressas_no_meio_da_saida_nao_viram_cartao", () => {
+    // Um agente que imprime o menu e depois continua imprimindo não cria pedido: o detector só aceita o menu no fim.
+    expect(promptDaTela([...CODEX_CMD, "$ bun test", "ok 12 testes"])).toBeNull();
+  });
+
+  it("pedido_so_vira_cartao_quando_se_repete_no_tick_seguinte", () => {
+    const key = "t1:sig";
+    expect(pedidosEstaveis(new Set(), [key])).toEqual([]);
+    expect(pedidosEstaveis(new Set([key]), [key])).toEqual([key]);
   });
 });

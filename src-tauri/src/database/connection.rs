@@ -54,22 +54,66 @@ pub fn db_boot_status() -> DbBootStatus {
 /// admite escrituras concurrentes, así que el `Mutex` es el que serializa el acceso.
 pub type DbConnection = Arc<Mutex<Connection>>;
 
-pub(crate) fn user_db_path() -> PathBuf {
-    db_path()
+/// Falha de boot que o app mostra ao usuário antes de sair (ver `app::fatal`). O texto é PT-BR
+/// porque é o que aparece na caixa de aviso.
+#[derive(Debug)]
+pub enum BootError {
+    /// Sem a pasta do usuário e sem `ADE_AGS_DATA_DIR`: não há onde guardar a base.
+    SemDiretorioDeDados,
+    /// A pasta de dados existe no plano, mas o sistema não deixou criá-la.
+    DiretorioNaoCriado { caminho: PathBuf, motivo: String },
+    /// O SQLite falhou ao abrir, migrar ou semear.
+    Banco(rusqlite::Error),
 }
 
-fn db_path() -> PathBuf {
-    let dir = crate::util::datadir::ags_home().expect("Cannot determine home directory");
-    std::fs::create_dir_all(&dir).expect("Cannot create the data directory (~/.ags or ADE_AGS_DATA_DIR)");
-    dir.join("data.db")
+impl std::fmt::Display for BootError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SemDiretorioDeDados => write!(
+                f,
+                "Não foi possível descobrir a pasta de dados do ADE AGS: a pasta do usuário não está disponível. \
+                 Defina ADE_AGS_DATA_DIR ou verifique o perfil do usuário."
+            ),
+            Self::DiretorioNaoCriado { caminho, motivo } => {
+                write!(f, "Não foi possível criar a pasta de dados {}: {motivo}", caminho.display())
+            }
+            Self::Banco(erro) => write!(f, "Erro no banco de dados: {erro}"),
+        }
+    }
+}
+
+impl From<rusqlite::Error> for BootError {
+    fn from(erro: rusqlite::Error) -> Self {
+        Self::Banco(erro)
+    }
+}
+
+/// Caminho da base para a manutenção em segundo plano. `None` só se a pasta de dados sumiu depois do boot.
+pub(crate) fn user_db_path() -> Option<PathBuf> {
+    db_path().ok()
+}
+
+/// Pasta e arquivo da base. Sem pasta de dados, devolve erro tipado em vez de dar pânico.
+fn db_path() -> Result<PathBuf, BootError> {
+    db_path_in(crate::util::datadir::ags_home())
+}
+
+/// A pasta de dados chega de fora, então o erro se testa sem tocar em `~/.ags`. Cria a pasta se preciso.
+fn db_path_in(dir: Option<PathBuf>) -> Result<PathBuf, BootError> {
+    let dir = dir.ok_or(BootError::SemDiretorioDeDados)?;
+    std::fs::create_dir_all(&dir).map_err(|erro| BootError::DiretorioNaoCriado {
+        caminho: dir.clone(),
+        motivo: erro.to_string(),
+    })?;
+    Ok(dir.join("data.db"))
 }
 
 /// Uma conexão própria à mesma base, para o trabalho que mistura banco com git ou disco (limpeza
 /// de worktrees: `git status`/`log`/`worktree remove` e a medição de GBs de `target/`). Com a
 /// conexão global (`DbConnection`) o `Mutex` ficava preso durante tudo isso e o resto do app
 /// (autosave, IPC, Vigia) parava. Em WAL as duas convivem; `busy_timeout` cobre as escritas.
-pub(crate) fn open_side_connection() -> SqlResult<Connection> {
-    let conn = Connection::open(db_path())?;
+pub(crate) fn open_side_connection() -> Result<Connection, BootError> {
+    let conn = Connection::open(db_path()?)?;
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
          PRAGMA busy_timeout = 30000;",
@@ -78,8 +122,8 @@ pub(crate) fn open_side_connection() -> SqlResult<Connection> {
 }
 
 /// Abre el archivo y deja WAL y las claves foráneas. No migra.
-fn open_configured() -> SqlResult<DbConnection> {
-    let path = db_path();
+fn open_configured() -> Result<DbConnection, BootError> {
+    let path = db_path()?;
     let conn = Connection::open(&path)?;
 
     // SQLite trae el enforcement de FK apagado por defecto en cada conexión — sin esto,
@@ -115,7 +159,7 @@ fn needs_upgrade(conn: &DbConnection) -> SqlResult<bool> {
 /// Abre la base. Si ya está en el schema de esta build (o es nueva: no hay `VACUUM`),
 /// la deja lista acá. Si hay que subir de versión, no copia ni migra: la ventana tiene
 /// que poder pintarse con el aviso de "actualizando datos" antes de ese trabajo.
-pub fn prepare_db() -> SqlResult<(DbConnection, bool)> {
+pub fn prepare_db() -> Result<(DbConnection, bool), BootError> {
     let conn = open_configured()?;
     let pending = needs_upgrade(&conn)?;
     if pending {
@@ -132,7 +176,7 @@ pub fn prepare_db() -> SqlResult<(DbConnection, bool)> {
 /// El arranque usa [`prepare_db`]: si hay que subir el schema, la copia y la migración
 /// no corren acá. Esta queda para quien necesita el camino completo en el mismo hilo.
 #[allow(dead_code)]
-pub fn init_db() -> SqlResult<DbConnection> {
+pub fn init_db() -> Result<DbConnection, BootError> {
     let conn = open_configured()?;
     finish_db(&conn)?;
     Ok(conn)
@@ -143,13 +187,13 @@ pub fn init_db() -> SqlResult<DbConnection> {
 /// Quien llama sostiene que nadie más está escribiendo un schema viejo: o esto corre
 /// antes de que exista la ventana, o la UI está en el splash y las escrituras esperan
 /// [`wait_until_db_ready`].
-pub fn finish_db(conn: &DbConnection) -> SqlResult<()> {
-    let path = db_path();
+pub fn finish_db(conn: &DbConnection) -> Result<(), BootError> {
+    let path = db_path()?;
     let guard = conn.lock().unwrap_or_else(|err| err.into_inner());
     upgrade_schema(&guard, &path)
 }
 
-pub(crate) fn upgrade_schema(conn: &Connection, path: &std::path::Path) -> SqlResult<()> {
+pub(crate) fn upgrade_schema(conn: &Connection, path: &std::path::Path) -> Result<(), BootError> {
     backup_before_upgrade(conn, path)?;
     super::schema::migrate(conn)?;
     // A reconciliação de boot (chat, efeitos e Frota) roda em `app::housekeeping`, já com o
@@ -200,6 +244,56 @@ fn backup_before_upgrade(conn: &Connection, path: &std::path::Path) -> SqlResult
         conn.execute("VACUUM INTO ?1", [backup.to_string_lossy().as_ref()])?;
     }
     Ok(())
+}
+
+/// Erros de boot que o app mostra antes de sair (ver `app::fatal`). Testes puros: não abrem a
+/// base do usuário nem `~/.ags`.
+#[cfg(test)]
+mod boot_tests {
+    use super::*;
+
+    /// Sem home e sem `ADE_AGS_DATA_DIR`, não há onde guardar a base. O boot devolve o erro
+    /// tipado: antes era `expect`, que fechava o app sem nenhuma mensagem.
+    #[test]
+    fn boot_sem_data_dir_devolve_erro_tipado() {
+        // `catch_unwind` separa o caso: a versão com `expect` entra em pânico, e a falha aparece como
+        // "devolve Err" na asserção, não como abort do teste.
+        let resultado = std::panic::catch_unwind(|| db_path_in(None));
+        let err = match resultado {
+            Ok(Err(err)) => err,
+            Ok(Ok(caminho)) => panic!("sem pasta de dados não há base, e veio {caminho:?}"),
+            Err(_) => panic!("boot entrou em pânico em vez de devolver Err"),
+        };
+        assert!(matches!(err, BootError::SemDiretorioDeDados), "{err:?}");
+        assert!(err.to_string().contains("pasta de dados"), "{err}");
+    }
+
+    /// Um arquivo ocupa o lugar do pai da pasta: não dá para criá-la. Erro tipado, com o caminho.
+    #[test]
+    fn boot_com_diretorio_impossivel_devolve_erro_tipado() {
+        let root = std::env::temp_dir().join(format!("ade-boot-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let ocupado = root.join("arquivo");
+        std::fs::write(&ocupado, b"nao e pasta").unwrap();
+        let destino = ocupado.join("ags");
+        let err = db_path_in(Some(destino.clone())).expect_err("o pai é um arquivo");
+        match &err {
+            BootError::DiretorioNaoCriado { caminho, .. } => assert_eq!(caminho, &destino),
+            outro => panic!("erro inesperado: {outro:?}"),
+        }
+        assert!(err.to_string().contains("Não foi possível criar"), "{err}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Caminho feliz: cria a pasta e devolve o `data.db` dentro dela.
+    #[test]
+    fn com_diretorio_valido_o_banco_fica_dentro_dele() {
+        let root = std::env::temp_dir().join(format!("ade-boot-ok-{}", uuid::Uuid::new_v4()));
+        let dir = root.join("ags");
+        assert_eq!(db_path_in(Some(dir.clone())).unwrap(), dir.join("data.db"));
+        assert!(dir.is_dir());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[cfg(test)]

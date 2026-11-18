@@ -7,10 +7,11 @@ use rusqlite::{Connection, Result as SqlResult};
 use uuid::Uuid;
 
 use crate::util::now_ts;
+use super::connection::BootError;
 use super::models::DEFAULT_WORKSPACE_ID;
 
 /// Corre todas las siembras. La llama `connection::init_db` justo después de migrar.
-pub(super) fn seed_defaults(conn: &Connection) -> SqlResult<()> {
+pub(super) fn seed_defaults(conn: &Connection) -> Result<(), BootError> {
     ensure_default_workspace(conn)?;
     ensure_default_settings(conn)?;
     ensure_default_registries(conn)?;
@@ -99,14 +100,15 @@ const DEFAULT_REGISTRIES: &[(i32, &str, &str)] = &[
 /// Siembra los valores por defecto de `settings` que el backend necesita leer de forma
 /// autónoma (sin que el frontend se los pase en cada llamada), como el directorio global
 /// de skills. Solo inserta si la key todavía no existe — no pisa un valor ya elegido.
-fn ensure_default_settings(conn: &Connection) -> SqlResult<()> {
+fn ensure_default_settings(conn: &Connection) -> Result<(), BootError> {
     let has_skills_dir: i64 = conn.query_row(
         "SELECT COUNT(*) FROM settings WHERE key = 'skills_dir'",
         [],
         |r| r.get(0),
     )?;
     if has_skills_dir == 0 {
-        let home = crate::util::datadir::ags_home().expect("Cannot determine home directory");
+        // Sem pasta do usuário não há onde pôr o padrão de skills: erro tipado, que vira aviso de boot.
+        let home = crate::util::datadir::ags_home().ok_or(BootError::SemDiretorioDeDados)?;
         let default_dir = home.join("skills");
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('skills_dir', ?1)",

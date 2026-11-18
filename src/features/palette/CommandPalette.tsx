@@ -90,6 +90,13 @@ const NAVIGATION_COMMAND_IDS: Record<string, string> = {
 
 const GROUP_ORDER: Group[] = ["conversations", "files", "navigate", "workspaces", "actions"];
 
+/**
+ * Classe dos ícones de linha da paleta. Fica no módulo, e não no corpo do componente: os `useMemo` que
+ * montam os resultados (inclusive os de mensagem) rodam antes de uma declaração ali embaixo, e lê-la antes
+ * lançava `ReferenceError` (TDZ) assim que a busca achava algo.
+ */
+const icon = "w-4 h-4";
+
 /** Tecla de atalho (kbd): mono, pastilha discreta. */
 const KBD = "font-mono text-[11px] leading-4 px-1.5 py-px rounded-[5px] bg-gray-100 dark:bg-white/[0.08] text-gray-500 dark:text-white/[0.55] whitespace-nowrap";
 
@@ -475,7 +482,6 @@ function PaletteDialog() {
 
   const close = () => ui.setPaletteOpen(false);
   const go = (path: string) => () => navigate(path);
-  const icon = "w-4 h-4";
 
   const currentQuickOpenResult = !actionsOnly
     && quickOpenResult?.root === projectScriptCwd

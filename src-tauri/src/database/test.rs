@@ -375,7 +375,7 @@ fn archived_session_id(conn: &Connection) -> Option<String> {
 fn archive(db: &DbConnection, tab_id: &str, ws: &str) {
     let resolved = resolve_for_archive(db, tab_id);
     let conn = db.lock().unwrap();
-    archive_tab_row(&conn, tab_id, ws, &resolved).unwrap();
+    archive_tab_row(&conn, tab_id, ws, &resolved, &crate::canvas::Boards::default()).unwrap();
 }
 
 fn setup_db() -> DbConnection {

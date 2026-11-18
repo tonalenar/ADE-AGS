@@ -58,9 +58,8 @@ export function BrowserRecordingSetting() {
       <SettingsGroup>
         <SettingsRow label={t("settings.browser.recording.fps")} hint={t("settings.browser.recording.fpsHint")}>
           <PopupSelect value={String(preferences.maxRecordingFps)} aria-label={t("settings.browser.recording.fps")}
-            onChange={(event) => update({ maxRecordingFps: event.target.value === "60" ? 60 : 30 })}>
+            onChange={() => update({ maxRecordingFps: 30 })}>
             <option value="30">30 fps</option>
-            <option value="60">60 fps</option>
           </PopupSelect>
         </SettingsRow>
       </SettingsGroup>

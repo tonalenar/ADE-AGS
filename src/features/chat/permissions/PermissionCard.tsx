@@ -165,6 +165,9 @@ export function PermissionCard({ ask, terminal }: { ask: PendingAsk; terminal: b
           )}
         </div>
         <AskMeta ask={ask} />
+        {ask.errorKey && (
+          <p role="alert" className="m-0 text-chat-note text-red-700 dark:text-red-400">{t(ask.errorKey)}</p>
+        )}
         {replying && (
           <div className="flex flex-col gap-1.5">
             <label className="sr-only" htmlFor={`reply-${ask.id}`}>{t("chat.permission.replyLabel")}</label>

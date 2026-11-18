@@ -325,7 +325,7 @@ fn reanudar_una_sesion_recupera_sus_skills() {
     let resolved = crate::database::resolve_for_archive(&state, &tab_id);
     let history_id = {
         let conn = state.lock().unwrap();
-        crate::database::archive_tab_row(&conn, &tab_id, &workspace_id, &resolved)
+        crate::database::archive_tab_row(&conn, &tab_id, &workspace_id, &resolved, &crate::canvas::Boards::default())
             .expect("archivar");
         conn.execute("DELETE FROM tabs WHERE id = ?1", [&tab_id])
             .unwrap();

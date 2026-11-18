@@ -35,11 +35,17 @@ interface CanvasState {
   /** Os canvases salvos já foram lidos do disco. Antes disso "a aba não está em nenhum canvas" é falso: quem decide
    *  por isso (adotar abas numa conversa, avisar o orquestrador) espera. */
   loaded: boolean;
+  /** Falha ao ler o arquivo. Enquanto existir, nenhuma edição pode substituir o conteúdo do disco. */
+  loadError: string | null;
+  /** Última falha ao gravar o canvas. */
+  saveError: string | null;
 }
 
-export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}, grids: {}, liveRects: {}, desktopRects: {}, desktopFocus: null, focus: null, activeThread: null, loaded: false }));
+export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}, grids: {}, liveRects: {}, desktopRects: {}, desktopFocus: null, focus: null, activeThread: null, loaded: false, loadError: null, saveError: null }));
 let desktopFocusSequence = 0;
 let focusSequence = 0;
+
+const pendingUpdates = new Map<string, Array<(board: Board) => Board>>();
 
 let windowLabel = "main";
 
@@ -159,12 +165,17 @@ export function setWorkMode(key: string, mode: WorkMode): void {
 
 // ── Edición ─────────────────────────────────────────────────────────
 
-function updateBoard(key: string, fn: (b: Board) => Board): void {
-  const boards = useCanvasStore.getState().boards;
+function updateBoard(key: string, fn: (b: Board) => Board, queueBeforeLoad = true): void {
+  const state = useCanvasStore.getState();
+  const boards = state.boards;
   const current = boards[key] ?? emptyBoard();
   const next = fn(current);
   if (next === current && key in boards) return;
   useCanvasStore.setState({ boards: { ...boards, [key]: next } });
+  if (!state.loaded) {
+    if (queueBeforeLoad) pendingUpdates.set(key, [...(pendingUpdates.get(key) ?? []), fn]);
+    return;
+  }
   scheduleSave(key);
 }
 
@@ -310,12 +321,19 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
 /** Al backend, que es quien hace cumplir las conexiones (ver `canvas/mod.rs`). Con una
  *  pausa: arrastrar un nodo dispara un cambio por cuadro. */
 function scheduleSave(key: string): void {
+  if (!useCanvasStore.getState().loaded || useCanvasStore.getState().loadError) return;
   const prev = timers.get(key);
   if (prev) clearTimeout(prev);
   timers.set(key, setTimeout(() => {
     timers.delete(key);
+    const state = useCanvasStore.getState();
+    if (!state.loaded || state.loadError) return;
     const board = useCanvasStore.getState().boards[key];
-    if (board) invoke("canvas_save", { key, board }).catch(console.error);
+    if (board) {
+      invoke("canvas_save", { key, board })
+        .then(() => useCanvasStore.setState({ saveError: null }))
+        .catch((error: unknown) => useCanvasStore.setState({ saveError: String(error) }));
+    }
   }, 300));
 }
 
@@ -330,8 +348,23 @@ export async function flushSave(key: string): Promise<void> {
     clearTimeout(pending);
     timers.delete(key);
   }
+  const state = useCanvasStore.getState();
+  if (!state.loaded || state.loadError) return;
   const board = useCanvasStore.getState().boards[key];
-  if (board) await invoke("canvas_save", { key, board });
+  if (board) {
+    try {
+      await invoke("canvas_save", { key, board });
+      useCanvasStore.setState({ saveError: null });
+    } catch (error) {
+      useCanvasStore.setState({ saveError: String(error) });
+      throw error;
+    }
+  }
+}
+
+/** Grava os canvas com debounce pendente antes de a janela fechar. */
+export async function flushCanvasSavesForClose(): Promise<void> {
+  await Promise.all([...timers.keys()].map((key) => flushSave(key)));
 }
 
 // ── Sincronización con las tabs ─────────────────────────────────────
@@ -352,7 +385,7 @@ function syncBoards(): void {
   for (const key of keys) {
     const current = boards[key] ?? emptyBoard();
     const next = reconcile(current, byKey.get(key) ?? [], tabs.map((t) => t.id));
-    if (next !== current || !(key in boards)) updateBoard(key, () => next);
+    if (next !== current || !(key in boards)) updateBoard(key, () => next, false);
   }
 }
 
@@ -375,7 +408,6 @@ export function initCanvasSync(label: string): () => void {
   let disposed = false;
   let unsub: (() => void) | null = null;
   invoke<Record<string, Board>>("canvas_load")
-    .catch(() => ({} as Record<string, Board>))
     .then((saved) => {
       if (disposed) return;
       // Solo los de esta ventana: los de las otras son de ellas.
@@ -385,7 +417,31 @@ export function initCanvasSync(label: string): () => void {
           .filter(([k]) => k.startsWith(`${label}|`))
           .map(([k, b]) => [k, { ...emptyBoard(), ...b, viewport: safeViewport(b?.viewport), nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], threads: b?.threads ?? {}, roles: b?.roles ?? {}, subagents: b?.subagents ?? [] }]),
       );
-      useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards }, loaded: true });
+      const current = useCanvasStore.getState();
+      const merged = { ...mine };
+      if (!current.loadError) {
+        for (const [key, board] of Object.entries(current.boards)) {
+          if (!pendingUpdates.has(key)) merged[key] = board;
+        }
+      }
+      const changed = [...pendingUpdates.keys()];
+      for (const [key, updates] of pendingUpdates) {
+        let board = merged[key] ?? emptyBoard();
+        for (const update of updates) board = update(board);
+        merged[key] = board;
+      }
+      pendingUpdates.clear();
+      useCanvasStore.setState({ boards: merged, loaded: true, loadError: null, saveError: null });
+      unsub = useTabsStore.subscribe(syncBoards);
+      syncBoards();
+      for (const key of changed) scheduleSave(key);
+    })
+    .catch((error: unknown) => {
+      if (disposed) return;
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      useCanvasStore.setState({ loadError: String(error), loaded: false });
+      // A reconciliação continua em memória para as abas funcionarem; scheduleSave bloqueia o disco.
       unsub = useTabsStore.subscribe(syncBoards);
       syncBoards();
     });
