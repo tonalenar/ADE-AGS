@@ -120,7 +120,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
                 crate::ipc::current_client_pid(),
             )
         },
-        crate::canvas::load_boards,
+        || crate::canvas::load_boards(),
         &crate::ipc::guard::opened_by,
     ) {
         Ok(patched) => patched,

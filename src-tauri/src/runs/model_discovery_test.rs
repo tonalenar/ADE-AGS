@@ -492,3 +492,32 @@ fn claude_exposes_t3_ultrathink_ultracode_and_fast_only_on_supported_profiles() 
     assert!(!super::claude_fast_supported("sonnet", (5, 5)));
     assert!(!super::claude_fast_supported("haiku", (5, 5)));
 }
+
+/// Uma linha sem fim do app-server não chega inteira à memória: passou do teto, a leitura para e nada mais é entregue.
+#[test]
+fn linha_acima_do_teto_encerra_a_leitura() {
+    let texto = format!("curta\n{}\ndepois\n", "x".repeat(40));
+    let lines = super::pump_lines(std::io::Cursor::new(texto.into_bytes()), 16);
+    assert_eq!(lines.recv().as_deref(), Ok("curta"));
+    assert!(lines.recv().is_err(), "a linha acima do teto não pode ser entregue");
+}
+
+/// Mais linhas que o teto da fila, com a leitura e o consumo andando juntos: nenhuma se perde nem sai fora de ordem.
+#[test]
+fn todas_as_linhas_chegam_em_ordem_com_mais_que_o_teto_da_fila() {
+    let texto: String = (0..1000).map(|i| format!("{{\"i\":{i}}}\n")).collect();
+    let lines = super::pump_lines(std::io::Cursor::new(texto.into_bytes()), 1 << 20);
+    for i in 0..1000 {
+        assert_eq!(lines.recv().unwrap(), format!("{{\"i\":{i}}}"));
+    }
+    assert!(lines.recv().is_err(), "o fim do stdout desconecta o canal");
+}
+
+/// O que `lines()` já fazia e continua fazendo: tira o `\r\n`, e UTF-8 inválido encerra a leitura.
+#[test]
+fn crlf_sai_e_utf8_invalido_encerra_a_leitura() {
+    let lines = super::pump_lines(std::io::Cursor::new(b"a\r\nb\n\xff\nc\n".to_vec()), 1 << 20);
+    assert_eq!(lines.recv().as_deref(), Ok("a"));
+    assert_eq!(lines.recv().as_deref(), Ok("b"));
+    assert!(lines.recv().is_err());
+}

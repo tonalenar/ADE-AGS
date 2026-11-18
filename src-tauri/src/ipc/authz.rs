@@ -457,7 +457,7 @@ pub(crate) fn authorize(
     command: &str,
     args: &Value,
     who: impl FnOnce() -> Result<Principal, String>,
-    boards: impl FnOnce() -> Boards,
+    boards: impl FnOnce() -> Result<Boards, String>,
     opened_by: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Value, String> {
     let Some(class) = class_of(command) else {
@@ -469,7 +469,7 @@ pub(crate) fn authorize(
         Class::PersonOrScope(Role::Crown) => match who()? {
             Principal::Tab(me) => {
                 claims_match(args, &me)?;
-                if crate::canvas::is_orchestrator(&boards(), &me) {
+                if crate::canvas::is_orchestrator(&boards()?, &me) {
                     Ok(with_key(args, "from", &me))
                 } else {
                     Err(screen_only(
@@ -494,7 +494,7 @@ fn scope(
     args: &Value,
     target: Target,
     principal: Principal,
-    boards: impl FnOnce() -> Boards,
+    boards: impl FnOnce() -> Result<Boards, String>,
     opened_by: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Value, String> {
     match (target, principal) {
@@ -562,7 +562,7 @@ Peça à pessoa para fechar o resto."
             let Some(tab) = text(args, arg) else {
                 return Err(format!("`{command}` precisa do alvo (--{arg})."));
             };
-            if crate::ipc::guard::in_reach(&boards(), &me, tab, opened_by(tab).as_deref()) {
+            if crate::ipc::guard::in_reach(&boards()?, &me, tab, opened_by(tab).as_deref()) {
                 Ok(args.clone())
             } else {
                 Err(out_of_reach(command, "aba", tab))
@@ -580,7 +580,7 @@ Peça à pessoa para fechar o resto."
                 };
             };
             let key = thread_ref(thread);
-            if crate::ipc::guard::in_reach(&boards(), &me, &key, opened_by(&key).as_deref()) {
+            if crate::ipc::guard::in_reach(&boards()?, &me, &key, opened_by(&key).as_deref()) {
                 Ok(args.clone())
             } else {
                 Err(out_of_reach(command, "conversa", thread))
@@ -591,7 +591,7 @@ Peça à pessoa para fechar o resto."
             let Some(mission) = text(args, arg) else {
                 return Err(format!("`{command}` precisa da missão (--{arg})."));
             };
-            let boards = boards();
+            let boards = boards()?;
             if crate::canvas::mission_of_tab(&boards, &me).as_deref() != Some(mission) {
                 return Err(format!(
                     "A missão {mission} não é a do seu quadro: `{command}` só age na missão a que você pertence."
@@ -610,14 +610,14 @@ Peça à pessoa para fechar o resto."
         }
         (Target::CallerOrOutside, Principal::Tab(me)) => {
             claims_match(args, &me)?;
-            extra_rule(command, args, &me, &boards())?;
+            extra_rule(command, args, &me, boards)?;
             Ok(with_key(args, "from", &me))
         }
     }
 }
 
 /// Regras que dependem do argumento, e não só do método.
-fn extra_rule(command: &str, args: &Value, me: &str, boards: &Boards) -> Result<(), String> {
+fn extra_rule(command: &str, args: &Value, me: &str, boards: impl FnOnce() -> Result<Boards, String>) -> Result<(), String> {
     match command {
         // Fechar o workspace atual mata os terminais da pessoa (AGENTS.md §2.1): só ela.
         "workspace.open" if truthy(args, "closeCurrent") => Err(
@@ -632,7 +632,7 @@ fn extra_rule(command: &str, args: &Value, me: &str, boards: &Boards) -> Result<
         },
         // `--pre` / `command` digitado roda shell cru antes do agente. Só a pessoa e o orquestrador do próprio canvas.
         "tab.create" if typed_prelaunch(args) => {
-            if crate::canvas::is_orchestrator_here(boards, me) {
+            if crate::canvas::is_orchestrator_here(&boards()?, me) {
                 Ok(())
             } else {
                 Err(

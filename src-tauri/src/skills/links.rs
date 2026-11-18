@@ -11,7 +11,7 @@ use crate::database::DbConnection;
 
 use super::files::slug_from_source_path;
 use super::settings::skills_dir_from_conn;
-use super::store::{row_to_skill_info, SKILL_COLUMNS, SKILL_COLUMNS_QUALIFIED};
+use super::store::{SKILL_COLUMNS, SKILL_COLUMNS_QUALIFIED, row_to_skill_info};
 use crate::util::now_ts;
 
 use super::mount::{is_mount, mount_dir, points_inside, remove_mount, same_path};
@@ -53,7 +53,11 @@ pub fn links_dir_for(cwd: &str, agent_id: &str) -> Option<PathBuf> {
 /// id no es uno de los conocidos. Es la variante que usa todo el camino de reconciliación
 /// (que siempre tiene la conexión a mano); `links_dir_for` queda para los casos donde no
 /// hay DB disponible.
-pub(super) fn links_dir_for_conn(conn: &rusqlite::Connection, cwd: &str, agent_id: &str) -> Option<PathBuf> {
+pub(super) fn links_dir_for_conn(
+    conn: &rusqlite::Connection,
+    cwd: &str,
+    agent_id: &str,
+) -> Option<PathBuf> {
     if let Some(dir) = links_dir_for(cwd, agent_id) {
         return Some(dir);
     }
@@ -132,22 +136,53 @@ pub(super) fn desired_skills_for_link_dir(
 /// Best-effort por diseño: corre en el arranque de cada tab y en cada cierre de
 /// tab/ventana, donde un conflicto puntual (ej. una carpeta real ocupando el path de un
 /// symlink) no debe abortar la operación — `check_symlinks_health` lo reporta después.
-pub(crate) fn reconcile_link_dir(
+/// Lo que `reconcile_link_dir` lee de la base. Se arma con el mutex tomado y se aplica sin
+/// él: el disco (`read_dir`, symlinks, `remove_dir`) no debe bloquear a otros comandos.
+pub(crate) struct LinkPlan {
+    dir: PathBuf,
+    skills_dir: PathBuf,
+    /// Skills que deben quedar montadas, con la ruta exacta de cada montaje.
+    desired: Vec<(SkillInfo, PathBuf)>,
+    /// Slugs de las skills deseadas: lo que no esté acá se quita del directorio.
+    keep: std::collections::HashSet<String>,
+}
+
+/// Primer paso, con la base: arma el plan sin tocar el disco.
+pub(crate) fn link_plan(
     conn: &rusqlite::Connection,
     cwd: &str,
     agent_id: &str,
-) -> Result<(), String> {
-    let Some(dir) = links_dir_for_conn(conn, cwd, agent_id) else { return Ok(()) };
+) -> Result<Option<LinkPlan>, String> {
+    let Some(dir) = links_dir_for_conn(conn, cwd, agent_id) else {
+        return Ok(None);
+    };
     let skills_dir = skills_dir_from_conn(conn)?;
-
     let desired: Vec<SkillInfo> = desired_skills_for_link_dir(conn, cwd, agent_id)?
         .into_iter()
         .filter(|s| agent_is_compatible(s, agent_id))
         .collect();
-    let keep: std::collections::HashSet<String> =
-        desired.iter().map(|s| slug_from_source_path(&s.source_path)).collect();
+    let keep = desired
+        .iter()
+        .map(|s| slug_from_source_path(&s.source_path))
+        .collect();
+    let desired = desired
+        .into_iter()
+        .map(|s| {
+            let path = dir.join(slug_from_source_path(&s.source_path));
+            (s, path)
+        })
+        .collect();
+    Ok(Some(LinkPlan {
+        dir,
+        skills_dir,
+        desired,
+        keep,
+    }))
+}
 
-    if let Ok(entries) = std::fs::read_dir(&dir) {
+/// Segundo paso, sin la base: aplica el plan sobre el disco.
+pub(crate) fn apply_link_plan(plan: &LinkPlan) {
+    if let Ok(entries) = std::fs::read_dir(&plan.dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if !is_mount(&path) {
@@ -156,25 +191,36 @@ pub(crate) fn reconcile_link_dir(
             // `read_link` funciona igual con un symlink roto, así que uno colgado que
             // apunta a la copia global (skill borrada a mano) también se limpia acá.
             // En Windows un junction no es `is_symlink`, pero sí es un montaje nuestro.
-            let Ok(target) = std::fs::read_link(&path) else { continue };
-            if !points_inside(&target, &skills_dir) {
+            let Ok(target) = std::fs::read_link(&path) else {
+                continue;
+            };
+            if !points_inside(&target, &plan.skills_dir) {
                 continue; // montaje que no gestiona ADE AGS
             }
             let name = entry.file_name().to_string_lossy().to_string();
-            if !keep.contains(&name) {
+            if !plan.keep.contains(&name) {
                 remove_symlink_best_effort(&path);
             }
         }
     }
 
-    for skill in &desired {
-        let _ = ensure_symlink(conn, skill, cwd, agent_id);
+    for (skill, link_path) in &plan.desired {
+        let _ = ensure_symlink_at(skill, link_path);
     }
 
     // Si no quedó ninguna skill, tampoco queda el directorio vacío tirado en el repo del
     // usuario (`remove_dir` falla solo si no está vacío, que es justo lo que queremos).
-    let _ = std::fs::remove_dir(&dir);
+    let _ = std::fs::remove_dir(&plan.dir);
+}
 
+pub(crate) fn reconcile_link_dir(
+    conn: &rusqlite::Connection,
+    cwd: &str,
+    agent_id: &str,
+) -> Result<(), String> {
+    if let Some(plan) = link_plan(conn, cwd, agent_id)? {
+        apply_link_plan(&plan);
+    }
     Ok(())
 }
 
@@ -186,6 +232,37 @@ pub(crate) fn reconcile_link_dirs(conn: &rusqlite::Connection, pairs: &[(String,
     for (cwd, agent_id) in pairs {
         if seen.insert((cwd.clone(), agent_id.clone())) {
             let _ = reconcile_link_dir(conn, cwd, agent_id);
+        }
+    }
+}
+
+/// Como `reconcile_link_dirs`, sin segurar el mutex del banco mientras toca el disco: cada
+/// par lee su plan con el mutex tomado, lo suelta y recién después aplica el plan.
+pub(crate) fn reconcile_link_dirs_db(
+    db: &crate::database::DbConnection,
+    pairs: &[(String, String)],
+) {
+    reconcile_link_dirs_with(db, pairs, apply_link_plan);
+}
+
+/// Núcleo de `reconcile_link_dirs_db`. `aplicar` recibe cada plan fuera del mutex (los tests
+/// lo usan para comprobarlo).
+pub(crate) fn reconcile_link_dirs_with(
+    db: &crate::database::DbConnection,
+    pairs: &[(String, String)],
+    mut aplicar: impl FnMut(&LinkPlan),
+) {
+    let mut seen = std::collections::HashSet::new();
+    for (cwd, agent_id) in pairs {
+        if !seen.insert((cwd.clone(), agent_id.clone())) {
+            continue;
+        }
+        let plan = match db.lock() {
+            Ok(conn) => link_plan(&conn, cwd, agent_id),
+            Err(_) => continue,
+        };
+        if let Ok(Some(plan)) = plan {
+            aplicar(&plan);
         }
     }
 }
@@ -228,21 +305,37 @@ pub(crate) fn link_dirs_of_workspace(
 /// que garantizar que en esa carpeta están las skills de ESTA tab/workspace y ninguna
 /// otra, porque varios agentes escanean su carpeta de skills una sola vez, al arrancar.
 #[tauri::command]
-pub fn reconcile_tab_skills(tab_id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let row: Option<(String, String)> = conn
-        .query_row("SELECT cwd, agent_id FROM tabs WHERE id = ?1", [&tab_id], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
-        .optional()
-        .map_err(|e| e.to_string())?;
-    let Some((cwd, agent_id)) = row else { return Ok(()) };
-    reconcile_link_dir(&conn, &cwd, &agent_id)
+pub async fn reconcile_tab_skills(
+    tab_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let row: Option<(String, String)> = conn
+            .query_row(
+                "SELECT cwd, agent_id FROM tabs WHERE id = ?1",
+                [&tab_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let Some((cwd, agent_id)) = row else {
+            return Ok(());
+        };
+        reconcile_link_dir(&conn, &cwd, &agent_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
-pub(super) fn fetch_skill_row(conn: &rusqlite::Connection, skill_id: &str) -> Result<SkillInfo, String> {
+pub(super) fn fetch_skill_row(
+    conn: &rusqlite::Connection,
+    skill_id: &str,
+) -> Result<SkillInfo, String> {
     let query = format!("SELECT {SKILL_COLUMNS} FROM skills WHERE id = ?1");
-    conn.query_row(&query, [skill_id], row_to_skill_info).map_err(|e| e.to_string())
+    conn.query_row(&query, [skill_id], row_to_skill_info)
+        .map_err(|e| e.to_string())
 }
 
 /// Tabs (id, cwd, agent_id) de un workspace, o de una sola tab puntual si `tab_id` está
@@ -309,7 +402,11 @@ pub(super) fn ensure_symlink(
     let Some(link_path) = link_path_for_conn(conn, cwd, agent_id, &slug) else {
         return Ok(()); // agente sin carpeta de skills conocida ni declarada, se saltea
     };
+    ensure_symlink_at(skill, &link_path)
+}
 
+/// La parte de disco de `ensure_symlink`: deja `skill` montada en `link_path`. No lee la base.
+pub(super) fn ensure_symlink_at(skill: &SkillInfo, link_path: &Path) -> Result<(), String> {
     if link_path.symlink_metadata().is_ok() {
         if is_mount(&link_path) {
             let target = std::fs::read_link(&link_path).map_err(|e| e.to_string())?;
@@ -332,7 +429,7 @@ pub(super) fn ensure_symlink(
 }
 
 #[tauri::command]
-pub fn attach_skill(
+pub async fn attach_skill(
     skill_id: String,
     workspace_id: String,
     scope: String,
@@ -340,98 +437,117 @@ pub fn attach_skill(
     // `cwd`, con scope='workspace': la carpeta a la que aplica. `None` = todas las del
     // workspace, que es lo único que existía antes de la v9.
     cwd: Option<String>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
-    if scope == "tab" && tab_id.is_none() {
-        return Err("scope='tab' requiere tab_id".to_string());
-    }
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
 
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let skill = fetch_skill_row(&conn, &skill_id)?;
-    let scope_cwd = if scope == "tab" { None } else { cwd.as_deref() };
-    let tabs = tabs_for_scope(&conn, &workspace_id, tab_id.as_deref(), scope_cwd)?;
-
-    // Si una tab falla a mitad del loop (ej. destino ya existe y no es symlink), las
-    // symlinks ya creadas para tabs anteriores no deben quedar huérfanas en disco sin
-    // fila en `project_skills` — ni `check_symlinks_health` ni `delete_skill` las verían.
-    // Se deshacen las que sí se crearon en esta llamada antes de propagar el error.
-    let mut created: Vec<(&str, &str)> = Vec::new();
-    for (_, cwd, agent_id) in &tabs {
-        if let Err(e) = ensure_symlink(&conn, &skill, cwd, agent_id) {
-            let slug = slug_from_source_path(&skill.source_path);
-            for (cwd, agent_id) in &created {
-                if let Some(link_path) = link_path_for_conn(&conn, cwd, agent_id, &slug) {
-                    remove_symlink_best_effort(&link_path);
-                }
+            if scope == "tab" && tab_id.is_none() {
+                return Err("scope='tab' requiere tab_id".to_string());
             }
-            return Err(e);
-        }
-        created.push((cwd.as_str(), agent_id.as_str()));
-    }
 
-    // El destino del ON CONFLICT es un índice PARCIAL distinto por scope, así que la
-    // sentencia cambia con él. No es cosmético: la UNIQUE de la tabla incluye `tab_id`,
-    // que es NULL en scope='workspace', y SQLite considera distintos a dos NULL — con esa
-    // sola nunca había conflicto y cada re-attach dejaba una fila más.
-    let now = now_ts();
-    let stored_cwd = scope_cwd.unwrap_or("");
-    let sql = if scope == "tab" {
-        "INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, cwd, enabled, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)
-         ON CONFLICT(skill_id, tab_id) WHERE scope = 'tab' DO UPDATE SET enabled = 1"
-    } else {
-        "INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, cwd, enabled, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)
-         ON CONFLICT(skill_id, workspace_id, cwd) WHERE scope = 'workspace' DO UPDATE SET enabled = 1"
-    };
-    conn.execute(
-        sql,
-        rusqlite::params![
-            Uuid::new_v4().to_string(), skill_id, workspace_id, scope, tab_id, stored_cwd, now
-        ],
-    )
-    .map_err(|e| e.to_string())?;
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let skill = fetch_skill_row(&conn, &skill_id)?;
+            let scope_cwd = if scope == "tab" { None } else { cwd.as_deref() };
+            let tabs = tabs_for_scope(&conn, &workspace_id, tab_id.as_deref(), scope_cwd)?;
 
-    // Ya con la fila persistida, dejar los directorios afectados exactamente con el set
-    // de skills que corresponde — barre de paso cualquier symlink colgado de un workspace
-    // anterior que hubiera usado la misma carpeta.
-    let pairs: Vec<(String, String)> =
-        tabs.iter().map(|(_, cwd, agent)| (cwd.clone(), agent.clone())).collect();
-    reconcile_link_dirs(&conn, &pairs);
+            // Si una tab falla a mitad del loop (ej. destino ya existe y no es symlink), las
+            // symlinks ya creadas para tabs anteriores no deben quedar huérfanas en disco sin
+            // fila en `project_skills` — ni `check_symlinks_health` ni `delete_skill` las verían.
+            // Se deshacen las que sí se crearon en esta llamada antes de propagar el error.
+            let mut created: Vec<(&str, &str)> = Vec::new();
+            for (_, cwd, agent_id) in &tabs {
+                if let Err(e) = ensure_symlink(&conn, &skill, cwd, agent_id) {
+                    let slug = slug_from_source_path(&skill.source_path);
+                    for (cwd, agent_id) in &created {
+                        if let Some(link_path) = link_path_for_conn(&conn, cwd, agent_id, &slug) {
+                            remove_symlink_best_effort(&link_path);
+                        }
+                    }
+                    return Err(e);
+                }
+                created.push((cwd.as_str(), agent_id.as_str()));
+            }
 
-    Ok(())
+            // El destino del ON CONFLICT es un índice PARCIAL distinto por scope, así que la
+            // sentencia cambia con él. No es cosmético: la UNIQUE de la tabla incluye `tab_id`,
+            // que es NULL en scope='workspace', y SQLite considera distintos a dos NULL — con esa
+            // sola nunca había conflicto y cada re-attach dejaba una fila más.
+            let now = now_ts();
+            let stored_cwd = scope_cwd.unwrap_or("");
+            let sql = if scope == "tab" {
+                "INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, cwd, enabled, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)
+                 ON CONFLICT(skill_id, tab_id) WHERE scope = 'tab' DO UPDATE SET enabled = 1"
+            } else {
+                "INSERT INTO project_skills (id, skill_id, workspace_id, scope, tab_id, cwd, enabled, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)
+                 ON CONFLICT(skill_id, workspace_id, cwd) WHERE scope = 'workspace' DO UPDATE SET enabled = 1"
+            };
+            conn.execute(
+                sql,
+                rusqlite::params![
+                    Uuid::new_v4().to_string(), skill_id, workspace_id, scope, tab_id, stored_cwd, now
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+
+            // Ya con la fila persistida, dejar los directorios afectados exactamente con el set
+            // de skills que corresponde — barre de paso cualquier symlink colgado de un workspace
+            // anterior que hubiera usado la misma carpeta.
+            let pairs: Vec<(String, String)> =
+                tabs.iter().map(|(_, cwd, agent)| (cwd.clone(), agent.clone())).collect();
+            reconcile_link_dirs(&conn, &pairs);
+
+            Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn detach_skill(
+pub async fn detach_skill(
     skill_id: String,
     workspace_id: String,
     scope: String,
     tab_id: Option<String>,
     // Ver `attach_skill`: identifica CUÁL de las filas de workspace hay que sacar.
     cwd: Option<String>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let scope_cwd = if scope == "tab" { None } else { cwd.as_deref() };
-    let tabs = tabs_for_scope(&conn, &workspace_id, tab_id.as_deref(), scope_cwd)?;
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let scope_cwd = if scope == "tab" { None } else { cwd.as_deref() };
+        let tabs = tabs_for_scope(&conn, &workspace_id, tab_id.as_deref(), scope_cwd)?;
 
-    conn.execute(
-        "DELETE FROM project_skills WHERE skill_id = ?1 AND workspace_id = ?2 AND scope = ?3
-         AND ((tab_id IS NULL AND ?4 IS NULL) OR tab_id = ?4)
-         AND cwd = ?5",
-        rusqlite::params![skill_id, workspace_id, scope, tab_id, scope_cwd.unwrap_or("")],
-    )
-    .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM project_skills WHERE skill_id = ?1 AND workspace_id = ?2 AND scope = ?3
+                 AND ((tab_id IS NULL AND ?4 IS NULL) OR tab_id = ?4)
+                 AND cwd = ?5",
+            rusqlite::params![
+                skill_id,
+                workspace_id,
+                scope,
+                tab_id,
+                scope_cwd.unwrap_or("")
+            ],
+        )
+        .map_err(|e| e.to_string())?;
 
-    // El symlink se quita reconciliando, no borrándolo a mano: la misma skill puede seguir
-    // attacheada por otra vía (detachearla de una tab cuando el workspace entero la tiene
-    // activa no debe dejar a esa tab sin la skill).
-    let pairs: Vec<(String, String)> =
-        tabs.iter().map(|(_, cwd, agent)| (cwd.clone(), agent.clone())).collect();
-    reconcile_link_dirs(&conn, &pairs);
+        // El symlink se quita reconciliando, no borrándolo a mano: la misma skill puede seguir
+        // attacheada por otra vía (detachearla de una tab cuando el workspace entero la tiene
+        // activa no debe dejar a esa tab sin la skill).
+        let pairs: Vec<(String, String)> = tabs
+            .iter()
+            .map(|(_, cwd, agent)| (cwd.clone(), agent.clone()))
+            .collect();
+        reconcile_link_dirs(&conn, &pairs);
 
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Deja los symlinks de TODAS las tabs abiertas de un workspace alineados con sus
@@ -441,76 +557,92 @@ pub fn detach_skill(
 /// Reconcilia en vez de solo crear: además de agregar lo que falta, quita de esas
 /// carpetas las skills que quedaron de otro workspace o de una tab ya cerrada.
 #[tauri::command]
-pub fn sync_workspace_skills(workspace_id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let tabs = tabs_for_scope(&conn, &workspace_id, None, None)?;
-    let pairs: Vec<(String, String)> =
-        tabs.into_iter().map(|(_, cwd, agent)| (cwd, agent)).collect();
-    reconcile_link_dirs(&conn, &pairs);
-    Ok(())
+pub async fn sync_workspace_skills(
+    workspace_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let tabs = tabs_for_scope(&conn, &workspace_id, None, None)?;
+        let pairs: Vec<(String, String)> = tabs
+            .into_iter()
+            .map(|(_, cwd, agent)| (cwd, agent))
+            .collect();
+        reconcile_link_dirs(&conn, &pairs);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Verifica, para cada attachment habilitado de un workspace, que el symlink físico
 /// exista y apunte al `source_path` correcto. Solo devuelve entradas con problema —
 /// una skill sana no aparece en el resultado.
 #[tauri::command]
-pub fn check_symlinks_health(
+pub async fn check_symlinks_health(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<SymlinkHealthEntry>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
 
-    let attachments: Vec<(String, String, String, Option<String>)> = {
-        let mut stmt = conn
-            .prepare("SELECT skill_id, scope, id, tab_id FROM project_skills WHERE workspace_id = ?1 AND enabled = 1")
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([&workspace_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
-            .map_err(|e| e.to_string())?;
-        rows.filter_map(|r| r.ok()).collect()
-    };
+            let conn = db.lock().map_err(|e| e.to_string())?;
 
-    let mut issues = Vec::new();
-    for (skill_id, _scope, project_skill_id, scoped_tab_id) in attachments {
-        let skill = fetch_skill_row(&conn, &skill_id)?;
-        let slug = slug_from_source_path(&skill.source_path);
-        let tabs = tabs_for_scope(&conn, &workspace_id, scoped_tab_id.as_deref(), None)?;
-        let _ = project_skill_id;
-
-        for (tab_id, cwd, agent_id) in tabs {
-            if !agent_is_compatible(&skill, &agent_id) {
-                continue;
-            }
-            let Some(link_path) = link_path_for_conn(&conn, &cwd, &agent_id, &slug) else { continue };
-
-            let title: Option<String> = conn
-                .query_row("SELECT title FROM tabs WHERE id = ?1", [&tab_id], |r| r.get(0))
-                .optional()
-                .map_err(|e| e.to_string())?
-                .flatten();
-
-            let issue = match link_path.symlink_metadata() {
-                Err(_) => Some("missing"),
-                Ok(_) if !is_mount(&link_path) => Some("stale_target"),
-                Ok(_) => match std::fs::read_link(&link_path) {
-                    Err(_) => Some("broken"),
-                    Ok(target) if !same_path(&target, Path::new(&skill.source_path)) => Some("stale_target"),
-                    Ok(_) => None,
-                },
+            let attachments: Vec<(String, String, String, Option<String>)> = {
+                let mut stmt = conn
+                    .prepare("SELECT skill_id, scope, id, tab_id FROM project_skills WHERE workspace_id = ?1 AND enabled = 1")
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map([&workspace_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+                    .map_err(|e| e.to_string())?;
+                rows.filter_map(|r| r.ok()).collect()
             };
 
-            if let Some(issue) = issue {
-                issues.push(SymlinkHealthEntry {
-                    skill_id: skill.id.clone(),
-                    skill_name: skill.name.clone(),
-                    tab_id,
-                    tab_title: title,
-                    link_path: link_path.to_string_lossy().to_string(),
-                    issue: issue.to_string(),
-                });
-            }
-        }
-    }
+            let mut issues = Vec::new();
+            for (skill_id, _scope, project_skill_id, scoped_tab_id) in attachments {
+                let skill = fetch_skill_row(&conn, &skill_id)?;
+                let slug = slug_from_source_path(&skill.source_path);
+                let tabs = tabs_for_scope(&conn, &workspace_id, scoped_tab_id.as_deref(), None)?;
+                let _ = project_skill_id;
 
-    Ok(issues)
+                for (tab_id, cwd, agent_id) in tabs {
+                    if !agent_is_compatible(&skill, &agent_id) {
+                        continue;
+                    }
+                    let Some(link_path) = link_path_for_conn(&conn, &cwd, &agent_id, &slug) else { continue };
+
+                    let title: Option<String> = conn
+                        .query_row("SELECT title FROM tabs WHERE id = ?1", [&tab_id], |r| r.get(0))
+                        .optional()
+                        .map_err(|e| e.to_string())?
+                        .flatten();
+
+                    let issue = match link_path.symlink_metadata() {
+                        Err(_) => Some("missing"),
+                        Ok(_) if !is_mount(&link_path) => Some("stale_target"),
+                        Ok(_) => match std::fs::read_link(&link_path) {
+                            Err(_) => Some("broken"),
+                            Ok(target) if !same_path(&target, Path::new(&skill.source_path)) => Some("stale_target"),
+                            Ok(_) => None,
+                        },
+                    };
+
+                    if let Some(issue) = issue {
+                        issues.push(SymlinkHealthEntry {
+                            skill_id: skill.id.clone(),
+                            skill_name: skill.name.clone(),
+                            tab_id,
+                            tab_title: title,
+                            link_path: link_path.to_string_lossy().to_string(),
+                            issue: issue.to_string(),
+                        });
+                    }
+                }
+            }
+
+            Ok(issues)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

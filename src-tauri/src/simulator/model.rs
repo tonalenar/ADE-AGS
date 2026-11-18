@@ -212,6 +212,24 @@ pub fn subtract(r: Rect, holes: &[Rect]) -> Vec<Rect> {
 }
 
 /// O ponto (em pixels da view) → proporção 0..1 da tela, que é como o Indigo recebe o toque.
+/// O prefixo do UDID que vai no nome do arquivo de foto. Corta por caractere: um UDID com acento não derruba a foto.
+pub fn short_udid(udid: &str) -> String {
+    udid.chars().take(8).collect()
+}
+
+/// Uma entrega ao HID desde a marca `before` falhou (o contador `after` andou)? O agente recebe o erro, não um "ok".
+pub fn delivery_check(before: u64, after: u64) -> Result<(), String> {
+    if after > before {
+        return Err("o dtuhidd não aceitou a entrada; o toque não chegou ao aparelho".into());
+    }
+    Ok(())
+}
+
+/// A view precisa refazer a orientação? Só quando a orientação ou o tamanho dela mudaram desde a última vez.
+pub fn needs_orient(last: Option<(u32, u64, u64)>, orientation: u32, width: f64, height: f64) -> bool {
+    last != Some((orientation, width.to_bits(), height.to_bits()))
+}
+
 pub fn touch_ratio(x: f64, y: f64, width: f64, height: f64) -> Option<(f64, f64)> {
     if width <= 0.0 || height <= 0.0 {
         return None;

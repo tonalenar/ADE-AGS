@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 import { useCanvasStore, conversationBoardKey } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
@@ -13,6 +14,7 @@ import { hibernateConversation, openConversation, tabsOfConversation, type FlowC
 import { sameProject, useConversationsStore } from "./conversationsStore";
 import { deleteConversation, updateConversation } from "./ipc.projectConversations";
 import { sessionTitle } from "./ipc";
+import { noteTitlePollFailure } from "./titlePollFailure";
 
 /** O ícone de uma conversa-canvas: quatro quadros, como o canvas. */
 function CanvasIcon({ className }: { className?: string }) {
@@ -58,6 +60,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
   // Relido de tempos em tempos: o título acompanha o contexto do orquestrador enquanto a conversa está ativa.
   useEffect(() => {
     let alive = true;
+    let titleFails = 0;
     const refresh = async () => {
       const { rows: all } = useConversationsStore.getState();
       for (const row of all.filter((r) => sameProject(r.projectKey, projectKey) && r.state === "active" && !r.customTitle)) {
@@ -68,7 +71,20 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
           const title = found && found.source !== "fallback" ? found.title.trim() : "";
           if (!alive) return;
           if (title) {
-            if (title !== row.title) upsert(await updateConversation(row.id, { title }));
+            if (title !== row.title) {
+              try {
+                upsert(await updateConversation(row.id, { title }));
+                titleFails = 0;
+              } catch (error) {
+                console.warn("conversations.title.poll", error);
+                const noted = noteTitlePollFailure(titleFails);
+                titleFails = noted.consecutive;
+                if (noted.notify) {
+                  AlertaToast(t("conversations.title"), t("conversations.titlePollFailed"), "warning", 6000);
+                  titleFails = 0;
+                }
+              }
+            }
             break;
           }
         }
@@ -77,7 +93,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
     void refresh();
     const timer = window.setInterval(() => void refresh(), 45_000);
     return () => { alive = false; window.clearInterval(timer); };
-  }, [projectKey, upsert]);
+  }, [projectKey, upsert, t]);
 
   const mine = useMemo(
     () => rows
@@ -96,7 +112,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
     try {
       await work();
     } catch (e) {
-      AlertaToast(t("conversations.title"), String(e), "error", 7000);
+      AlertaToast(t("conversations.title"), uiErrorText(e), "error", 7000);
     } finally {
       setBusy(null);
     }

@@ -3,11 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ProjectChatDefaultsDto } from "../projectChatDefaults";
 
-const fake = vi.hoisted(() => ({ saved: new Map<string, unknown>(), saves: [] as unknown[] }));
+const fake = vi.hoisted(() => ({ saved: new Map<string, unknown>(), saves: [] as unknown[], failList: false }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args: Record<string, unknown> = {}) => {
-    if (cmd === "chat_project_defaults_list") return [...fake.saved.values()];
+    if (cmd === "chat_project_defaults_list") {
+      if (fake.failList) throw new Error("falha na leitura dos padrões");
+      return [...fake.saved.values()];
+    }
     if (cmd === "chat_project_defaults_save") {
       const dto = args.defaults as ProjectChatDefaultsDto;
       fake.saves.push(dto);
@@ -44,7 +47,8 @@ beforeEach(() => {
   localStorage.clear();
   fake.saved.clear();
   fake.saves.length = 0;
-  useProjectDefaultsStore.setState({ byKey: {}, versions: {}, hydrated: false });
+  fake.failList = false;
+  useProjectDefaultsStore.setState({ byKey: {}, versions: {}, hydrated: false, loadStatus: "unknown" });
 });
 
 afterEach(() => localStorage.clear());
@@ -149,5 +153,15 @@ describe("conciliar o aparelho com o banco", () => {
   it("sem nada de nenhum lado não grava nada", async () => {
     await syncProjectDefaults();
     expect(fake.saves).toHaveLength(0);
+  });
+
+  it("leitura_falha_nao_sobrescreve_padroes", async () => {
+    localStorage.setItem("cc-chat-project-defaults", JSON.stringify({ "/p/local": { access: "ask" } }));
+    fake.failList = true;
+
+    await syncProjectDefaults();
+
+    expect(fake.saves).toHaveLength(0);
+    expect(useProjectDefaultsStore.getState().loadStatus).toBe("unknown");
   });
 });

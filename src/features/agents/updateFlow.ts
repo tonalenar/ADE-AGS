@@ -26,6 +26,8 @@ export interface UpdateFlowOutcome {
   reopened: number;
   /** La actualización salió bien y se pidió reiniciar la app entera. */
   appRestarting: boolean;
+  /** O reinício da app falhou: a atualização ficou feita, e as pestañas foram relançadas. A causa volta para a tela (I1). */
+  restartError?: string;
 }
 
 /** Qué razones permiten seguir: ninguna, o solo que hay terminales abiertas (esas las cierra el flujo). */
@@ -101,13 +103,21 @@ export async function updateAgentRestarting(agentId: string, deps: UpdateFlowDep
     result = { ...failure(agentId, "failed"), output: String(error) };
   }
 
+  let restartError: string | undefined;
   if (result.ok) {
     deps.onStage?.("restarting", killed.length);
-    // La app guarda el estado, cierra y vuelve a abrir; las pestañas se restauran solas.
-    await deps.restartApp();
-    return { result, reopened: 0, appRestarting: true };
+    try {
+      // La app guarda el estado, cierra y vuelve a abrir; las pestañas se restauran solas.
+      await deps.restartApp();
+      return { result, reopened: 0, appRestarting: true };
+    } catch (error) {
+      // Sin reinicio, nada relanza las pestañas cerradas: se relanzan aquí (A167). La actualización sí quedó hecha.
+      // A falha não some: vai registrada e volta com a causa (I1).
+      console.error("[atualização] não foi possível reiniciar a app", error);
+      restartError = String(error);
+    }
   }
   if (killed.length > 0) deps.onStage?.("reopening", killed.length);
   for (const id of killed) deps.restartAgent(id);
-  return { result, reopened: killed.length, appRestarting: false };
+  return { result, reopened: killed.length, appRestarting: false, restartError };
 }

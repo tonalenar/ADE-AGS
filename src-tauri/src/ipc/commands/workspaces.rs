@@ -1,6 +1,6 @@
 //! Comandos de workspaces.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tauri::AppHandle;
 
 use rusqlite::OptionalExtension;
@@ -12,7 +12,7 @@ use crate::ipc::protocol::arg_str;
 
 pub(super) fn workspace_list(app: &AppHandle) -> Result<Value, String> {
     let db = db(app)?;
-    let rows = crate::database::db_list_workspaces(db)?;
+    let rows = crate::database::db_list_workspaces_now(&db)?;
     Ok(json!({ "workspaces": rows }))
 }
 
@@ -23,7 +23,10 @@ pub(super) fn workspace_restore(_app: &AppHandle, _args: &Value) -> Result<Value
 
 pub(super) fn workspace_open(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let requested = arg_str(args, "workspace")?;
-    let close_current = args.get("closeCurrent").and_then(|v| v.as_bool()).unwrap_or(false);
+    let close_current = args
+        .get("closeCurrent")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     // Se acepta el id o el nombre: desde una terminal, escribir el nombre es lo natural.
     let id = {
@@ -48,7 +51,11 @@ pub(super) fn workspace_open(app: &AppHandle, args: &Value) -> Result<Value, Str
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?
-        .block_on(crate::window::open_workspace(app, id_for_task, close_current))?;
+        .block_on(crate::window::open_workspace(
+            app,
+            id_for_task,
+            close_current,
+        ))?;
 
     Ok(json!({ "workspaceId": id, "opened": true }))
 }

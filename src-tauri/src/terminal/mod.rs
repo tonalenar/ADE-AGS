@@ -22,6 +22,10 @@ pub(crate) mod replay;
 mod session;
 #[cfg(test)]
 mod test;
+mod write_queue;
+#[cfg(unix)]
+mod pty_io;
+pub(crate) use write_queue::Passo;
 #[cfg(windows)]
 mod win_conpty;
 pub(crate) use pty_manager::open_pty;

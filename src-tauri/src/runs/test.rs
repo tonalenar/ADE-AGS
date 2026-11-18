@@ -2047,6 +2047,32 @@ fn lo_que_ofrece_recordar_una_tarea_aislada_es_la_ruta_del_proyecto() {
     h.join().unwrap();
 }
 
+#[test]
+fn set_worktree_nao_grava_se_o_status_mudou_durante_o_io() {
+    let db = db_compartida();
+    let conn = db.lock().unwrap();
+    let run = run_en(&conn);
+    let id = tarea_en(&conn, &run);
+    conn.execute(
+        "UPDATE tasks SET status = 'running' WHERE id = ?1",
+        [&id],
+    )
+    .unwrap();
+
+    assert!(!store::set_worktree_if_status(
+        &conn,
+        &id,
+        "pending",
+        "/wt/stale",
+        "/wt/stale",
+        "cc/stale",
+    )
+    .unwrap());
+    let task = store::task_by_id(&conn, &id).unwrap().unwrap();
+    assert_eq!(task.status, "running");
+    assert_eq!(task.worktree_path, None);
+}
+
 /// El cableado completo del aislamiento: la tarea termina corriendo ADENTRO del worktree,
 /// con su rama anotada, y la carpeta del proyecto (la del run, de donde salen las reglas)
 /// no cambia.
@@ -2111,6 +2137,60 @@ fn aislar_una_tarea_la_muda_al_worktree_sin_mover_el_proyecto() {
         Some(&*repo.0.to_string_lossy()),
         "las reglas se siguen buscando en el proyecto"
     );
+}
+
+/// Duas isolações da mesma tarea: la que primero graba el worktree gana; la otra recibe
+/// conflicto y se limpia sola. La carrera se fuerza con una sonda, sin esperas.
+#[test]
+fn duas_isolacoes_concorrentes_so_uma_grava_o_worktree() {
+    let repo = repo();
+    let base = Tmp::new("base-corrida");
+    let db = db_compartida();
+    let task = {
+        let conn = db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('w1','W',0,0)",
+            [],
+        )
+        .unwrap();
+        let cwd = repo.0.to_string_lossy().to_string();
+        let run = store::create_run(&conn, "w1", "o", &cwd).unwrap();
+        store::create_task(
+            &conn,
+            &NewTask {
+                reasoning_effort: None,
+                run_id: &run.id,
+                title: "arreglar el login",
+                prompt: "x",
+                agent_id: "claude-code",
+                account_id: None,
+                model: None,
+                cwd: &cwd,
+                budget_usd: None,
+                complexity: None,
+                routed_by: None,
+                route_note: None,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    };
+
+    let ganadora: std::cell::RefCell<Option<Result<Task, String>>> = std::cell::RefCell::new(None);
+    let perdedora = super::isolate_task_from_with(&base.0, &db, &task, "HEAD", &|| {
+        if ganadora.borrow().is_none() {
+            let otra = super::isolate_task_from(&base.0, &db, &task, "HEAD");
+            *ganadora.borrow_mut() = Some(otra);
+        }
+    });
+
+    let ganadora = ganadora.into_inner().expect("la otra isolación no corrió");
+    let ganadora = ganadora.expect("la isolación que llegó primero debería grabar");
+    let error = perdedora.expect_err("la isolación que perdió la carrera no recibió conflicto");
+    assert!(error.contains("mudou de estado"), "error inesperado: {error}");
+    let conn = db.lock().unwrap();
+    let guardada = store::task_by_id(&conn, &task.id).unwrap().unwrap();
+    assert_eq!(guardada.worktree_path, ganadora.worktree_path, "el worktree guardado no es el ganador");
 }
 
 // ── El cupo ─────────────────────────────────────────────────────

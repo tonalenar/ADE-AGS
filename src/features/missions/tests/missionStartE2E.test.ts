@@ -31,6 +31,11 @@ const mocks = vi.hoisted(() => ({
   addTab: vi.fn(),
   activateTab: vi.fn(),
   board: vi.fn(),
+  tabs: [] as Array<{ id: string; ptyId: number | null }>,
+  tabListeners: new Set<() => void>(),
+  tabIds: [] as string[],
+  nextPtyId: 1,
+  terminalsByPty: new Map<number, SimulatedTerminal>(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -46,8 +51,12 @@ vi.mock("@/features/tabs/store", () => ({
         { id: "codex", command: "codex", available: true },
         { id: "claude-code", command: "claude", available: true },
       ],
-      tabs: [],
+      tabs: mocks.tabs,
     }),
+    subscribe: (listener: () => void) => {
+      mocks.tabListeners.add(listener);
+      return () => mocks.tabListeners.delete(listener);
+    },
   },
 }));
 vi.mock("@/features/canvas/store", () => ({
@@ -67,6 +76,8 @@ vi.mock("../autonomy", () => ({
  */
 class SimulatedTerminal {
   public rows = 24;
+  public cols = 80;
+  public modes = { bracketedPasteMode: false };
   public lines: string[] = [];
   public isAlt = false;
   public inputs: string[] = [];
@@ -146,10 +157,31 @@ class SimulatedTerminal {
 
 const cleanups: Array<() => void> = [];
 
+function notifyTabsChanged(): void {
+  for (const listener of mocks.tabListeners) listener();
+}
+
+function setPtyLive(tabId: string, term: SimulatedTerminal): void {
+  let tab = mocks.tabs.find((candidate) => candidate.id === tabId);
+  if (!tab) {
+    tab = { id: tabId, ptyId: null };
+    mocks.tabs.push(tab);
+  }
+  if (tab.ptyId == null) tab.ptyId = mocks.nextPtyId++;
+  mocks.terminalsByPty.set(tab.ptyId, term);
+  notifyTabsChanged();
+}
+
 function registerSimulated(tabId: string, term: SimulatedTerminal): SimulatedTerminal {
+  if (!mocks.tabs.some((candidate) => candidate.id === tabId)) mocks.tabs.push({ id: tabId, ptyId: null });
   const unregister = registerTerminal(tabId, term as unknown as import("@xterm/xterm").Terminal);
+  setPtyLive(tabId, term);
   cleanups.push(unregister);
   return term;
+}
+
+async function flushPromises(): Promise<void> {
+  for (let i = 0; i < 8; i++) await Promise.resolve();
 }
 
 const workspace = (name: string, path: string) => ({
@@ -170,6 +202,17 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     vi.clearAllMocks();
     recordedSpans.length = 0;
     cleanups.splice(0, cleanups.length).forEach((fn) => fn());
+    mocks.tabs.length = 0;
+    mocks.tabListeners.clear();
+    mocks.tabIds.length = 0;
+    mocks.nextPtyId = 1;
+    mocks.terminalsByPty.clear();
+    mocks.addTab.mockImplementation(() => {
+      const id = mocks.tabIds.shift() ?? `tab-e2e-${mocks.tabs.length}`;
+      mocks.tabs.push({ id, ptyId: null });
+      notifyTabsChanged();
+      return id;
+    });
 
     mocks.invoke.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
       if (cmd === "mission_prepare_team") {
@@ -186,6 +229,24 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       }
       if (cmd === "mission_timing_add") {
         recordedSpans.push(args as unknown as { missionId: string; span: { kind: string; actor?: string; detail?: string; startedMs: number; endedMs: number } });
+        return {};
+      }
+      if (cmd === "pty_write_composto") {
+        const id = args.id as number;
+        const term = mocks.terminalsByPty.get(id);
+        const passos = args.passos as Array<{ tipo: "texto"; dados: string } | { tipo: "pausa"; ms: number }>;
+        for (const passo of passos) {
+          if (passo.tipo === "pausa") await new Promise((resolve) => setTimeout(resolve, passo.ms));
+          else if (passo.dados === "\r") term?.input(passo.dados);
+          else term?.paste(passo.dados);
+        }
+        return {};
+      }
+      if (cmd === "pty_write") {
+        const term = mocks.terminalsByPty.get(args.id as number);
+        const data = args.data as string;
+        if (data === "\r") term?.input(data);
+        else term?.paste(data);
         return {};
       }
       return {};
@@ -273,11 +334,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     const frontendTabId = "tab-e2e-frontend";
     const qaTabId = "tab-e2e-qa";
 
-    mocks.addTab
-      .mockReturnValueOnce(leadTabId)
-      .mockReturnValueOnce(backendTabId)
-      .mockReturnValueOnce(frontendTabId)
-      .mockReturnValueOnce(qaTabId);
+    mocks.tabIds.push(leadTabId, backendTabId, frontendTabId, qaTabId);
 
     // Cria os 4 terminais simulados
     const leadTerm = new SimulatedTerminal(["$ codex --model o3-mini"]);
@@ -309,6 +366,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     expect(backendTerm.pastes).toHaveLength(0);
 
     vi.advanceTimersByTime(2500);
+    await flushPromises();
 
     // Todos os briefings foram colados automaticamente!
     expect(leadTerm.pastes).toHaveLength(1);
@@ -319,17 +377,21 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     expect(frontendTerm.pastes[0]).toContain("Frontend");
     expect(qaTerm.pastes).toHaveLength(1);
     expect(qaTerm.pastes[0]).toContain("QA");
+    // O envio conta quando o Enter sai (PR08): colar sozinho ainda não é envio.
+    expect(recordedSpans.filter((s) => s.span.kind === "start_briefing")).toHaveLength(0);
+    expect(leadTerm.inputs).not.toContain("\r");
 
-    // Spans de start_briefing registrados
-    const briefingSpans = recordedSpans.filter((s) => s.span.kind === "start_briefing");
-    expect(briefingSpans.map((s) => s.span.actor)).toEqual(["Orquestrador", "Backend", "Frontend", "QA"]);
-
-    // 5. Após 80ms, o primeiro Enter (\r) é disparado pelo pasteIntoTab
+    // 5. Após 80ms, o primeiro Enter (\r) é disparado
     vi.advanceTimersByTime(80);
+    await flushPromises();
     expect(leadTerm.inputs).toContain("\r");
     expect(backendTerm.inputs).toContain("\r");
     expect(frontendTerm.inputs).toContain("\r");
     expect(qaTerm.inputs).toContain("\r");
+
+    // Spans de start_briefing: registrados quando o Enter sai (PR08: o envio conta, não só a colagem).
+    const briefingSpans = recordedSpans.filter((s) => s.span.kind === "start_briefing");
+    expect(briefingSpans.map((s) => s.span.actor)).toEqual(["Orquestrador", "Backend", "Frontend", "QA"]);
 
     // Simulação do comportamento das TUIs:
     // - Lead: aceitou o Enter imediatamente e começou a trabalhar
@@ -413,7 +475,10 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     const qaInputsBeforeCheck = qaTerm.inputs.length;
     const leadPastesBeforeCheck = leadTerm.pastes.length;
 
+    // O relógio do início começa no Enter (80 ms depois da colagem, PR08): aos 25 s da colagem ainda não há aviso.
     vi.advanceTimersByTime(START_CHECK_MS - 4900);
+    expect(recordedSpans.filter((s) => s.span.kind === "start_stalled" && s.span.actor === "QA")).toHaveLength(0);
+    vi.advanceTimersByTime(80);
 
     // Backend e Frontend tiveram atividade detectada após ECHO_MS -> NÃO foram dados como stalled!
     // QA NUNCA arrancou:
@@ -460,7 +525,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
   });
 
   describe("Cobertura detalhada dos novos callbacks (onActivity, onRetry, onStalled)", () => {
-    it("(1) onActivity é chamado exatamente uma vez na 1ª saída >4 s (e não com eco <=4 s)", () => {
+    it("(1) onActivity é chamado exatamente uma vez na 1ª saída >4 s (e não com eco <=4 s)", async () => {
       const tabId = "tab-cb-activity";
       const term = new SimulatedTerminal(["› "]);
       registerSimulated(tabId, term);
@@ -474,6 +539,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       term.emitOutput(["Prompt inicial"]);
       vi.advanceTimersByTime(2500); // settle -> paste enviado
       vi.advanceTimersByTime(80); // enter enviado
+      await flushPromises();
 
       // Saída dentro de ECHO_MS (ex.: em 2s e em 3.9s após o envio) é tratada como eco
       vi.advanceTimersByTime(2000 - 80);
@@ -501,7 +567,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       expect(activityCalls).toHaveLength(1);
     });
 
-    it("(1b) onActivity é chamado inclusive quando o agente arranca DEPOIS do aviso de 25 s (até 120 s)", () => {
+    it("(1b) onActivity é chamado inclusive quando o agente arranca DEPOIS do aviso de 25 s (até 120 s)", async () => {
       const leadTabId = "tab-late-lead";
       const memberTabId = "tab-late-member";
       const leadTerm = new SimulatedTerminal(["› "]);
@@ -526,6 +592,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       memberTerm.emitOutput(["Boot"]);
       vi.advanceTimersByTime(2500); // settle
       vi.advanceTimersByTime(80); // enter
+      await flushPromises();
 
       // Membro fica mudo até os 25s
       vi.advanceTimersByTime(START_CHECK_MS - 80);
@@ -550,7 +617,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       expect(activityCalls).toHaveLength(1);
     });
 
-    it("(1c) saídas após 120 s (START_DEADLINE_MS) não chamam onActivity pois o watcher foi descartado", () => {
+    it("(1c) saídas após 120 s (START_DEADLINE_MS) não chamam onActivity pois o watcher foi descartado", async () => {
       const tabId = "tab-deadline-expire";
       const term = new SimulatedTerminal(["› "]);
       registerSimulated(tabId, term);
@@ -564,6 +631,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       term.emitOutput(["Boot"]);
       vi.advanceTimersByTime(2500); // settle
       vi.advanceTimersByTime(80); // enter
+      await flushPromises();
 
       // Avança até ultrapassar START_DEADLINE_MS (120_000ms)
       vi.advanceTimersByTime(START_DEADLINE_MS);
@@ -649,7 +717,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       expect(retryTimes).toHaveLength(1);
     });
 
-    it("(3) agente que nunca arranca: onActivity jamais é chamado, e onStalled + onRetry são chamados aos 25 s", () => {
+    it("(3) agente que nunca arranca: onActivity jamais é chamado, e onStalled + onRetry são chamados aos 25 s", async () => {
       const leadTabId = "tab-stalled-full-lead";
       const memberTabId = "tab-stalled-full-member";
 
@@ -680,6 +748,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       memberTerm.emitOutput(["Iniciando TUI..."]);
       vi.advanceTimersByTime(2500); // settle
       vi.advanceTimersByTime(80); // enter inicial
+      await flushPromises();
 
       // Emite eco <= 4s (ECHO_MS), que NÃO conta como atividade
       vi.advanceTimersByTime(2000);
@@ -742,7 +811,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
         { id: "backend", label: "Backend", description: "API", instructions: "API" },
       ];
 
-      mocks.addTab.mockReturnValueOnce("tab-all-lead").mockReturnValueOnce("tab-all-backend");
+      mocks.tabIds.push("tab-all-lead", "tab-all-backend");
 
       const leadTerm = new SimulatedTerminal(["› "]);
       const backendTerm = new SimulatedTerminal(["› "]);
@@ -757,10 +826,12 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
 
       // Orquestrador mostra atividade aos 5s
       vi.advanceTimersByTime(5000);
+      await flushPromises();
       leadTerm.emitOutput(["Planejando tarefas..."]);
 
       // Backend mostra atividade aos 12s
       vi.advanceTimersByTime(7000);
+      await flushPromises();
       backendTerm.emitOutput(["Iniciando backend..."]);
 
       // Verifica que o span 'start_all_working' foi registrado para 'all'
@@ -781,7 +852,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
   });
 
   describe("Orquestrador (lead)", () => {
-    it("grava start_stalled se não houver atividade, mas não cola aviso a si mesmo", () => {
+    it("grava start_stalled se não houver atividade, mas não cola aviso a si mesmo", async () => {
       const leadTabId = "tab-lead-alone";
       const leadTerm = new SimulatedTerminal(["› "]);
       registerSimulated(leadTabId, leadTerm);
@@ -797,6 +868,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       leadTerm.emitOutput(["Pronto"]);
       vi.advanceTimersByTime(2500);
       vi.advanceTimersByTime(80);
+      await flushPromises();
 
       // Avança até 25s sem atividade
       vi.advanceTimersByTime(START_CHECK_MS);

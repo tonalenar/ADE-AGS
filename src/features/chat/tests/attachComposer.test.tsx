@@ -30,11 +30,11 @@ let root: Root;
 let host: HTMLDivElement;
 let submitted: [string, Attachment[]][] = [];
 let queued: [string, Attachment[]][] = [];
-let result: boolean | void = undefined;
+let result: boolean = true;
 
 const mount = (extra: Partial<React.ComponentProps<typeof ChatComposer>> = {}) => act(async () => {
   root.render(
-    <ChatComposer placeholder="p" cwd="/repo" onSubmit={(text, atts) => { submitted.push([text, atts]); return result; }}
+    <ChatComposer placeholder="p" cwd="/repo" onSubmit={async (text, atts) => { submitted.push([text, atts]); return result; }}
       onQueue={(text, atts) => { queued.push([text, atts]); }} {...extra} />,
   );
 });
@@ -61,7 +61,7 @@ const key = (k: string, init: KeyboardEventInit = {}) => act(async () => { texta
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-  submitted = []; queued = []; result = undefined; mocks.picked = []; mocks.inspectFails = false; mocks.saved = 0;
+  submitted = []; queued = []; result = true; mocks.picked = []; mocks.inspectFails = false; mocks.saved = 0;
   URL.createObjectURL = () => "blob:preview";
   URL.revokeObjectURL = () => undefined;
   host = document.createElement("div");
@@ -76,6 +76,8 @@ describe("colar no composer", () => {
     const e = await paste([png()]);
     expect(e.defaultPrevented).toBe(true);
     expect(items()).toHaveLength(1);
+    // A imagem colada é salva em disco (na pasta temporária, pelo `savePastedImage`) antes de ir para a miniatura.
+    expect(mocks.saved).toBe(1);
     const img = host.querySelector("ul[aria-label='chat.attach.label'] img") as HTMLImageElement;
     expect(img.src).toBe("blob:preview");
     expect(img.alt).toBe("chat.attach.pastedName.png");

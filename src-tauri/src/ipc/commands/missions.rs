@@ -9,7 +9,7 @@
 use std::time::{Duration, Instant};
 
 use rusqlite::params;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
 
 use crate::bus::{self, Filter};
@@ -49,7 +49,10 @@ fn summary(detail: &MissionDetail) -> Value {
 }
 
 fn is_final(status: &str) -> bool {
-    matches!(status, "done" | "done_without_delivery" | "failed" | "cancelled")
+    matches!(
+        status,
+        "done" | "done_without_delivery" | "failed" | "cancelled"
+    )
 }
 
 /// `--budget`: ausente é "sem teto"; escrito errado (`abc`) é erro, não "sem teto" em silêncio.
@@ -63,7 +66,9 @@ fn budget_arg(args: &Value) -> Result<Option<f64>, String> {
             .parse::<f64>()
             .map(Some)
             .map_err(|_| format!("--budget precisa ser um número em dólares (recebi {s:?})")),
-        Some(other) => Err(format!("--budget precisa ser um número em dólares (recebi {other})")),
+        Some(other) => Err(format!(
+            "--budget precisa ser um número em dólares (recebi {other})"
+        )),
     }
 }
 
@@ -90,7 +95,9 @@ pub(super) fn mission_create(app: &AppHandle, args: &Value) -> Result<Value, Str
         ..Default::default()
     };
     let mission = crate::missions::create_now(app, &workspace, &input)?;
-    Ok(json!({ "id": mission.id, "title": mission.title, "status": mission.status, "isTest": mission.is_test }))
+    Ok(
+        json!({ "id": mission.id, "title": mission.title, "status": mission.status, "isTest": mission.is_test }),
+    )
 }
 
 pub(super) fn mission_start(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -110,12 +117,20 @@ pub(super) fn mission_status(app: &AppHandle, args: &Value) -> Result<Value, Str
 /// ERROR para la CLI (código 1): es lo que un pipeline de CI necesita para cortar.
 pub(super) fn mission_wait(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
-    let timeout = Duration::from_secs(arg_u64_opt(args, "timeout").unwrap_or(3600).clamp(1, MAX_WAIT_SECS));
+    let timeout = Duration::from_secs(
+        arg_u64_opt(args, "timeout")
+            .unwrap_or(3600)
+            .clamp(1, MAX_WAIT_SECS),
+    );
     wait_for(app, &id, timeout)
 }
 
 fn wait_for(app: &AppHandle, id: &str, timeout: Duration) -> Result<Value, String> {
-    let filter = Filter { topics: vec!["mission.changed".into()], mission_id: Some(id.to_string()), ..Default::default() };
+    let filter = Filter {
+        topics: vec!["mission.changed".into()],
+        mission_id: Some(id.to_string()),
+        ..Default::default()
+    };
     let deadline = Instant::now() + timeout;
     // El seq ANTES de mirar el estado: lo que cambie entre medio se ve en la espera.
     let mut after = bus::since(0, &filter, 0).last_seq;
@@ -132,10 +147,18 @@ fn wait_for(app: &AppHandle, id: &str, timeout: Duration) -> Result<Value, Strin
         }
         let now = Instant::now();
         if now >= deadline {
-            return Err(format!("a missão continua {status} depois de {} s", timeout.as_secs()));
+            return Err(format!(
+                "a missão continua {status} depois de {} s",
+                timeout.as_secs()
+            ));
         }
         // Un tope por vuelta: si un cambio no publica en el bus, igual se vuelve a mirar.
-        let page = bus::wait(after, &filter, 10, (deadline - now).min(Duration::from_secs(30)));
+        let page = bus::wait(
+            after,
+            &filter,
+            10,
+            (deadline - now).min(Duration::from_secs(30)),
+        );
         after = page.last_seq;
     }
 }
@@ -145,8 +168,15 @@ pub(super) fn mission_run(app: &AppHandle, args: &Value) -> Result<Value, String
     let created = mission_create(app, args)?;
     let id = created["id"].as_str().unwrap_or_default().to_string();
     crate::missions::start_now(app, &id)?;
-    if args.get("wait").is_some_and(|w| w.as_bool().unwrap_or(true)) {
-        let timeout = Duration::from_secs(arg_u64_opt(args, "timeout").unwrap_or(3600).clamp(1, MAX_WAIT_SECS));
+    if args
+        .get("wait")
+        .is_some_and(|w| w.as_bool().unwrap_or(true))
+    {
+        let timeout = Duration::from_secs(
+            arg_u64_opt(args, "timeout")
+                .unwrap_or(3600)
+                .clamp(1, MAX_WAIT_SECS),
+        );
         return wait_for(app, &id, timeout);
     }
     let mut started = summary(&crate::missions::detail_now(app, &id)?);
@@ -164,8 +194,7 @@ Acompanhe na página de Missões. Para abrir o time nos terminais, use `ags miss
 pub(super) fn mission_review(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
     let db = db(app)?;
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    Ok(json!(crate::missions::review::review(&conn, &id)?))
+    Ok(json!(crate::missions::review::review_with_db(&db, &id)?))
 }
 
 /// `ags memory suggest --mission <id> --scope workspace|mission --key <k> --body "..."`: el agente
@@ -182,14 +211,16 @@ fn memory_caller_mission(args: &Value) -> Result<String, String> {
     let tab = authenticated_tab(args)?;
     let mut bound = args.clone();
     bound["from"] = json!(tab);
-    memory_mission_in_boards(&bound, &crate::canvas::load_boards())
+    memory_mission_in_boards(&bound, &crate::canvas::load_boards()?)
 }
 
 /// Workspace da aba autenticada. Missão ou aba solta, e recusa workspace em soft-delete.
 fn workspace_for_caller(conn: &rusqlite::Connection, tab: &str) -> Result<(String, Option<String>), String> {
-    let mission = crate::canvas::mission_of_tab(&crate::canvas::load_boards(), tab);
+    let mission = crate::canvas::mission_of_tab(&crate::canvas::load_boards()?, tab);
     let workspace = if let Some(id) = &mission {
-        crate::missions::store::get(conn, id)?.ok_or_else(|| "mission not found".to_string())?.workspace_id
+        crate::missions::store::get(conn, id)?
+            .ok_or_else(|| "mission not found".to_string())?
+            .workspace_id
     } else {
         conn.query_row(
             "SELECT w.workspace_id FROM tabs t JOIN windows w ON w.id=t.window_id JOIN workspaces s ON s.id=w.workspace_id WHERE t.id=?1 AND w.is_open=1 AND s.deleted_at IS NULL",
@@ -199,7 +230,11 @@ fn workspace_for_caller(conn: &rusqlite::Connection, tab: &str) -> Result<(Strin
         .map_err(|_| "caller tab is unavailable".to_string())?
     };
     let deleted: Option<i64> = conn
-        .query_row("SELECT deleted_at FROM workspaces WHERE id=?1", [&workspace], |r| r.get(0))
+        .query_row(
+            "SELECT deleted_at FROM workspaces WHERE id=?1",
+            [&workspace],
+            |r| r.get(0),
+        )
         .map_err(|_| "workspace unavailable".to_string())?;
     if deleted.is_some() {
         return Err("workspace is unavailable".into());
@@ -207,21 +242,30 @@ fn workspace_for_caller(conn: &rusqlite::Connection, tab: &str) -> Result<(Strin
     Ok((workspace, mission))
 }
 
-fn memory_mission_in_boards(args: &Value, boards: &crate::canvas::Boards) -> Result<String, String> {
+fn memory_mission_in_boards(
+    args: &Value,
+    boards: &crate::canvas::Boards,
+) -> Result<String, String> {
     let tab = arg_str(args, "from")?;
     crate::canvas::mission_of_tab(boards, &tab)
         .ok_or_else(|| "memory commands require a caller tab attached to a mission".into())
 }
 
 pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    use crate::memory::agent::{author_of, propose_for_mission, AgentProposal};
+    use crate::memory::agent::{AgentProposal, author_of, propose_for_mission};
 
     // Numa missão, a proposta é da missão; numa conversa de projeto (sem missão) vale para o projeto.
     let caller_tab = authenticated_tab(args)?;
     let mission = memory_caller_mission(args).ok();
     let key = arg_str(args, "key")?;
     let body = arg_str(args, "body")?;
-    let scope = arg_str_opt(args, "scope").unwrap_or_else(|| if mission.is_some() { "mission".into() } else { "workspace".into() });
+    let scope = arg_str_opt(args, "scope").unwrap_or_else(|| {
+        if mission.is_some() {
+            "mission".into()
+        } else {
+            "workspace".into()
+        }
+    });
     let kind = arg_str_opt(args, "kind").unwrap_or_else(|| "note".into());
     let priority = args.get("priority").and_then(Value::as_i64).unwrap_or(0);
 
@@ -229,7 +273,13 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
     let from = Some(authenticated_tab(args)?);
     let name = from
         .as_deref()
-        .and_then(|id| super::peers::open_tabs(app).ok()?.into_iter().find(|t| t.id == id).map(|t| t.name))
+        .and_then(|id| {
+            super::peers::open_tabs(app)
+                .ok()?
+                .into_iter()
+                .find(|t| t.id == id)
+                .map(|t| t.name)
+        })
         .unwrap_or_else(|| "agente".to_string());
     let author = author_of(&name);
 
@@ -239,30 +289,65 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
         match &mission {
             Some(mission) => propose_for_mission(
                 &conn,
-                &AgentProposal { mission_id: mission, scope: &scope, key: &key, kind: &kind, body: &body, priority, author, author_name: &name },
+                &AgentProposal {
+                    mission_id: mission,
+                    scope: &scope,
+                    key: &key,
+                    kind: &kind,
+                    body: &body,
+                    priority,
+                    author,
+                    author_name: &name,
+                },
             )?,
             None => {
                 let (workspace, _) = workspace_for_caller(&conn, &caller_tab)?;
                 crate::memory::agent::propose_for_workspace(
                     &conn,
                     &workspace,
-                    &AgentProposal { mission_id: "", scope: &scope, key: &key, kind: &kind, body: &body, priority, author, author_name: &name },
+                    &AgentProposal {
+                        mission_id: "",
+                        scope: &scope,
+                        key: &key,
+                        kind: &kind,
+                        body: &body,
+                        priority,
+                        author,
+                        author_name: &name,
+                    },
                 )?
             }
         }
     };
     crate::memory::notify_changed(app);
     let draft_warning = if result.status == "agent_draft" {
-        let conn=db.lock().map_err(|e|e.to_string())?;
+        let conn = db.lock().map_err(|e| e.to_string())?;
         let (workspace, _) = workspace_for_caller(&conn, &caller_tab)?;
-        let count:i64=conn.query_row("SELECT COUNT(*) FROM memory_agent_drafts WHERE workspace_id=?1",[&workspace],|r|r.get(0)).map_err(|e|e.to_string())?;
-        let warning=format!("Memória: {count} rascunhos de agente aguardam revisão do usuário; a caixa de 32 pendências está cheia.");
-        let app=app.clone();let from=from.clone();let notice=warning.clone();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM memory_agent_drafts WHERE workspace_id=?1",
+                [&workspace],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let warning = format!(
+            "Memória: {count} rascunhos de agente aguardam revisão do usuário; a caixa de 32 pendências está cheia."
+        );
+        let app = app.clone();
+        let from = from.clone();
+        let notice = warning.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            if let Some(from)=from { let _=super::peers::peer_tell(&app,&json!({"from":from,"to":"Orquestrador","text":notice})); }
+            if let Some(from) = from {
+                let _ = super::peers::peer_tell(
+                    &app,
+                    &json!({"from":from,"to":"Orquestrador","text":notice}),
+                );
+            }
         });
         Some(warning)
-    }else{None};
+    } else {
+        None
+    };
     Ok(json!({
         "entryId": result.entry_id,
         "revision": result.revision,
@@ -290,7 +375,8 @@ pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, Stri
     };
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let mission = crate::missions::store::get(&conn, &id)?.ok_or_else(|| format!("não há nenhuma missão {id}"))?;
+    let mission = crate::missions::store::get(&conn, &id)?
+        .ok_or_else(|| format!("não há nenhuma missão {id}"))?;
     let hits = match at {
         Some(at) => crate::memory::search::search_at(
             &conn,
@@ -310,24 +396,60 @@ pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, Stri
     };
     let keys: Vec<String> = hits.iter().map(|hit| hit.key.clone()).collect();
     let tab = authenticated_tab(args).ok();
-    crate::memory::usage::record(&conn, &crate::memory::usage::UsageRow { ts: crate::memory::usage::now(), workspace_id: &mission.workspace_id, mission_id: Some(&id), tab_id: tab.as_deref(), action: "search", query: Some(query.as_str()), hits: hits.len() as u32, entry_keys: &keys });
+    crate::memory::usage::record(
+        &conn,
+        &crate::memory::usage::UsageRow {
+            ts: crate::memory::usage::now(),
+            workspace_id: &mission.workspace_id,
+            mission_id: Some(&id),
+            tab_id: tab.as_deref(),
+            action: "search",
+            query: Some(query.as_str()),
+            hits: hits.len() as u32,
+            entry_keys: &keys,
+        },
+    );
     Ok(match at {
         Some(at) => json!({ "query": query, "at": at, "results": hits }),
         None => json!({ "query": query, "results": hits }),
     })
 }
 
-pub(super) fn memory_repo_read(app: &AppHandle, args: &Value, index: bool) -> Result<Value, String> {
-    let path = if index { "MEMORY.md".to_string() } else { arg_str(args, "path")? };
+pub(super) fn memory_repo_read(
+    app: &AppHandle,
+    args: &Value,
+    index: bool,
+) -> Result<Value, String> {
+    let path = if index {
+        "MEMORY.md".to_string()
+    } else {
+        arg_str(args, "path")?
+    };
     let tab = authenticated_tab(args)?;
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     let (workspace, mission) = workspace_for_caller(&conn, &tab)?;
     let text = crate::memory::repo::approved_open(&conn, &workspace, mission.as_deref(), &path)?;
-    let read_keys: Vec<String> = if index { Vec::new() } else { vec![path.clone()] };
+    let read_keys: Vec<String> = if index {
+        Vec::new()
+    } else {
+        vec![path.clone()]
+    };
     let hits = u32::from(!text.trim().is_empty());
     let action = if index { "index" } else { "open" };
-    crate::memory::usage::record(&conn, &crate::memory::usage::UsageRow { ts: crate::memory::usage::now(), workspace_id: &workspace, mission_id: mission.as_deref(), tab_id: Some(tab.as_str()), action, query: None, hits, entry_keys: &read_keys });
+    crate::memory::usage::record(
+        &conn,
+        &crate::memory::usage::UsageRow {
+            ts: crate::memory::usage::now(),
+            workspace_id: &workspace,
+            mission_id: mission.as_deref(),
+            tab_id: Some(tab.as_str()),
+            action,
+            query: None,
+            hits,
+            entry_keys: &read_keys,
+        },
+    );
     Ok(json!({"path": path, "text": text}))
 }
 
@@ -341,17 +463,25 @@ pub(super) fn memory_usage(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     let (workspace, _) = workspace_for_caller(&conn, &tab)?;
-    Ok(json!(crate::memory::usage::report(&conn, &workspace, since)?))
+    Ok(json!(crate::memory::usage::report(
+        &conn, &workspace, since
+    )?))
 }
 
-pub(super) fn swarm_write(app: &AppHandle, args: &Value, question: bool) -> Result<Value,String> {
+pub(super) fn swarm_write(app: &AppHandle, args: &Value, question: bool) -> Result<Value, String> {
     let id = memory_caller_mission(args)?;
-    let body = arg_str(args,"body")?;
-    let db=db(app)?;
+    let body = arg_str(args, "body")?;
+    let db = db(app)?;
     let (note, workspace) = {
-        let conn=db.lock().map_err(|e|e.to_string())?;
-        let mission=crate::missions::store::get(&conn,&id)?.ok_or("mission not found")?;
-        let note=crate::memory::lifecycle::swarm_write(&conn,&mission.workspace_id,&id,if question {"question"} else {"note"},&body)?;
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mission = crate::missions::store::get(&conn, &id)?.ok_or("mission not found")?;
+        let note = crate::memory::lifecycle::swarm_write(
+            &conn,
+            &mission.workspace_id,
+            &id,
+            if question { "question" } else { "note" },
+            &body,
+        )?;
         // A nota já está no banco. O marcador sobrevive se o processo fechar antes do git.
         if let Err(error) = crate::memory::repo_sync::note_dirty(&conn, &mission.workspace_id) {
             eprintln!("[memory] não foi possível marcar a exportação pendente: {error}");
@@ -359,11 +489,15 @@ pub(super) fn swarm_write(app: &AppHandle, args: &Value, question: bool) -> Resu
         (note, mission.workspace_id)
     };
     // The note is already committed. Git must not run while this call still holds the database mutex.
-    if let Some(sync)=app.try_state::<crate::memory::repo_sync::RepoSync>() {
+    if let Some(sync) = app.try_state::<crate::memory::repo_sync::RepoSync>() {
         sync.enqueue(&workspace, None);
-        Ok(json!({"id":note,"status":"run_data","projection":"queued","projectionError":Value::Null}))
+        Ok(
+            json!({"id":note,"status":"run_data","projection":"queued","projectionError":Value::Null}),
+        )
     } else {
-        Ok(json!({"id":note,"status":"run_data","projection":"skipped","projectionError":"memory sync unavailable"}))
+        Ok(
+            json!({"id":note,"status":"run_data","projection":"skipped","projectionError":"memory sync unavailable"}),
+        )
     }
 }
 
@@ -377,18 +511,28 @@ pub(super) fn swarm_read(app: &AppHandle, args: &Value) -> Result<Value, String>
     Ok(json!({ "text": crate::memory::lifecycle::render_board(&notes), "notes": notes }))
 }
 
-pub(super) fn swarm_promote(app:&AppHandle,args:&Value)->Result<Value,String>{
-    let mission=memory_caller_mission(args)?;
-    let db=db(app)?;
-    let conn=db.lock().map_err(|e|e.to_string())?;
-    let row=crate::missions::store::get(&conn,&mission)?.ok_or("mission not found")?;
-    let result=crate::memory::lifecycle::swarm_promote(&conn,&row.workspace_id,&mission,&arg_str(args,"note")?,&arg_str(args,"key")?)?;
+pub(super) fn swarm_promote(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let mission = memory_caller_mission(args)?;
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let row = crate::missions::store::get(&conn, &mission)?.ok_or("mission not found")?;
+    let result = crate::memory::lifecycle::swarm_promote(
+        &conn,
+        &row.workspace_id,
+        &mission,
+        &arg_str(args, "note")?,
+        &arg_str(args, "key")?,
+    )?;
     drop(conn);
     crate::memory::notify_changed(app);
     Ok(json!(result))
 }
 
-pub(super) fn memory_maintenance(app: &AppHandle, args: &Value, compact: bool) -> Result<Value, String> {
+pub(super) fn memory_maintenance(
+    app: &AppHandle,
+    args: &Value,
+    compact: bool,
+) -> Result<Value, String> {
     if compact {
         return Err(crate::ipc::AGENT_MAINTENANCE_DENIED.into());
     }
@@ -480,49 +624,85 @@ pub(super) fn mission_startcheck(app: &AppHandle, args: &Value) -> Result<Value,
     let id = arg_str(args, "mission")?;
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    Ok(json!(crate::missions::startcheck::get(&conn, &id, crate::util::now_ts_ms())?))
+    Ok(json!(crate::missions::startcheck::get(
+        &conn,
+        &id,
+        crate::util::now_ts_ms()
+    )?))
 }
 
 /// `ags mission efficiency <id>`: métricas de tempo, custo e agentes com histórico por faixa.
 pub(super) fn mission_efficiency(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
     let db = db(app)?;
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let mut efficiency = json!(crate::missions::efficiency::get(&conn, &id)?);
-    efficiency["tokens"] = json!(crate::usage::mission_tokens_for_conn(&conn, &id)?);
-    efficiency["memoryContext"] = crate::memory::context_metrics(&conn, None, Some(&id))?;
-    let status=crate::usage::budget_for_conn(&conn, &id)?;
-    if let Some(message)=crate::usage::claim_warning(&conn,&id,&status)? {crate::usage::warn_lead(app,&id,&message);}
+    // A eficiência é lida numa conexão lateral, sem o mutex do banco do app.
+    let mut efficiency = json!(crate::missions::efficiency::get_db(&db, &id)?);
+    let memory_context = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::memory::context_metrics(&conn, None, Some(&id))?
+    };
+    // Os transcripts são lidos uma vez e sem o mutex do banco preso; o orçamento reusa os tokens.
+    let tokens = crate::usage::mission_tokens_for_db(&db, &id)?;
+    let status = crate::usage::budget_status_from_tokens(&db, &id, &tokens)?;
+    let warning = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::usage::claim_warning(&conn, &id, &status)?
+    };
+    if let Some(message) = warning {
+        crate::usage::warn_lead(app, &id, &message);
+    }
+    efficiency["tokens"] = json!(tokens);
+    efficiency["memoryContext"] = memory_context;
     efficiency["budget"] = json!(status);
     Ok(efficiency)
 }
 
-pub(super) fn mission_cleanup(app: &AppHandle,args:&Value)->Result<Value,String> {
-    let id=arg_str(args,"mission")?;
+pub(super) fn mission_cleanup(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let id = arg_str(args, "mission")?;
     let _ = app;
     // Conexão própria: git e medição de disco sem prender o `Mutex` do app (ver `open_side_connection`).
-    let conn=crate::database::open_side_connection().map_err(|e|e.to_string())?;
-    let base=dirs::home_dir().ok_or("Home indisponível")?.join(".ags/worktrees");
-    let dry=args.get("dryRun").is_some_and(|v|v!=&Value::Bool(false));
-    Ok(json!(crate::missions::cleanup::cleanup(&conn,&id,&base,dry)?))
+    let conn = crate::database::open_side_connection().map_err(|e| e.to_string())?;
+    let base = dirs::home_dir()
+        .ok_or("Home indisponível")?
+        .join(".ags/worktrees");
+    let dry = args.get("dryRun").is_some_and(|v| v != &Value::Bool(false));
+    Ok(json!(crate::missions::cleanup::cleanup(
+        &conn, &id, &base, dry
+    )?))
 }
 
-pub(super) fn worktrees(app:&AppHandle,args:&Value,prune:bool)->Result<Value,String> {
+pub(super) fn worktrees(app: &AppHandle, args: &Value, prune: bool) -> Result<Value, String> {
     let _ = app;
     // `ags worktrees list/prune` passa por todos os worktrees (71 no banco real) rodando git em cada:
     // conexão própria, sem prender o `Mutex` do app.
-    let conn=crate::database::open_side_connection().map_err(|e|e.to_string())?;
-    let cwd=arg_str_opt(args,"cwd").unwrap_or_else(|| ".".into());
-    let base=dirs::home_dir().ok_or("Home indisponível")?.join(".ags/worktrees");
-    if !prune { return Ok(json!(crate::missions::cleanup::list(&conn,std::path::Path::new(&cwd),&base)?)) }
-    let dry=args.get("dryRun").is_some_and(|v|v!=&Value::Bool(false));
-    Ok(json!(crate::missions::cleanup::prune(&conn,std::path::Path::new(&cwd),&base,dry)?))
+    let conn = crate::database::open_side_connection().map_err(|e| e.to_string())?;
+    let cwd = arg_str_opt(args, "cwd").unwrap_or_else(|| ".".into());
+    let base = dirs::home_dir()
+        .ok_or("Home indisponível")?
+        .join(".ags/worktrees");
+    if !prune {
+        return Ok(json!(crate::missions::cleanup::list(
+            &conn,
+            std::path::Path::new(&cwd),
+            &base
+        )?));
+    }
+    let dry = args.get("dryRun").is_some_and(|v| v != &Value::Bool(false));
+    Ok(json!(crate::missions::cleanup::prune(
+        &conn,
+        std::path::Path::new(&cwd),
+        &base,
+        dry
+    )?))
 }
 
 pub(super) fn mission_accept(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
     let task = arg_str(args, "task")?;
-    let base = dirs::home_dir().ok_or("não foi possível localizar a pasta do usuário")?.join(".ags").join("worktrees");
+    let base = dirs::home_dir()
+        .ok_or("não foi possível localizar a pasta do usuário")?
+        .join(".ags")
+        .join("worktrees");
     let outcome = crate::missions::review::accept(&db(app)?, &base, &id, &task)?;
     crate::missions::notify(app, &id);
     Ok(json!(outcome))
@@ -560,11 +740,30 @@ mod memory_time_tests {
 
     #[test]
     fn memory_mission_comes_only_from_caller_canvas() {
-        let board = crate::canvas::Board { nodes: serde_json::json!({"caller":{}}), ..Default::default() };
+        let board = crate::canvas::Board {
+            nodes: serde_json::json!({"caller":{}}),
+            ..Default::default()
+        };
         let boards = crate::canvas::Boards::from([("main|C:/repo#m:actual".into(), board)]);
-        assert_eq!(super::memory_mission_in_boards(&serde_json::json!({"from":"caller","mission":"foreign"}), &boards).unwrap(), "actual");
-        assert!(super::memory_mission_in_boards(&serde_json::json!({"mission":"actual"}), &boards).is_err());
-        assert!(super::memory_mission_in_boards(&serde_json::json!({"from":"missing","mission":"actual"}), &boards).is_err());
+        assert_eq!(
+            super::memory_mission_in_boards(
+                &serde_json::json!({"from":"caller","mission":"foreign"}),
+                &boards
+            )
+            .unwrap(),
+            "actual"
+        );
+        assert!(
+            super::memory_mission_in_boards(&serde_json::json!({"mission":"actual"}), &boards)
+                .is_err()
+        );
+        assert!(
+            super::memory_mission_in_boards(
+                &serde_json::json!({"from":"missing","mission":"actual"}),
+                &boards
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -573,7 +772,9 @@ mod memory_time_tests {
         let token = uuid::Uuid::new_v4().to_string();
         crate::terminal::publish_token(&tab, &token, std::process::id()).unwrap();
         let forged = crate::ipc::with_client_pid(Some(std::process::id()), || {
-            super::authenticated_tab(&serde_json::json!({"from":"other-tab","session":&token,"mission":"foreign"}))
+            super::authenticated_tab(
+                &serde_json::json!({"from":"other-tab","session":&token,"mission":"foreign"}),
+            )
         });
         assert!(forged.unwrap_err().contains("ADE_TAB_ID"));
         let same = crate::ipc::with_client_pid(Some(std::process::id()), || {
@@ -605,7 +806,9 @@ mod memory_time_tests {
 
 /// --test (CLI) and isTest (structured payload) are explicit boolean markers only.
 fn test_mark(args: &Value) -> Result<Option<bool>, String> {
-    let Some(value) = args.get("isTest").or_else(|| args.get("test")) else { return Ok(None); };
+    let Some(value) = args.get("isTest").or_else(|| args.get("test")) else {
+        return Ok(None);
+    };
     match value {
         Value::Bool(marked) => Ok(Some(*marked)),
         Value::String(raw) if raw == "true" => Ok(Some(true)),

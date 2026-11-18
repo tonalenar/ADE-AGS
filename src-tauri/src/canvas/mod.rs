@@ -12,7 +12,7 @@
 //! migración al schema de SQLite.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -162,38 +162,41 @@ lazy_static::lazy_static! {
     static ref LOCK: Mutex<()> = Mutex::new(());
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_FILE_PATH: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 fn file_path() -> Result<PathBuf, String> {
+    #[cfg(test)]
+    if let Some(path) = TEST_FILE_PATH.with(|path| path.borrow().clone()) {
+        return Ok(path);
+    }
     let dir = crate::util::datadir::ags_home().ok_or("Pasta de dados indisponível")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("canvas.json"))
 }
 
-fn read_file() -> Boards {
-    let Ok(path) = file_path() else { return Boards::new() };
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<CanvasFile>(&raw).ok())
-        .map(|f| f.boards)
-        .unwrap_or_default()
+fn read_file(path: &Path) -> Result<Boards, String> {
+    crate::util::user_json::read_user_json::<CanvasFile>(path)
+        .map(|file| file.map(|f| f.boards).unwrap_or_default())
+        .map_err(|e| e.to_string())
 }
 
 /// Todos los canvas guardados.
-pub fn load_boards() -> Boards {
+pub fn load_boards() -> Result<Boards, String> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    read_file()
+    read_file(&file_path()?)
 }
 
 /// Reemplaza un canvas. Se escribe a un temporal y se renombra: si la app se cae a la
 /// mitad, queda el archivo viejo entero y no uno cortado.
 pub fn save_board(key: &str, board: Board) -> Result<(), String> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut boards = read_file();
-    boards.insert(key.to_string(), board);
     let path = file_path()?;
-    let tmp = path.with_extension("json.tmp");
-    let body = serde_json::to_string(&CanvasFile { boards }).map_err(|e| e.to_string())?;
-    std::fs::write(&tmp, body).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    let mut boards = read_file(&path)?;
+    boards.insert(key.to_string(), board);
+    crate::util::user_json::write_user_json(&path, &CanvasFile { boards })
 }
 
 /// Las tabs conectadas con `tab`, en cualquier canvas. Sin repetidos y sin ella misma.
@@ -422,7 +425,7 @@ pub fn reachable(boards: &Boards, tab: &str) -> BTreeSet<String> {
 // ── Comandos Tauri ───────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn canvas_load() -> Boards {
+pub fn canvas_load() -> Result<Boards, String> {
     load_boards()
 }
 

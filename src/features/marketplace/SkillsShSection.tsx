@@ -77,7 +77,7 @@ export function SkillsShSection() {
   };
 
   const copy = () => {
-    navigator.clipboard.writeText(command).then(() => setNote(t("settings.skillssh.copied"))).catch(console.error);
+    navigator.clipboard.writeText(command).then(() => setNote(t("settings.skillssh.copied"))).catch(() => setNote(t("settings.skillssh.copyError")));
   };
 
   const needsNode = results.node !== undefined && results.node.state !== "ok"

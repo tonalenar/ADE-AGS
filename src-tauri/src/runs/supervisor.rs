@@ -528,8 +528,10 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
             let (db, task) = (db.clone(), task_snapshot.clone());
             let _ = tokio::task::spawn_blocking(move || super::checkpoints::auto(&db, &task, super::checkpoints::kind::AFTER)).await;
         }
+        let full_gate_cache_green = store::full_gate_cache_green_for_outcome(&db, &task_id, &outcome)
+            .unwrap_or(false);
         let outcome = if let Ok(conn) = db.lock() {
-            let outcome = store::persist_finish(&conn, &task_id, &outcome);
+            let outcome = store::persist_finish_with_gate(&conn, &task_id, &outcome, full_gate_cache_green);
             if let Err(error) = super::execution_log::record_fleet_final(&conn, &task_id, &event_attempt_id, &outcome) {
                 eprintln!("[harness] não foi possível persistir o desfecho do worker: {error}");
             }

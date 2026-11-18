@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import { briefingFor } from "@/features/missions/terminals";
-import { sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { sendAutonomous } from "@/features/terminal/safeWrite";
 import { SHELL_AGENT_ID, type Tab } from "@/features/tabs/types";
 
 type TabLike = Pick<Tab, "id" | "agentId" | "memoryBlock">;
@@ -32,7 +32,7 @@ export async function tabMemoryMessage(tab: TabLike, workspaceId: string): Promi
 export async function injectTabMemory(tab: TabLike, workspaceId: string): Promise<boolean> {
   const message = await tabMemoryMessage(tab, workspaceId);
   if (message === null) return false;
-  sendWhenReady(tab.id, message);
+  sendAutonomous(tab.id, message, "peer");
   return true;
 }
 

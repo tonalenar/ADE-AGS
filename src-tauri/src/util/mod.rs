@@ -10,6 +10,7 @@ mod proc;
 pub mod spawn;
 mod time;
 pub mod untrusted;
+pub mod user_json;
 pub mod win_quote;
 #[cfg(test)]
 mod spawn_lint;

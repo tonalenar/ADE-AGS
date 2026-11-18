@@ -8,7 +8,7 @@ use crate::database::DbConnection;
 
 use super::files::{copy_dir_recursive, resolve_skill_file, scan_skill_file, slugify};
 use super::frontmatter::{render_skill_md, split_frontmatter};
-use super::links::reconcile_link_dirs;
+use super::links::reconcile_link_dirs_db;
 use super::settings::resolve_skills_dir;
 use super::store::collect_linked_tabs;
 use crate::util::now_ts;
@@ -303,8 +303,8 @@ pub(crate) fn delete_skill_internal(skill_id: &str, db: &DbConnection) -> Result
     let affected = collect_linked_tabs(&conn, skill_id)?;
 
     conn.execute("DELETE FROM skills WHERE id = ?1", [skill_id]).map_err(|e| e.to_string())?;
-    reconcile_link_dirs(&conn, &affected);
     drop(conn);
+    reconcile_link_dirs_db(db, &affected);
 
     let _ = std::fs::remove_dir_all(&source_path);
 

@@ -55,6 +55,7 @@ export function PhysicalSection({ tone, current, onPick }: { tone: Tone; current
   const devices = useIphoneStore((s) => s.devices);
   const loaded = useIphoneStore((s) => s.loaded);
   const unavailable = useIphoneStore((s) => s.unavailable);
+  const discovery = useIphoneStore((s) => s.discovery);
   const c = SECTION[tone];
   const ready = devices.filter(isReady);
   return (
@@ -64,6 +65,8 @@ export function PhysicalSection({ tone, current, onPick }: { tone: Tone; current
         <p className={c.note}>{t(`iphone.unavailable.${unavailable}`)}</p>
       ) : (
         <>
+          {/* Cada falha da consulta tem a sua frase; a falta do Xcode já está acima, no `unavailable`. */}
+          {discovery && discovery.kind !== "xcodeMissing" ? <p className={c.note}>{t(`iphone.discovery.${discovery.kind}`)}</p> : null}
           {devices.map((d) => {
             const hint = deviceHint(d);
             const picked = d.id === current;

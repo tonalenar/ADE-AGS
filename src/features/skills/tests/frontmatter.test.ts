@@ -40,4 +40,15 @@ describe("applyName", () => {
     expect(out).toContain("name: nuevo\n");
     expect(out).toContain("  name: no-soy-el-nombre");
   });
+
+  it("atualiza o frontmatter em CRLF sem duplicar o bloco", () => {
+    const md = "---\r\nname: velho\r\ndescription: faz algo\r\nversion: 1.0.0\r\n---\r\n\r\n# Corpo\r\n";
+    const out = applyName(md, "novo");
+    expect(out.match(/^---/gm)).toHaveLength(2);
+    expect(out).toMatch(/name: novo/);
+    expect(out).toContain("description: faz algo");
+    expect(out).toContain("version: 1.0.0");
+    expect(out).toContain("# Corpo");
+    expect(out).toContain("\r\n");
+  });
 });

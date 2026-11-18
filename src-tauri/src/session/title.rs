@@ -167,9 +167,8 @@ pub(super) fn newest_where(
 }
 
 pub(super) fn find_string_field(path: &Path, candidates: &[&str]) -> Option<String> {
-    let content = fs::read_to_string(path).ok()?;
-    for line in content.lines() {
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+    let parsed = crate::missions::transcript_cache::read_incremental(path).ok()?;
+    for v in parsed.lines.iter() {
         for c in candidates {
             if let Some(s) = v.get(*c).and_then(|x| x.as_str()) {
                 return Some(s.to_string());
@@ -643,12 +642,11 @@ pub(super) fn gemini_session_file_by_id(home: &Path, cwd: &str, session_id: &str
 }
 
 pub(super) fn gemini_title(path: &Path, fallback: &str) -> SessionTitleResult {
-    let Ok(content) = fs::read_to_string(path) else { return fallback_result(fallback) };
+    let Ok(parsed) = crate::missions::transcript_cache::read_incremental(path) else { return fallback_result(fallback) };
     let mut first_user_msg: Option<String> = None;
     let mut user_msgs_seen = 0usize;
 
-    for line in content.lines() {
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+    for v in parsed.lines.iter() {
         let summary = v.get("summary").and_then(|s| s.as_str())
             .or_else(|| v.get("$set").and_then(|s| s.get("summary")).and_then(|s| s.as_str()))
             .filter(|s| !echoes_ade_notice(s));
@@ -786,14 +784,13 @@ pub(super) fn codex_is_synthetic(text: &str) -> bool {
 }
 
 pub(super) fn codex_title(path: &Path, fallback: &str) -> SessionTitleResult {
-    let Ok(content) = fs::read_to_string(path) else { return fallback_result(fallback) };
+    let Ok(parsed) = crate::missions::transcript_cache::read_incremental(path) else { return fallback_result(fallback) };
     let mut user_msgs_seen = 0usize;
 
-    for line in content.lines() {
+    for v in parsed.lines.iter() {
         if user_msgs_seen >= TITLE_SCAN_LIMIT {
             break;
         }
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
         let msg_type = v.get("type").and_then(|t| t.as_str());
 
         if msg_type == Some("event_msg") {
@@ -1376,17 +1373,6 @@ pub(super) fn opencode_invocation() -> (&'static str, &'static str) {
 /// cada agente. A diferencia de `get_session_title`, acá interesa el archivo en sí (para
 /// leer la conversación entera), y se acepta el "más reciente del cwd" cuando no hay
 /// `session_id`: en un export, mostrar la sesión más probable es mejor que no mostrar nada.
-pub fn session_file_for(
-    agent_id: &str,
-    cwd: &str,
-    session_id: Option<&str>,
-    // Directorio de la cuenta con la que corrió la sesión; `None` = la del sistema.
-    profile: Option<&Path>,
-    db: &tauri::State<crate::database::DbConnection>,
-) -> Option<PathBuf> {
-    session_file_for_db(agent_id, cwd, session_id, profile, db.inner())
-}
-
 /// Resolución por ID que también pueden usar los trabajos en segundo plano.
 pub(crate) fn session_file_for_db(
     agent_id: &str,
@@ -1704,14 +1690,13 @@ fn activity_of<'a>(messages: impl IntoIterator<Item = &'a str>) -> &'static str 
 /// `extract` devuelve el texto de una línea, o `None` si esa línea no es un mensaje del
 /// usuario. `None` si el archivo no se puede leer.
 fn first_user_texts(path: &Path, extract: fn(&Value) -> Option<String>) -> Option<Vec<String>> {
-    let content = fs::read_to_string(path).ok()?;
+    let parsed = crate::missions::transcript_cache::read_incremental(path).ok()?;
     let mut texts = Vec::new();
-    for line in content.lines() {
+    for value in parsed.lines.iter() {
         if texts.len() >= TITLE_SCAN_LIMIT {
             break;
         }
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-        if let Some(text) = extract(&v) {
+        if let Some(text) = extract(value) {
             texts.push(text);
         }
     }

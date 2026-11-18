@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getSetting, setSetting } from "@/shared/ipc/settings";
+import { persistToggle, toastToggleError } from "@/features/settings/persistToggle";
 import { SettingsToggleRow } from "@/features/settings/SettingsSection";
 import { NOTIFICATIONS_KEY } from "@/features/settings/notificationsPreference";
 
@@ -21,8 +22,7 @@ export function NotificationsSetting() {
     <SettingsToggleRow
       checked={enabled}
       onChange={(value) => {
-        setEnabled(value);
-        setSetting(NOTIFICATIONS_KEY, value ? "true" : "false").catch(console.error);
+        void persistToggle(value, setEnabled, () => setSetting(NOTIFICATIONS_KEY, value ? "true" : "false"), (e) => toastToggleError(t("settings.notifications.label"), e));
       }}
       label={t("settings.notifications.label")}
       description={t("settings.notifications.desc")}

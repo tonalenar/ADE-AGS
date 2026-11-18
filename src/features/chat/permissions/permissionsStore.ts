@@ -1,23 +1,27 @@
 import { useMemo } from "react";
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 
+import i18n from "@/i18n";
 import { answerTerminalPrompt } from "@/features/canvas/useTerminalPrompts";
 import type { TerminalPromptItem } from "@/features/canvas/teamFeedModel";
 import { useRunsStore } from "@/features/runs/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { sendToConversation } from "../chatActions";
 import { chatPermissionNotify } from "../ipc";
 import { useChatLive } from "../liveStore";
 import { unsnoozeConversation } from "../shelf";
-import { EMPTY_LIVE } from "../structured/model";
+import { EMPTY_LIVE, type ThreadLive } from "../structured/model";
+import type { ThreadRow } from "../structured/ipc";
 import { answerRequest, sendToThread, useStructured } from "../structured/store";
 import { teamVerdictForAsk } from "../team/teamPermissions";
 import { useTeamStore } from "../team/teamStore";
 import { fleetAsk, threadAsks, tuiAsk } from "./askSources";
 import { chatPermissionRuleAdd, chatPermissionRuleRemove, chatPermissionRuleUpdate, chatPermissionRules, ruleOf } from "./ipc";
-import { sortAsks, type AskFilter, type PendingAsk, type PermissionRule } from "./permissionModel";
+import { sortAsks, waitingAgents, type AskFilter, type PendingAsk, type PermissionRule } from "./permissionModel";
 
 /**
  * O store único dos pedidos de permissão (prancheta 14): o que cada fonte tem pendente vira um
@@ -79,34 +83,69 @@ export function setTuiPrompts(tui: TerminalPromptItem[]): void {
   for (const prompt of answeredInTui) unsnoozeConversation(prompt.tabId);
 }
 
-/** Lê as regras do banco (a fonte da verdade, também do backend). */
+/**
+ * Um aviso de falha no canto. Não repete o erro técnico: diz o que não mudou e deixa a tela no estado gravado.
+ */
+function avisoDeFalha(key: string): void {
+  void AlertaToast(i18n.t("chat.permission.failedTitle"), i18n.t(key), "warning", 6000);
+}
+
+/**
+ * Lê as regras do banco (a fonte da verdade, também do backend). Falha de leitura não é "sem regras": a lista que já
+ * estava na tela fica, `rulesLoaded` não sobe, e a pessoa é avisada (sem regras lidas, nenhum pedido é decidido sozinho).
+ */
 export async function loadRules(): Promise<void> {
-  const rows = await chatPermissionRules().catch(() => null);
-  usePermissions.setState({ rules: (rows ?? []).map(ruleOf), rulesLoaded: true });
+  try {
+    const rows = await chatPermissionRules();
+    usePermissions.setState({ rules: rows.map(ruleOf), rulesLoaded: true });
+  } catch {
+    avisoDeFalha("chat.permission.ruleLoadFailed");
+  }
 }
 
 /** Acrescenta uma regra (sem repetir a mesma): só a pessoa, pela tela. */
 export function addRule(rule: Omit<PermissionRule, "id" | "createdAt">): void {
   const { rules } = usePermissions.getState();
   if (rules.some((r) => r.kind === rule.kind && r.pattern === rule.pattern && r.agentId === rule.agentId)) return;
-  chatPermissionRuleAdd({ kind: rule.kind, pattern: rule.pattern, agentId: rule.agentId }).then(() => loadRules(), console.error);
+  chatPermissionRuleAdd({ kind: rule.kind, pattern: rule.pattern, agentId: rule.agentId }).then(() => loadRules(), () => avisoDeFalha("chat.permission.ruleSaveFailed"));
 }
 
-export function updateRule(id: string, patch: Partial<Omit<PermissionRule, "id">>): void {
+/**
+ * Muda uma regra. A tela só mostra a mudança depois de o banco confirmar: o padrão que vale para os pedidos é o
+ * gravado. Se a gravação falhar, a regra segue como estava e a pessoa é avisada.
+ */
+export async function updateRule(id: string, patch: Partial<Omit<PermissionRule, "id">>): Promise<void> {
   const body: { pattern?: string; agentId?: string; anyAgent?: boolean } = {};
   if (patch.pattern !== undefined) body.pattern = patch.pattern;
   if (patch.agentId !== undefined) {
     if (patch.agentId === null) body.anyAgent = true;
     else body.agentId = patch.agentId;
   }
-  // Mostra já; o banco confirma (e corrige) na releitura.
+  // `false` do backend é falha (a regra não existe, ou não foi gravada): não é sucesso.
+  const saved = await chatPermissionRuleUpdate(id, body).catch(() => false);
+  if (saved !== true) {
+    avisoDeFalha("chat.permission.ruleSaveFailed");
+    await loadRules();
+    return;
+  }
   usePermissions.setState((s) => ({ rules: s.rules.map((r) => (r.id === id ? { ...r, ...patch } : r)) }));
-  chatPermissionRuleUpdate(id, body).then(() => loadRules(), console.error);
+  await loadRules();
 }
 
-export function removeRule(id: string): void {
+/**
+ * Apaga uma regra. Ela só sai da tela depois de o banco confirmar. Se a remoção falhar, a regra continua valendo:
+ * fica na tela e a pessoa é avisada.
+ */
+export async function removeRule(id: string): Promise<void> {
+  // `false` do backend é falha: a regra não saiu do banco, então não sai da tela.
+  const removed = await chatPermissionRuleRemove(id).catch(() => false);
+  if (removed !== true) {
+    avisoDeFalha("chat.permission.ruleSaveFailed");
+    await loadRules();
+    return;
+  }
   usePermissions.setState((s) => ({ rules: s.rules.filter((r) => r.id !== id) }));
-  chatPermissionRuleRemove(id).then(() => loadRules(), console.error);
+  await loadRules();
 }
 
 export type AskDecision = "allow" | "allowSession" | "deny";
@@ -114,29 +153,58 @@ export type AskDecision = "allow" | "allowSession" | "deny";
 /** Quanto esperar depois do "negar" na TUI para colar a resposta (o diálogo precisa fechar). */
 const REPLY_DELAY_MS = 400;
 
+/** Pedidos com uma resposta em andamento: um segundo clique no mesmo pedido não manda outra resposta. */
+const answering = new Set<string>();
+
 /**
- * Responde um pedido pelo caminho da fonte dele. `reply` = "Responder…": nega e manda o texto ao
- * agente (o que fazer em vez disso).
+ * Responde um pedido pelo caminho da fonte dele. `reply` = "Responder…": nega e manda o texto ao agente (o que fazer
+ * em vez disso). O pedido só sai da caixa depois de a fonte confirmar; se a resposta falhar, ele fica e a pessoa vê o
+ * aviso. Devolve `true` quando a fonte confirmou.
  */
-export function answerAsk(ask: PendingAsk, decision: AskDecision, reply?: string): void {
-  const text = reply?.trim();
+export async function answerAsk(ask: PendingAsk, decision: AskDecision, reply?: string): Promise<boolean> {
+  if (answering.has(ask.id)) return false;
+  answering.add(ask.id);
+  try {
+    if (ask.conversation) unsnoozeConversation(ask.conversation);
+    const ok = await deliver(ask, decision, reply?.trim());
+    if (ok) usePermissions.setState((s) => ({ answered: { ...s.answered, [ask.id]: true }, selected: s.selected === ask.id ? null : s.selected }));
+    return ok;
+  } finally {
+    answering.delete(ask.id);
+  }
+}
+
+/** Manda a decisão pelo caminho da fonte e diz se ela confirmou. */
+async function deliver(ask: PendingAsk, decision: AskDecision, text: string | undefined): Promise<boolean> {
   const ref = ask.ref;
-  if (ask.conversation) unsnoozeConversation(ask.conversation);
-  usePermissions.setState((s) => ({ answered: { ...s.answered, [ask.id]: true }, selected: s.selected === ask.id ? null : s.selected }));
   if (ref.source === "thread") {
-    answerRequest(ref.threadId, ref.requestId, decision);
-    if (text) sendToThread(ref.threadId, text);
-    return;
+    // `answerRequest` só tira o pedido da conversa depois da confirmação do backend.
+    if (!(await answerRequest(ref.threadId, ref.requestId, decision))) {
+      avisoDeFalha("chat.permission.answerFailed");
+      return false;
+    }
+    if (text) void sendToThread(ref.threadId, text);
+    return true;
   }
   if (ref.source === "tui") {
     const item = usePermissions.getState().tui.find((p) => p.tabId === ref.tabId && p.prompt.signature === ref.signature);
     const choices = item?.prompt.choices ?? [];
     const choice = choices.find((c) => c.id === decision) ?? (decision === "allowSession" ? choices.find((c) => c.id === "allow") : undefined);
-    if (choice) answerTerminalPrompt(ref.tabId, choice);
+    // Sem a opção, ou com a tela já trocada, `answerTerminalPrompt` não manda a tecla: o pedido fica, e a pessoa é avisada.
+    if (!choice || !answerTerminalPrompt(ref.tabId, choice, ref.signature)) {
+      avisoDeFalha("chat.permission.ttyChanged");
+      return false;
+    }
     if (text) window.setTimeout(() => sendToConversation(ref.tabId, text), REPLY_DELAY_MS);
-    return;
+    return true;
   }
-  useRunsStore.getState().decideApproval(ref.approvalId, decision !== "deny", false).catch(console.error);
+  try {
+    await useRunsStore.getState().decideApproval(ref.approvalId, decision !== "deny", false);
+    return true;
+  } catch {
+    avisoDeFalha("chat.permission.answerFailed");
+    return false;
+  }
 }
 
 /**
@@ -152,16 +220,102 @@ export function teamDecision(ask: PendingAsk): "allow" | "deny" | null {
 /** "Sempre permitir <padrão>": guarda a regra (para este agente) e permite este pedido. */
 export function alwaysAllow(ask: PendingAsk, pattern: string): void {
   addRule({ kind: ask.kind, pattern, agentId: ask.agentId });
-  answerAsk(ask, "allow");
+  void answerAsk(ask, "allow");
 }
 
 /**
  * Todos os pedidos pendentes, de todas as fontes, o mais antigo primeiro. As abas de shell não
  * pedem nada; os respondidos aqui somem na hora.
  */
+/** As fontes que compõem os pedidos pendentes (o que `usePendingAsks` e a contagem da barra leem). */
+type AskSources = {
+  threads: ThreadRow[];
+  live: Record<string, ThreadLive>;
+  answerErrors?: Record<string, string>;
+  tui: PermissionsState["tui"];
+  answered: PermissionsState["answered"];
+  tabs: ReturnType<typeof useTabsStore.getState>["tabs"];
+  detected: ReturnType<typeof useTabsStore.getState>["detectedAgents"];
+  turns: ReturnType<typeof useChatLive.getState>["turn"];
+  awaiting: ReturnType<typeof useChatLive.getState>["awaiting"];
+  approvals: ReturnType<typeof useRunsStore.getState>["approvals"];
+  tasks: ReturnType<typeof useRunsStore.getState>["tasks"];
+};
+
+/** Os pedidos pendentes de todas as fontes, o mais antigo primeiro. Pura sobre as fontes lidas. */
+export function pendingAsksOf(src: AskSources): PendingAsk[] {
+  const label = (id: string) => src.detected.find((a) => a.id === id)?.label ?? id;
+  const fromThreads = src.threads.filter((th) => th.state === "active").flatMap((th) => {
+    const l = src.live[th.id] ?? EMPTY_LIVE;
+    return threadAsks(th, l.requests, l.items, label, src.answerErrors);
+  });
+  const fromTui = src.tui.flatMap((item) => {
+    const tab = src.tabs.find((t) => t.id === item.tabId);
+    if (!tab || tab.agentId === SHELL_AGENT_ID) return [];
+    const tools = src.turns[tab.id]?.tools ?? [];
+    const pending = tools[tools.length - 1] ?? (src.awaiting[tab.id] ? { name: "", summary: src.awaiting[tab.id]! } : null);
+    return [tuiAsk({ id: tab.id, title: tab.title, cwd: tab.cwd, agentId: tab.agentId, agentLabel: tab.agentLabel }, item.prompt, item.atMs, pending)];
+  });
+  const fromFleet = src.approvals.map((a) => fleetAsk(a, src.tasks.find((t) => t.id === a.taskId), label));
+  return sortAsks([...fromThreads, ...fromTui, ...fromFleet].filter((a) => !src.answered[a.id]));
+}
+
+/**
+ * O que a lista de pedidos lê do estado ao vivo: os pedidos das conversas ativas e os itens com arquivo (as edições, que
+ * dão a lista de arquivos). Cada elemento tem identidade estável enquanto não muda, então o texto do streaming não entra.
+ */
+function askInputsOf(s: { threads: ThreadRow[]; live: Record<string, ThreadLive> }): unknown[] {
+  const out: unknown[] = [];
+  for (const th of s.threads) {
+    if (th.state !== "active") continue;
+    const l = s.live[th.id];
+    if (!l) continue;
+    out.push(l.requests);
+    for (const item of l.items) if (item.path) out.push(item);
+  }
+  return out;
+}
+
+/**
+ * Todos os pedidos pendentes, de todas as fontes, o mais antigo primeiro. As abas de shell não
+ * pedem nada; os respondidos aqui somem na hora. Assina o `live` inteiro: quem mostra a lista (a caixa, o cartão)
+ * refaz a lista a cada pedaço de texto; quem só conta pedidos usa `usePendingAskCounts`.
+ */
 export function usePendingAsks(): PendingAsk[] {
   const threads = useStructured((s) => s.threads);
-  const live = useStructured((s) => s.live);
+  const askInputs = useStructured(useShallow((s) => askInputsOf(s)));
+  const answerErrors = useStructured((s) => s.answerErrors);
+  const tui = usePermissions((s) => s.tui);
+  const answered = usePermissions((s) => s.answered);
+  const tabs = useTabsStore((s) => s.tabs);
+  const detected = useTabsStore((s) => s.detectedAgents);
+  const turns = useChatLive((s) => s.turn);
+  const awaiting = useChatLive((s) => s.awaiting);
+  const approvals = useRunsStore((s) => s.approvals);
+  const tasks = useRunsStore((s) => s.tasks);
+  return useMemo(
+    () => pendingAsksOf({ threads, live: useStructured.getState().live, answerErrors, tui, answered, tabs, detected, turns, awaiting, approvals, tasks }),
+    [threads, askInputs, answerErrors, tui, answered, tabs, detected, turns, awaiting, approvals, tasks],
+  );
+}
+
+/**
+ * Um texto curto com o que a contagem de pedidos lê dos registros: o id de cada conversa ativa, e os pedidos dela (id,
+ * tipo, estado e título). Muda só quando um pedido muda, nunca com o texto do streaming. Pura.
+ */
+function requestsSignature(live: Record<string, ThreadLive>, threads: ThreadRow[]): string {
+  return threads.filter((th) => th.state === "active").map((th) =>
+    `${th.id}[${(live[th.id]?.requests ?? []).map((r) => `${r.id}/${r.kind}/${r.state}/${r.title}`).join(";")}]`).join("|");
+}
+
+/**
+ * A contagem de pedidos por conversa e quantas conversas esperam a pessoa (a barra lateral). Assina só a assinatura dos
+ * pedidos, então o texto que chega numa conversa não re-renderiza quem só conta. Os arquivos das edições (que vêm dos
+ * itens) ficam para a lista; a contagem não depende deles.
+ */
+export function usePendingAskCounts(): { waiting: number; byConversation: Record<string, number> } {
+  const threads = useStructured((s) => s.threads);
+  const requests = useStructured((s) => requestsSignature(s.live, s.threads));
   const tui = usePermissions((s) => s.tui);
   const answered = usePermissions((s) => s.answered);
   const tabs = useTabsStore((s) => s.tabs);
@@ -171,21 +325,11 @@ export function usePendingAsks(): PendingAsk[] {
   const approvals = useRunsStore((s) => s.approvals);
   const tasks = useRunsStore((s) => s.tasks);
   return useMemo(() => {
-    const label = (id: string) => detected.find((a) => a.id === id)?.label ?? id;
-    const fromThreads = threads.filter((th) => th.state === "active").flatMap((th) => {
-      const l = live[th.id] ?? EMPTY_LIVE;
-      return threadAsks(th, l.requests, l.items, label);
-    });
-    const fromTui = tui.flatMap((item) => {
-      const tab = tabs.find((t) => t.id === item.tabId);
-      if (!tab || tab.agentId === SHELL_AGENT_ID) return [];
-      const tools = turns[tab.id]?.tools ?? [];
-      const pending = tools[tools.length - 1] ?? (awaiting[tab.id] ? { name: "", summary: awaiting[tab.id]! } : null);
-      return [tuiAsk({ id: tab.id, title: tab.title, cwd: tab.cwd, agentId: tab.agentId, agentLabel: tab.agentLabel }, item.prompt, item.atMs, pending)];
-    });
-    const fromFleet = approvals.map((a) => fleetAsk(a, tasks.find((t) => t.id === a.taskId), label));
-    return sortAsks([...fromThreads, ...fromTui, ...fromFleet].filter((a) => !answered[a.id]));
-  }, [threads, live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks]);
+    const asks = pendingAsksOf({ threads, live: useStructured.getState().live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks });
+    const byConversation: Record<string, number> = {};
+    for (const a of asks) if (a.conversation) byConversation[a.conversation] = (byConversation[a.conversation] ?? 0) + 1;
+    return { waiting: waitingAgents(asks), byConversation };
+  }, [threads, requests, tui, answered, tabs, detected, turns, awaiting, approvals, tasks]);
 }
 
 /** O aviso do sistema de um pedido novo (só aparece com o app sem foco; ver `notifier.rs`). */

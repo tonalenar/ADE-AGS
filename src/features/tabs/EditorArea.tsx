@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useChatUnreadWatcher } from "@/features/canvas/chatUnread";
 import { useMissionWatcher } from "@/features/missions/watcher";
 import { createPortal } from "react-dom";
@@ -7,6 +7,8 @@ import { useTranslation } from "react-i18next";
 import { Button, AddIcon, CloseIcon } from "neogestify-ui-components";
 
 import { GlobeIcon, SplitDownIcon, SplitRightIcon } from "@/app/icons";
+import { PanelBoundary } from "@/app/PanelBoundary";
+import { lazyWithRetry } from "@/app/lazyWithRetry";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { focusTab } from "@/features/terminal/terminalRegistry";
 import { GroupTabStrip } from "@/features/tabs/GroupTabStrip";
@@ -32,7 +34,7 @@ import { NEW_WORKSPACE_AGENT_EVENT, canOpenWorkspaceAgent } from "@/features/tab
 // @xyflow/react pesa y solo hace falta en la vista canvas. Un import estático lo metía en
 // el arranque aunque `{canvas && …}` no lo montara. El tablero ya está en el store
 // (`initCanvasSync`): al cargar el módulo se pinta el board que había, no uno vacío.
-const CanvasView = lazy(() =>
+const CanvasView = lazyWithRetry(() =>
   import("@/features/canvas/CanvasView").then((m) => ({ default: m.CanvasView })),
 );
 
@@ -61,6 +63,8 @@ export function EditorArea() {
   // aberta): nada de canvas, grade ou grupos por cima da tela da conversa.
   const chat = useChatShell();
   const boardCanvas = useWorkMode() === "canvas";
+  // Uma vez montado, o canvas fica montado: trocar para o modo Abas só o esconde, sem desmontar os Portais.
+  const [canvasMounted, setCanvasMounted] = useState(boardCanvas);
   const canvas = boardCanvas && !chat;
   const grid = useMissionGrid();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -68,6 +72,10 @@ export function EditorArea() {
   const groupIds = groups.map((g) => g.id).join("|");
   // Los huecos de la grade aparecen y desaparecen sin que cambie el árbol: hay que reobservarlos.
   const gridIds = grid ? grid.join("|") : "";
+
+  useEffect(() => {
+    if (boardCanvas) setCanvasMounted(true);
+  }, [boardCanvas]);
 
   // A paleta e os atalhos pedem a mesma ação; revalidar aqui garante que só abrimos o
   // assistente dentro do workspace e com uma pasta ativa. Nada inicia até a pessoa confirmar.
@@ -119,29 +127,35 @@ export function EditorArea() {
           navegador desmontado perde a página. `visibility` sozinho não basta — o @xyflow marca
           cada nó medido com `visibility: visible`, que vence o herdado —, então ele também sai da
           tela, sem mudar de tamanho (como as terminais ocultas do `TerminalPanel`). */}
-      {boardCanvas && (
-        <div className="absolute inset-0" style={chat ? { visibility: "hidden", transform: "translateX(-300vw)" } : undefined}>
-          <Suspense fallback={<div className="absolute inset-0" aria-busy="true" />}>
-            <CanvasView />
-          </Suspense>
+      {canvasMounted && (
+        <div className="absolute inset-0" style={!boardCanvas || chat ? { visibility: "hidden", transform: "translateX(-300vw)" } : undefined}>
+          <PanelBoundary name="canvas">
+            <Suspense fallback={<div className="absolute inset-0" aria-busy="true" />}>
+              <CanvasView />
+            </Suspense>
+          </PanelBoundary>
         </div>
       )}
-      {/* TerminalPanel siempre montado para preservar PTYs */}
+      {/* TerminalPanel siempre montado para preservar PTYs. Sem PanelBoundary de propósito: um boundary que
+          troca os filhos desmonta as terminais, e desmontar uma terminal mata o PTY. */}
       <TerminalPanel />
-      {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. */}
-      <ViewTabsHost />
-      {!chat && !canvas && grid && <MissionGrid ids={grid} />}
+      {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. Boundary só nos filhos que
+          não são terminal: um erro aqui fica aqui, e não sobe até a raiz. */}
+      <PanelBoundary name="views"><ViewTabsHost /></PanelBoundary>
+      {!chat && !canvas && grid && <PanelBoundary name="mission-grid"><MissionGrid ids={grid} /></PanelBoundary>}
       {!chat && !canvas && !grid && (
         <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
           {layout ? (
-            <NodeView node={layout.root} focused={layout.focused} divided={groups.length > 1} />
+            <PanelBoundary name="layout">
+              <NodeView node={layout.root} focused={layout.focused} divided={groups.length > 1} />
+            </PanelBoundary>
           ) : (
             <div data-slot="" className="h-full" />
           )}
         </div>
       )}
-      {!chat && !canvas && !grid && <TabDragOverlay />}
-      {!chat && !canvas && <SelectedProtocolPane />}
+      {!chat && !canvas && !grid && <PanelBoundary name="tab-drag"><TabDragOverlay /></PanelBoundary>}
+      {!chat && !canvas && <PanelBoundary name="protocol-pane"><SelectedProtocolPane /></PanelBoundary>}
     </div>
   );
 }

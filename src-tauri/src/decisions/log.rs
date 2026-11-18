@@ -11,6 +11,9 @@ use super::points::blind_labels;
 pub const RETAIN_DAYS: i64 = 30;
 pub const RETAIN_ROWS: i64 = 50_000;
 pub const DEDUPE_SECS: i64 = 3_600;
+/// O `fleet_gate` só repete a pergunta de um mesmo estado depois de um dia. Com a janela de 1 h, uma tarefa parada
+/// (o estado não muda enquanto ela espera) pagava o provedor a cada hora, sem limite.
+pub const DEDUPE_FLEET_SECS: i64 = 86_400;
 /// Abaixo disso, a concordância de um ponto ainda não diz nada.
 pub const MIN_SAMPLE: i64 = 30;
 const MAX_PAIRS: usize = 12;
@@ -208,10 +211,11 @@ pub fn recent(
     now: i64,
 ) -> Result<bool, String> {
     migrate(conn).map_err(|error| error.to_string())?;
+    let window = if point == super::points::POINT_FLEET { DEDUPE_FLEET_SECS } else { DEDUPE_SECS };
     let found: Option<i64> = conn
         .query_row(
             "SELECT 1 FROM decision_shadow_log WHERE point = ?1 AND state_hash = ?2 AND provider = ?3 AND ts >= ?4 LIMIT 1",
-            rusqlite::params![point, state_hash, provider, now.saturating_sub(DEDUPE_SECS)],
+            rusqlite::params![point, state_hash, provider, now.saturating_sub(window)],
             |row| row.get(0),
         )
         .optional()
@@ -252,27 +256,33 @@ struct Row {
     state_hash: String,
 }
 
-pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
+pub struct ShadowSnapshot {
+    rows: Vec<Row>,
+    human: BTreeMap<(String, String), String>,
+}
+
+pub fn snapshot(conn: &Connection) -> Result<ShadowSnapshot, String> {
     migrate(conn).map_err(|error| error.to_string())?;
     let mut stmt = conn
         .prepare("SELECT point, heuristic, provider_decision, latency_ms, error, state_hash, provider FROM decision_shadow_log ORDER BY ts ASC, id ASC")
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map([], |row| {
-            Ok(Row {
-                point: row.get(0)?,
-                heuristic: row.get(1)?,
-                provider_decision: row.get(2)?,
-                latency_ms: row.get(3)?,
-                error: row.get(4)?,
-                state_hash: row.get(5)?,
-                provider: row.get(6)?,
-            })
-        })
+        .query_map([], |row| Ok(Row {
+            point: row.get(0)?, heuristic: row.get(1)?, provider_decision: row.get(2)?,
+            latency_ms: row.get(3)?, error: row.get(4)?, state_hash: row.get(5)?, provider: row.get(6)?,
+        }))
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
+    Ok(ShadowSnapshot { rows, human: human_decisions(conn)? })
+}
 
+pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
+    report_from_snapshot(snapshot(conn)?)
+}
+
+pub fn report_from_snapshot(snapshot: ShadowSnapshot) -> Result<ShadowReport, String> {
+    let ShadowSnapshot { rows, human } = snapshot;
     let mut by_point: BTreeMap<(&str, &str), Vec<&Row>> = BTreeMap::new();
     for row in &rows {
         by_point
@@ -285,7 +295,7 @@ pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
         .map(|((point, provider), mine)| point_report(point, provider, &mine))
         .collect();
     let comparisons = comparisons(&rows);
-    let judged = judged(&rows, &human_decisions(conn)?);
+    let judged = judged(&rows, &human);
 
     let mut disagreements = Vec::new();
     for row in rows.iter().rev() {
@@ -541,6 +551,15 @@ fn comparisons(rows: &[Row]) -> Vec<Comparison> {
 
 pub fn export_csv(conn: &Connection) -> Result<String, String> {
     let report = report(conn)?;
+    export_csv_from_report(&report)
+}
+
+pub fn export_csv_from_snapshot(snapshot: ShadowSnapshot) -> Result<String, String> {
+    let report = report_from_snapshot(snapshot)?;
+    export_csv_from_report(&report)
+}
+
+fn export_csv_from_report(report: &ShadowReport) -> Result<String, String> {
     let mut csv = String::from(
         "tipo,ponto,provedor,total,concordancia,p50_ms,p95_ms,taxa_erro,taxa_timeout,comparadas,amostra_pequena\n",
     );

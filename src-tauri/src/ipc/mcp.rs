@@ -428,12 +428,14 @@ browser_network marked as mocked.",
     BrowserTool {
         name: "browser_dialogs",
         op: "dialogs",
-        description: "Native dialogs (alert, confirm, prompt) are answered automatically — inside an iframe they \
-would freeze the whole app — and recorded. This reads what appeared and sets what to answer from now on.",
+        description: "A dialog a page opens while an agent drives it is never answered by the agent. confirm: refused, and \
+the app asks the person whether to allow that one dialog; if she allows it, the same action, repeated, goes through \
+once. alert: not answered; the person is only told. prompt: refused (the agent gets no text); the person is only \
+told. Lists what appeared.",
         properties: || {
             json!({
-                "action": { "type": "string", "enum": ["accept", "dismiss"], "description": "What to answer confirm/prompt. Default: accept." },
-                "prompt_text": { "type": "string", "description": "What to type into a prompt." },
+                "action": { "type": "string", "enum": ["accept", "dismiss"], "description": "Omit it, or use dismiss: it only lists what appeared (dismiss passes no action). accept is refused: the person decides in the app." },
+                "prompt_text": { "type": "string", "description": "Ignored: the agent never types into a prompt. The person is told about it in the app." },
             })
         },
         required: &[],
@@ -545,7 +547,8 @@ request and response bodies, timing and the cause of a network error.",
         name: "browser_storage",
         op: "storage",
         description: "Read or change localStorage/sessionStorage (list also shows IndexedDB databases, Cache Storage \
-and service workers).",
+and service workers). On a real site (not localhost) list shows only the keys and sizes: the values can be the \
+user's session.",
         properties: || {
             json!({
                 "action": { "type": "string", "enum": ["list", "set", "remove", "clear"] },

@@ -8,7 +8,7 @@ import { useTabsStore } from "@/features/tabs/store";
 
 import { readAccess, type ConversationCard } from "./chatModel";
 import { chatSideChatDelete, chatThreadItems, type ThreadRow } from "./structured/ipc";
-import { createThread, forkSideChat, settleThread, sendToThread, useStructured } from "./structured/store";
+import { createFirstThread, firstMessageAccepted, forkSideChat, removeDeletedSideChat, settleThread, sendToThread, useStructured } from "./structured/store";
 import { threadIdOf, threadKey } from "./structured/model";
 import { StructuredConversationView } from "./structured/StructuredConversationView";
 import { switchableAgents } from "./structured/switchModel";
@@ -77,13 +77,13 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
   const [loading, setLoading] = useState(false);
   const parentTuiBusy = useChatLive((s) => conversation ? s.phase[conversation.tabId] === "working" : false);
   const parentBusy = parentTuiBusy || parentStructuredBusy;
-  const live = useStructured((s) => s.live);
   const selected = sideChats.find((row) => row.id === selectedId) ?? null;
   /** O aviso do topo: o recorte ou o contexto portátil (a cópia nativa não avisa). */
   const forkNote = sideChatForkNote(selected);
   const answerItems = useStructured((s) => selectedId ? s.live[selectedId]?.items : undefined) ?? [];
   const answer = [...answerItems].reverse().find((item) => item.kind === "assistant" && item.text?.trim())?.text?.trim() ?? "";
-  const selectedWorking = selectedId ? live[selectedId]?.phase === "working" : false;
+  // Só a fase da conversa selecionada: o texto que chega nas outras não re-renderiza o painel.
+  const selectedWorking = useStructured((s) => (selectedId ? s.live[selectedId]?.phase === "working" : false));
   // O histórico da origem, limitado, é o mesmo que a timeline do chat principal mostra: a pergunta lateral o herda na tela.
   const history = useMemo(() => sideChatHistory(items), [items]);
   const sideView = useMemo(() => ({ history: history.items, truncated: history.truncated }), [history]);
@@ -142,7 +142,7 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
     setError(null);
     setLoading(true);
     try {
-      const id = await createThread({
+      const creation = {
         agentId: draftValue.agentId,
         cwd: conversation.cwd,
         title: question.trim().replace(/\s+/g, " ").slice(0, 72) || t("chat.sideChat.title"),
@@ -152,14 +152,19 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
         access: clampSideChatAccess(draftValue.agentId, originAccess, draftValue.access),
         accountId: sideChatAccountFor(draftValue.agentId, conversation.agentId, parentThread?.accountId ?? tab?.accountId ?? null),
         parentRef: ref,
-      });
-      // A pergunta nasce como cópia da conversa de origem (fork nativo). Sem fork, a primeira mensagem leva o recorte
-      // do histórico e a tela avisa o motivo. A origem não é tocada em nenhum dos dois caminhos.
-      const fork = await forkSideChat(id);
+      };
+      // Uma tentativa recusada reaproveita a conversa que ficou sem mensagem: não cria outra vazia (ver `createFirstThread`).
+      const { id, reused } = await createFirstThread(creation);
+      // A pergunta nasce como cópia da conversa de origem (fork nativo), uma vez só. Sem fork, a primeira mensagem leva o
+      // recorte do histórico e a tela avisa o motivo. A origem não é tocada em nenhum dos dois caminhos.
+      const fork = reused ? { mode: "excerpt" as const } : await forkSideChat(id);
+      const sent = messageFor(threadKey(id), sideChatFirstMessage(fork.mode, items, question), attachments);
+      // A pergunta só troca o rascunho pela conversa depois de o backend aceitar a primeira mensagem; recusada, o texto fica na caixa.
+      const accepted = await sendToThread(id, sent.text, (message) => setError(message), undefined, sent.images);
+      if (!accepted) return false;
+      firstMessageAccepted(creation);
       setSelectedId(id);
       setDraft(null);
-      const sent = messageFor(threadKey(id), sideChatFirstMessage(fork.mode, items, question), attachments);
-      sendToThread(id, sent.text, (message) => setError(message), undefined, sent.images);
       return true;
     } catch (cause) {
       setError(String(cause));
@@ -180,11 +185,7 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
     setError(null);
     try {
       await chatSideChatDelete(thread.id);
-      useStructured.setState((state) => ({
-        threads: state.threads.filter((row) => row.id !== thread.id),
-        live: Object.fromEntries(Object.entries(state.live).filter(([id]) => id !== thread.id)),
-        hydrated: Object.fromEntries(Object.entries(state.hydrated).filter(([id]) => id !== thread.id)),
-      }));
+      removeDeletedSideChat(thread.id);
       if (selectedId === thread.id) setSelectedId(null);
     } catch (cause) {
       setError(String(cause));
@@ -231,11 +232,7 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
               (selectedId === row.id ? "bg-gray-100 dark:bg-white/[0.08] text-gray-900 dark:text-white" : "text-gray-500 dark:text-white/50")}>
               <button type="button" onClick={() => { if (row.state === "settled") settleThread(row.id, false); setSelectedId(row.id); setDraft(null); }}
                 className="min-w-0 h-full px-2 truncate" title={row.title}>{row.title || t("chat.sideChat.title")}</button>
-              <button type="button" onClick={() => void remove(row)} disabled={live[row.id]?.phase === "working"}
-                aria-label={t("chat.sideChat.delete")} title={t("chat.sideChat.delete")}
-                className="w-5 h-full grid place-items-center text-gray-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40">
-                <XIcon className="w-3 h-3" />
-              </button>
+              <SideChatRowDelete id={row.id} label={t("chat.sideChat.delete")} onDelete={() => void remove(row)} />
             </div>
           ))}
         </nav>
@@ -253,5 +250,20 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
           agents={agents} draft={draftValue} originAccess={originAccess} busy={loading} onDraftChange={setDraft} onSubmit={create} />
       )}
     </div>
+  );
+}
+
+/**
+ * O Apagar de uma pergunta da lista. Assina só a fase dela (igualdade rasa): a linha desabilita quando a própria
+ * conversa trabalha, mesmo que outra conversa seja a selecionada e mude de fase.
+ */
+function SideChatRowDelete({ id, label, onDelete }: { id: string; label: string; onDelete: () => void }) {
+  const working = useStructured((s) => s.live[id]?.phase === "working");
+  return (
+    <button type="button" onClick={onDelete} disabled={working}
+      aria-label={label} title={label}
+      className="w-5 h-full grid place-items-center text-gray-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40">
+      <XIcon className="w-3 h-3" />
+    </button>
   );
 }

@@ -57,20 +57,21 @@ pub async fn preview_capture<R: Runtime>(webview: Webview<R>) -> Result<Response
 /// En la carpeta temporal del sistema y no en el proyecto: dentro del workspace aparecería
 /// en git, y cualquier agente de la máquina puede leer la temporal.
 #[tauri::command]
-pub fn preview_save_capture(request: Request<'_>) -> Result<String, String> {
+pub async fn preview_save_capture(request: Request<'_>) -> Result<String, String> {
     // De quién es la foto. Va por cabecera porque el cuerpo es el PNG crudo, y termina en
     // el NOMBRE del archivo: con dos agentes sacando fotos de la misma página, que la ruta
     // diga de quién es evita que uno abra la del otro.
     let tag = request.headers().get(TAG_HEADER).and_then(|v| v.to_str().ok()).map(slug);
-    let path = match request.body() {
-        InvokeBody::Raw(png) => save_capture(&capture_dir(), png, tag.as_deref(), SystemTime::now())?,
+    let png: Vec<u8> = match request.body() {
+        InvokeBody::Raw(png) => png.clone(),
         // Si el webview no deja usar el protocolo del IPC, Tauri cae a `postMessage` y los
         // bytes llegan como una lista de números.
-        InvokeBody::Json(value) => {
-            let png: Vec<u8> = serde_json::from_value(value.clone()).map_err(|_| "la captura tiene que llegar como bytes".to_string())?;
-            save_capture(&capture_dir(), &png, tag.as_deref(), SystemTime::now())?
-        }
+        InvokeBody::Json(value) => serde_json::from_value(value.clone()).map_err(|_| "la captura tiene que llegar como bytes".to_string())?,
     };
+    // Escribir el PNG en disco va fuera del hilo principal.
+    let path = tauri::async_runtime::spawn_blocking(move || save_capture(&capture_dir(), &png, tag.as_deref(), SystemTime::now()))
+        .await
+        .map_err(|e| e.to_string())??;
     Ok(path.to_string_lossy().into_owned())
 }
 

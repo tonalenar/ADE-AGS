@@ -9,6 +9,7 @@ import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { sendAutonomous } from "@/features/terminal/safeWrite";
 
 import { chatCommand } from "../chatModel";
 import { addSurface, useChatStore } from "../store";
@@ -331,8 +332,12 @@ export function sendToMember(ref: string, text: string, done?: { onSent?: () => 
     sendToThread(thread, text, done?.onError, done?.onSent, images, fastMode);
     return;
   }
-  sendWhenReady(ref, text);
-  done?.onSent?.();
+  // "Enviada" só quando o terminal do integrante aceitou a entrada. Se ela não entrar, o erro aparece ao
+  // orquestrador (A074).
+  sendWhenReady(ref, text, {
+    onSent: () => done?.onSent?.(),
+    onFailed: () => done?.onError?.(i18n.t("team.send.notDelivered")),
+  });
 }
 
 /** O interruptor «não decidir sozinho» do time: desligado (`enabled = false`), toda permissão espera pela pessoa. */
@@ -384,7 +389,9 @@ export function sendDirect(orchestrator: string, member: string, text: string, p
 }
 
 async function finishLink(teamId: string, ref: string, briefing: string): Promise<void> {
-  sendToMember(ref, briefing);
+  // O briefing é do app: numa aba passa pela guarda; numa conversa por protocolo não há TUI para apertar Enter.
+  if (threadIdOf(ref)) sendToMember(ref, briefing);
+  else sendAutonomous(ref, briefing, "peer");
   const teams = await reloadTeams();
   const team = teams.find((t) => t.id === teamId);
   if (team) await syncTeamCanvas(team);

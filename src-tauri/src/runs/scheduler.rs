@@ -5,8 +5,8 @@
 //! de la base, marca las elegidas antes de soltarlo y recién después las lanza — así dos
 //! ticks seguidos no despachan la misma tarea dos veces.
 
-use std::collections::HashMap;
-use std::sync::{Condvar, Mutex};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Condvar, Mutex, TryLockError};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
@@ -94,6 +94,9 @@ lazy_static::lazy_static! {
     static ref TICK: Mutex<()> = Mutex::new(());
     /// Cuántas veces cambió cada run. `run_await` espera a que el número se mueva.
     static ref CHANGES: (Mutex<HashMap<String, u64>>, Condvar) = (Mutex::new(HashMap::new()), Condvar::new());
+    /// Runs com um rollback ou uma restauração de foto em andamento. Enquanto o run está aqui, o tick não despacha nada
+    /// dele. Lock próprio e curto: quem mexe nele já tem o TICK (ou só o toma para desmarcar, sem I/O).
+    static ref MANUTENCAO: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
 }
 
 /// Anota que el run cambió y despierta a quien esté esperando.
@@ -134,10 +137,44 @@ fn db_of(app: &AppHandle) -> Option<DbConnection> {
     app.try_state::<DbConnection>().map(|s| s.inner().clone())
 }
 
+/// El lock de `tick`. Quien cambia un run por fuera del agendador (rollback y restauración de foto) lo toma también:
+/// así la checagem de tareas vivas y la restauración de archivos no corren junto con un despacho.
+pub(super) fn tick_lock() -> std::sync::MutexGuard<'static, ()> {
+    TICK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Como `tick_lock`, sem esperar: `None` se o TICK já está tomado por outro.
+pub(super) fn try_tick_lock() -> Option<std::sync::MutexGuard<'static, ()>> {
+    match TICK.try_lock() {
+        Ok(guard) => Some(guard),
+        Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+        Err(TryLockError::WouldBlock) => None,
+    }
+}
+
+/// Marca o run como em manutenção. `false` se ele já estava marcado (outro rollback ou restauração em curso).
+pub(super) fn marcar_manutencao(run_id: &str) -> bool {
+    MANUTENCAO.lock().unwrap_or_else(|e| e.into_inner()).insert(run_id.to_string())
+}
+
+/// Tira a marca de manutenção do run.
+pub(super) fn desmarcar_manutencao(run_id: &str) {
+    MANUTENCAO.lock().unwrap_or_else(|e| e.into_inner()).remove(run_id);
+}
+
+/// O run está em manutenção agora? Enquanto estiver, o tick não despacha nada dele.
+pub(super) fn em_manutencao(run_id: &str) -> bool {
+    MANUTENCAO.lock().unwrap_or_else(|e| e.into_inner()).contains(run_id)
+}
+
 /// Despacha lo que le toque al run y cierra lo que ya no va a correr.
 pub fn tick(app: &AppHandle, run_id: &str) {
     let Some(db) = db_of(app) else { return };
-    let _one = TICK.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = tick_lock();
+    // Rollback ou restauração em curso neste run: ele mesmo decide quando as tarefas voltam à fila (ver `checkpoints`).
+    if em_manutencao(run_id) {
+        return;
+    }
 
     let mut mission_changed = None;
     let (to_launch, skipped, shadow) = {
@@ -375,6 +412,30 @@ pub fn on_task_finished(app: &AppHandle, task_id: &str) {
     tick(app, &run_id);
     // Terminar libera un lugar en su cuenta, y puede haber tareas de otros runs esperándolo.
     wake_waiting(app, &run_id);
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    #[test]
+    fn reroute_dispara_o_tick_em_thread_de_trabalho() {
+        let source = include_str!("mod.rs");
+        let reroute = source
+            .split("pub async fn reroute(")
+            .nth(1)
+            .expect("reroute precisa existir")
+            .split("/// Lo mismo con la asignación")
+            .next()
+            .expect("o corpo de reroute precisa terminar antes de reroute_to");
+
+        assert!(
+            reroute.contains("spawn_blocking(move || scheduler::tick"),
+            "reroute precisa despachar scheduler::tick fora da thread do runtime"
+        );
+        assert!(
+            !reroute.contains("scheduler::tick(app,"),
+            "reroute não pode travar a thread do runtime em scheduler::tick"
+        );
+    }
 }
 
 /// La cuenta de una tarea falló: queda fuera del ruteo (hasta que se reinicie su ventana o

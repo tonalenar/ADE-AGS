@@ -66,7 +66,8 @@ export function formatElement(entry: MarkedEntry, index: number, toDisplayUrl: (
   }
 
   const el = entry.element;
-  const name = el.name ? ` "${el.name}"` : "";
+  // Nombre, atributos y valor los escribe la página: una sola línea cada uno, para que no finjan líneas del informe.
+  const name = el.name ? ` "${oneLine(el.name)}"` : "";
   const states = el.states.length > 0 ? ` [${el.states.join("] [")}]` : "";
   lines.push(`${index}. ${el.role}${name} [ref=${el.ref}]${states}`);
   lines.push(`   selector: ${el.selector}`);
@@ -80,10 +81,10 @@ export function formatElement(entry: MarkedEntry, index: number, toDisplayUrl: (
   lines.push(`   box: ${where}, ${visibility}`);
   const styles = Object.entries(el.styles).map(([k, v]) => `${k}:${v}`).join(" · ");
   if (styles) lines.push(`   styles: ${styles}`);
-  const attributes = Object.entries(el.attributes).map(([k, v]) => `${k}="${v}"`).join(" ");
+  const attributes = Object.entries(el.attributes).map(([k, v]) => `${k}="${oneLine(v)}"`).join(" ");
   if (attributes) lines.push(`   attributes: ${attributes}`);
   if (el.classes.length > 0) lines.push(`   classes: ${el.classes.join(" ")}`);
-  if (el.value !== undefined) lines.push(`   value: "${el.value}"`);
+  if (el.value !== undefined) lines.push(`   value: "${oneLine(el.value)}"`);
   if (el.text && el.text !== el.name) lines.push(`   text: "${oneLine(el.text)}"`);
   lines.push(`   html: ${clip(oneLine(el.html), 600)}`);
   return lines.join("\n");

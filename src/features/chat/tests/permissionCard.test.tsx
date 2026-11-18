@@ -50,6 +50,13 @@ afterEach(async () => {
 });
 
 describe("cartão de permissão no fio", () => {
+  it("pedido cuja resposta falhou mostra o aviso e segue com os botões (rodada 2)", async () => {
+    await render(<PermissionCard ask={{ ...ask, errorKey: "chat.permission.answerFailed" }} terminal />);
+    const alert = host.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("chat.permission.answerFailed");
+    expect(button("chat.permission.allow")).toBeDefined();
+  });
+
   it("mostra o comando, onde, a rede e o que mexe; cada botão responde", async () => {
     await render(<PermissionCard ask={ask} terminal />);
     expect(host.textContent).toContain("chat.permission.titleCommand");
@@ -79,11 +86,16 @@ describe("cartão de permissão no fio", () => {
     expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "deny", "use o pnpm");
   });
 
-  it("N nega e ⏎ permite com o foco fora de um campo", async () => {
+  it("N nega de fora de um campo; ⏎ só permite com o foco dentro do cartão (A161)", async () => {
     await render(<PermissionCard ask={ask} terminal />);
     await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true })); });
     expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "deny");
+    // Foco no corpo da página: ⏎ não aprova (quem aperta pode nem estar vendo o pedido).
     await act(async () => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    expect(store.answerAsk).not.toHaveBeenCalledWith(ask, "allow");
+    // Foco dentro do cartão: ⏎ permite.
+    const card = host.querySelector("[data-permission-dock]") as HTMLElement;
+    await act(async () => { card.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
     expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "allow");
   });
 

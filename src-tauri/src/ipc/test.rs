@@ -3976,7 +3976,7 @@ mod autorizacao {
         abriu: &[(&str, &str)],
     ) -> Result<Value, String> {
         let boards = mundo();
-        authz::authorize(comando, &args, || quem, || boards, &|id| {
+        authz::authorize(comando, &args, || quem, || Ok(boards), &|id| {
             abriu
                 .iter()
                 .find(|(r, _)| *r == id)
@@ -4148,7 +4148,7 @@ mod autorizacao {
                     chamadas.set(chamadas.get() + 1);
                     Err("sem identidade".into())
                 },
-                || boards,
+                || Ok(boards),
                 &|_| None,
             );
             assert_eq!(saida.unwrap(), args, "{metodo}");
@@ -5287,7 +5287,7 @@ mod autorizacao {
                 json!({ "nodes": { "solta": {}, "m2": {} }, "orchestrators": ["m1"] }),
             )
             .unwrap();
-            Boards::from([("/a".to_string(), a), ("/b".to_string(), b)])
+            Ok(Boards::from([("/a".to_string(), a), ("/b".to_string(), b)]))
         };
         let pede = |quem: &str| {
             authz::authorize(
@@ -5317,7 +5317,7 @@ mod autorizacao {
                 json!({ "nodes": { "lead-b": {}, "m-b": {} }, "orchestrators": ["lead-b"] }),
             )
             .unwrap();
-            Boards::from([("/a".to_string(), a), ("/b".to_string(), b)])
+            Ok(Boards::from([("/a".to_string(), a), ("/b".to_string(), b)]))
         };
         let pede = |quem: &str| {
             authz::authorize(

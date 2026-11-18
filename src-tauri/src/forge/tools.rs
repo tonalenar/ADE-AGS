@@ -300,7 +300,14 @@ async fn call(app: &AppHandle, cwd: &str, name: &str, args: &Value) -> Result<St
             // Dentro de un repo con cuenta, la de ese repo; si no, todas.
             let accounts = match target(app, cwd).await.ok().and_then(|t| t.account) {
                 Some(a) => vec![a],
-                None => store::list(&db(app)?.lock().unwrap()).into_iter().filter(|a| a.kind.has_api()).collect(),
+                None => {
+                    let conn = db(app)?;
+                    crate::database::blocking_db(&conn, |conn| Ok(store::list(conn)))
+                        .await?
+                        .into_iter()
+                        .filter(|a| a.kind.has_api())
+                        .collect()
+                }
             };
             if accounts.is_empty() {
                 return Err(ForgeError::NoAccount("any host".into()));

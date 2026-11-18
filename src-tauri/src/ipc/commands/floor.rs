@@ -27,17 +27,19 @@ fn me(app: &AppHandle, args: &Value) -> Result<OpenTab, String> {
 
 pub(super) fn floor_list(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let me = me(app, args)?;
-    let list = floors::list_for(&me.cwd);
+    let list = floors::list_for(&me.cwd)?;
+    let all = floors::all()?;
     Ok(json!({
         "ground": list.ground,
-        "here": floors::all().iter().find(|f| floors::norm(&f.cwd) == floors::norm(&me.cwd)).map(|f| f.name.clone()),
+        "here": all.iter().find(|f| floors::norm(&f.cwd) == floors::norm(&me.cwd)).map(|f| f.name.clone()),
         "floors": list.floors.iter().map(describe).collect::<Vec<_>>(),
     }))
 }
 
 pub(super) fn floor_create(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let me = me(app, args)?;
-    if !crate::canvas::is_orchestrator(&crate::canvas::load_boards(), &me.id) {
+    let boards = crate::canvas::load_boards()?;
+    if !crate::canvas::is_orchestrator(&boards, &me.id) {
         return Err("Só um orquestrador cria andares. O usuário marca um agente como orquestrador no canvas (coroa no cabeçalho do nó).".into());
     }
     let floor = floors::create(&me.cwd, &arg_str(args, "name")?, arg_str_opt(args, "from").as_deref())?;
@@ -49,7 +51,7 @@ pub(super) fn floor_create(app: &AppHandle, args: &Value) -> Result<Value, Strin
 /// Dónde se recluta: la carpeta del piso pedido, o la planta baja. `None` = donde está quien
 /// recluta.
 pub(crate) fn recruit_cwd(me_cwd: &str, wanted: &str) -> Result<String, String> {
-    let all = floors::all();
+    let all = floors::all()?;
     let ground = floors::ground_for(&all, me_cwd);
     if is_ground_word(wanted) {
         return Ok(ground);
