@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { uiErrorText } from "@/shared/uiErrorText";
+
 import * as ipc from "./ipc";
 import { applyPrefs, collectPrefs } from "./prefs";
 import type { SyncReport, SyncStatus } from "./types";
@@ -36,7 +38,7 @@ export const useSyncStore = create<SyncState>()((set, get) => ({
       applyPrefs(result.prefs, get().setTheme);
       set({ report: result.report });
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: uiErrorText(e) });
     } finally {
       set({ running: false });
       get().load().catch(() => {});
@@ -48,7 +50,7 @@ export const useSyncStore = create<SyncState>()((set, get) => ({
     try {
       set({ status: await ipc.syncSetup(accountId, name) });
     } catch (e) {
-      set({ error: String(e), running: false });
+      set({ error: uiErrorText(e), running: false });
       return;
     }
     set({ running: false });
@@ -57,13 +59,23 @@ export const useSyncStore = create<SyncState>()((set, get) => ({
   },
 
   disconnect: async () => {
-    await ipc.syncDisconnect();
-    set({ report: null, error: null });
-    await get().load();
+    try {
+      await ipc.syncDisconnect();
+      set({ report: null, error: null });
+      await get().load();
+    } catch (e) {
+      set({ error: uiErrorText(e) });
+      throw e;
+    }
   },
 
   setAuto: async (auto) => {
-    await ipc.syncSetAuto(auto);
-    await get().load();
+    try {
+      await ipc.syncSetAuto(auto);
+      await get().load();
+    } catch (e) {
+      set({ error: uiErrorText(e) });
+      throw e;
+    }
   },
 }));

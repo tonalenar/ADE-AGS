@@ -70,7 +70,7 @@ describe("Design Canvas Integration & Regression Suite (Etapa 19 QA)", () => {
       {
         id: "be6ce1fb-b8e9-47e9-a2f0-78438e01fa1c",
         title: "Polir o bot - aura e acabamento",
-        workspace: "C:\\Users\\tonz1n\\.ags\\worktrees\\8c1e293f",
+        workspace: "C:\\Users\\qa\\.ags\\worktrees\\8c1e293f",
         missionId,
         ownerTabId: null,
         status: "approved",
@@ -78,7 +78,7 @@ describe("Design Canvas Integration & Regression Suite (Etapa 19 QA)", () => {
       {
         id: "8fa79850-678c-493f-a8f1-915f4022ce95",
         title: "Polir o bot - aura e acabamento",
-        workspace: "C:\\Users\\tonz1n\\.ags\\worktrees\\8c1e293f",
+        workspace: "C:\\Users\\qa\\.ags\\worktrees\\8c1e293f",
         missionId,
         ownerTabId: deadOwnerTabId,
         status: "draft",

@@ -296,9 +296,15 @@ function formatBinding(binding: ShortcutBinding): string {
   return [...mods, keyDisplay(binding.key)].join("+");
 }
 
+let shortcutsMemo: { prefs: ReturnType<typeof useShortcutPreferences.getState>; project: string; list: Shortcut[] } | null = null;
+
 /** Atalhos efetivos, combinando defaults e preferências locais validadas. */
 export function getShortcuts(projectContext?: { cwd: string | null; scripts: ReturnType<typeof loadChatProjectScripts> }): Shortcut[] {
-  const { bindings: overrides, conditions, contextualRules } = useShortcutPreferences.getState();
+  const prefs = useShortcutPreferences.getState();
+  const { bindings: overrides, conditions, contextualRules } = prefs;
+  const projectCwdHint = projectContext?.cwd ?? activeProjectScriptCwd();
+  const projectKey = `${projectCwdHint ?? ""}|${(projectContext?.scripts ?? []).map((script) => script.id).join(",")}`;
+  if (shortcutsMemo && shortcutsMemo.prefs === prefs && shortcutsMemo.project === projectKey) return shortcutsMemo.list;
   const resolved: Shortcut[] = [];
   for (const shortcut of SHORTCUTS) {
     if (Object.prototype.hasOwnProperty.call(overrides, shortcut.id) && overrides[shortcut.id] === null) {
@@ -375,6 +381,7 @@ export function getShortcuts(projectContext?: { cwd: string | null; scripts: Ret
       });
     }
   }
+  shortcutsMemo = { prefs, project: projectKey, list: all };
   return all;
 }
 

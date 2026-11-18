@@ -13,6 +13,7 @@ import {
   AUTO_SETTING, CHANGED_EVENT, tabCheckpointCreate, tabCheckpointDiff, tabCheckpointRestore,
   tabCheckpointsDelete, tabCheckpointsList,
 } from "./ipc";
+import { persistCheckpointAuto } from "./autoToggle";
 import { authorKey, describeBlockers, diffTone, kindKey } from "./model";
 import type { CheckpointDiff, TabCheckpoint } from "./types";
 
@@ -63,8 +64,8 @@ export function CheckpointsDialog({ tab, onClose }: { tab: Tab; onClose: () => v
   });
 
   const toggleAuto = (on: boolean) => {
-    setAuto(on);
-    setSetting(AUTO_SETTING, on ? "1" : "0").catch((e) => setError(String(e)));
+    void persistCheckpointAuto(on, setAuto, (v) => setSetting(AUTO_SETTING, v ? "1" : "0"))
+      .then((out) => { if (!out.ok) setError(String(out.error)); });
   };
 
   const restore = (cp: TabCheckpoint) => run(cp.id, async () => {

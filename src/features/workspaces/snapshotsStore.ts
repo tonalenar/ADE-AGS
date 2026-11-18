@@ -10,6 +10,8 @@ interface SnapshotsState {
   save: (cwd: string, workspaceId: string, tabs: ipc.SnapshotTab[]) => Promise<void>;
   /** Lo devuelve y lo olvida: reabrir consume el recuerdo. */
   take: (cwd: string) => Promise<WorkspaceSnapshot | null>;
+  /** Lê sem apagar: a restauração só chama `take` depois. */
+  peek: (cwd: string) => Promise<WorkspaceSnapshot | null>;
   forget: (cwd: string) => Promise<void>;
 }
 
@@ -27,6 +29,11 @@ export const useSnapshotsStore = create<SnapshotsState>((set, get) => ({
   save: async (cwd, workspaceId, tabs) => {
     await ipc.saveWorkspaceSnapshot(cwd, workspaceId, tabs);
     await get().load();
+  },
+
+  peek: async (cwd) => {
+    await get().load();
+    return get().snapshots.find((s) => s.cwd === cwd) ?? null;
   },
 
   take: async (cwd) => {

@@ -16,6 +16,7 @@ describe("aviso do navegador ligado a um agente", () => {
       expect(notice.agent).toBe("a");
       expect(notice.text).toContain('"App"');
       expect(notice.text).toContain("http://localhost:5173");
+      expect(notice.text).toContain("<untrusted_data source=\"portal-url\">");
       expect(notice.text).toContain("ags portal snapshot");
     }
   });

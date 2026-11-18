@@ -105,8 +105,8 @@ export async function runProjectScript(cwd: string, name: string, commandText: s
  */
 export function runInShell(cwd: string, command: string): void {
   openShellPanel();
-  void ensureShellTab(cwd).then((tabId) => {
+  ensureShellTab(cwd).then((tabId) => {
     // Shell já vivo: vai direto. Recém-criado: espera o prompt aparecer e assentar.
     if (!runInTerminal(tabId, command)) sendWhenReady(tabId, command);
-  });
+  }, (e) => console.error("[chat] não abriu o terminal da conversa:", e));
 }

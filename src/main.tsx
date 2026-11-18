@@ -3,10 +3,8 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
-import { useEffect } from "react";
 import ReactDOM from "react-dom/client";
-import { ThemeProvider, useTheme } from "neogestify-ui-components";
-import { Boot } from "@/app/Boot.tsx";
+import { AppTree } from "@/app/AppTree";
 import { whenHomeCanPaint } from "@/app/bootGate";
 import { loadAgentRegistry } from "@/features/agents/registry";
 import "@/features/settings/fontPreferences";
@@ -17,13 +15,6 @@ import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { renderingInfo } from "@/shared/ipc/settings";
 import { reportBootStep } from "@/app/splash";
 import { installScaledMouseFix } from "@/features/terminal/scaledMouse";
-import { observeAppearanceMode } from "@/features/settings/appearanceMode";
-
-function AppearanceModeSync() {
-  const { setTheme } = useTheme();
-  useEffect(() => observeAppearanceMode(setTheme), [setTheme]);
-  return null;
-}
 
 // O bundle chegou: a abertura passa a "carregando os workspaces".
 reportBootStep(1);
@@ -69,9 +60,6 @@ const appReady = whenHomeCanPaint({ loadAgentRegistry, applyRendering: () => ren
 // tela mostraria as chaves. É um arquivo local; mesmo com falha a tela pinta (com as chaves).
 void i18nReady.finally(() => {
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-    <ThemeProvider>
-      <AppearanceModeSync />
-      <Boot appReady={appReady} />
-    </ThemeProvider>
+    <AppTree appReady={appReady} />,
   );
 });

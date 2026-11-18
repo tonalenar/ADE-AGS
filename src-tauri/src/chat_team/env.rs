@@ -28,10 +28,26 @@ pub fn thread_env(thread_id: &str) -> Vec<(String, OsString)> {
 
 /// Registra o processo do motor da conversa: é com o PID dele que o app reconhece, sem token, quem chama
 /// `sim act` e o computer use por esta conversa (`terminal::authorize_actor`).
-pub fn register_process(thread_id: &str, pid: Option<u32>) {
+pub fn register_process(thread_id: &str, pid: Option<u32>) -> Result<(), String> {
+    register_process_with(thread_id, pid, crate::terminal::register_conversation)
+}
+
+fn register_process_with(
+    thread_id: &str,
+    pid: Option<u32>,
+    register: impl FnOnce(&str, u32) -> Result<(), String>,
+) -> Result<(), String> {
+    let tab_id = format!("{THREAD_PREFIX}{thread_id}");
     if let Some(pid) = pid {
-        crate::terminal::register_conversation(&format!("{THREAD_PREFIX}{thread_id}"), pid);
+        if let Err(error) = register(&tab_id, pid) {
+            crate::terminal::discard_pending_conversation_token(&tab_id);
+            return Err(error);
+        }
+    } else {
+        crate::terminal::discard_pending_conversation_token(&tab_id);
+        return Err("Não foi possível confirmar o PID do processo desta conversa. O lançamento foi recusado.".into());
     }
+    Ok(())
 }
 
 /// O PATH com a pasta do executável do app no fim, se o `ags` estiver lá e ela ainda não estiver no
@@ -66,7 +82,7 @@ mod test {
         let token = value(&env, crate::terminal::SESSION_ENV).expect("a conversa recebe ADE_SESSION");
         // Antes de o motor ter PID, o token ainda não vale.
         assert!(crate::terminal::authorize(Some(&token), Some(&thread), Some(std::process::id())).is_err());
-        register_process(&id, Some(std::process::id()));
+        register_process(&id, Some(std::process::id())).unwrap();
         if crate::terminal::ancestry_required() {
             assert_eq!(crate::terminal::authorize(Some(&token), Some(&thread), Some(std::process::id())).unwrap(), thread);
             // Sem token, a conversa continua reconhecida pelo PID (sim act / desk act).
@@ -81,10 +97,10 @@ mod test {
         let id = format!("env-{}", uuid::Uuid::new_v4());
         let thread = format!("{THREAD_PREFIX}{id}");
         let first = value(&thread_env(&id), crate::terminal::SESSION_ENV).unwrap();
-        register_process(&id, Some(std::process::id()));
+        register_process(&id, Some(std::process::id())).unwrap();
         let second = value(&thread_env(&id), crate::terminal::SESSION_ENV).unwrap();
         assert_ne!(first, second);
-        register_process(&id, Some(std::process::id()));
+        register_process(&id, Some(std::process::id())).unwrap();
         assert!(crate::terminal::authorize(Some(&first), Some(&thread), None).unwrap_err().contains("não é reconhecida"));
         assert!(crate::terminal::authorize(Some(&second), Some(&thread), Some(std::process::id())).is_ok());
     }
@@ -94,7 +110,18 @@ mod test {
         let id = format!("env-{}", uuid::Uuid::new_v4());
         let thread = format!("{THREAD_PREFIX}{id}");
         let token = value(&thread_env(&id), crate::terminal::SESSION_ENV).unwrap();
-        register_process(&id, None);
+        assert!(register_process(&id, None).unwrap_err().contains("PID"));
         assert!(crate::terminal::authorize(Some(&token), Some(&thread), Some(std::process::id())).is_err());
+    }
+
+    #[test]
+    fn register_process_propaga_falha_com_mensagem_pt_br() {
+        let id = format!("env-falha-{}", uuid::Uuid::new_v4());
+        let error = register_process_with(&id, Some(42), |_, _| {
+            Err("Não foi possível ler o horário de início do processo desta conversa.".into())
+        })
+        .unwrap_err();
+
+        assert!(error.contains("horário de início"), "{error}");
     }
 }

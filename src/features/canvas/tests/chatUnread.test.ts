@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { JUMP_WINDOW_MS, countUnread, latest, shouldChime, shouldJump, unreadOf } from "../chatUnread";
+import { JUMP_WINDOW_MS, countUnread, latest, pruneSeen, shouldChime, shouldJump, unreadOf } from "../chatUnread";
 
 const m = (thread: string, kind: string, at: number) => ({ thread, kind, at });
 
@@ -37,6 +37,12 @@ describe("sonido de nueva respuesta", () => {
     expect(shouldChime({ blue: 2 }, { blue: 1 }, null)).toBe(false);
     expect(shouldChime({}, { blue: 1 }, "blue")).toBe(false);
     expect(shouldChime({ blue: 1 }, {}, null)).toBe(false);
+  });
+});
+
+describe("marca de visto", () => {
+  it("poda chaves de abas que já não existem", () => {
+    expect(pruneSeen({ "a|blue": 1, "b|red": 2, "a|green": 3 }, ["a"])).toEqual({ "a|blue": 1, "a|green": 3 });
   });
 });
 

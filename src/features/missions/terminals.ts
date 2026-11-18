@@ -543,6 +543,7 @@ export async function startMissionInTerminals(
           // Carência: o agente pode só estar iniciando (o Antigravity levou 15 s para a 1ª saída). Só avisa se continuar mudo.
           window.setTimeout(() => {
             if (!shouldWarnStalled(startup, actor)) return;
+            if (!useTabsStore.getState().tabs.some((t) => t.id === leadTabId)) return;
             void writeToAgent(leadTabId, `[AGS] ${actor} não mostrou atividade após o briefing (recebeu um Enter). Confirme se ele está trabalhando; se não, reenvie a tarefa dele com ags peer tell.`, { submit: true, source: "stalled" }).then((result) => mostraResultado(leadTabId, "stalled", result));
           }, STALL_GRACE_MS);
         },

@@ -441,10 +441,11 @@ pub(super) fn is_injected_context(text: &str) -> bool {
 /// Las líneas que no son mensajes (metadata, tool calls, deltas de streaming sin texto)
 /// se saltean solas al no tener rol + contenido textual.
 pub(super) fn extract_transcript(path: &Path) -> Vec<Turn> {
-    let Ok(parsed) = crate::missions::transcript_cache::read_incremental(path) else {
-        return Vec::new();
-    };
-    parse_transcript_values(parsed.lines.iter())
+    if let Ok(parsed) = crate::missions::transcript_cache::read_incremental(path) {
+        return parse_transcript_values(parsed.lines.iter());
+    }
+    let Ok(bytes) = std::fs::read(path) else { return Vec::new() };
+    parse_transcript(&String::from_utf8_lossy(&bytes))
 }
 
 /// Lê no máximo os 4 MiB mais recentes para o índice de busca. Exportação continua lendo

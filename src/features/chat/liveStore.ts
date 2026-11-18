@@ -64,10 +64,15 @@ export function startChatLive(): void {
   if (started) return;
   started = true;
   try {
+    // As abas que já tiveram um evento ao vivo ficam com o evento: a foto do backend pode ser mais antiga que ele.
+    const fromEvents = new Set<string>();
     invoke<StructuredSnapshot[]>("structured_state_all")
-      .then((all) => useChatLive.setState((s) => all.reduce(applyLiveState, s)))
+      .then((all) => useChatLive.setState((s) => all.filter((snap) => !fromEvents.has(snap.tabId)).reduce(applyLiveState, s)))
       .catch(() => undefined);
-    listen<StateEvent>("cc-structured-state", (e) => useChatLive.setState((s) => applyLiveState(s, e.payload))).catch(() => undefined);
+    listen<StateEvent>("cc-structured-state", (e) => {
+      fromEvents.add(e.payload.tabId);
+      useChatLive.setState((s) => applyLiveState(s, e.payload));
+    }).catch(() => undefined);
     listen<{ tabId: string; waiting: boolean; tool: string }>("cc-conversation-approval", (e) =>
       useChatLive.setState((s) => applyApproval(s, e.payload))).catch(() => undefined);
   } catch {

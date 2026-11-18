@@ -1,4 +1,4 @@
-import { Children, isValidElement, memo, useState, type ReactNode } from "react";
+import { Children, isValidElement, memo, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -42,9 +42,13 @@ function CodeBlock({ lang, children }: { lang: string; children: ReactNode }) {
     const text = textOf(children).replace(/\n$/, "");
     navigator.clipboard?.writeText(text).then(() => {
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
     }).catch(() => undefined);
   };
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
   return (
     <div className="group/code my-2 overflow-hidden rounded-lg border border-black/[0.08] bg-gray-50 dark:border-white/[0.08] dark:bg-surface-deep">
       <div className="flex h-7 items-center gap-2 border-b border-black/[0.08] pl-3 pr-1.5 dark:border-white/[0.08]">

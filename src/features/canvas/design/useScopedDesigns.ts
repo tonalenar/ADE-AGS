@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { designApi, onDesignChanged, type Design, type DesignDetail } from "./designApi";
-import { designsForBoard, freshDesigns } from "./scope";
+import { designsForBoardDetails, freshDesigns } from "./scope";
 
 export interface DesignScope { cwd: string | null; missionId: string | null }
 
@@ -14,6 +14,7 @@ export function useScopedDesigns(scope: DesignScope) {
   const [details, setDetails] = useState<DesignDetail[]>([]);
   const [notice, setNotice] = useState<Design | null>(null);
   const [unseen, setUnseen] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const known = useRef<Set<string> | null>(null);
   const seq = useRef(0);
   const scopeKey = `${scope.missionId ?? ""}|${scope.cwd ?? ""}`;
@@ -23,10 +24,10 @@ export function useScopedDesigns(scope: DesignScope) {
   const reload = useCallback(async () => {
     const mine = ++seq.current;
     try {
-      const list = designsForBoard(await designApi.list(), scopeRef.current);
-      const full = await Promise.all(list.map((d) => designApi.get(d.id).catch(() => null)));
+      const full = designsForBoardDetails(await designApi.listDetails(), scopeRef.current);
       if (mine !== seq.current) return;
-      setDetails(full.filter((d): d is DesignDetail => d !== null));
+      setDetails(full);
+      const list = full.map((d) => d.design);
       if (known.current) {
         const fresh = freshDesigns(known.current, list);
         if (fresh.length > 0) {
@@ -35,8 +36,10 @@ export function useScopedDesigns(scope: DesignScope) {
         }
       }
       known.current = new Set(list.map((d) => d.id));
+      setLoadError(null);
     } catch {
-      if (mine === seq.current) setDetails([]);
+      // Erro transitório: conserva as pranchetas que já estão na tela e avisa.
+      setLoadError("canvas.design.reloadFailed");
     }
   }, []);
 
@@ -44,14 +47,15 @@ export function useScopedDesigns(scope: DesignScope) {
     known.current = null; // o primeiro carregamento de um canvas só semeia: não avisa dos designs que já existiam
     setNotice(null);
     setUnseen(false);
+    setLoadError(null);
     setDetails([]);
     void reload();
   }, [scopeKey, reload]);
   useEffect(() => onDesignChanged(() => { void reload(); }), [reload]);
 
   return {
-    details, reload, notice, unseen,
-    dismissNotice: () => setNotice(null),
+    details, reload, notice, unseen, loadError,
+    dismissNotice: () => { setNotice(null); setLoadError(null); },
     markSeen: () => { setNotice(null); setUnseen(false); },
   };
 }

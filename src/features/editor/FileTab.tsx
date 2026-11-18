@@ -11,7 +11,10 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { relativeTo, type FileView } from "@/features/tabs/viewTabs";
 
 import { CodeEditor, type EditorHandle } from "./CodeEditor";
+import { applyDiskReload, dirtyAfterSuccessfulSave } from "./dirtySave";
 import { bannerForConflict, expectedVersionForSave } from "./fileVersion";
+import { uiErrorText } from "@/shared/uiErrorText";
+import { AlertaToast } from "@/shared/ui/alerts";
 import { fileStat, readFile, writeFile, type FileContent, type FileVersion } from "./ipc";
 import { isMarkdownPath, rememberMarkdownPreview } from "./markdown";
 import { useDocumentVisible } from "@/shared/useDocumentVisible";
@@ -77,18 +80,20 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
 
   const load = useCallback(async (intoEditor: boolean) => {
     const next = await readFile(view.path);
+    const skipEditor = dirty.current && intoEditor;
     if (next.kind === "text") {
-      version.current = next.version;
-      if (intoEditor && editor.current) editor.current.setDoc(next.content);
-      else setContent(next);
-      // Un agente reescribió el documento mientras se lee: la vista previa lo acompaña.
-      if (previewRef.current) setPreviewSource(next.content);
-    } else {
+      if (!skipEditor) version.current = next.version;
+      if (applyDiskReload(dirty.current, intoEditor) && editor.current) editor.current.setDoc(next.content);
+      else if (!skipEditor) setContent(next);
+      if (previewRef.current && !skipEditor) setPreviewSource(next.content);
+    } else if (!skipEditor) {
       setContent(next);
     }
-    setDirty(false);
-    setBanner(null);
-    setError(null);
+    if (!skipEditor) {
+      setDirty(false);
+      setBanner(null);
+      setError(null);
+    }
   }, [view.path, setDirty]);
 
   // Mover o renombrar el archivo desde el árbol cambia la ruta, no el contenido: con
@@ -125,14 +130,16 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
     if (!editor.current || saving) return;
     setSaving(true);
     try {
+      const docAtStart = editor.current.getDoc();
       const expected = expectedVersionForSave({ overwrite, deleted: banner === "deleted", version: version.current });
-      const outcome = await writeFile(view.path, editor.current.getDoc(), expected);
+      const outcome = await writeFile(view.path, docAtStart, expected);
       if (outcome.kind === "conflict") {
         setBanner(bannerForConflict(outcome));
       } else {
         version.current = outcome.version;
         ignoredVersion.current = null;
-        setDirty(false);
+        const stillDirty = dirtyAfterSuccessfulSave(docAtStart, editor.current.getDoc());
+        setDirty(stillDirty);
         setBanner(null);
       }
     } catch (e) {
@@ -225,7 +232,7 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
         <Tooltip content={t("explorer.reveal")} placement="bottom">
           <Button
             variant="icon"
-            onClick={() => revealItemInDir(view.path).catch(console.error)}
+            onClick={() => revealItemInDir(view.path).catch((e) => AlertaToast(t("explorer.reveal"), uiErrorText(e), "error", 5000))}
             aria-label={t("explorer.reveal")}
             className="cc-t flex items-center justify-center w-6 h-6 p-0 rounded-md
               text-gray-400 dark:text-white/35 hover:text-gray-700 dark:hover:text-white
@@ -298,7 +305,7 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
             title={t(content.kind === "binary" ? "editor.binary" : "editor.tooLarge")}
             description={formatBytes(content.size)}
             action={
-              <Button size="sm" variant="outline" onClick={() => openPath(view.path).catch(console.error)}>
+              <Button size="sm" variant="outline" onClick={() => openPath(view.path).catch((e) => AlertaToast(t("editor.openExternal"), uiErrorText(e), "error", 5000))}>
                 {t("editor.openExternal")}
               </Button>
             }

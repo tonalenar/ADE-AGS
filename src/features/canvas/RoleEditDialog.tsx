@@ -11,6 +11,7 @@ import { useSquadAccountLabel } from "@/features/squads/accountLabel";
 import { claudeEffortLevels, modelsForAccount, reasoningOptions } from "@/features/squads/modelSelection";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type Tab } from "@/features/tabs/types";
+import { activeTabIds } from "@/features/terminal/activity";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
@@ -77,7 +78,7 @@ export function RoleEditDialog({ name, label, subagent, tab, tunable = true, onC
   const save = async () => {
     if (isAgent && tuningChanged(before, effort, fast)) {
       // Reiniciar no meio de um turno o interrompe: pergunta antes.
-      if (isWorking(screenOf(tab.id)?.lines ?? [])) {
+      if (isWorking(screenOf(tab.id)?.lines ?? []) || activeTabIds().includes(tab.id)) {
         const ok = await appConfirm({
           title: t("role.editTitle"), lead: t("role.restartConfirm", { name }),
           confirmLabel: t("role.restartApply"), cancelLabel: t("role.restartBack"),

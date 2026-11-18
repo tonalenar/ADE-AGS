@@ -391,6 +391,7 @@ export function FilesView({ cwd, repo, title }: {
   // archivos, y la página no ve ninguno.
 
   const hoverTimer = useRef<{ dir: string; id: number } | null>(null);
+  const dragDetach = useRef<(() => void) | null>(null);
   const clearHover = () => {
     if (hoverTimer.current) window.clearTimeout(hoverTimer.current.id);
     hoverTimer.current = null;
@@ -437,9 +438,7 @@ export function FilesView({ cwd, repo, title }: {
     };
 
     const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
+      detach();
       clearHover();
       if (!dragging) return;
       justDragged.current = true;
@@ -459,13 +458,20 @@ export function FilesView({ cwd, repo, title }: {
         }
       }, [dir, parentDir(done.path)]);
     };
+    const detach = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      dragDetach.current = null;
+    };
 
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
+    dragDetach.current = detach;
   };
 
-  useEffect(() => clearHover, []);
+  useEffect(() => () => { clearHover(); dragDetach.current?.(); }, []);
 
   // ── Dibujo ───────────────────────────────────────────────────────────────────────────
 

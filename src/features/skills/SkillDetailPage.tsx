@@ -18,6 +18,7 @@ import {
 import { useSkillsStore } from "@/features/skills/store";
 import { ChatSwitch } from "@/features/settings/SettingsSection";
 import { openExternalUrl } from "@/shared/openExternalUrl";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 import { alwaysOnSkills, setSkillAlwaysOn } from "./ipc";
 
@@ -104,7 +105,7 @@ export function SkillDetailPage() {
       await setSkillAlwaysOn(id, next);
       setAlwaysOn(next);
     } catch (e) {
-      setError(String(e));
+      setError(uiErrorText(e));
     }
   };
 
@@ -114,7 +115,7 @@ export function SkillDetailPage() {
     setLoading(true);
     setError("");
     load(id, () => alive)
-      .catch((e) => { if (alive) setError(String(e)); })
+      .catch((e) => { if (alive) setError(uiErrorText(e)); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -131,7 +132,7 @@ export function SkillDetailPage() {
       await updateSkillContent(id, applyName(content, name));
       await load(id);
     } catch (e) {
-      setError(String(e));
+      setError(uiErrorText(e));
     } finally {
       setSaving(false);
     }
@@ -148,7 +149,7 @@ export function SkillDetailPage() {
       const copy = await forkSkill(id, name !== savedName ? name : undefined, content);
       navigate(`/skills/${copy.id}`);
     } catch (e) {
-      setError(String(e));
+      setError(uiErrorText(e));
     } finally {
       setSaving(false);
     }

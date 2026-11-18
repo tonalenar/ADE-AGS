@@ -32,7 +32,7 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
         .trim_end_matches(['\r', '\n'])
         .into())
 }
-fn integration(c: &rusqlite::Connection, mission: &str) -> Result<(String, PathBuf), String> {
+fn integration_refs(c: &rusqlite::Connection, mission: &str) -> Result<(String, PathBuf), String> {
     let (branch, path) =
         super::review::integration_path(c, mission)?.ok_or("missions.conflicts.noIntegration")?;
     let root = PathBuf::from(path)
@@ -43,14 +43,17 @@ fn integration(c: &rusqlite::Connection, mission: &str) -> Result<(String, PathB
         .join(".ags/worktrees")
         .canonicalize()
         .map_err(|e| e.to_string())?;
-    if !root.starts_with(&base)
-        || root == base
-        || !branch.starts_with("cc/")
-        || git(&root, &["symbolic-ref", "--short", "HEAD"])? != branch
-    {
+    if !root.starts_with(&base) || root == base || !branch.starts_with("cc/") {
         return Err("integration ownership mismatch".into());
     }
     Ok((branch, root))
+}
+
+fn verify_integration(root: &Path, branch: &str) -> Result<(), String> {
+    if git(root, &["symbolic-ref", "--short", "HEAD"])? != branch {
+        return Err("integration ownership mismatch".into());
+    }
+    Ok(())
 }
 fn paths(root: &Path) -> Result<Vec<String>, String> {
     Ok(
@@ -123,7 +126,8 @@ pub async fn mission_conflicts(
 ) -> Result<IntegrationConflicts, String> {
     tauri::async_runtime::spawn_blocking(move || {
         // Só a leitura da integração com o banco aberto; o git roda com o lock solto.
-        let (branch, root) = { let db = app.state::<crate::database::DbConnection>(); let c = db.lock().map_err(|e| e.to_string())?; integration(&c, &mission_id)? };
+        let (branch, root) = { let db = app.state::<crate::database::DbConnection>(); let c = db.lock().map_err(|e| e.to_string())?; integration_refs(&c, &mission_id)? };
+        verify_integration(&root, &branch)?;
         read(&root, branch, &mission_id)
     })
     .await
@@ -140,7 +144,8 @@ pub async fn mission_resolve_conflict(
         if has_markers(&content) || content.len() > 2 * 1024 * 1024 {
             return Err("missions.conflicts.markersRemain".into());
         }
-        let (branch, root) = { let db = app.state::<crate::database::DbConnection>(); let c = db.lock().map_err(|e| e.to_string())?; integration(&c, &mission_id)? };
+        let (branch, root) = { let db = app.state::<crate::database::DbConnection>(); let c = db.lock().map_err(|e| e.to_string())?; integration_refs(&c, &mission_id)? };
+        verify_integration(&root, &branch)?;
         git(&root, &["rev-parse", "--verify", "MERGE_HEAD"])?;
         if !paths(&root)?.contains(&path) {
             return Err("file is not an unresolved conflict".into());
@@ -163,7 +168,8 @@ pub async fn mission_conclude_merge(
     abort: Option<bool>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let (_, root) = { let db = app.state::<crate::database::DbConnection>(); let c = db.lock().map_err(|e| e.to_string())?; integration(&c, &mission_id)? };
+        let (branch, root) = { let db = app.state::<crate::database::DbConnection>(); let c = db.lock().map_err(|e| e.to_string())?; integration_refs(&c, &mission_id)? };
+        verify_integration(&root, &branch)?;
         git(&root, &["rev-parse", "--verify", "MERGE_HEAD"])?;
         if abort.unwrap_or(false) {
             git(&root, &["merge", "--abort"])?;

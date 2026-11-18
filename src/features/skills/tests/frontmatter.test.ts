@@ -52,4 +52,3 @@ describe("applyName", () => {
     expect(out).toContain("\r\n");
   });
 });
-

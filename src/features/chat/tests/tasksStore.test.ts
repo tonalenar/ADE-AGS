@@ -99,4 +99,18 @@ describe("guardar entre aberturas", () => {
     await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
     expect(invokeMock.calls("db_set_setting")).toHaveLength(1);
   });
+
+  it("uma gravação recusada pelo banco tenta de novo depois do prazo, sem esperar outra mudança", async () => {
+    vi.useFakeTimers();
+    invokeMock.on("db_get_setting", () => null);
+    invokeMock.once("db_set_setting", () => { throw new Error("banco ocupado"); });
+    invokeMock.on("db_set_setting", () => undefined);
+    startTasks();
+    await vi.advanceTimersByTimeAsync(0);
+    receiveTask("th-2", { op: "started", taskId: "b", at: 1, title: "y" });
+    await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
+    expect(invokeMock.calls("db_set_setting")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS);
+    expect(invokeMock.calls("db_set_setting")).toHaveLength(2);
+  });
 });

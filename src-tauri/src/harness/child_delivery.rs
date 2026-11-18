@@ -613,6 +613,27 @@ fn one_line(raw: &str) -> String {
     raw.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Impede que o texto do filho feche ou abra um envelope: `<` e `>` das tags viram parênteses ocos.
+fn defang(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while !rest.is_empty() {
+        let lower = rest.to_ascii_lowercase();
+        if lower.starts_with("</untrusted_data") {
+            out.push_str("</untrusted-data");
+            rest = &rest["</untrusted_data".len()..];
+        } else if lower.starts_with("<untrusted_data") {
+            out.push_str("<untrusted-data");
+            rest = &rest["<untrusted_data".len()..];
+        } else {
+            let ch = rest.chars().next().unwrap();
+            out.push(ch);
+            rest = &rest[ch.len_utf8()..];
+        }
+    }
+    out
+}
+
 /// O texto do aviso: o cabeçalho do sistema, o desfecho e o resultado do filho dentro de um envelope de
 /// dado não confiável. Uma linha só, no máximo `RESULT_MAX_CHARS` do resultado.
 pub fn notice_text(watch: &Watch, end: &End) -> String {

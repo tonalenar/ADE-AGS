@@ -7,6 +7,7 @@
  * rescatan solo `src` y `alt`: el resto del HTML sigue sin interpretarse.
  */
 export function htmlImagesToMarkdown(text: string): string {
+  if (!text.toLowerCase().includes("<img")) return text;
   // Lo que está en código se muestra tal cual: es justamente cómo se escribe una etiqueta
   // para que se lea.
   return text

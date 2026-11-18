@@ -50,13 +50,19 @@ pub struct Doc {
     pub body: String,
 }
 
-pub(crate) const DOCS_AT_SQL:&str="WITH valid AS (
+pub(crate) fn docs_at_sql(fail_closed: bool) -> String {
+    format!(
+        "WITH valid AS (
  SELECT e.id,e.scope,e.key,r.kind,r.priority,r.body,r.operation,
  ROW_NUMBER() OVER (PARTITION BY e.id ORDER BY r.decided_at DESC,r.revision DESC) AS n
  FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id
  WHERE e.workspace_id=?1 AND (e.scope='workspace' OR (e.scope='mission' AND e.mission_id=?2))
+ AND {}
  AND r.status='approved' AND r.decided_at IS NOT NULL AND r.decided_at<=?3)
- SELECT id,scope,key,kind,priority,body FROM valid WHERE n=1 AND operation IN ('create','update') ORDER BY scope,key COLLATE BINARY,id";
+ SELECT id,scope,key,kind,priority,body FROM valid WHERE n=1 AND operation IN ('create','update') ORDER BY scope,key COLLATE BINARY,id",
+        super::repo_scope::sql_match("?4", fail_closed)
+    )
+}
 
 // ── Texto ───────────────────────────────────────────────────────────
 
@@ -214,17 +220,30 @@ fn snippet_of(body: &str) -> (String, bool) {
 /// As memórias ativas e aprovadas que a missão enxerga: as do workspace e as da própria missão. Numa
 /// missão, só as do repositório dela e as sem repositório (ver `repo_scope`): a missão de um repo Node
 /// não recebe as regras de cargo e Tauri do ADE-AGS.
+#[cfg(test)]
 pub fn load_docs(conn: &Connection, workspace_id: &str, mission_id: Option<&str>) -> Result<Vec<Doc>, String> {
     let repo = mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m));
+    load_docs_with_repo(conn, workspace_id, mission_id, repo.as_deref(), mission_id.is_some() && repo.is_none())
+}
+
+/// Carrega documentos usando a chave já resolvida pelo chamador, sem tocar no filesystem.
+pub fn load_docs_with_repo(
+    conn: &Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    repo: Option<&str>,
+    fail_closed: bool,
+) -> Result<Vec<Doc>, String> {
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT e.id, e.scope, e.key, r.kind, e.priority, r.body
                FROM memory_entries e
                JOIN memory_revisions r ON r.entry_id = e.id AND r.revision = e.current_revision
               WHERE e.status = 'active' AND r.status='approved' AND e.workspace_id = ?1
                 AND (e.scope = 'workspace' OR (e.scope = 'mission' AND e.mission_id = ?2))
-                AND (?3 IS NULL OR e.repo_key IS NULL OR e.repo_key = ?3)",
-        )
+                AND {}",
+            super::repo_scope::sql_match("?3", fail_closed)
+        ))
         .map_err(|_| "não foi possível ler as memórias".to_string())?;
     let rows = stmt
         .query_map(params![workspace_id, mission_id, repo], |r| {
@@ -236,9 +255,22 @@ pub fn load_docs(conn: &Connection, workspace_id: &str, mission_id: Option<&str>
 
 /// Load the memory versions that were valid at one Unix timestamp. Unlike `load_docs`, this
 /// includes entries that have since been deleted because their earlier intervals may apply.
+#[cfg(test)]
 pub fn load_docs_at(conn:&Connection,workspace_id:&str,mission_id:Option<&str>,at:i64)->Result<Vec<Doc>,String> {
-    let mut stmt=conn.prepare(DOCS_AT_SQL).map_err(|_|"could not read historical memory")?;
-    stmt.query_map(params![workspace_id,mission_id,at],|r|Ok(Doc{entry_id:r.get(0)?,scope:r.get(1)?,key:r.get(2)?,kind:r.get(3)?,priority:r.get(4)?,body:r.get(5)?})).map_err(|_|"could not read historical memory")?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_|"could not read historical memory".into())
+    let repo = mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m));
+    load_docs_at_with_repo(conn, workspace_id, mission_id, repo.as_deref(), mission_id.is_some() && repo.is_none(), at)
+}
+
+pub fn load_docs_at_with_repo(
+    conn: &Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    repo: Option<&str>,
+    fail_closed: bool,
+    at: i64,
+) -> Result<Vec<Doc>, String> {
+    let mut stmt=conn.prepare(&docs_at_sql(fail_closed)).map_err(|_|"could not read historical memory")?;
+    stmt.query_map(params![workspace_id,mission_id,at,repo],|r|Ok(Doc{entry_id:r.get(0)?,scope:r.get(1)?,key:r.get(2)?,kind:r.get(3)?,priority:r.get(4)?,body:r.get(5)?})).map_err(|_|"could not read historical memory")?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_|"could not read historical memory".into())
 }
 
 #[cfg(test)]
@@ -297,7 +329,21 @@ pub(crate) fn legacy_load_docs_at(
 }
 
 /// A busca completa. A pergunta é validada (vazia ou enorme não faz sentido).
+#[cfg(test)]
 pub fn search(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, query: &str, limit: usize) -> Result<Vec<Hit>, String> {
+    let repo = mission_id.and_then(|mission| super::repo_scope::mission_repo_key(conn, mission));
+    search_with_repo(conn, workspace_id, mission_id, repo.as_deref(), mission_id.is_some() && repo.is_none(), query, limit)
+}
+
+pub fn search_with_repo(
+    conn: &Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    repo: Option<&str>,
+    fail_closed: bool,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<Hit>, String> {
     let query = query.trim();
     if query.is_empty() {
         return Err("A busca precisa de um texto.".into());
@@ -305,15 +351,40 @@ pub fn search(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, q
     if query.chars().count() > MAX_QUERY_CHARS {
         return Err(format!("A busca tem até {MAX_QUERY_CHARS} caracteres."));
     }
-    Ok(rank(&load_docs(conn, workspace_id, mission_id)?, query, limit))
+    Ok(rank(&load_docs_with_repo(conn, workspace_id, mission_id, repo, fail_closed)?, query, limit))
 }
 
 /// Search only the memory versions valid at one Unix timestamp. `search` remains the
 /// unchanged current-state mode used when callers do not supply `--at`.
+#[cfg(test)]
 pub fn search_at(
     conn: &Connection,
     workspace_id: &str,
     mission_id: Option<&str>,
+    query: &str,
+    limit: usize,
+    at: i64,
+) -> Result<Vec<Hit>, String> {
+    let repo = mission_id.and_then(|mission| super::repo_scope::mission_repo_key(conn, mission));
+    search_at_with_repo(
+        conn,
+        workspace_id,
+        mission_id,
+        repo.as_deref(),
+        mission_id.is_some() && repo.is_none(),
+        query,
+        limit,
+        at,
+    )
+}
+
+/// Busca histórico usando a chave do repositório resolvida antes de adquirir o lock do banco.
+pub fn search_at_with_repo(
+    conn: &Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    repo: Option<&str>,
+    fail_closed: bool,
     query: &str,
     limit: usize,
     at: i64,
@@ -326,7 +397,7 @@ pub fn search_at(
         return Err(format!("A busca tem até {MAX_QUERY_CHARS} caracteres."));
     }
     Ok(rank(
-        &load_docs_at(conn, workspace_id, mission_id, at)?,
+        &load_docs_at_with_repo(conn, workspace_id, mission_id, repo, fail_closed, at)?,
         query,
         limit,
     ))

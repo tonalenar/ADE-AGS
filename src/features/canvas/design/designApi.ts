@@ -102,8 +102,10 @@ export function normalizeDesign(raw: RawDesign): DesignDetail {
 const call = <T>(cmd: string, args: Record<string, unknown> = {}) => invoke<T>(cmd, { args });
 
 export const designApi = {
+  listDetails: async (workspace?: string): Promise<DesignDetail[]> =>
+    (await call<RawDesign[]>("design_list", { workspace: workspace ?? null })).map(normalizeDesign),
   list: async (workspace?: string): Promise<Design[]> =>
-    (await call<RawDesign[]>("design_list", { workspace: workspace ?? null })).map((d) => normalizeDesign(d).design),
+    (await designApi.listDetails(workspace)).map((d) => d.design),
   get: async (designId: string) => normalizeDesign(await call<RawDesign>("design_get", { designId })),
   /** Mexer só em x/y/width/height/radius não cria versão nova do HTML (contrato). */
   updateArtboard: (artboardId: string, patch: { html?: string; title?: string; x?: number; y?: number; width?: number; height?: number; radius?: number; expectedVersion?: number }) =>

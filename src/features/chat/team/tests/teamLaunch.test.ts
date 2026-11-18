@@ -46,7 +46,7 @@ const TEAM = {
   members: [{ teamId: "t1", member: "tab-m", agentId: "codex", label: "Codex · Testes", role: "qa", model: null, policy: "read", branch: "team/tests", worktree: null, origin: "new", position: 0, createdAt: 1, updatedAt: 1, subagent: false }],
 } as unknown as TeamView;
 
-beforeEach(() => { calls.log = []; calls.failLink = false; calls.team = TEAM; });
+beforeEach(() => { calls.log = []; calls.failLink = false; calls.team = TEAM; vi.restoreAllMocks(); });
 
 describe("o TeamPort de verdade", () => {
   it("a conversa orquestradora nasce em segundo plano e SEM a mensagem (o texto só sai no fim)", async () => {

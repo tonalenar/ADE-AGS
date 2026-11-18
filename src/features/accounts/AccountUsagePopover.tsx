@@ -132,6 +132,8 @@ export function AccountUsagePopover({ account, onLogin }: { account: AgentAccoun
   // al cierre de la app— y recién después, si venció o si lo pidió el usuario, se vuelve a
   // preguntar. El panel nunca queda en blanco esperando.
   useEffect(() => {
+    setAsking(false);
+    setRefreshing(false);
     if (account.agentId !== "claude-code") return;
     let stale = false;
 
@@ -146,23 +148,28 @@ export function AccountUsagePopover({ account, onLogin }: { account: AgentAccoun
     (async () => {
       const forced = reload > 0;
 
-      if (!forced) {
-        setAsking(true);
-        const stored = await ask(false).catch(() => null);
+      try {
+        if (!forced) {
+          setAsking(true);
+          const stored = await ask(false).catch(() => null);
+          if (stale) return;
+          if (stored) setLive(stored);
+          // Lo guardado todavía sirve: no hay nada más que hacer.
+          if (stored?.available && isUsageFresh(stored.fetchedAt, Math.floor(Date.now() / 1000))) {
+            return;
+          }
+        }
+
         if (stale) return;
-        if (stored) setLive(stored);
-        setAsking(false);
-        // Lo guardado todavía sirve: no hay nada más que hacer.
-        if (stored?.available && isUsageFresh(stored.fetchedAt, Math.floor(Date.now() / 1000))) {
-          return;
+        setRefreshing(true);
+        const fresh = await ask(true).catch((e) => asFailure(String(e)));
+        if (!stale) setLive(fresh);
+      } finally {
+        if (!stale) {
+          setAsking(false);
+          setRefreshing(false);
         }
       }
-
-      setRefreshing(true);
-      const fresh = await ask(true).catch((e) => asFailure(String(e)));
-      if (stale) return;
-      setLive(fresh);
-      setRefreshing(false);
     })();
 
     return () => { stale = true; };

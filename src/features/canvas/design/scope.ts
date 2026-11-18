@@ -21,6 +21,11 @@ export function designsForBoard(designs: Design[], scope: { cwd: string | null; 
   return designs.filter((d) => !d.missionId && !!d.workspace && comparablePath(d.workspace) === cwd);
 }
 
+export function designsForBoardDetails(details: DesignDetail[], scope: { cwd: string | null; missionId: string | null }): DesignDetail[] {
+  const ids = new Set(designsForBoard(details.map((d) => d.design), scope).map((d) => d.id));
+  return details.filter((d) => ids.has(d.design.id));
+}
+
 /** O ponto livre do canvas: à direita de tudo o que já existe (terminais, notas, portais...). */
 export function freeOrigin(board: Board): { x: number; y: number } {
   const boxes = [

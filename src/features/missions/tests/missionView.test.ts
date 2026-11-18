@@ -247,6 +247,8 @@ describe("formulario", () => {
     expect(parseBudget("1,5")).toBe(1.5);
     expect(parseBudget("1.000,50")).toBe(1000.5);
     expect(parseBudget("1,000.50")).toBe(1000.5);
+    expect(parseBudget("1.000")).toBe(1000);
+    expect(parseBudget("1,000")).toBe(1000);
     expect(parseBudget("5 dólares")).toBeNull();
   });
 

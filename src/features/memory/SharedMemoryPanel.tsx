@@ -146,9 +146,11 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
   const loadMore = async (scope: MemoryScope) => {
     const page = scope === "workspace" ? workspacePage : missionPage;
     if (!page?.nextCursor || !missionId && scope === "mission") return;
+    const started = refreshKey;
     setBusy(true);
     try {
       const next = await fetchPage(scope === "mission" ? missionId : null, page.nextCursor);
+      if (started !== refreshKey) return;
       const merge = (previous: MemoryPage | null): MemoryPage => ({
         items: [...(previous?.items ?? []), ...next.items],
         hasMore: next.hasMore,

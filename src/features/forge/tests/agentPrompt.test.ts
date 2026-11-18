@@ -56,4 +56,3 @@ describe("itemPrompt", () => {
     expect(p.slice(start, end)).not.toContain(base.webUrl);
   });
 });
-

@@ -11,6 +11,7 @@ import { PHONE_MIN, type CanvasPortal } from "./board";
 import { NOTE_HEADER_H } from "./geometry";
 import { useChatShell } from "@/app/uiStore";
 import { canvasDeviceEngaged } from "@/features/chat/deviceDemand";
+import { androidFrameShouldPoll } from "./androidPoll";
 
 import { canvasActions, useActiveBoardKey, useWorkMode } from "./store";
 
@@ -30,6 +31,12 @@ interface Frame {
   png: string;
   width: number;
   height: number;
+}
+
+/** Timer do aviso "iniciando" o AVD: o caller limpa no unmount. */
+export function armStartingTimeout(onDone: () => void, ms = 20_000): () => void {
+  const id = window.setTimeout(onDone, ms);
+  return () => window.clearTimeout(id);
 }
 
 /** Cada cuánto se vuelve a pedir la pantalla: `screencap` tarda, no tiene sentido pedir más rápido. */
@@ -86,6 +93,16 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
   const [typing, setTyping] = useState("");
   const [starting, setStarting] = useState(false);
   const img = useRef<HTMLImageElement>(null);
+  const nodeRef = useRef<HTMLDivElement>(null);
+  const stopStarting = useRef<(() => void) | undefined>(undefined);
+  const [onScreen, setOnScreen] = useState(true);
+  useEffect(() => {
+    const el = nodeRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((entries) => setOnScreen(entries.some((e) => e.isIntersecting)), { rootMargin: "80px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
   const down = useRef<{ x: number; y: number } | null>(null);
   const handle = "w-2.5! h-2.5! border-2! border-white! dark:border-surface-deep! bg-emerald-400! dark:bg-emerald-500!";
 
@@ -120,11 +137,11 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
       setFrame(null);
       return;
     }
-    if (!surfaceOpen) return;
+    if (!androidFrameShouldPoll({ hidden: document.hidden, surfaceOpen, onScreen })) return;
     let alive = true;
     let timer: number | undefined;
     const tick = async () => {
-      if (!document.hidden) {
+      if (androidFrameShouldPoll({ hidden: document.hidden, surfaceOpen, onScreen })) {
         try {
           const f = await invoke<Frame>("android_frame", { serial: chosen });
           if (alive) {
@@ -142,7 +159,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [chosen, surfaceOpen]);
+  }, [chosen, surfaceOpen, onScreen]);
 
   const fail = (e: unknown) => AlertaToast(portal.name, String(e), "error", 5000);
 
@@ -155,9 +172,14 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
       fail(e);
     } finally {
       // El emulador tarda en aparecer: el aviso de "iniciando" se apaga solo cuando hay dispositivo.
-      window.setTimeout(() => setStarting(false), 20000);
+      stopStarting.current?.();
+      stopStarting.current = armStartingTimeout(() => setStarting(false), 20_000);
     }
   };
+  useEffect(() => () => {
+    stopStarting.current?.();
+    setStarting(false);
+  }, []);
   useEffect(() => {
     if (ready.length > 0) setStarting(false);
   }, [ready.length]);
@@ -206,6 +228,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
 
   return (
     <div
+      ref={nodeRef}
       className={`h-full w-full flex flex-col rounded-lg overflow-hidden border bg-white dark:bg-surface
         ${selected
           ? "border-accent-500 dark:border-accent-400 shadow-[0_0_0_1px_var(--color-accent-400)]"

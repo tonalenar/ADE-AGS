@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+import en from "@/i18n/locales/en.json";
+import es from "@/i18n/locales/es.json";
 import ptBR from "@/i18n/locales/pt-BR.json";
 import type { TeamView } from "../ipc";
 import { decidePermission, teamPolicyOf, teamRequester, teamVerdict, teamVerdictForAsk } from "../teamPermissions";
@@ -46,13 +48,15 @@ describe("as chaves de i18n do time", () => {
   it("toda chave fixa que o time usa existe no catálogo", () => {
     const dir = join(__dirname, "..");
     const source = readdirSync(dir).filter((f) => /\.tsx?$/.test(f)).map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
-    const used = [...source.matchAll(/(?:t\(|i18nKey=)"(chat\.(?:team|panel)\.[\w.]+)"/g)].map((m) => m[1]!);
-    const catalog = ptBR as Record<string, string>;
-    const missing = [...new Set(used)].filter((k) => !(k in catalog) && !(`${k}_one` in catalog));
+    const used = [...source.matchAll(/(?:t\(|i18nKey=)"((?:chat\.(?:team|panel)|role|canvas)\.[\w.]+)"/g)].map((m) => m[1]!);
+    const catalogs = [ptBR, en, es] as Record<string, string>[];
     expect(used.length).toBeGreaterThan(20);
-    expect(missing).toEqual([]);
-    for (const group of ["roles", "policy", "policyMenu", "state"]) {
-      expect(Object.keys(catalog).some((k) => k.startsWith(`chat.team.${group}.`)), group).toBe(true);
+    for (const catalog of catalogs) {
+      const missing = [...new Set(used)].filter((k) => !(k in catalog) && !(`${k}_one` in catalog));
+      expect(missing).toEqual([]);
+      for (const group of ["roles", "policy", "policyMenu", "state"]) {
+        expect(Object.keys(catalog).some((k) => k.startsWith(`chat.team.${group}.`)), group).toBe(true);
+      }
     }
   });
 });

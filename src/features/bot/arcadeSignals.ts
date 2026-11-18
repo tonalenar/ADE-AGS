@@ -22,9 +22,12 @@ export function noteSustained(tabIds: readonly string[]): void {
   useArcadeSignals.setState({ worked: { ...worked, ...Object.fromEntries(fresh.map((id) => [id, true as const])) } });
 }
 
+const MAX_DELIVERIES_PER_TAB = 40;
+
 export function noteDelivery(tabId: string, atMs: number): void {
   const { deliveries } = useArcadeSignals.getState();
-  useArcadeSignals.setState({ deliveries: { ...deliveries, [tabId]: [...(deliveries[tabId] ?? []), atMs] } });
+  const next = [...(deliveries[tabId] ?? []), atMs].slice(-MAX_DELIVERIES_PER_TAB);
+  useArcadeSignals.setState({ deliveries: { ...deliveries, [tabId]: next } });
 }
 
 export interface DeliveryMessage {

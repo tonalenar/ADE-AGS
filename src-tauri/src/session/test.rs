@@ -1085,3 +1085,20 @@ fn titulo_gerado_de_um_aviso_do_ade_e_fraco() {
     assert!(is_noise_message("[ADE AGS] Você é o orquestrador deste canvas"));
     assert!(!is_noise_message("Revisar o portal do cliente"));
 }
+
+#[test]
+fn collect_files_nao_segue_symlink() {
+    let root = std::env::temp_dir().join(format!("ags-collect-{}", uuid::Uuid::new_v4().simple()));
+    let nested = root.join("ok");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(nested.join("a.jsonl"), "{}").unwrap();
+    let loop_dir = root.join("loop");
+    #[cfg(unix)]
+    {
+        let _ = std::os::unix::fs::symlink(&root, &loop_dir);
+    }
+    let mut out = Vec::new();
+    collect_files(&root, "jsonl", &mut out);
+    assert_eq!(out.len(), 1);
+    let _ = std::fs::remove_dir_all(&root);
+}

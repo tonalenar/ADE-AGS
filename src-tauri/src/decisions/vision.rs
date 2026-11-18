@@ -232,6 +232,10 @@ fn read_capture(path: &str) -> Result<Vec<u8>, String> {
     if !wanted.starts_with(&allowed) {
         return Err("Só uso fotos que o próprio app tirou da página.".into());
     }
+    let len = std::fs::metadata(&wanted).map_err(|e| e.to_string())?.len();
+    if len > MAX_IMAGE_BYTES as u64 {
+        return Err("A foto da página não é um PNG de tamanho aceitável.".into());
+    }
     let png = std::fs::read(&wanted).map_err(|e| e.to_string())?;
     if !png.starts_with(&[0x89, b'P', b'N', b'G']) || png.len() > MAX_IMAGE_BYTES {
         return Err("A foto da página não é um PNG de tamanho aceitável.".into());

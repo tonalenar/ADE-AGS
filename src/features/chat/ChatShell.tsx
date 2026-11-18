@@ -31,7 +31,7 @@ import { useElementWidth } from "./ComposerColumn";
 import { CHAT_SHELL_ATTR, ConversationView } from "./ConversationView";
 import { hasTimeline } from "./chatModel";
 import { parseUnifiedDiff } from "./diffModel";
-import { scmWorkingDiff } from "./ipc";
+import { readWorkingDiff } from "./workingDiffRead";
 import { startChatLive } from "./liveStore";
 import { SummaryPane } from "./summary/SummaryPane";
 import { SUMMARY_POPOVER_W, SummaryPopover } from "./summary/SummaryPopover";
@@ -342,7 +342,7 @@ export function useFolderDiffs(cards: ConversationCard[]): Record<string, Folder
 
   useEffect(() => {
     const load = (cwd: string) => {
-      scmWorkingDiff(cwd)
+      readWorkingDiff(cwd)
         .then((diff) => {
           const files = diff ? parseUnifiedDiff(diff.text) : [];
           const total = files.reduce((n, f) => ({ added: n.added + f.added, removed: n.removed + f.removed }), { added: 0, removed: 0 });
