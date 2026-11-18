@@ -1,11 +1,9 @@
 //! Sessão de terminal emitida pelo app.
 //!
-//! Cada PTY de uma aba recebe um token (`ADE_SESSION`) que só o processo
-//! daquele terminal herda, e o PID desse processo fica registrado junto.
-//! A CLI manda o token. O servidor, no socket de credencial, lê o PID de
-//! quem conectou e só aceita se esse PID for o processo do PTY ou um
-//! descendente. Token e ancestralidade juntos: copiar o token de outro
-//! processo não basta.
+//! Cada PTY de uma aba registra seu PID raiz. Claude também recebe um token
+//! (`ADE_SESSION`) que só aquele terminal herda. O Codex usa a identidade da
+//! aba e a ancestralidade comprovada pelo PID do socket; não precisa guardar
+//! esse token no perfil temporário. Copiar um token de outro processo não basta.
 //!
 //! O transporte tem de entregar o PID. TCP em loopback não entrega
 //! (`SO_PEERCRED` / `GetNamedPipeClientProcessId` não existem aí). A app
@@ -15,12 +13,12 @@
 //!
 //! Plataformas Unix sem API de PID do peer ficam no token, de propósito
 //! e documentado (`ancestry_required` é falso). Linux, macOS e Windows
-//! exigem os dois.
+//! exigem ancestralidade pelo PID.
 //!
 //! Terminais restaurados reanexam o PTY vivo: o processo conserva o
 //! ambiente e este registro conserva o token e o PID. Um PTY novo para a
-//! mesma aba troca os dois. O valor do token não vai na linha de comando
-//! do Codex: o sandbox herda pelo perfil em arquivo (ver `pty_manager`).
+//! mesma aba troca os dois. O Codex usa somente a identidade da aba em seu
+//! perfil temporário; operações do ADE comprovam o PID pelo IPC.
 //!
 //! Fleet, Dreaming e o MCP da missão não passam por `ags memory` /
 //! `ags swarm`. Essas ferramentas rodam dentro do processo (`memory.list`,
@@ -47,6 +45,12 @@ const ERR_CONVERSATION_UNKNOWN: &str = "Esta conversa não tem um processo regis
 Mande uma mensagem na conversa para o agente voltar e repita o comando de dentro dela.";
 const ERR_ANCESTRY: &str = "O processo que chamou este comando não pertence ao terminal desta aba. O comando foi recusado. \
 Rode o `ags` no próprio shell da aba ou da conversa: um daemon, `nohup`/`setsid`, outro terminal ou um servidor lançado fora dela não herdam a identidade.";
+const ERR_AMBIGUOUS: &str = "O processo corresponde a mais de uma sessão ativa do ADE AGS. O comando foi recusado. \
+Use uma única sessão para este processo, ou rode o `ags` no shell da aba certa.";
+const ERR_ROOT_START: &str = "Não foi possível ler o horário de início do processo desta sessão. O ADE AGS recusou o registro da identidade. \
+Reabra o terminal; sem esse horário não dá para recusar um PID reutilizado.";
+const ERR_CONVERSATION_START: &str = "Não foi possível ler o horário de início do processo desta conversa. O ADE AGS recusou o registro da identidade. \
+Retome a conversa pelo app; sem esse horário não dá para recusar um PID reutilizado.";
 
 /// Profundidade máxima da caminhada de pais. Um ciclo ou uma árvore
 /// absurda fecha em vez de andar para sempre.
@@ -55,18 +59,33 @@ const MAX_ANCESTORS: usize = 64;
 #[derive(Clone)]
 struct Bound {
     tab: String,
-    root_pid: u32,
+    root: ProcessIdentity,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ProcessIdentity {
+    pub(crate) pid: u32,
+    pub(crate) start_time: Option<u64>,
+}
+
+impl ProcessIdentity {
+    pub(crate) fn current(pid: u32) -> Self {
+        Self {
+            pid,
+            start_time: process_start_time(pid),
+        }
+    }
 }
 
 struct Sessions {
     by_token: HashMap<String, Bound>,
     by_tab: HashMap<String, String>,
     /// Conversas por protocolo: o PID do processo do motor, por `thread:<id>`. Sem token.
-    conversations: HashMap<String, u32>,
+    conversations: HashMap<String, ProcessIdentity>,
     /// Token já entregue ao ambiente de uma conversa (`thread_env`) que espera o PID do motor para virar sessão.
     pending: HashMap<String, String>,
     /// Tarefas da Frota: o PID do processo do agente, registrado pelo supervisor ao lançá-lo (F-02).
-    task_roots: HashMap<String, u32>,
+    task_roots: HashMap<String, ProcessIdentity>,
 }
 
 fn registry() -> MutexGuard<'static, Sessions> {
@@ -96,19 +115,47 @@ pub(crate) fn ancestry_required() -> bool {
 
 /// Publica o token já gerado para o PTY desta aba, amarrado ao PID do
 /// processo que o PTY lançou. Substitui o token anterior da mesma aba.
-pub(crate) fn publish_token(tab_id: &str, token: &str, root_pid: u32) {
-    publish_in(&mut registry(), tab_id, token, root_pid);
+#[cfg(test)]
+pub(crate) fn publish_token(tab_id: &str, token: &str, root_pid: u32) -> Result<(), String> {
+    publish_identity(tab_id, token, ProcessIdentity::current(root_pid))
 }
 
-fn publish_in(sessions: &mut Sessions, tab_id: &str, token: &str, root_pid: u32) {
-    if let Some(previous) = sessions.by_tab.insert(tab_id.to_string(), token.to_string()) {
+#[cfg(test)]
+fn publish_identity(tab_id: &str, token: &str, root: ProcessIdentity) -> Result<(), String> {
+    if root.pid == 0 {
+        return Err(ERR_NO_PID.into());
+    }
+    if root.start_time.is_none() {
+        eprintln!(
+            "[ade-ags] sessão {tab_id}: PID {} sem horário de início; o registro foi recusado",
+            root.pid
+        );
+        return Err(ERR_ROOT_START.into());
+    }
+    publish_in(&mut registry(), tab_id, token, root);
+    Ok(())
+}
+
+pub(crate) fn publish_validated_identity(tab_id: &str, token: &str, root: ProcessIdentity) {
+    debug_assert!(root.pid > 0 && root.start_time.is_some());
+    publish_in(&mut registry(), tab_id, token, root);
+}
+
+fn publish_in(sessions: &mut Sessions, tab_id: &str, token: &str, root: ProcessIdentity) {
+    if let Some(previous) = sessions
+        .by_tab
+        .insert(tab_id.to_string(), token.to_string())
+    {
         if previous != token {
             sessions.by_token.remove(&previous);
         }
     }
     sessions.by_token.insert(
         token.to_string(),
-        Bound { tab: tab_id.to_string(), root_pid },
+        Bound {
+            tab: tab_id.to_string(),
+            root,
+        },
     );
 }
 
@@ -128,14 +175,50 @@ pub(crate) fn issue_conversation_token(tab_id: &str) -> Option<String> {
 /// processo; um respawn da mesma conversa troca o PID. Com o token emitido por [`issue_conversation_token`] a
 /// conversa também tem sessão (memória e quadro da missão); sem ele, vale só a ancestralidade do PID do
 /// cliente (ver [`authorize_actor`]).
-pub(crate) fn register_conversation(tab_id: &str, root_pid: u32) {
-    if tab_id.starts_with(crate::chat_team::model::THREAD_PREFIX) && root_pid > 0 {
-        let mut sessions = registry();
-        sessions.conversations.insert(tab_id.to_string(), root_pid);
-        if let Some(token) = sessions.pending.remove(tab_id) {
-            publish_in(&mut sessions, tab_id, &token, root_pid);
-        }
+pub(crate) fn register_conversation(tab_id: &str, root_pid: u32) -> Result<(), String> {
+    if !tab_id.starts_with(crate::chat_team::model::THREAD_PREFIX) {
+        return Ok(());
     }
+    register_conversation_identity(tab_id, ProcessIdentity::current(root_pid))
+}
+
+pub(crate) fn process_identity_with(
+    pid: u32,
+    mut start_of: impl FnMut(u32) -> Option<u64>,
+) -> Result<ProcessIdentity, String> {
+    if pid == 0 {
+        return Err(ERR_NO_PID.into());
+    }
+    let start_time = start_of(pid);
+    if start_time.is_none() {
+        return Err(ERR_ROOT_START.into());
+    }
+    Ok(ProcessIdentity { pid, start_time })
+}
+
+fn register_conversation_identity(tab_id: &str, root: ProcessIdentity) -> Result<(), String> {
+    if root.pid == 0 {
+        registry().pending.remove(tab_id);
+        return Err(ERR_NO_PID.into());
+    }
+    if root.start_time.is_none() {
+        registry().pending.remove(tab_id);
+        eprintln!(
+            "[ade-ags] conversa {tab_id}: PID {} sem horário de início; o registro foi recusado",
+            root.pid
+        );
+        return Err(ERR_CONVERSATION_START.into());
+    }
+    let mut sessions = registry();
+    sessions.conversations.insert(tab_id.to_string(), root);
+    if let Some(token) = sessions.pending.remove(tab_id) {
+        publish_in(&mut sessions, tab_id, &token, root);
+    }
+    Ok(())
+}
+
+pub(crate) fn discard_pending_conversation_token(tab_id: &str) {
+    registry().pending.remove(tab_id);
 }
 
 /// O PTY saiu do registro (fechou, foi substituído ou a app encerrou a sessão).
@@ -172,9 +255,20 @@ fn bound_tab(session: Option<&str>, claimed_tab: Option<&str>) -> Result<Bound, 
     Ok(bound)
 }
 
-/// Token e ancestralidade. `client_pid` é o processo que abriu o IPC.
-/// Sem ele, ou se não descende do PTY, a chamada fecha.
-pub fn authorize(session: Option<&str>, claimed_tab: Option<&str>, client_pid: Option<u32>) -> Result<String, String> {
+/// Autoriza por token e ancestralidade, ou por PID e sessão ativa quando o
+/// agente não recebeu `ADE_SESSION` (caso do Codex). `client_pid` é o processo
+/// que abriu o IPC; sem prova de descendência, a chamada fecha.
+pub fn authorize(
+    session: Option<&str>,
+    claimed_tab: Option<&str>,
+    client_pid: Option<u32>,
+) -> Result<String, String> {
+    if !session
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+    {
+        return authorize_by_pid(claimed_tab, client_pid);
+    }
     let bound = bound_tab(session, claimed_tab)?;
     if !ancestry_required() {
         return Ok(bound.tab);
@@ -182,10 +276,59 @@ pub fn authorize(session: Option<&str>, claimed_tab: Option<&str>, client_pid: O
     let Some(client) = client_pid.filter(|pid| *pid > 0) else {
         return Err(ERR_NO_PID.into());
     };
-    if !descends_from(client, bound.root_pid, parent_pid) {
+    if !descends_from_identity(client, bound.root, parent_pid, process_start_time) {
         return Err(ERR_ANCESTRY.into());
     }
     Ok(bound.tab)
+}
+
+/// Autoriza sessões sem token pela árvore comprovada do socket IPC.
+fn authorize_by_pid(claimed_tab: Option<&str>, client_pid: Option<u32>) -> Result<String, String> {
+    if !ancestry_required() {
+        return Err(ERR_MISSING.into());
+    }
+    let Some(client) = client_pid.filter(|pid| *pid > 0) else {
+        return Err(ERR_NO_PID.into());
+    };
+    let claimed = claimed_tab.map(str::trim).filter(|tab| !tab.is_empty());
+    let roots: Vec<(String, ProcessIdentity)> = {
+        let sessions = registry();
+        sessions
+            .by_tab
+            .iter()
+            .filter_map(|(tab, token)| {
+                sessions
+                    .by_token
+                    .get(token)
+                    .map(|bound| (tab.clone(), bound.root))
+            })
+            .collect()
+    };
+    authorize_by_pid_with_roots(claimed, client, &roots, parent_pid)
+}
+
+fn authorize_by_pid_with_roots(
+    claimed: Option<&str>,
+    client: u32,
+    roots: &[(String, ProcessIdentity)],
+    mut parent: impl FnMut(u32) -> Result<Option<u32>, String>,
+) -> Result<String, String> {
+    let matching: Vec<&String> = roots
+        .iter()
+        .filter_map(|(tab, root)| {
+            descends_from_identity(client, *root, &mut parent, process_start_time).then_some(tab)
+        })
+        .collect();
+    if matching.len() > 1 {
+        return Err(ERR_AMBIGUOUS.into());
+    }
+    if let Some(tab) = matching.first() {
+        if claimed.is_some_and(|value| value != tab.as_str()) {
+            return Err(ERR_FORGED.into());
+        }
+        return Ok((*tab).clone());
+    }
+    Err(ERR_ANCESTRY.into())
 }
 
 /// Quem chama as ações do Jev e do computer use: um terminal de aba (token + ancestralidade, como
@@ -194,11 +337,20 @@ pub fn authorize(session: Option<&str>, claimed_tab: Option<&str>, client_pid: O
 /// recusada: não há como provar a identidade, e o token não existe para ela.
 ///
 /// Só quem chama isto aceita conversa. `memory.*` e `swarm.*` continuam em [`authorize`], só de terminal.
-pub fn authorize_actor(session: Option<&str>, claimed_tab: Option<&str>, client_pid: Option<u32>) -> Result<String, String> {
-    if session.map(str::trim).is_some_and(|value| !value.is_empty()) {
+pub fn authorize_actor(
+    session: Option<&str>,
+    claimed_tab: Option<&str>,
+    client_pid: Option<u32>,
+) -> Result<String, String> {
+    if session
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+    {
         return authorize(session, claimed_tab, client_pid);
     }
-    let tab = claimed_tab.map(str::trim).filter(|value| value.starts_with(crate::chat_team::model::THREAD_PREFIX));
+    let tab = claimed_tab
+        .map(str::trim)
+        .filter(|value| value.starts_with(crate::chat_team::model::THREAD_PREFIX));
     let Some(tab) = tab else {
         return Err(ERR_MISSING.into());
     };
@@ -207,7 +359,9 @@ pub fn authorize_actor(session: Option<&str>, claimed_tab: Option<&str>, client_
     };
     let client = client_pid.filter(|pid| *pid > 0);
     match (ancestry_required(), client) {
-        (true, Some(pid)) if descends_from(pid, root, parent_pid) => Ok(tab.to_string()),
+        (true, Some(pid)) if descends_from_identity(pid, root, parent_pid, process_start_time) => {
+            Ok(tab.to_string())
+        }
         (true, Some(_)) => Err(ERR_ANCESTRY.into()),
         _ => Err(ERR_NO_PID.into()),
     }
@@ -217,15 +371,33 @@ const ERR_TASK_UNKNOWN: &str = "Esta tarefa não tem um processo registrado no A
 O `taskId` só vale para quem é o próprio agente da tarefa.";
 const ERR_TASK_ANCESTRY: &str = "O processo que chamou não pertence a esta tarefa: o `taskId` só vale para o agente que o app lançou para ela \
 e os processos que ele mesmo abriu (o `ags mcp` dele). O comando foi recusado.";
+const ERR_TASK_START: &str = "Não foi possível ler o horário de início do processo desta tarefa. O ADE AGS recusou o registro da identidade. \
+Rode a tarefa de novo a partir do app; sem esse horário não dá para recusar um PID reutilizado.";
 const ERR_STRIPPED: &str = "Este processo roda dentro de um terminal ou conversa do ADE AGS, mas chamou sem a identidade dele (sem ADE_SESSION e sem ADE_TAB_ID: \
 `env -i`, sandbox ou ambiente limpo). O comando foi recusado: rode o `ags` com o ambiente que o app deu ao terminal do agente.";
+const ERR_PROCESS_IDENTITY: &str = "Não foi possível comprovar a identidade do processo chamador. O ADE AGS recusou o comando porque não conseguiu verificar a árvore de processos.";
 
 /// O processo do agente de uma tarefa da Frota. O supervisor registra o PID ao lançá-lo; o `taskId` de um pedido só
 /// vale se o cliente do IPC for ele ou um descendente (F-02). Substitui o registro anterior da mesma tarefa.
-pub fn register_task_process(task_id: &str, root_pid: u32) {
-    if root_pid > 0 {
-        registry().task_roots.insert(task_id.to_string(), root_pid);
+pub fn register_task_process(task_id: &str, root_pid: u32) -> Result<(), String> {
+    register_task_identity(task_id, ProcessIdentity::current(root_pid))
+}
+
+fn register_task_identity(task_id: &str, root: ProcessIdentity) -> Result<(), String> {
+    if root.pid == 0 {
+        return Err(ERR_NO_PID.into());
     }
+    if root.start_time.is_none() {
+        eprintln!(
+            "[ade-ags] tarefa {task_id}: PID {} sem horário de início; o registro foi recusado",
+            root.pid
+        );
+        return Err(ERR_TASK_START.into());
+    }
+    registry()
+        .task_roots
+        .insert(task_id.to_string(), root);
+    Ok(())
 }
 
 pub fn release_task_process(task_id: &str) {
@@ -236,10 +408,6 @@ pub fn release_task_process(task_id: &str) {
 /// PID registrado. Sem PID (TCP) ou sem processo registrado, recusa. Nos Unix sem API de PID fica só o `taskId` declarado
 /// (o mesmo fallback explícito de [`authorize`]).
 pub fn authorize_task(task_id: &str, client_pid: Option<u32>) -> Result<(), String> {
-    authorize_task_with(task_id, client_pid, parent_pid)
-}
-
-fn authorize_task_with(task_id: &str, client_pid: Option<u32>, parent: impl FnMut(u32) -> Option<u32>) -> Result<(), String> {
     if !ancestry_required() {
         return Ok(());
     }
@@ -249,7 +417,33 @@ fn authorize_task_with(task_id: &str, client_pid: Option<u32>, parent: impl FnMu
     let Some(client) = client_pid.filter(|pid| *pid > 0) else {
         return Err(ERR_NO_PID.into());
     };
-    if descends_from(client, root, parent) { Ok(()) } else { Err(ERR_TASK_ANCESTRY.into()) }
+    if descends_from_identity(client, root, parent_pid, process_start_time) {
+        Ok(())
+    } else {
+        Err(ERR_TASK_ANCESTRY.into())
+    }
+}
+
+fn authorize_task_with(
+    task_id: &str,
+    client_pid: Option<u32>,
+    parent: impl FnMut(u32) -> Result<Option<u32>, String>,
+    start_of: impl FnMut(u32) -> Option<u64>,
+) -> Result<(), String> {
+    if !ancestry_required() {
+        return Ok(());
+    }
+    let Some(root) = registry().task_roots.get(task_id).copied() else {
+        return Err(ERR_TASK_UNKNOWN.into());
+    };
+    let Some(client) = client_pid.filter(|pid| *pid > 0) else {
+        return Err(ERR_NO_PID.into());
+    };
+    if descends_from_identity(client, root, parent, start_of) {
+        Ok(())
+    } else {
+        Err(ERR_TASK_ANCESTRY.into())
+    }
 }
 
 /// Quem chama, depois de o servidor provar o que pôde (F-09, `peer.answer`, `fix.decide`).
@@ -265,11 +459,30 @@ pub enum Caller {
 /// Classifica quem chama. Identidade declarada (`ADE_SESSION` ou `ADE_TAB_ID`) tem de ser provada ([`authorize_actor`]); sem
 /// nenhuma, o cliente tem de estar fora de toda árvore de processos do ADE (PTYs, conversas, tarefas): quem está dentro e
 /// chamou sem identidade apagou o ambiente de propósito (ou por sandbox) e é recusado. Sem PID do cliente não há como saber.
-pub fn classify_caller(session: Option<&str>, from: Option<&str>, client_pid: Option<u32>) -> Result<Caller, String> {
+pub fn classify_caller(
+    session: Option<&str>,
+    from: Option<&str>,
+    client_pid: Option<u32>,
+) -> Result<Caller, String> {
     classify_caller_with(session, from, client_pid, parent_pid)
 }
 
-fn classify_caller_with(session: Option<&str>, from: Option<&str>, client_pid: Option<u32>, parent: impl FnMut(u32) -> Option<u32>) -> Result<Caller, String> {
+fn classify_caller_with(
+    session: Option<&str>,
+    from: Option<&str>,
+    client_pid: Option<u32>,
+    parent: impl FnMut(u32) -> Result<Option<u32>, String>,
+) -> Result<Caller, String> {
+    classify_caller_with_identity(session, from, client_pid, parent, process_start_time)
+}
+
+fn classify_caller_with_identity(
+    session: Option<&str>,
+    from: Option<&str>,
+    client_pid: Option<u32>,
+    parent: impl FnMut(u32) -> Result<Option<u32>, String>,
+    start_of: impl FnMut(u32) -> Option<u64>,
+) -> Result<Caller, String> {
     let declared = |value: Option<&str>| value.map(str::trim).is_some_and(|v| !v.is_empty());
     if declared(session) || declared(from) {
         return authorize_actor(session, from, client_pid).map(Caller::Tab);
@@ -280,7 +493,11 @@ fn classify_caller_with(session: Option<&str>, from: Option<&str>, client_pid: O
     let Some(client) = client_pid.filter(|pid| *pid > 0) else {
         return Err(ERR_NO_PID.into());
     };
-    if inside_an_ade_process(client, parent) { Err(ERR_STRIPPED.into()) } else { Ok(Caller::Outside) }
+    if inside_an_ade_process_with(client, parent, start_of)? {
+        Err(ERR_STRIPPED.into())
+    } else {
+        Ok(Caller::Outside)
+    }
 }
 
 // ── Quem chama, para a tabela de autorização por método (HOST_REMOTO.md, F-09) ─────────────
@@ -311,37 +528,53 @@ enum Owner {
     Task(String),
 }
 
-/// O dono (aba, conversa ou tarefa) cujo processo-raiz é `pid` ou um ancestral dele. O mais próximo vence.
-fn owner_of(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> Option<Owner> {
-    let roots: Vec<(Owner, u32)> = {
+/// O dono (aba, conversa ou tarefa) cuja identidade de processo é `pid` ou um ancestral dele.
+/// Com raízes distintas, a mais próxima vence; a mesma identidade em duas raízes é ambígua.
+fn owner_of_identity(
+    pid: u32,
+    mut parent: impl FnMut(u32) -> Result<Option<u32>, String>,
+    mut start_of: impl FnMut(u32) -> Option<u64>,
+) -> Result<Option<Owner>, String> {
+    let roots: Vec<(Owner, ProcessIdentity)> = {
         let sessions = registry();
         sessions
             .by_token
             .values()
-            .map(|bound| (Owner::Tab(bound.tab.clone()), bound.root_pid))
-            .chain(sessions.conversations.iter().map(|(tab, root)| (Owner::Tab(tab.clone()), *root)))
-            .chain(sessions.task_roots.iter().map(|(task, root)| (Owner::Task(task.clone()), *root)))
+            .map(|bound| (Owner::Tab(bound.tab.clone()), bound.root))
+            .chain(
+                sessions
+                    .conversations
+                    .iter()
+                    .map(|(tab, root)| (Owner::Tab(tab.clone()), *root)),
+            )
+            .chain(
+                sessions
+                    .task_roots
+                    .iter()
+                    .map(|(task, root)| (Owner::Task(task.clone()), *root)),
+            )
             .collect()
     };
     if pid == 0 {
-        return None;
+        return Ok(None);
     }
-    let mut current = pid;
-    let mut seen = Vec::with_capacity(8);
-    for _ in 0..MAX_ANCESTORS {
-        if let Some((owner, _)) = roots.iter().find(|(_, root)| *root == current) {
-            return Some(owner.clone());
+    let chain = identity_chain(pid, &mut parent, &mut start_of).map_err(|()| ERR_ANCESTRY)?;
+    for identity in chain {
+        let mut owners_here = Vec::new();
+        for (owner, root) in &roots {
+            if *root == identity {
+                if !owners_here.contains(owner) {
+                    owners_here.push(owner.clone());
+                }
+            }
         }
-        if current <= 1 || seen.contains(&current) {
-            return None;
-        }
-        seen.push(current);
-        match parent(current) {
-            Some(next) if next != current && next != 0 => current = next,
-            _ => return None,
+        match owners_here.len() {
+            0 => {}
+            1 => return Ok(owners_here.pop()),
+            _ => return Err(ERR_AMBIGUOUS.into()),
         }
     }
-    None
+    Ok(None)
 }
 
 /// Prova quem chama. `claims` são as abas que o pedido declara (`from`, `tabId`), `task_id` a tarefa declarada e `session` o
@@ -352,8 +585,20 @@ fn owner_of(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> Option<Owne
 /// - o cliente está na árvore de uma tarefa: é essa tarefa (e não declara aba);
 /// - fora de toda árvore: [`Principal::Outside`], **desde que não declare identidade**: um `from` sem prova é forjado;
 /// - sem PID (TCP, CLI antiga), nas plataformas com socket local: [`Principal::Unknown`] (só métodos livres).
-pub fn principal_of(session: Option<&str>, claims: &[&str], task_id: Option<&str>, client_pid: Option<u32>) -> Result<Principal, String> {
-    principal_with(session, claims, task_id, client_pid, parent_pid)
+pub fn principal_of(
+    session: Option<&str>,
+    claims: &[&str],
+    task_id: Option<&str>,
+    client_pid: Option<u32>,
+) -> Result<Principal, String> {
+    principal_with(
+        session,
+        claims,
+        task_id,
+        client_pid,
+        parent_pid,
+        process_start_time,
+    )
 }
 
 fn principal_with(
@@ -361,7 +606,8 @@ fn principal_with(
     claims: &[&str],
     task_id: Option<&str>,
     client_pid: Option<u32>,
-    mut parent: impl FnMut(u32) -> Option<u32>,
+    mut parent: impl FnMut(u32) -> Result<Option<u32>, String>,
+    mut start_of: impl FnMut(u32) -> Option<u64>,
 ) -> Result<Principal, String> {
     let clean = |value: &str| {
         let value = value.trim();
@@ -373,14 +619,17 @@ fn principal_with(
         if session.is_some() || !claims.is_empty() {
             return Err(ERR_TASK_AND_TAB.into());
         }
-        authorize_task_with(&task, client_pid, &mut parent)?;
+        authorize_task_with(&task, client_pid, &mut parent, &mut start_of)?;
         return Ok(Principal::Task(task));
     }
     if !ancestry_required() {
         // Sem API de PID do peer (outros Unix): o token é o que há, como em `authorize`.
         return match (session, claims.first()) {
-            (Some(session), claim) => bound_tab(Some(&session), claim.map(String::as_str)).map(|bound| Principal::Tab(bound.tab)),
-            (None, Some(claim)) if claim.starts_with(crate::chat_team::model::THREAD_PREFIX) => authorize_actor(None, Some(claim), client_pid).map(Principal::Tab),
+            (Some(session), claim) => bound_tab(Some(&session), claim.map(String::as_str))
+                .map(|bound| Principal::Tab(bound.tab)),
+            (None, Some(claim)) if claim.starts_with(crate::chat_team::model::THREAD_PREFIX) => {
+                authorize_actor(None, Some(claim), client_pid).map(Principal::Tab)
+            }
             (None, Some(_)) => Err(ERR_MISSING.into()),
             (None, None) => Ok(Principal::Outside),
         };
@@ -389,7 +638,7 @@ fn principal_with(
         // TCP legado: não é a pessoa (`Outside`). Sem PID não há o que provar.
         return Ok(Principal::Unknown);
     };
-    match owner_of(client, &mut parent) {
+    match owner_of_identity(client, &mut parent, &mut start_of)? {
         Some(Owner::Tab(tab)) => {
             if claims.iter().any(|claim| *claim != tab) {
                 return Err(ERR_FORGED.into());
@@ -414,102 +663,137 @@ fn principal_with(
 }
 
 /// `pid` é (ou descende de) o processo de algum PTY, conversa ou tarefa registrados.
-fn inside_an_ade_process(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> bool {
-    let roots: Vec<u32> = {
+fn inside_an_ade_process_with(
+    pid: u32,
+    mut parent: impl FnMut(u32) -> Result<Option<u32>, String>,
+    mut start_of: impl FnMut(u32) -> Option<u64>,
+) -> Result<bool, String> {
+    let roots: Vec<ProcessIdentity> = {
         let sessions = registry();
         sessions
             .by_token
             .values()
-            .map(|bound| bound.root_pid)
+            .map(|bound| bound.root)
             .chain(sessions.conversations.values().copied())
             .chain(sessions.task_roots.values().copied())
             .collect()
     };
-    roots.into_iter().any(|root| descends_from(pid, root, &mut parent))
+    let chain = identity_chain(pid, &mut parent, &mut start_of)
+        .map_err(|()| ERR_PROCESS_IDENTITY.to_string())?;
+    Ok(roots.iter().any(|root| chain.contains(root)))
 }
 
-/// `client` é `root` ou um descendente, segundo `parent`. Para no init,
-/// em ciclo ou depois de [`MAX_ANCESTORS`] passos.
-pub(crate) fn descends_from(client: u32, root: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> bool {
-    if client == 0 || root == 0 {
+/// Confirma a instância de cada PID observado e compara também o início da raiz registrada.
+pub(crate) fn descends_from_identity(
+    client: u32,
+    root: ProcessIdentity,
+    mut parent: impl FnMut(u32) -> Result<Option<u32>, String>,
+    mut start_of: impl FnMut(u32) -> Option<u64>,
+) -> bool {
+    if root.start_time.is_none() || root.pid == 0 || client == 0 {
         return false;
+    }
+    identity_chain(client, &mut parent, &mut start_of).is_ok_and(|chain| chain.contains(&root))
+}
+
+/// Lê cada elo uma vez e só o conserva se a identidade continuou a mesma ao consultar o pai.
+fn identity_chain(
+    client: u32,
+    mut parent: impl FnMut(u32) -> Result<Option<u32>, String>,
+    mut start_of: impl FnMut(u32) -> Option<u64>,
+) -> Result<Vec<ProcessIdentity>, ()> {
+    if client == 0 {
+        return Err(());
     }
     let mut current = client;
     let mut seen = Vec::with_capacity(8);
+    let mut chain = Vec::with_capacity(8);
     for _ in 0..MAX_ANCESTORS {
-        if current == root {
-            return true;
+        if current == 1 {
+            return Ok(chain);
         }
-        if current <= 1 || seen.contains(&current) {
-            return false;
+        let start_before = start_of(current).ok_or(())?;
+        if current == 0 || seen.contains(&current) {
+            return Err(());
         }
         seen.push(current);
-        match parent(current) {
-            Some(next) if next != current && next != 0 => current = next,
-            _ => return false,
+        chain.push(ProcessIdentity {
+            pid: current,
+            start_time: Some(start_before),
+        });
+        let next = parent(current).map_err(|_| ())?;
+        // A troca durante a consulta invalida o elo observado, mesmo se a cadeia terminar aqui.
+        if start_of(current) != Some(start_before) {
+            return Err(());
+        }
+        match next {
+            Some(0) | None => return Ok(chain),
+            Some(next) if next == current => return Err(()),
+            Some(next) => current = next,
         }
     }
-    false
+    Err(())
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn parent_pid(pid: u32) -> Option<u32> {
-    let text = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
-    for line in text.lines() {
-        if let Some(rest) = line.strip_prefix("PPid:") {
-            return rest.trim().parse().ok().filter(|ppid| *ppid > 0);
-        }
-    }
-    None
+pub(crate) fn process_start_time(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // comm pode conter espaços e parênteses; os campos numéricos começam após o último `)`.
+    let fields = stat.rsplit_once(')')?.1.split_whitespace();
+    fields.skip(19).next()?.parse().ok()
 }
 
-/// `getpeereid` não traz PID. O pai vem de `proc_pidinfo(PROC_PIDTBSDINFO)`, em `pbi_ppid`.
-/// (Não `sysctl(KERN_PROC_PID)`: a `libc` não expõe `kinfo_proc` no macOS e o build quebrava.)
 #[cfg(target_os = "macos")]
-fn parent_pid(pid: u32) -> Option<u32> {
+pub(crate) fn process_start_time(pid: u32) -> Option<u64> {
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
     let read = unsafe {
-        libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDTBSDINFO, 0, &mut info as *mut libc::proc_bsdinfo as *mut libc::c_void, size)
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            &mut info as *mut libc::proc_bsdinfo as *mut libc::c_void,
+            size,
+        )
     };
     if read != size {
         return None;
     }
-    Some(info.pbi_ppid).filter(|ppid| *ppid > 0)
+    Some((info.pbi_start_tvsec as u64).saturating_mul(1_000_000) + info.pbi_start_tvusec as u64)
 }
 
-/// `CreateToolhelp32Snapshot` enxerga o pai. Se o PID não está no
-/// snapshot, a checagem fecha: não há como provar a descendência.
 #[cfg(windows)]
-fn parent_pid(pid: u32) -> Option<u32> {
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+pub(crate) fn process_start_time(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
     unsafe {
-        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snap == INVALID_HANDLE_VALUE {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
             return None;
         }
-        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-        if Process32FirstW(snap, &mut entry) == 0 {
-            CloseHandle(snap);
-            return None;
-        }
-        loop {
-            if entry.th32ProcessID == pid {
-                let ppid = entry.th32ParentProcessID;
-                CloseHandle(snap);
-                return if ppid == 0 { None } else { Some(ppid) };
-            }
-            if Process32NextW(snap, &mut entry) == 0 {
-                break;
-            }
-        }
-        CloseHandle(snap);
-        None
+        let mut creation = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let mut exit = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let mut kernel = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let mut user = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let ok = GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user);
+        CloseHandle(process);
+        (ok != 0)
+            .then_some(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
     }
 }
 
@@ -519,8 +803,96 @@ fn parent_pid(pid: u32) -> Option<u32> {
     target_os = "macos",
     target_os = "windows"
 )))]
-fn parent_pid(_pid: u32) -> Option<u32> {
+pub(crate) fn process_start_time(_pid: u32) -> Option<u64> {
     None
+}
+
+/// `Ok(None)` indica ausência de pai ou chegada à raiz (PID 0/1); `Err` indica falha de consulta.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub(crate) fn parent_pid(pid: u32) -> Result<Option<u32>, String> {
+    let text = std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .map_err(|error| format!("não foi possível ler /proc/{pid}/status: {error}"))?;
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("PPid:") {
+            let ppid = rest
+                .trim()
+                .parse::<u32>()
+                .map_err(|error| format!("PPid inválido em /proc/{pid}/status: {error}"))?;
+            return Ok((ppid > 1).then_some(ppid));
+        }
+    }
+    Err(format!("PPid ausente em /proc/{pid}/status"))
+}
+
+/// `getpeereid` não traz PID. O pai vem de `proc_pidinfo(PROC_PIDTBSDINFO)`, em `pbi_ppid`.
+/// (Não `sysctl(KERN_PROC_PID)`: a `libc` não expõe `kinfo_proc` no macOS e o build quebrava.)
+#[cfg(target_os = "macos")]
+pub(crate) fn parent_pid(pid: u32) -> Result<Option<u32>, String> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            &mut info as *mut libc::proc_bsdinfo as *mut libc::c_void,
+            size,
+        )
+    };
+    if read != size {
+        return Err(format!("proc_pidinfo não consultou o PID {pid}"));
+    }
+    Ok((info.pbi_ppid > 1).then_some(info.pbi_ppid))
+}
+
+/// `CreateToolhelp32Snapshot` enxerga o pai. Se o PID não está no
+/// snapshot, a checagem fecha: não há como provar a descendência.
+#[cfg(windows)]
+pub(crate) fn parent_pid(pid: u32) -> Result<Option<u32>, String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return Err(format!(
+                "não foi possível obter snapshot de processos para o PID {pid}"
+            ));
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        if Process32FirstW(snap, &mut entry) == 0 {
+            CloseHandle(snap);
+            return Err(format!(
+                "não foi possível ler o snapshot de processos para o PID {pid}"
+            ));
+        }
+        loop {
+            if entry.th32ProcessID == pid {
+                let ppid = entry.th32ParentProcessID;
+                CloseHandle(snap);
+                return Ok((ppid > 1).then_some(ppid));
+            }
+            if Process32NextW(snap, &mut entry) == 0 {
+                break;
+            }
+        }
+        CloseHandle(snap);
+        Err(format!("PID {pid} não encontrado no snapshot de processos"))
+    }
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows"
+)))]
+pub(crate) fn parent_pid(_pid: u32) -> Result<Option<u32>, String> {
+    Err("consulta de processo não disponível nesta plataforma".into())
 }
 
 #[cfg(test)]
@@ -537,7 +909,7 @@ mod tests {
         fn new(label: &str) -> Self {
             let tab = format!("{label}-{}", uuid::Uuid::new_v4());
             let token = uuid::Uuid::new_v4().to_string();
-            publish_token(&tab, &token, std::process::id());
+            publish_token(&tab, &token, std::process::id()).unwrap();
             Self { tab, token }
         }
     }
@@ -553,24 +925,48 @@ mod tests {
         let issued = Issued::new("forged");
         let err = verified_tab(Some(&issued.token), Some("other-tab")).unwrap_err();
         assert!(err.contains("ADE_TAB_ID"), "{err}");
-        assert_eq!(verified_tab(Some(&issued.token), Some(&issued.tab)).unwrap(), issued.tab);
+        assert_eq!(
+            verified_tab(Some(&issued.token), Some(&issued.tab)).unwrap(),
+            issued.tab
+        );
         assert_eq!(verified_tab(Some(&issued.token), None).unwrap(), issued.tab);
-        assert_eq!(verified_tab(Some(&issued.token), Some("  ")).unwrap(), issued.tab);
+        assert_eq!(
+            verified_tab(Some(&issued.token), Some("  ")).unwrap(),
+            issued.tab
+        );
     }
 
     #[test]
     fn missing_or_unknown_session_is_rejected() {
         let issued = Issued::new("unknown");
-        assert!(verified_tab(None, Some(&issued.tab)).unwrap_err().contains("ausente"));
-        assert!(verified_tab(Some(""), Some(&issued.tab)).unwrap_err().contains("ausente"));
-        assert!(verified_tab(Some("not-a-session"), Some(&issued.tab)).unwrap_err().contains("não é reconhecida"));
+        assert!(
+            verified_tab(None, Some(&issued.tab))
+                .unwrap_err()
+                .contains("ausente")
+        );
+        assert!(
+            verified_tab(Some(""), Some(&issued.tab))
+                .unwrap_err()
+                .contains("ausente")
+        );
+        assert!(
+            verified_tab(Some("not-a-session"), Some(&issued.tab))
+                .unwrap_err()
+                .contains("não é reconhecida")
+        );
     }
 
     #[test]
     fn reattached_terminal_keeps_its_token() {
         let issued = Issued::new("reattach");
-        assert_eq!(verified_tab(Some(&issued.token), Some(&issued.tab)).unwrap(), issued.tab);
-        assert_eq!(verified_tab(Some(&issued.token), Some(&issued.tab)).unwrap(), issued.tab);
+        assert_eq!(
+            verified_tab(Some(&issued.token), Some(&issued.tab)).unwrap(),
+            issued.tab
+        );
+        assert_eq!(
+            verified_tab(Some(&issued.token), Some(&issued.tab)).unwrap(),
+            issued.tab
+        );
     }
 
     #[test]
@@ -578,12 +974,32 @@ mod tests {
         let tab = format!("replaced-{}", uuid::Uuid::new_v4());
         let first = uuid::Uuid::new_v4().to_string();
         let second = uuid::Uuid::new_v4().to_string();
-        publish_token(&tab, &first, 10);
-        publish_token(&tab, &second, 11);
+        publish_identity(
+            &tab,
+            &first,
+            ProcessIdentity {
+                pid: 10,
+                start_time: Some(10),
+            },
+        )
+        .unwrap();
+        publish_identity(
+            &tab,
+            &second,
+            ProcessIdentity {
+                pid: 11,
+                start_time: Some(11),
+            },
+        )
+        .unwrap();
         assert!(verified_tab(Some(&first), Some(&tab)).is_err());
         assert_eq!(verified_tab(Some(&second), Some(&tab)).unwrap(), tab);
         release_token(&second);
-        assert!(verified_tab(Some(&second), Some(&tab)).unwrap_err().contains("não é reconhecida"));
+        assert!(
+            verified_tab(Some(&second), Some(&tab))
+                .unwrap_err()
+                .contains("não é reconhecida")
+        );
     }
 
     #[test]
@@ -591,50 +1007,293 @@ mod tests {
         let thread = format!("{}teste-actor", crate::chat_team::model::THREAD_PREFIX);
         let outra = format!("{}teste-outra", crate::chat_team::model::THREAD_PREFIX);
         // Sem registro: recusada, mesmo com PID.
-        assert!(authorize_actor(None, Some(&thread), Some(std::process::id())).unwrap_err().contains("não tem um processo"));
-        register_conversation(&thread, std::process::id());
+        assert!(
+            authorize_actor(None, Some(&thread), Some(std::process::id()))
+                .unwrap_err()
+                .contains("não tem um processo")
+        );
+        register_conversation(&thread, std::process::id()).unwrap();
         if ancestry_required() {
-            assert_eq!(authorize_actor(None, Some(&thread), Some(std::process::id())).unwrap(), thread);
-            assert!(authorize_actor(None, Some(&thread), None).unwrap_err().contains("PID"));
-            assert!(authorize_actor(None, Some(&thread), Some(1)).unwrap_err().contains("não pertence"));
+            assert_eq!(
+                authorize_actor(None, Some(&thread), Some(std::process::id())).unwrap(),
+                thread
+            );
+            assert!(
+                authorize_actor(None, Some(&thread), None)
+                    .unwrap_err()
+                    .contains("PID")
+            );
+            assert!(
+                authorize_actor(None, Some(&thread), Some(1))
+                    .unwrap_err()
+                    .contains("não pertence")
+            );
             // Outra conversa não herda o processo desta.
-            register_conversation(&outra, std::process::id().wrapping_add(7_000_000));
+            let _ = register_conversation(&outra, std::process::id().wrapping_add(7_000_000));
             assert!(authorize_actor(None, Some(&outra), Some(std::process::id())).is_err());
         }
         // Terminal sem token continua recusado, e o `authorize` de memória/swarm não aceita conversa.
-        assert!(authorize_actor(None, Some("tab-de-terminal"), Some(std::process::id())).unwrap_err().contains("ausente"));
+        assert!(
+            authorize_actor(None, Some("tab-de-terminal"), Some(std::process::id()))
+                .unwrap_err()
+                .contains("ausente")
+        );
         assert!(authorize(None, Some(&thread), Some(std::process::id())).is_err());
+        let codex_tab = Issued::new("codex-pid");
+        if ancestry_required() {
+            let root = registry().by_token[&codex_tab.token].root;
+            assert_eq!(
+                authorize_by_pid_with_roots(
+                    Some(&codex_tab.tab),
+                    std::process::id(),
+                    &[(codex_tab.tab.clone(), root)],
+                    parent_pid,
+                )
+                .unwrap(),
+                codex_tab.tab,
+                "o PID do IPC identifica a sessão Codex sem ADE_SESSION"
+            );
+            assert!(authorize(None, Some(&codex_tab.tab), Some(1)).is_err());
+        }
         // Token de terminal não vale para outra aba mesmo com o PID certo.
         let issued = Issued::new("actor");
-        assert!(authorize_actor(Some(&issued.token), Some(&thread), Some(std::process::id())).unwrap_err().contains("ADE_TAB_ID"));
+        assert!(
+            authorize_actor(Some(&issued.token), Some(&thread), Some(std::process::id()))
+                .unwrap_err()
+                .contains("ADE_TAB_ID")
+        );
+    }
+
+    #[test]
+    fn sessoes_com_mesmo_pid_raiz_sao_ambiguas_e_recusadas() {
+        if !ancestry_required() {
+            return;
+        }
+        let first = Issued::new("pid-collision-first");
+        let second = Issued::new("pid-collision-second");
+        let root_tabs: Vec<String> = {
+            let sessions = registry();
+            sessions
+                .by_tab
+                .iter()
+                .filter_map(|(tab, token)| {
+                    sessions
+                        .by_token
+                        .get(token)
+                        .filter(|bound| bound.root.pid == std::process::id())
+                        .map(|_| tab.clone())
+                })
+                .collect()
+        };
+        let first_root = root_tabs.first().expect("há sessões registradas");
+        let claimed = if first_root == &first.tab {
+            &second.tab
+        } else {
+            &first.tab
+        };
+
+        assert_ne!(first_root, claimed);
+        let err = authorize(None, Some(claimed), Some(std::process::id())).unwrap_err();
+        assert!(err.contains("mais de uma sessão"), "{err}");
+        let err = principal_of(None, &[], None, Some(std::process::id())).unwrap_err();
+        assert!(err.contains("mais de uma sessão"), "{err}");
     }
 
     #[test]
     fn ancestry_accepts_self_and_a_child_and_rejects_the_rest() {
-        let mut parents = HashMap::from([(3, 2), (2, 1)]);
-        assert!(descends_from(1, 1, |pid| parents.get(&pid).copied()));
-        assert!(descends_from(3, 1, |pid| parents.get(&pid).copied()));
-        assert!(!descends_from(3, 9, |pid| parents.get(&pid).copied()));
-        assert!(!descends_from(0, 1, |pid| parents.get(&pid).copied()));
-        assert!(!descends_from(3, 0, |pid| parents.get(&pid).copied()));
-        parents.insert(5, 6);
-        parents.insert(6, 5);
-        assert!(!descends_from(5, 1, |pid| parents.get(&pid).copied()));
+        let parents = HashMap::from([(3, 2), (5, 6), (6, 5)]);
+        let start = |pid| Some(u64::from(pid) * 10);
+        assert!(descends_from_identity(
+            2,
+            ProcessIdentity {
+                pid: 2,
+                start_time: Some(20)
+            },
+            |pid| Ok(parents.get(&pid).copied()),
+            start
+        ));
+        assert!(descends_from_identity(
+            3,
+            ProcessIdentity {
+                pid: 2,
+                start_time: Some(20)
+            },
+            |pid| Ok(parents.get(&pid).copied()),
+            start
+        ));
+        assert!(!descends_from_identity(
+            3,
+            ProcessIdentity {
+                pid: 9,
+                start_time: Some(90)
+            },
+            |pid| Ok(parents.get(&pid).copied()),
+            start
+        ));
+        assert!(!descends_from_identity(
+            0,
+            ProcessIdentity {
+                pid: 2,
+                start_time: Some(20)
+            },
+            |pid| Ok(parents.get(&pid).copied()),
+            start
+        ));
+        assert!(!descends_from_identity(
+            3,
+            ProcessIdentity {
+                pid: 0,
+                start_time: Some(0)
+            },
+            |pid| Ok(parents.get(&pid).copied()),
+            start
+        ));
+        assert!(!descends_from_identity(
+            5,
+            ProcessIdentity {
+                pid: 2,
+                start_time: Some(20)
+            },
+            |pid| Ok(parents.get(&pid).copied()),
+            start
+        ));
+    }
+
+    #[test]
+    fn registro_de_aba_sem_inicio_e_recusado_sem_alterar_o_estado() {
+        let tab = format!("missing-start-{}", uuid::Uuid::new_v4());
+        let token = uuid::Uuid::new_v4().to_string();
+        let err = publish_identity(
+            &tab,
+            &token,
+            ProcessIdentity {
+                pid: 42,
+                start_time: None,
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("horário de início"), "{err}");
+        assert!(!registry().by_token.contains_key(&token));
+    }
+
+    #[test]
+    fn registro_de_conversa_sem_inicio_e_recusado_sem_alterar_o_estado() {
+        let tab = format!(
+            "{}missing-start-{}",
+            crate::chat_team::model::THREAD_PREFIX,
+            uuid::Uuid::new_v4()
+        );
+        let err = register_conversation_identity(
+            &tab,
+            ProcessIdentity {
+                pid: 42,
+                start_time: None,
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("horário de início"), "{err}");
+        assert!(!registry().conversations.contains_key(&tab));
+    }
+
+    #[test]
+    fn falha_ao_registrar_conversa_descarta_token_pendente() {
+        let tab = format!(
+            "{}falha-start-{}",
+            crate::chat_team::model::THREAD_PREFIX,
+            uuid::Uuid::new_v4()
+        );
+        let token = issue_conversation_token(&tab).unwrap();
+        let error = register_conversation_identity(
+            &tab,
+            ProcessIdentity {
+                pid: 42,
+                start_time: None,
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.contains("horário de início"), "{error}");
+        let sessions = registry();
+        assert!(!sessions.pending.contains_key(&tab));
+        assert!(!sessions.by_token.contains_key(&token));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn pid_registrado_com_inicio_diferente_e_recusado() {
+        let pid = std::process::id();
+        let actual_start =
+            process_start_time(pid).expect("o processo do teste tem início conhecido");
+        let issued = Issued::new("pid-start-mismatch");
+        {
+            let mut sessions = registry();
+            let bound = sessions.by_token.get_mut(&issued.token).unwrap();
+            assert_eq!(bound.root.pid, pid);
+            bound.root.start_time = Some(actual_start.wrapping_add(1));
+        }
+        assert!(
+            authorize(Some(&issued.token), Some(&issued.tab), Some(pid)).is_err(),
+            "o PID atual não deve comprovar uma sessão registrada para outra instância do processo"
+        );
+    }
+
+    #[test]
+    fn elo_intermediario_trocado_durante_a_caminhada_e_recusado() {
+        let task = format!("owner-race-{}", uuid::Uuid::new_v4());
+        register_task_identity(
+            &task,
+            ProcessIdentity {
+                pid: 4,
+                start_time: Some(40),
+            },
+        )
+        .unwrap();
+        let mut reads_of_client = 0;
+        let result = owner_of_identity(
+            5,
+            |pid| Ok((pid == 5).then_some(4)),
+            |pid| match pid {
+                5 => {
+                    reads_of_client += 1;
+                    Some(if reads_of_client == 1 { 50 } else { 51 })
+                }
+                4 => Some(40),
+                _ => None,
+            },
+        );
+        release_task_process(&task);
+        assert!(
+            result.is_err(),
+            "a troca da identidade de um elo intermediário deve recusar a caminhada"
+        );
     }
 
     #[test]
     fn token_without_client_pid_is_refused_when_ancestry_is_required() {
         let issued = Issued::new("pid");
         if !ancestry_required() {
-            assert_eq!(authorize(Some(&issued.token), Some(&issued.tab), None).unwrap(), issued.tab);
+            assert_eq!(
+                authorize(Some(&issued.token), Some(&issued.tab), None).unwrap(),
+                issued.tab
+            );
             return;
         }
         let missing = authorize(Some(&issued.token), Some(&issued.tab), None).unwrap_err();
         assert!(missing.contains("PID"), "{missing}");
-        let forged = authorize(Some(&issued.token), Some("other-tab"), Some(std::process::id())).unwrap_err();
+        let forged = authorize(
+            Some(&issued.token),
+            Some("other-tab"),
+            Some(std::process::id()),
+        )
+        .unwrap_err();
         assert!(forged.contains("ADE_TAB_ID"), "{forged}");
         assert_eq!(
-            authorize(Some(&issued.token), Some(&issued.tab), Some(std::process::id())).unwrap(),
+            authorize(
+                Some(&issued.token),
+                Some(&issued.tab),
+                Some(std::process::id())
+            )
+            .unwrap(),
             issued.tab
         );
     }
@@ -643,7 +1302,10 @@ mod tests {
     #[test]
     fn a_spawned_child_belongs_to_this_process_and_init_does_not() {
         let issued = Issued::new("child");
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
         let pid = child.id();
         assert_eq!(
             authorize(Some(&issued.token), Some(&issued.tab), Some(pid)).unwrap(),
@@ -658,9 +1320,19 @@ mod tests {
 
     #[test]
     fn cada_recusa_diz_o_que_fazer_e_nenhuma_manda_reiniciar_o_app() {
-        for err in [ERR_MISSING, ERR_UNKNOWN, ERR_FORGED, ERR_NO_PID, ERR_CONVERSATION_UNKNOWN, ERR_ANCESTRY] {
+        for err in [
+            ERR_MISSING,
+            ERR_UNKNOWN,
+            ERR_FORGED,
+            ERR_NO_PID,
+            ERR_CONVERSATION_UNKNOWN,
+            ERR_ANCESTRY,
+            ERR_AMBIGUOUS,
+        ] {
             assert!(
-                ["Rode ", "Peça ", "Use ", "Mande ", "Não defina "].iter().any(|verb| err.contains(verb)),
+                ["Rode ", "Peça ", "Use ", "Mande ", "Não defina "]
+                    .iter()
+                    .any(|verb| err.contains(verb)),
                 "a recusa precisa dizer o próximo passo: {err}"
             );
             // Reiniciar o app fecha os terminais e agentes da pessoa (AGENTS.md, regra 2.1).
@@ -678,20 +1350,55 @@ mod tests {
         format!("{label}-{}", uuid::Uuid::new_v4())
     }
 
+    fn fake_start(pid: u32) -> Option<u64> {
+        Some(u64::from(pid))
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn pid_de_tarefa_com_inicio_adulterado_e_recusado() {
+        if !ancestry_required() {
+            return;
+        }
+        let pid = std::process::id();
+        let actual_start =
+            process_start_time(pid).expect("o processo do teste tem início conhecido");
+        let task = task_id("tarefa-inicio");
+        register_task_process(&task, pid).unwrap();
+        {
+            let mut sessions = registry();
+            let root = sessions.task_roots.get_mut(&task).unwrap();
+            assert_eq!(root.pid, pid);
+            root.start_time = Some(actual_start.wrapping_add(1));
+        }
+        assert!(
+            authorize_task_with(&task, Some(pid), |_| Ok(None), process_start_time).is_err(),
+            "o PID atual não deve comprovar uma tarefa registrada para outra instância do processo"
+        );
+        release_task_process(&task);
+    }
+
     #[test]
     fn taskid_so_vale_para_o_processo_que_o_supervisor_lancou_e_seus_descendentes() {
         if !ancestry_required() {
             return;
         }
         let task = task_id("tarefa");
-        register_task_process(&task, 100);
+        register_task_identity(
+            &task,
+            ProcessIdentity {
+                pid: 100,
+                start_time: Some(100),
+            },
+        )
+        .unwrap();
         let parents = HashMap::from([(300, 200), (200, 100), (900, 800)]);
-        let parent = |pid: u32| parents.get(&pid).copied();
+        let parent = |pid: u32| Ok(parents.get(&pid).copied());
         // O próprio agente e o MCP que ele lançou (neto) provam a tarefa.
-        assert!(authorize_task_with(&task, Some(100), parent).is_ok());
-        assert!(authorize_task_with(&task, Some(300), parent).is_ok());
+        assert!(authorize_task_with(&task, Some(100), parent, fake_start).is_ok());
+        assert!(authorize_task_with(&task, Some(300), parent, fake_start).is_ok());
         // Um processo de outra árvore (outra tarefa, uma aba, a pessoa) não prova nada, mesmo com o token certo.
-        let intruso = authorize_task_with(&task, Some(900), parent).unwrap_err();
+        let intruso = authorize_task_with(&task, Some(900), parent, fake_start).unwrap_err();
         assert!(intruso.contains("não pertence"), "{intruso}");
         release_task_process(&task);
     }
@@ -702,13 +1409,32 @@ mod tests {
             return;
         }
         let task = task_id("tarefa");
-        register_task_process(&task, 100);
-        assert!(authorize_task_with(&task, None, |_| None).unwrap_err().contains("PID"), "o TCP não traz PID");
+        register_task_identity(
+            &task,
+            ProcessIdentity {
+                pid: 100,
+                start_time: Some(100),
+            },
+        )
+        .unwrap();
+        assert!(
+            authorize_task_with(&task, None, |_| Ok(None), fake_start)
+                .unwrap_err()
+                .contains("PID"),
+            "o TCP não traz PID"
+        );
         // Um id inventado (ou de uma tarefa que já saiu) não tem processo: não há como provar.
         let inventado = task_id("inventada");
-        assert!(authorize_task_with(&inventado, Some(100), |_| None).unwrap_err().contains("não tem um processo"));
+        assert!(
+            authorize_task_with(&inventado, Some(100), |_| Ok(None), fake_start)
+                .unwrap_err()
+                .contains("não tem um processo")
+        );
         release_task_process(&task);
-        assert!(authorize_task_with(&task, Some(100), |_| None).is_err(), "depois de liberada a tarefa não se prova mais");
+        assert!(
+            authorize_task_with(&task, Some(100), |_| Ok(None), fake_start).is_err(),
+            "depois de liberada a tarefa não se prova mais"
+        );
     }
 
     #[test]
@@ -717,10 +1443,27 @@ mod tests {
             return;
         }
         let (a, b) = (task_id("a"), task_id("b"));
-        register_task_process(&a, 100);
-        register_task_process(&b, 500);
-        assert!(authorize_task_with(&a, Some(100), |_| None).is_ok());
-        assert!(authorize_task_with(&b, Some(100), |_| None).is_err(), "a tarefa A agiu como a tarefa B");
+        register_task_identity(
+            &a,
+            ProcessIdentity {
+                pid: 100,
+                start_time: Some(100),
+            },
+        )
+        .unwrap();
+        register_task_identity(
+            &b,
+            ProcessIdentity {
+                pid: 500,
+                start_time: Some(500),
+            },
+        )
+        .unwrap();
+        assert!(authorize_task_with(&a, Some(100), |_| Ok(None), fake_start).is_ok());
+        assert!(
+            authorize_task_with(&b, Some(100), |_| Ok(None), fake_start).is_err(),
+            "a tarefa A agiu como a tarefa B"
+        );
         release_task_process(&a);
         release_task_process(&b);
     }
@@ -730,7 +1473,11 @@ mod tests {
     #[test]
     fn quem_chama_de_um_terminal_provado_e_a_aba() {
         let issued = Issued::new("quem");
-        let caller = classify_caller(Some(&issued.token), Some(&issued.tab), Some(std::process::id()));
+        let caller = classify_caller(
+            Some(&issued.token),
+            Some(&issued.tab),
+            Some(std::process::id()),
+        );
         assert_eq!(caller.unwrap(), Caller::Tab(issued.tab.clone()));
     }
 
@@ -740,7 +1487,14 @@ mod tests {
         // ADE_TAB_ID sem sessão: declarado, não provado.
         assert!(classify_caller(None, Some(&issued.tab), Some(std::process::id())).is_err());
         // Sessão de outra aba com a identidade de uma terceira.
-        assert!(classify_caller(Some(&issued.token), Some("outra-aba"), Some(std::process::id())).is_err());
+        assert!(
+            classify_caller(
+                Some(&issued.token),
+                Some("outra-aba"),
+                Some(std::process::id())
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -761,8 +1515,15 @@ mod tests {
             return;
         }
         // PID 1 nunca descende de PTY nenhum.
-        assert_eq!(classify_caller(None, None, Some(1)).unwrap(), Caller::Outside);
-        assert_eq!(classify_caller(Some(" "), Some(""), Some(1)).unwrap(), Caller::Outside, "campos vazios não são identidade");
+        assert_eq!(
+            classify_caller(None, None, Some(1)).unwrap(),
+            Caller::Outside
+        );
+        assert_eq!(
+            classify_caller(Some(" "), Some(""), Some(1)).unwrap(),
+            Caller::Outside,
+            "campos vazios não são identidade"
+        );
         // Sem PID (TCP) não dá para saber de que lado está: recusa.
         assert!(classify_caller(None, None, None).is_err());
     }
@@ -775,11 +1536,19 @@ mod tests {
         token: String,
     }
 
-    impl Fake {
+        impl Fake {
         fn new(root: u32) -> Self {
             let tab = format!("principal-{}", uuid::Uuid::new_v4());
             let token = uuid::Uuid::new_v4().to_string();
-            publish_token(&tab, &token, root);
+            publish_in(
+                &mut registry(),
+                &tab,
+                &token,
+                ProcessIdentity {
+                    pid: root,
+                    start_time: Some(u64::from(root)),
+                },
+            );
             Self { tab, token }
         }
     }
@@ -796,14 +1565,31 @@ mod tests {
             return;
         }
         let aba = Fake::new(4_100_000_001);
-        let parents = HashMap::from([(4_100_000_003, 4_100_000_002), (4_100_000_002, 4_100_000_001)]);
-        let parent = |pid: u32| parents.get(&pid).copied();
+        let parents = HashMap::from([
+            (4_100_000_003, 4_100_000_002),
+            (4_100_000_002, 4_100_000_001),
+        ]);
+        let parent = |pid: u32| Ok(parents.get(&pid).copied());
         // O próprio shell, um filho e um neto (o `ags mcp` do agente) são a aba, sem `ADE_TAB_ID` nem sessão (`env -i`).
         for pid in [4_100_000_001, 4_100_000_002, 4_100_000_003] {
-            assert_eq!(principal_with(None, &[], None, Some(pid), parent), Ok(Principal::Tab(aba.tab.clone())), "pid {pid}");
+            assert_eq!(
+                principal_with(None, &[], None, Some(pid), parent, fake_start),
+                Ok(Principal::Tab(aba.tab.clone())),
+                "pid {pid}"
+            );
         }
         // Declarar o que bate (aba e sessão) também serve; campos vazios não são declaração.
-        assert_eq!(principal_with(Some(&aba.token), &[&aba.tab, "", " "], None, Some(4_100_000_003), parent), Ok(Principal::Tab(aba.tab.clone())));
+        assert_eq!(
+            principal_with(
+                Some(&aba.token),
+                &[&aba.tab, "", " "],
+                None,
+                Some(4_100_000_003),
+                parent,
+                fake_start
+            ),
+            Ok(Principal::Tab(aba.tab.clone()))
+        );
     }
 
     #[test]
@@ -814,13 +1600,39 @@ mod tests {
         let minha = Fake::new(4_100_000_011);
         let outra = Fake::new(4_100_000_021);
         let parents = HashMap::from([(4_100_000_012, 4_100_000_011)]);
-        let parent = |pid: u32| parents.get(&pid).copied();
+        let parent = |pid: u32| Ok(parents.get(&pid).copied());
         // Dentro da aba `minha`, dizer ser `outra` (por `from`/`tabId` ou pela sessão dela).
-        let forjada = principal_with(None, &[&outra.tab], None, Some(4_100_000_012), parent).unwrap_err();
+        let forjada =
+            principal_with(None, &[&outra.tab], None, Some(4_100_000_012), parent, fake_start)
+                .unwrap_err();
         assert!(forjada.contains("ADE_TAB_ID"), "{forjada}");
-        assert!(principal_with(None, &["", &outra.tab], None, Some(4_100_000_012), parent).is_err());
-        assert!(principal_with(Some(&outra.token), &[], None, Some(4_100_000_012), parent).is_err(), "o token de outra aba não prova esta");
-        assert!(principal_with(Some("token-inventado"), &[], None, Some(4_100_000_012), parent).is_err());
+        assert!(
+            principal_with(None, &["", &outra.tab], None, Some(4_100_000_012), parent, fake_start)
+                .is_err()
+        );
+        assert!(
+            principal_with(
+                Some(&outra.token),
+                &[],
+                None,
+                Some(4_100_000_012),
+                parent,
+                fake_start
+            )
+            .is_err(),
+            "o token de outra aba não prova esta"
+        );
+        assert!(
+            principal_with(
+                Some("token-inventado"),
+                &[],
+                None,
+                Some(4_100_000_012),
+                parent,
+                fake_start
+            )
+            .is_err()
+        );
         drop(minha);
     }
 
@@ -831,17 +1643,54 @@ mod tests {
         }
         let aba = Fake::new(4_100_000_031);
         let parents = HashMap::from([(4_100_000_041, 4_100_000_040)]);
-        let parent = |pid: u32| parents.get(&pid).copied();
+        let parent = |pid: u32| Ok(parents.get(&pid).copied());
         // Um terminal próprio, fora de todo processo do ADE.
-        assert_eq!(principal_with(None, &[], None, Some(4_100_000_041), parent), Ok(Principal::Outside));
-        assert_eq!(principal_with(Some(" "), &["", ""], None, Some(4_100_000_041), parent), Ok(Principal::Outside));
+        assert_eq!(
+            principal_with(None, &[], None, Some(4_100_000_041), parent, fake_start),
+            Ok(Principal::Outside)
+        );
+        assert_eq!(
+            principal_with(
+                Some(" "),
+                &["", ""],
+                None,
+                Some(4_100_000_041),
+                parent,
+                fake_start
+            ),
+            Ok(Principal::Outside)
+        );
         // Mas dizer ser uma aba sem estar nela é forjar (um `setsid` com o ambiente herdado, `--from` à mão).
-        let forjada = principal_with(None, &[&aba.tab], None, Some(4_100_000_041), parent).unwrap_err();
+        let forjada = principal_with(
+            None,
+            &[&aba.tab],
+            None,
+            Some(4_100_000_041),
+            parent,
+            fake_start,
+        )
+        .unwrap_err();
         assert!(forjada.contains("não está dentro dela"), "{forjada}");
-        assert!(principal_with(Some(&aba.token), &[], None, Some(4_100_000_041), parent).is_err());
+        assert!(
+            principal_with(
+                Some(&aba.token),
+                &[],
+                None,
+                Some(4_100_000_041),
+                parent,
+                fake_start
+            )
+            .is_err()
+        );
         // O TCP não traz PID: não é a pessoa, é um chamador desconhecido.
-        assert_eq!(principal_with(None, &[], None, None, parent), Ok(Principal::Unknown));
-        assert_eq!(principal_with(None, &[&aba.tab], None, Some(0), parent), Ok(Principal::Unknown));
+        assert_eq!(
+            principal_with(None, &[], None, None, parent, fake_start),
+            Ok(Principal::Unknown)
+        );
+        assert_eq!(
+            principal_with(None, &[&aba.tab], None, Some(0), parent, fake_start),
+            Ok(Principal::Unknown)
+        );
     }
 
     #[test]
@@ -850,22 +1699,177 @@ mod tests {
             return;
         }
         let tarefa = task_id("principal");
-        register_task_process(&tarefa, 4_100_000_051);
-        let parents = HashMap::from([(4_100_000_053, 4_100_000_052), (4_100_000_052, 4_100_000_051)]);
-        let parent = |pid: u32| parents.get(&pid).copied();
+        register_task_identity(
+            &tarefa,
+            ProcessIdentity {
+                pid: 4_100_000_051,
+                start_time: Some(4_100_000_051),
+            },
+        )
+        .unwrap();
+        let parents = HashMap::from([
+            (4_100_000_053, 4_100_000_052),
+            (4_100_000_052, 4_100_000_051),
+        ]);
+        let parent = |pid: u32| Ok(parents.get(&pid).copied());
         // Sem declarar nada, o `ags` do shell do agente da tarefa é a tarefa; declarando o `taskId` certo também.
-        assert_eq!(principal_with(None, &[], None, Some(4_100_000_053), parent), Ok(Principal::Task(tarefa.clone())));
-        assert_eq!(principal_with(None, &[], Some(&tarefa), Some(4_100_000_053), parent), Ok(Principal::Task(tarefa.clone())));
+        assert_eq!(
+            principal_with(None, &[], None, Some(4_100_000_053), parent, fake_start),
+            Ok(Principal::Task(tarefa.clone()))
+        );
+        assert_eq!(
+            principal_with(
+                None,
+                &[],
+                Some(&tarefa),
+                Some(4_100_000_053),
+                parent,
+                fake_start
+            ),
+            Ok(Principal::Task(tarefa.clone()))
+        );
         // `taskId` de outra tarefa, ou de um processo que não é o dela: recusado.
         let outra = task_id("outra");
-        assert!(principal_with(None, &[], Some(&outra), Some(4_100_000_053), parent).is_err());
-        assert!(principal_with(None, &[], Some(&tarefa), Some(4_100_000_099), parent).is_err());
-        assert!(principal_with(None, &[], Some(&tarefa), None, parent).is_err(), "o TCP não prova tarefa");
+        assert!(
+            principal_with(
+                None,
+                &[],
+                Some(&outra),
+                Some(4_100_000_053),
+                parent,
+                fake_start
+            )
+            .is_err()
+        );
+        assert!(
+            principal_with(
+                None,
+                &[],
+                Some(&tarefa),
+                Some(4_100_000_099),
+                parent,
+                fake_start
+            )
+            .is_err()
+        );
+        assert!(
+            principal_with(None, &[], Some(&tarefa), None, parent, fake_start).is_err(),
+            "o TCP não prova tarefa"
+        );
         // Uma tarefa não é uma aba: declarar as duas é trocar de identidade.
-        assert!(principal_with(None, &["uma-aba"], Some(&tarefa), Some(4_100_000_053), parent).unwrap_err().contains("tarefa"));
-        assert!(principal_with(None, &["uma-aba"], None, Some(4_100_000_053), parent).is_err());
+        assert!(
+            principal_with(
+                None,
+                &["uma-aba"],
+                Some(&tarefa),
+                Some(4_100_000_053),
+                parent,
+                fake_start
+            )
+            .unwrap_err()
+            .contains("tarefa")
+        );
+        assert!(
+            principal_with(
+                None,
+                &["uma-aba"],
+                None,
+                Some(4_100_000_053),
+                parent,
+                fake_start
+            )
+            .is_err()
+        );
         release_task_process(&tarefa);
         // Liberada, o processo dela volta a ser um estranho ao ADE.
-        assert_eq!(principal_with(None, &[], None, Some(4_100_000_053), parent), Ok(Principal::Outside));
+        assert_eq!(
+            principal_with(None, &[], None, Some(4_100_000_053), parent, fake_start),
+            Ok(Principal::Outside)
+        );
+    }
+
+    #[test]
+    fn registro_sem_horario_de_inicio_e_recusado_com_erro_distinto() {
+        if !ancestry_required() {
+            return;
+        }
+        let task = task_id("sem-inicio");
+        let err = register_task_identity(
+            &task,
+            ProcessIdentity {
+                pid: 100,
+                start_time: None,
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("horário de início"), "{err}");
+        assert!(registry().task_roots.get(&task).is_none());
+    }
+
+    #[test]
+    fn aba_dentro_de_tarefa_escolhe_a_raiz_mais_proxima() {
+        if !ancestry_required() {
+            return;
+        }
+        let tarefa = task_id("ninho");
+        register_task_identity(
+            &tarefa,
+            ProcessIdentity {
+                pid: 4_100_000_100,
+                start_time: Some(4_100_000_100),
+            },
+        )
+        .unwrap();
+        let aba = Fake::new(4_100_000_200);
+        let parents = HashMap::from([
+            (4_100_000_201, 4_100_000_200),
+            (4_100_000_200, 4_100_000_100),
+        ]);
+        let parent = |pid: u32| Ok(parents.get(&pid).copied());
+        assert_eq!(
+            principal_with(None, &[], None, Some(4_100_000_201), parent, fake_start),
+            Ok(Principal::Tab(aba.tab.clone())),
+            "a aba aninhada na tarefa vence por proximidade, sem ambiguidade"
+        );
+        release_task_process(&tarefa);
+    }
+
+    #[test]
+    fn identidade_ilegivel_nao_classifica_o_chamador_como_fora() {
+        let issued = Issued::new("identidade-ilegivel");
+        let error = classify_caller_with_identity(
+            None,
+            None,
+            Some(std::process::id()),
+            |_| Ok(None),
+            |_| None,
+        )
+        .unwrap_err();
+
+        assert!(
+            error.contains("Não foi possível comprovar a identidade"),
+            "{error}"
+        );
+        drop(issued);
+    }
+
+    #[test]
+    fn falha_ao_consultar_pai_recusa_o_tab_send() {
+        if !ancestry_required() {
+            return;
+        }
+        let error = classify_caller_with_identity(
+            None,
+            None,
+            Some(4_100_000_301),
+            |_| Err("falha simulada na consulta de pai".into()),
+            |_| Some(42),
+        )
+        .expect_err("falha ao consultar o pai não pode classificar tab.send como Outside");
+
+        assert!(
+            error.contains("Não foi possível comprovar a identidade"),
+            "{error}"
+        );
     }
 }

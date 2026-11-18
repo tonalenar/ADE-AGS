@@ -805,7 +805,7 @@ mod memory_time_tests {
     fn forged_ade_tab_id_is_refused_before_the_mission_lookup() {
         let tab = format!("real-{}", uuid::Uuid::new_v4());
         let token = uuid::Uuid::new_v4().to_string();
-        crate::terminal::publish_token(&tab, &token, std::process::id());
+        crate::terminal::publish_token(&tab, &token, std::process::id()).unwrap();
         let forged = crate::ipc::with_client_pid(Some(std::process::id()), || {
             super::authenticated_tab(
                 &serde_json::json!({"from":"other-tab","session":&token,"mission":"foreign"}),

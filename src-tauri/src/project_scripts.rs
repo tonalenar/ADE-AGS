@@ -13,8 +13,9 @@ const SERVICE_PREFIX: &str = "ade-ags.project-scripts";
 const MAX_PROJECT_PATH: usize = 4096;
 const MAX_SCRIPT_ID: usize = 128;
 const MAX_COMMAND_BYTES: usize = 8 * 1024;
-const CHUNK_BYTES: usize = 1800;
-const MAX_CHUNKS: usize = 8;
+// 1200 bytes UTF-8 ocupam no máximo 2400 bytes UTF-16 no keyring do Windows.
+const CHUNK_BYTES: usize = 1200;
+const MAX_CHUNKS: usize = (MAX_COMMAND_BYTES + CHUNK_BYTES - 1) / CHUNK_BYTES;
 static KEYRING_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 const RUN_OUTPUT_EVENT: &str = "cc-project-script-output";
 const RUN_FINISHED_EVENT: &str = "cc-project-script-finished";
@@ -480,4 +481,22 @@ pub async fn chat_project_script_delete(cwd: String, id: String) -> Result<(), S
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn blocos_de_comando_respeitam_limite_windows_do_keyring() {
+        let command = "a".repeat(super::MAX_COMMAND_BYTES);
+        let chunks = super::split_chunks(&command);
+        assert!(chunks.len() <= super::MAX_CHUNKS);
+        for chunk in chunks {
+            assert!(chunk.len() <= super::CHUNK_BYTES);
+            assert!(
+                chunk.encode_utf16().count() * 2 <= 2560,
+                "bloco de {} bytes UTF-16",
+                chunk.encode_utf16().count() * 2
+            );
+        }
+    }
 }

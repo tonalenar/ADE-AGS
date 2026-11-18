@@ -27,11 +27,11 @@
 //! módulo também lê o marcador de login e, para Claude, o email em `.claude.json` para
 //! mostrar uma identidade reconhecível.
 
-
-mod commands;
-pub(crate) mod antigravity_oauth;
 pub(crate) mod antigravity_access;
 mod antigravity_home;
+pub(crate) mod antigravity_oauth;
+pub(crate) mod broker;
+mod commands;
 mod health;
 pub mod pools;
 mod profiles;

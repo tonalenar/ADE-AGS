@@ -9,10 +9,9 @@
 //!
 //! ## Cuando no hay llavero
 //!
-//! Hay Linux sin Secret Service (un WM mínimo, una sesión sin keyring desbloqueado). Ahí,
-//! en vez de no poder iniciar sesión, el token va a un archivo `0600` dentro de la carpeta
-//! de datos de la app — y la cuenta lo dice (`Storage::File`), para que no sea una
-//! sorpresa. VS Code hace lo mismo con su almacenamiento "básico".
+//! No se guarda un token nuevo en disco. Los archivos `git-secrets` que dejó una versión
+//! anterior se migran al llavero al leerlos; si el llavero no está disponible, se conserva
+//! el archivo y la operación falla con un mensaje claro.
 //!
 //! Todo esto bloquea (D-Bus, Keychain), así que solo se llama desde hilos de bloqueo.
 
@@ -51,62 +50,89 @@ fn file_path(data_dir: &Path, id: &str) -> PathBuf {
     data_dir.join("git-secrets").join(format!("{id}.json"))
 }
 
-fn write_file(path: &Path, content: &str) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|e| e.to_string())?;
-        f.write_all(content.as_bytes()).map_err(|e| e.to_string())
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, content).map_err(|e| e.to_string())
-    }
-}
-
 fn entry(id: &str) -> keyring::Result<keyring::Entry> {
     keyring::Entry::new(SERVICE, id)
 }
 
-pub fn save(data_dir: &Path, id: &str, secret: &Secret) -> Result<Storage, String> {
-    let json = serde_json::to_string(secret).map_err(|e| e.to_string())?;
-    let storage = match entry(id).and_then(|e| e.set_password(&json)) {
-        Ok(()) => {
-            // Si antes estaba en archivo (no había llavero y ahora sí), que no quede ahí.
-            let _ = std::fs::remove_file(file_path(data_dir, id));
-            Storage::Keyring
+struct WipeString(String);
+
+impl Drop for WipeString {
+    fn drop(&mut self) {
+        // SAFETY: bytes zero formam UTF-8 válido e removem a cópia serializada do token.
+        unsafe {
+            self.0.as_mut_vec().fill(0);
         }
-        Err(e) => {
-            eprintln!("[forge] llavero no disponible ({e}); el token va a un archivo 0600");
-            write_file(&file_path(data_dir, id), &json)?;
-            Storage::File
-        }
-    };
+        self.0.clear();
+    }
+}
+
+fn save_with_keyring(
+    data_dir: &Path,
+    id: &str,
+    secret: &Secret,
+    store: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<Storage, String> {
+    let json = WipeString(serde_json::to_string(secret).map_err(|e| e.to_string())?);
+    store(&json.0)
+        .map_err(|e| format!("Não foi possível guardar o token no cofre do sistema: {e}"))?;
+    let legacy = file_path(data_dir, id);
+    if legacy.exists() {
+        std::fs::remove_file(&legacy).map_err(|e| {
+            format!(
+                "O token foi guardado no cofre, mas o arquivo legado não pôde ser removido: {e}"
+            )
+        })?;
+    }
     CACHE.lock().unwrap().insert(id.to_string(), secret.clone());
-    Ok(storage)
+    Ok(Storage::Keyring)
+}
+
+fn migrate_legacy_with(
+    data_dir: &Path,
+    id: &str,
+    store: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<Secret, String> {
+    let legacy = file_path(data_dir, id);
+    let json = WipeString(std::fs::read_to_string(&legacy).map_err(|_| {
+        "Não foi possível ler o token legado; o arquivo foi preservado.".to_string()
+    })?);
+    let secret: Secret = serde_json::from_str(&json.0)
+        .map_err(|_| "O token legado está inválido; o arquivo foi preservado.".to_string())?;
+    save_with_keyring(data_dir, id, &secret, store)?;
+    Ok(secret)
+}
+
+pub fn save(data_dir: &Path, id: &str, secret: &Secret) -> Result<Storage, String> {
+    save_with_keyring(data_dir, id, secret, |json| {
+        entry(id)
+            .and_then(|e| e.set_password(json))
+            .map_err(|e| e.to_string())
+    })
 }
 
 pub fn load(data_dir: &Path, id: &str) -> Result<Secret, String> {
     if let Some(s) = CACHE.lock().unwrap().get(id) {
         return Ok(s.clone());
     }
-    let json = match entry(id).and_then(|e| e.get_password()) {
+    // Arquivos legados podem conter um token mais novo que uma entrada antiga do keyring.
+    // Migra antes da leitura normal e só remove a cópia em disco depois de gravar no cofre.
+    let legacy = file_path(data_dir, id);
+    if legacy.exists() {
+        return migrate_legacy_with(data_dir, id, |json| {
+            entry(id)
+                .and_then(|e| e.set_password(json))
+                .map_err(|e| e.to_string())
+        });
+    }
+    let json = WipeString(match entry(id).and_then(|e| e.get_password()) {
         Ok(json) => json,
-        Err(keyring_err) => std::fs::read_to_string(file_path(data_dir, id)).map_err(|_| {
-            format!("No se encontró el token de esta cuenta ({keyring_err}). Volvé a iniciar sesión.")
-        })?,
-    };
-    let secret: Secret = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        Err(keyring_err) => {
+            return Err(format!(
+                "Não foi possível acessar o token no cofre do sistema ({keyring_err}). Entre novamente."
+            ));
+        }
+    });
+    let secret: Secret = serde_json::from_str(&json.0).map_err(|e| e.to_string())?;
     CACHE.lock().unwrap().insert(id.to_string(), secret.clone());
     Ok(secret)
 }
@@ -131,4 +157,75 @@ pub fn delete(data_dir: &Path, id: &str) {
 #[cfg(test)]
 pub fn clear_cache_for_tests() {
     CACHE.lock().unwrap().clear();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("forge-secret-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn token_legado_mais_novo_substitui_keyring_antigo_e_e_migrado() {
+        let dir = TempDir::new();
+        let id = format!("test-{}", uuid::Uuid::new_v4());
+        let old = Secret {
+            access_token: "token-antigo-falso".into(),
+            refresh_token: None,
+            expires_at: None,
+        };
+        let new = Secret {
+            access_token: "token-novo-falso".into(),
+            refresh_token: Some("refresh-novo".into()),
+            expires_at: Some(99),
+        };
+        let mut keyring = HashMap::from([(id.clone(), serde_json::to_string(&old).unwrap())]);
+        let legacy = file_path(&dir.0, &id);
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, serde_json::to_string(&new).unwrap()).unwrap();
+
+        let loaded = migrate_legacy_with(&dir.0, &id, |json| {
+            keyring.insert(id.clone(), json.to_string());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(loaded, new);
+        assert!(!file_path(&dir.0, &id).exists());
+        let new_json = serde_json::to_string(&new).unwrap();
+        assert_eq!(
+            keyring.get(&id).map(String::as_str),
+            Some(new_json.as_str())
+        );
+        CACHE.lock().unwrap().remove(&id);
+    }
+
+    #[test]
+    fn falha_do_keyring_nao_grava_token_novo_em_arquivo() {
+        let dir = TempDir::new();
+        let id = format!("test-{}", uuid::Uuid::new_v4());
+        let secret = Secret {
+            access_token: "token-falso".into(),
+            refresh_token: None,
+            expires_at: None,
+        };
+        let result =
+            save_with_keyring(&dir.0, &id, &secret, |_| Err("keyring indisponível".into()));
+        assert!(result.is_err());
+        assert!(!file_path(&dir.0, &id).exists());
+    }
 }

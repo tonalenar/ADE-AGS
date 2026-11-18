@@ -4,29 +4,63 @@ use super::*;
 
 #[test]
 fn lifecycle_and_swarm_promotion_use_production_parser() {
-    assert_eq!(parse("swarm.promote", &["note-id","finding"]).unwrap()["note"],"note-id");
-    assert_eq!(parse("swarm.promote", &["note-id","finding"]).unwrap()["key"],"finding");
-    assert_eq!(parse("workspace.restore", &["workspace-id"]).unwrap()["workspace"],"workspace-id");
-    assert_eq!(parse("memory.compact", &["45"]).unwrap()["retentionDays"],"45");
+    assert_eq!(
+        parse("swarm.promote", &["note-id", "finding"]).unwrap()["note"],
+        "note-id"
+    );
+    assert_eq!(
+        parse("swarm.promote", &["note-id", "finding"]).unwrap()["key"],
+        "finding"
+    );
+    assert_eq!(
+        parse("workspace.restore", &["workspace-id"]).unwrap()["workspace"],
+        "workspace-id"
+    );
+    assert_eq!(
+        parse("memory.compact", &["45"]).unwrap()["retentionDays"],
+        "45"
+    );
     assert!(parse("memory.export", &[]).is_ok());
 }
 
 #[test]
 fn memory_repository_and_swarm_commands_use_production_flag_parser() {
-    let open=parse("memory.open",&["notes.md","--mission","spoofed"]).unwrap();assert_eq!(open["path"],"notes.md");
-    assert!(parse("memory.index",&["unexpected"]).is_err());
-    let mut note=parse("swarm.note",&["session fact","--from","spoofed","--mission","spoofed"]).unwrap();
-    caller_from("swarm.note",&mut note,Some("real-tab".into()),None);
-    assert_eq!(note["body"],"session fact");assert_eq!(note["from"],"real-tab");assert!(note.get("mission").is_none());
-    assert_eq!(parse("swarm.question",&["which source?"]).unwrap()["body"],"which source?");
+    let open = parse("memory.open", &["notes.md", "--mission", "spoofed"]).unwrap();
+    assert_eq!(open["path"], "notes.md");
+    assert!(parse("memory.index", &["unexpected"]).is_err());
+    let mut note = parse(
+        "swarm.note",
+        &["session fact", "--from", "spoofed", "--mission", "spoofed"],
+    )
+    .unwrap();
+    caller_from("swarm.note", &mut note, Some("real-tab".into()), None);
+    assert_eq!(note["body"], "session fact");
+    assert_eq!(note["from"], "real-tab");
+    assert!(note.get("mission").is_none());
+    assert_eq!(
+        parse("swarm.question", &["which source?"]).unwrap()["body"],
+        "which source?"
+    );
 }
 
 #[test]
 fn memory_numeric_flags_are_numbers() {
-    let args = parse_flags(&["--priority".into(), "-2".into(), "--limit".into(), "7".into()], &[]).unwrap();
+    let args = parse_flags(
+        &[
+            "--priority".into(),
+            "-2".into(),
+            "--limit".into(),
+            "7".into(),
+        ],
+        &[],
+    )
+    .unwrap();
     assert_eq!(args["priority"], -2);
     assert_eq!(args["limit"], 7);
-    assert_eq!(parse_flags(&["--priority".into(), "bad".into()], &[]).unwrap()["priority"], "bad");
+    assert_eq!(
+        parse_flags(&["--priority".into(), "bad".into()], &[]).unwrap()["priority"],
+        "bad"
+    );
 }
 
 #[test]
@@ -34,15 +68,22 @@ fn memory_cli_commands_parse_flags_and_sanitize_scope() {
     // 1. memory suggest aceita flags numéricas e strings
     let args_suggest = parse_flags(
         &[
-            "--mission".into(), "m-1".into(),
-            "--scope".into(), "workspace".into(),
-            "--kind".into(), "decision".into(),
-            "--key".into(), "db_pool".into(),
-            "--body".into(), "Usar sqlite pool".into(),
-            "--priority".into(), "3".into(),
+            "--mission".into(),
+            "m-1".into(),
+            "--scope".into(),
+            "workspace".into(),
+            "--kind".into(),
+            "decision".into(),
+            "--key".into(),
+            "db_pool".into(),
+            "--body".into(),
+            "Usar sqlite pool".into(),
+            "--priority".into(),
+            "3".into(),
         ],
         &[],
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(args_suggest["priority"], 3);
     assert_eq!(args_suggest["key"], "db_pool");
     assert_eq!(args_suggest["body"], "Usar sqlite pool");
@@ -56,7 +97,8 @@ fn memory_cli_commands_parse_flags_and_sanitize_scope() {
     let args_search = parse_flags(
         &["query de busca".into(), "--limit".into(), "10".into()],
         positionals("memory.search"),
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(args_search["query"], "query de busca");
     assert_eq!(args_search["limit"], 10);
 
@@ -74,7 +116,12 @@ fn memory_cli_commands_parse_flags_and_sanitize_scope() {
         "taskId": "other_task_id",
         "key": "safe_key"
     });
-    caller_from("memory.suggest", &mut spoofed, Some("real_tab_id".into()), None);
+    caller_from(
+        "memory.suggest",
+        &mut spoofed,
+        Some("real_tab_id".into()),
+        None,
+    );
     assert_eq!(spoofed["from"], "real_tab_id");
     assert!(spoofed.get("mission").is_none());
     assert!(spoofed.get("missionId").is_none());
@@ -87,46 +134,68 @@ fn local_tests_accept_suite_force_and_dry_run() {
     let args = parse("test.run", &["rust", "--force"]).unwrap();
     assert_eq!(args["suite"], "rust");
     assert_eq!(args["force"], true);
-    assert_eq!(parse("test.affected", &["--dry-run"]).unwrap()["dryRun"], true);
+    assert_eq!(
+        parse("test.affected", &["--dry-run"]).unwrap()["dryRun"],
+        true
+    );
     assert!(parse("test.status", &["extra"]).is_err());
 }
 
 #[test]
 fn cleanup_and_worktree_sweep_flags_are_routed() {
-    let c=parse("mission.cleanup", &["mission-id","--dry-run"]).unwrap();assert_eq!(c["mission"],"mission-id");assert!(c.get("dryRun").is_some());
-    assert!(parse("mission.cleanup", &["m","extra"]).is_err());
-    for command in ["worktrees.list","worktrees.prune"] {
-        let args=parse(command,&["--cwd","/repo","--dry-run"]).unwrap();assert_eq!(args["cwd"],"/repo");assert!(args.get("dryRun").is_some());
+    let c = parse("mission.cleanup", &["mission-id", "--dry-run"]).unwrap();
+    assert_eq!(c["mission"], "mission-id");
+    assert!(c.get("dryRun").is_some());
+    assert!(parse("mission.cleanup", &["m", "extra"]).is_err());
+    for command in ["worktrees.list", "worktrees.prune"] {
+        let args = parse(command, &["--cwd", "/repo", "--dry-run"]).unwrap();
+        assert_eq!(args["cwd"], "/repo");
+        assert!(args.get("dryRun").is_some());
     }
 }
 
 #[test]
 fn design_caller_is_the_creating_terminal() {
-    let mut args=json!({"from":"other","ownerTabId":"other"});
-    caller_from("design.create",&mut args,Some("actual-tab".into()),None);
-    assert_eq!(args["from"],"actual-tab");
-    let mut args=json!({"from":"explicit"});
-    caller_from("peer.tell",&mut args,Some("actual-tab".into()),None);
-    assert_eq!(args["from"],"explicit");
+    let mut args = json!({"from":"other","ownerTabId":"other"});
+    caller_from("design.create", &mut args, Some("actual-tab".into()), None);
+    assert_eq!(args["from"], "actual-tab");
+    let mut args = json!({"from":"explicit"});
+    caller_from("peer.tell", &mut args, Some("actual-tab".into()), None);
+    assert_eq!(args["from"], "explicit");
 }
 
 #[test]
 fn mission_startcheck_accepts_positional_id() {
-    assert_eq!(parse("mission.startcheck", &["mission-id"]).unwrap()["mission"], "mission-id");
+    assert_eq!(
+        parse("mission.startcheck", &["mission-id"]).unwrap()["mission"],
+        "mission-id"
+    );
     assert!(parse("mission.startcheck", &["m", "extra"]).is_err());
 }
 
 #[test]
 fn ags_mcp_parseia_missao_e_papel_da_tab() {
-    let args = ["--cwd", "/repo", "--tab", "t1", "--mission", "m1", "--role", "QA"]
-        .map(str::to_string);
+    let args = [
+        "--cwd",
+        "/repo",
+        "--tab",
+        "t1",
+        "--mission",
+        "m1",
+        "--role",
+        "QA",
+    ]
+    .map(str::to_string);
     let (context, prefix) = parse_mcp_args(&args).unwrap();
-    assert_eq!(context, ade_ags_lib::ipc::mcp::McpContext::Cwd {
-        cwd: "/repo".into(),
-        tab: Some("t1".into()),
-        mission: Some("m1".into()),
-        role: Some("QA".into()),
-    });
+    assert_eq!(
+        context,
+        ade_ags_lib::ipc::mcp::McpContext::Cwd {
+            cwd: "/repo".into(),
+            tab: Some("t1".into()),
+            mission: Some("m1".into()),
+            role: Some("QA".into()),
+        }
+    );
     assert_eq!(prefix, "");
 }
 
@@ -134,15 +203,17 @@ fn ags_mcp_parseia_missao_e_papel_da_tab() {
 fn ags_mcp_sem_missao_mantem_o_scope_atual_da_tab() {
     let args = ["--cwd", "/repo", "--tab", "t1"].map(str::to_string);
     let (context, prefix) = parse_mcp_args(&args).unwrap();
-    assert_eq!(context, ade_ags_lib::ipc::mcp::McpContext::Cwd {
-        cwd: "/repo".into(),
-        tab: Some("t1".into()),
-        mission: None,
-        role: None,
-    });
+    assert_eq!(
+        context,
+        ade_ags_lib::ipc::mcp::McpContext::Cwd {
+            cwd: "/repo".into(),
+            tab: Some("t1".into()),
+            mission: None,
+            role: None,
+        }
+    );
     assert_eq!(prefix, "");
 }
-
 
 fn flags(args: &[&str]) -> Value {
     parse_flags(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &[]).unwrap()
@@ -155,9 +226,12 @@ fn flags(args: &[&str]) -> Value {
 #[test]
 fn los_pre_comandos_se_acumulan_en_una_sola_lista_ordenada() {
     let v = flags(&[
-        "--pre-preset", "entorno conda",
-        "--pre", "nvm use",
-        "--pre-preset", "node del proyecto",
+        "--pre-preset",
+        "entorno conda",
+        "--pre",
+        "nvm use",
+        "--pre-preset",
+        "node del proyecto",
     ]);
     assert_eq!(
         v["prelaunch"],
@@ -183,7 +257,10 @@ fn pre_manda_el_texto_sin_interpretarlo() {
 #[test]
 fn pre_preset_marca_el_paso_como_guardado_obligatorio() {
     let v = flags(&["--pre-preset", "entorno conda"]);
-    assert_eq!(v["prelaunch"], serde_json::json!([{ "presetName": "entorno conda" }]));
+    assert_eq!(
+        v["prelaunch"],
+        serde_json::json!([{ "presetName": "entorno conda" }])
+    );
 }
 
 #[test]
@@ -207,7 +284,11 @@ fn un_pre_sin_valor_es_error_de_uso_y_no_un_booleano() {
 #[test]
 fn sin_pre_no_aparece_la_clave() {
     // La rama de pre-lanzamiento no tiene que tocar nada para quien no la usa.
-    assert!(flags(&["--agent", "claude-code"]).get("prelaunch").is_none());
+    assert!(
+        flags(&["--agent", "claude-code"])
+            .get("prelaunch")
+            .is_none()
+    );
 }
 
 fn parse(command: &str, args: &[&str]) -> Result<Value, String> {
@@ -220,14 +301,26 @@ fn parse(command: &str, args: &[&str]) -> Result<Value, String> {
 /// Escribir `--skill` para pasar el único argumento que el comando tiene era ruido.
 #[test]
 fn the_first_loose_value_fills_the_commands_main_flag() {
-    assert_eq!(parse("skill.install", &["git-helper"]).unwrap()["skill"], "git-helper");
+    assert_eq!(
+        parse("skill.install", &["git-helper"]).unwrap()["skill"],
+        "git-helper"
+    );
     // Buscar es la única forma de llegar a lo que hay en skills.sh: su directorio no se
     // puede listar de antemano, así que el texto suelto tiene que funcionar igual que
     // en `install`.
-    assert_eq!(parse("skill.search", &["react testing"]).unwrap()["query"], "react testing");
+    assert_eq!(
+        parse("skill.search", &["react testing"]).unwrap()["query"],
+        "react testing"
+    );
     assert_eq!(parse("tab.output", &["t1"]).unwrap()["tab"], "t1");
-    assert_eq!(parse("workspace.open", &["cliente"]).unwrap()["workspace"], "cliente");
-    assert_eq!(parse("tab.create", &["/repo/api"]).unwrap()["cwd"], "/repo/api");
+    assert_eq!(
+        parse("workspace.open", &["cliente"]).unwrap()["workspace"],
+        "cliente"
+    );
+    assert_eq!(
+        parse("tab.create", &["/repo/api"]).unwrap()["cwd"],
+        "/repo/api"
+    );
 }
 
 /// El caso de seguir la conversación con una tab abierta: id y texto, sin flags.
@@ -255,7 +348,10 @@ fn the_explicit_flag_form_still_works() {
 #[test]
 fn extra_loose_values_are_rejected() {
     let err = parse("skill.install", &["a", "b"]).unwrap_err();
-    assert!(err.contains("b"), "el error tiene que nombrar el argumento sobrante: {err}");
+    assert!(
+        err.contains("b"),
+        "el error tiene que nombrar el argumento sobrante: {err}"
+    );
 
     let err = parse("tab.list", &["algo"]).unwrap_err();
     assert!(err.contains("só aceita flags"));
@@ -291,15 +387,42 @@ fn typed_flags_are_converted() {
 #[test]
 fn o_act_espera_o_prazo_pedido_igual_no_portal_no_navegador_do_mcp_no_simulador_e_no_mac() {
     // Padrão 115 s, mais a margem de cada caminho; nunca os 60 s das outras operações do navegador.
-    assert_eq!(read_timeout_for("portal.act", &json!({})), Duration::from_secs(145));
-    assert_eq!(read_timeout_for("portal.act", &json!({ "timeout": 300 })), Duration::from_secs(330));
-    assert_eq!(read_timeout_for("browser.run", &json!({ "request": { "op": "act" } })), Duration::from_secs(145));
-    assert_eq!(read_timeout_for("browser.run", &json!({ "request": { "op": "act", "timeout": 300 } })), Duration::from_secs(330));
-    assert_eq!(read_timeout_for("browser.run", &json!({ "request": { "op": "click" } })), Duration::from_secs(75));
-    assert_eq!(read_timeout_for("sim.act", &json!({ "timeout": "300" })), Duration::from_secs(375));
-    assert_eq!(read_timeout_for("desk.act", &json!({})), Duration::from_secs(190));
+    assert_eq!(
+        read_timeout_for("portal.act", &json!({})),
+        Duration::from_secs(145)
+    );
+    assert_eq!(
+        read_timeout_for("portal.act", &json!({ "timeout": 300 })),
+        Duration::from_secs(330)
+    );
+    assert_eq!(
+        read_timeout_for("browser.run", &json!({ "request": { "op": "act" } })),
+        Duration::from_secs(145)
+    );
+    assert_eq!(
+        read_timeout_for(
+            "browser.run",
+            &json!({ "request": { "op": "act", "timeout": 300 } })
+        ),
+        Duration::from_secs(330)
+    );
+    assert_eq!(
+        read_timeout_for("browser.run", &json!({ "request": { "op": "click" } })),
+        Duration::from_secs(75)
+    );
+    assert_eq!(
+        read_timeout_for("sim.act", &json!({ "timeout": "300" })),
+        Duration::from_secs(375)
+    );
+    assert_eq!(
+        read_timeout_for("desk.act", &json!({})),
+        Duration::from_secs(190)
+    );
     // Outras ações do portal seguem com os 120 s de sempre.
-    assert_eq!(read_timeout_for("portal.click", &json!({})), Duration::from_secs(120));
+    assert_eq!(
+        read_timeout_for("portal.click", &json!({})),
+        Duration::from_secs(120)
+    );
 }
 
 /// `watch wait` bloquea hasta 300s por defecto. Con el timeout fijo de 30s de antes,
@@ -323,7 +446,11 @@ fn single_word_groups_map_to_their_list_action() {
     assert_eq!(shortcut("skills"), Some("skill.list"));
     assert_eq!(shortcut("agents"), Some("agent.list"));
     assert_eq!(shortcut("tab"), None);
-    assert_eq!(shortcut("skill"), None, "'skill install' necesita su acción");
+    assert_eq!(
+        shortcut("skill"),
+        None,
+        "'skill install' necesita su acción"
+    );
 }
 
 /// Crear una tab con prompt inicial espera a que arranque la TUI. Con el timeout de
@@ -331,7 +458,10 @@ fn single_word_groups_map_to_their_list_action() {
 /// pese a que la tab quedaba creada y el prompt se mandaba igual.
 #[test]
 fn creating_a_tab_with_an_init_prompt_waits_longer() {
-    assert_eq!(read_timeout_for("tab.create", &json!({ "cwd": "/x" })), Duration::from_secs(30));
+    assert_eq!(
+        read_timeout_for("tab.create", &json!({ "cwd": "/x" })),
+        Duration::from_secs(30)
+    );
 
     for key in ["initPrompt", "initprompt"] {
         let args = json!({ "cwd": "/x", key: "hola" });
@@ -350,7 +480,10 @@ fn an_init_prompt_survives_the_flag_parser_intact() {
     assert_eq!(v["initprompt"], "corré los tests y resumí los fallos");
 
     let v = flags(&["--init-prompt", "otro"]);
-    assert_eq!(v["initPrompt"], "otro", "la variante con guión llega en camelCase");
+    assert_eq!(
+        v["initPrompt"], "otro",
+        "la variante con guión llega en camelCase"
+    );
 }
 
 #[test]
@@ -414,7 +547,10 @@ fn la_ayuda_nombra_todos_los_grupos_que_la_app_atiende() {
         .collect();
     groups.sort_unstable();
     groups.dedup();
-    assert!(groups.len() >= 8, "no se reconocieron las ramas del despachador: {groups:?}");
+    assert!(
+        groups.len() >= 8,
+        "no se reconocieron las ramas del despachador: {groups:?}"
+    );
 
     for group in groups {
         // `user.ask`, `forge.run`, `mcp.cancel` y `memory.*` no se escriben en la terminal:
@@ -432,8 +568,9 @@ fn la_ayuda_nombra_todos_los_grupos_que_la_app_atiende() {
         // documentado a `run` porque la ayuda decía "la app no corre".
         let listed = USAGE.lines().any(|line| {
             let line = line.trim_start();
-            line.strip_prefix(group)
-                .is_some_and(|rest| rest.is_empty() || rest.starts_with(' ') || rest.starts_with('s'))
+            line.strip_prefix(group).is_some_and(|rest| {
+                rest.is_empty() || rest.starts_with(' ') || rest.starts_with('s')
+            })
         });
         assert!(listed, "la ayuda no nombra '{group}' como comando");
     }
@@ -456,7 +593,14 @@ fn memory_history_and_temporal_search_flags_are_parsed() {
 
     let history = parse(
         "memory.history",
-        &["--mission", "m1", "--key", "active-limits", "--scope", "mission"],
+        &[
+            "--mission",
+            "m1",
+            "--key",
+            "active-limits",
+            "--scope",
+            "mission",
+        ],
     )
     .unwrap();
     assert_eq!(history["mission"], "m1");
@@ -467,7 +611,11 @@ fn memory_history_and_temporal_search_flags_are_parsed() {
 #[test]
 fn mission_test_flag_is_an_explicit_boolean() {
     assert_eq!(flags(&["--test"])["test"], json!(true));
-    let parsed = parse_flags(&["mission-id".into(), "--test".into()], positionals("mission.start")).unwrap();
+    let parsed = parse_flags(
+        &["mission-id".into(), "--test".into()],
+        positionals("mission.start"),
+    )
+    .unwrap();
     assert_eq!(parsed["mission"], "mission-id");
     assert_eq!(parsed["test"], true);
     assert!(flags(&["--title", "E2E test"]).get("test").is_none());
@@ -476,61 +624,204 @@ fn mission_test_flag_is_an_explicit_boolean() {
 #[test]
 fn design_nested_commands_keep_ids_and_html_flags() {
     for (words, expected, key, id) in [
-        (vec!["design","page","add","d1","Page 1"],"design.page.add","designId","d1"),
-        (vec!["design","artboard","add","p1","Home","--html","<h1>Home</h1>"],"design.artboard.add","pageId","p1"),
-        (vec!["design","update","b1","--expected-version","2","--html","new"],"design.update","artboardId","b1"),
-        (vec!["design","comment","b1","change","--author","user"],"design.comment","artboardId","b1"),
-        (vec!["design","comment","resolve","c1"],"design.comment.resolve","commentId","c1"),
-        (vec!["design","approve","all","d1"],"design.approve.all","designId","d1"),
-        (vec!["design","delete","d1"],"design.delete","designId","d1"),
-        (vec!["design","archive","d1"],"design.archive","designId","d1"),
-        (vec!["design","view","d1"],"design.view","designId","d1"),
-        (vec!["design","open","d1","--artboard","b1"],"design.open","designId","d1"),
-        (vec!["design","artboard","duplicate","b1","--x","0"],"design.artboard.duplicate","artboardId","b1"),
-        (vec!["design","artboard","delete","b1"],"design.artboard.delete","artboardId","b1"),
-        (vec!["design","artboard","resize","b1","--width","390","--radius","12"],"design.artboard.resize","artboardId","b1"),
-        (vec!["design","page","rename","p1","Fluxo"],"design.page.rename","pageId","p1"),
-        (vec!["design","page","delete","p1"],"design.page.delete","pageId","p1"),
-        (vec!["design","note","add","p1","lembrar","--x","10","--y","-20"],"design.note.add","pageId","p1"),
+        (
+            vec!["design", "page", "add", "d1", "Page 1"],
+            "design.page.add",
+            "designId",
+            "d1",
+        ),
+        (
+            vec![
+                "design",
+                "artboard",
+                "add",
+                "p1",
+                "Home",
+                "--html",
+                "<h1>Home</h1>",
+            ],
+            "design.artboard.add",
+            "pageId",
+            "p1",
+        ),
+        (
+            vec![
+                "design",
+                "update",
+                "b1",
+                "--expected-version",
+                "2",
+                "--html",
+                "new",
+            ],
+            "design.update",
+            "artboardId",
+            "b1",
+        ),
+        (
+            vec!["design", "comment", "b1", "change", "--author", "user"],
+            "design.comment",
+            "artboardId",
+            "b1",
+        ),
+        (
+            vec!["design", "comment", "resolve", "c1"],
+            "design.comment.resolve",
+            "commentId",
+            "c1",
+        ),
+        (
+            vec!["design", "approve", "all", "d1"],
+            "design.approve.all",
+            "designId",
+            "d1",
+        ),
+        (
+            vec!["design", "delete", "d1"],
+            "design.delete",
+            "designId",
+            "d1",
+        ),
+        (
+            vec!["design", "archive", "d1"],
+            "design.archive",
+            "designId",
+            "d1",
+        ),
+        (
+            vec!["design", "view", "d1"],
+            "design.view",
+            "designId",
+            "d1",
+        ),
+        (
+            vec!["design", "open", "d1", "--artboard", "b1"],
+            "design.open",
+            "designId",
+            "d1",
+        ),
+        (
+            vec!["design", "artboard", "duplicate", "b1", "--x", "0"],
+            "design.artboard.duplicate",
+            "artboardId",
+            "b1",
+        ),
+        (
+            vec!["design", "artboard", "delete", "b1"],
+            "design.artboard.delete",
+            "artboardId",
+            "b1",
+        ),
+        (
+            vec![
+                "design", "artboard", "resize", "b1", "--width", "390", "--radius", "12",
+            ],
+            "design.artboard.resize",
+            "artboardId",
+            "b1",
+        ),
+        (
+            vec!["design", "page", "rename", "p1", "Fluxo"],
+            "design.page.rename",
+            "pageId",
+            "p1",
+        ),
+        (
+            vec!["design", "page", "delete", "p1"],
+            "design.page.delete",
+            "pageId",
+            "p1",
+        ),
+        (
+            vec![
+                "design", "note", "add", "p1", "lembrar", "--x", "10", "--y", "-20",
+            ],
+            "design.note.add",
+            "pageId",
+            "p1",
+        ),
     ] {
-        let args=words.iter().map(|v|v.to_string()).collect::<Vec<_>>();
-        let (command,rest)=design_command(&args).unwrap();
-        assert_eq!(command,expected);
-        assert_eq!(parse_flags(rest,positionals(&command)).unwrap()[key],id);
+        let args = words.iter().map(|v| v.to_string()).collect::<Vec<_>>();
+        let (command, rest) = design_command(&args).unwrap();
+        assert_eq!(command, expected);
+        assert_eq!(parse_flags(rest, positionals(&command)).unwrap()[key], id);
     }
     assert!(design_command(&["design".into()]).is_err());
-    assert!(design_command(&["design".into(),"page".into()]).is_err());
+    assert!(design_command(&["design".into(), "page".into()]).is_err());
 }
 
 #[test]
 fn design_cli_defaults_use_callers_cwd_and_agent_author() {
-    let cwd=std::path::Path::new("/caller/project");
-    let a=design_defaults("design.create",json!({"title":"Home"}),cwd);
-    assert_eq!(a["workspace"],"/caller/project");
-    let a=design_defaults("design.create",json!({"title":"Home","workspace":"explicit"}),cwd);
-    assert_eq!(a["workspace"],"explicit");
-    let a=design_defaults("design.comment",json!({"artboardId":"b1","text":"Change"}),cwd);
-    assert_eq!(a["author"],"agent");
-    let a=design_defaults("design.comment.add",json!({"author":"user"}),cwd);
-    assert_eq!(a["author"],"user");
-    let a=design_defaults("design.artboard.add",parse("design.artboard.add",&["d1","Home","--page","Page 1"]).unwrap(),cwd);
-    assert_eq!(a["designId"],"d1");assert_eq!(a["page"],"Page 1");assert!(a.get("pageId").is_none());
-    let a=design_defaults("design.artboard.add",parse("design.artboard.add",&["p1","Home"]).unwrap(),cwd);
-    assert_eq!(a["pageId"],"p1");assert!(a.get("designId").is_none());
-    // `design open --page/--artboard` levam ids; `design view` sem id fica sem designId.
-    let a=design_defaults("design.open",parse("design.open",&["d1","--page","p1","--artboard","b1"]).unwrap(),cwd);
-    assert_eq!((a["designId"].clone(),a["pageId"].clone(),a["artboardId"].clone()),(json!("d1"),json!("p1"),json!("b1")));
-    assert!(a.get("page").is_none() && a.get("artboard").is_none());
-    let a=design_defaults("design.view",parse("design.view",&[]).unwrap(),cwd);
+    let cwd = std::path::Path::new("/caller/project");
+    let a = design_defaults("design.create", json!({"title":"Home"}), cwd);
+    assert_eq!(a["workspace"], "/caller/project");
+    let a = design_defaults(
+        "design.create",
+        json!({"title":"Home","workspace":"explicit"}),
+        cwd,
+    );
+    assert_eq!(a["workspace"], "explicit");
+    let a = design_defaults(
+        "design.comment",
+        json!({"artboardId":"b1","text":"Change"}),
+        cwd,
+    );
+    assert_eq!(a["author"], "agent");
+    let a = design_defaults("design.comment.add", json!({"author":"user"}), cwd);
+    assert_eq!(a["author"], "user");
+    let a = design_defaults(
+        "design.artboard.add",
+        parse("design.artboard.add", &["d1", "Home", "--page", "Page 1"]).unwrap(),
+        cwd,
+    );
+    assert_eq!(a["designId"], "d1");
+    assert_eq!(a["page"], "Page 1");
+    assert!(a.get("pageId").is_none());
+    let a = design_defaults(
+        "design.artboard.add",
+        parse("design.artboard.add", &["p1", "Home"]).unwrap(),
+        cwd,
+    );
+    assert_eq!(a["pageId"], "p1");
     assert!(a.get("designId").is_none());
-    let a=parse("design.note.add",&["p1","lembrar","--x","10","--y","-20"]).unwrap();
-    assert_eq!((a["text"].clone(),a["x"].clone(),a["y"].clone()),(json!("lembrar"),json!("10"),json!("-20")));
+    // `design open --page/--artboard` levam ids; `design view` sem id fica sem designId.
+    let a = design_defaults(
+        "design.open",
+        parse("design.open", &["d1", "--page", "p1", "--artboard", "b1"]).unwrap(),
+        cwd,
+    );
+    assert_eq!(
+        (
+            a["designId"].clone(),
+            a["pageId"].clone(),
+            a["artboardId"].clone()
+        ),
+        (json!("d1"), json!("p1"), json!("b1"))
+    );
+    assert!(a.get("page").is_none() && a.get("artboard").is_none());
+    let a = design_defaults("design.view", parse("design.view", &[]).unwrap(), cwd);
+    assert!(a.get("designId").is_none());
+    let a = parse(
+        "design.note.add",
+        &["p1", "lembrar", "--x", "10", "--y", "-20"],
+    )
+    .unwrap();
+    assert_eq!(
+        (a["text"].clone(), a["x"].clone(), a["y"].clone()),
+        (json!("lembrar"), json!("10"), json!("-20"))
+    );
 }
 
 #[test]
 fn memory_context_ignores_requested_caller_and_mission() {
-    let mut args = json!({"from":"spoofed","mission":"foreign","missionId":"foreign","taskId":"victim"});
-    caller_from("memory.suggest", &mut args, Some("actual-tab".into()), Some("issued-session".into()));
+    let mut args =
+        json!({"from":"spoofed","mission":"foreign","missionId":"foreign","taskId":"victim"});
+    caller_from(
+        "memory.suggest",
+        &mut args,
+        Some("actual-tab".into()),
+        Some("issued-session".into()),
+    );
     assert_eq!(args["from"], "actual-tab");
     assert_eq!(args["session"], "issued-session");
     assert!(args.get("mission").is_none());
@@ -544,27 +835,49 @@ fn memory_context_ignores_requested_caller_and_mission() {
 #[test]
 fn memory_caller_drops_a_forged_session_and_keeps_the_pty_token() {
     let mut args = json!({"from":"other-tab","session":"stolen","mission":"foreign","key":"k"});
-    caller_from("memory.search", &mut args, Some("real-tab".into()), Some("pty-token".into()));
+    caller_from(
+        "memory.search",
+        &mut args,
+        Some("real-tab".into()),
+        Some("pty-token".into()),
+    );
     assert_eq!(args["from"], "real-tab");
     assert_eq!(args["session"], "pty-token");
     assert!(args.get("mission").is_none());
-    caller_from("swarm.note", &mut args, Some("real-tab".into()), Some("".into()));
+    caller_from(
+        "swarm.note",
+        &mut args,
+        Some("real-tab".into()),
+        Some("".into()),
+    );
     assert_eq!(args["from"], "real-tab");
     assert!(args.get("session").is_none());
 }
 
 #[test]
 fn smoke_probes_of_the_file_flag_work_offline_and_the_summary_counts_failures() {
-    use super::smoke::{file_flag_probe, missing_file_probe, summarize, Check, Outcome};
+    use super::smoke::{Check, Outcome, file_flag_probe, missing_file_probe, summarize};
     assert!(file_flag_probe().unwrap().contains("intactos"));
     assert!(missing_file_probe().unwrap().contains("nada enviado"));
     let checks = vec![
-        Check { name: "a", outcome: Outcome::Pass("ok".into()), ms: 1 },
-        Check { name: "b", outcome: Outcome::Skip("fora do terminal".into()), ms: 1 },
+        Check {
+            name: "a",
+            outcome: Outcome::Pass("ok".into()),
+            ms: 1,
+        },
+        Check {
+            name: "b",
+            outcome: Outcome::Skip("fora do terminal".into()),
+            ms: 1,
+        },
     ];
     let (body, passed) = summarize(&checks);
     assert!(passed && body["failed"] == 0 && body["checks"][1]["status"] == "skip");
-    let with_failure = vec![Check { name: "c", outcome: Outcome::Fail("quebrou".into()), ms: 2 }];
+    let with_failure = vec![Check {
+        name: "c",
+        outcome: Outcome::Fail("quebrou".into()),
+        ms: 2,
+    }];
     let (body, passed) = summarize(&with_failure);
     assert!(!passed && body["failed"] == 1 && body["checks"][0]["detail"] == "quebrou");
 }
@@ -577,13 +890,21 @@ fn peer_messages_from_a_file_land_in_the_text_field_without_shell_quotes() {
     std::fs::write(&path, "Entrega de <papel>: \"tudo\" > x").unwrap();
     let file = path.to_string_lossy().into_owned();
     let args = vec!["Backend".to_string(), "--file".into(), file.clone()];
-    let parsed = inline_file(parse_flags(&args, positionals("peer.tell")).unwrap(), "peer.tell").unwrap();
+    let parsed = inline_file(
+        parse_flags(&args, positionals("peer.tell")).unwrap(),
+        "peer.tell",
+    )
+    .unwrap();
     assert_eq!(parsed["to"], "Backend");
     assert_eq!(parsed["text"], "Entrega de <papel>: \"tudo\" > x");
     assert!(parsed.get("content").is_none());
 
     let both = vec!["Backend".to_string(), "oi".into(), "--file".into(), file];
-    let error = inline_file(parse_flags(&both, positionals("peer.tell")).unwrap(), "peer.tell").unwrap_err();
+    let error = inline_file(
+        parse_flags(&both, positionals("peer.tell")).unwrap(),
+        "peer.tell",
+    )
+    .unwrap_err();
     assert!(error.contains("--text"), "{error}");
     // Notas e roles continuam em `content`; swarm usa `body`.
     assert_eq!(text_field("note.write"), "content");
@@ -598,8 +919,18 @@ fn render_publish_le_o_arquivo_como_html_e_as_flags_de_exibicao_viram_show() {
     let path = std::env::temp_dir().join(format!("ags-cli-render-{}.html", uuid::Uuid::new_v4()));
     std::fs::write(&path, "<!doctype html><h1>Vendas</h1>").unwrap();
     let file = path.to_string_lossy().into_owned();
-    let args = vec!["--file".to_string(), file, "--title".into(), "Vendas".into(), "--sem-mostrar".into()];
-    let parsed = inline_file(parse_flags(&args, positionals("render.publish")).unwrap(), "render.publish").unwrap();
+    let args = vec![
+        "--file".to_string(),
+        file,
+        "--title".into(),
+        "Vendas".into(),
+        "--sem-mostrar".into(),
+    ];
+    let parsed = inline_file(
+        parse_flags(&args, positionals("render.publish")).unwrap(),
+        "render.publish",
+    )
+    .unwrap();
     let parsed = show_flags(parsed, "render.publish").unwrap();
     assert_eq!(parsed["html"], "<!doctype html><h1>Vendas</h1>");
     assert_eq!(parsed["title"], "Vendas");
@@ -609,12 +940,25 @@ fn render_publish_le_o_arquivo_como_html_e_as_flags_de_exibicao_viram_show() {
     // `--mostrar` vira `show: true` no aparelho; as duas juntas são erro, e não se escolhe uma no lugar da pessoa.
     let mostrar = parse_flags(&["--mostrar".to_string()], positionals("device.create")).unwrap();
     assert_eq!(show_flags(mostrar, "device.create").unwrap()["show"], true);
-    let both = parse_flags(&["--mostrar".to_string(), "--sem-mostrar".into()], positionals("device.create")).unwrap();
-    assert!(show_flags(both, "device.create").unwrap_err().contains("não os dois"));
+    let both = parse_flags(
+        &["--mostrar".to_string(), "--sem-mostrar".into()],
+        positionals("device.create"),
+    )
+    .unwrap();
+    assert!(
+        show_flags(both, "device.create")
+            .unwrap_err()
+            .contains("não os dois")
+    );
 
     // Comandos que não mostram nada na conversa não ganham o campo `show`.
     let other = parse_flags(&["--mostrar".to_string()], positionals("note.list")).unwrap();
-    assert!(show_flags(other, "note.list").unwrap().get("show").is_none());
+    assert!(
+        show_flags(other, "note.list")
+            .unwrap()
+            .get("show")
+            .is_none()
+    );
     std::fs::remove_file(path).unwrap();
 }
 
@@ -626,8 +970,14 @@ fn o_arquivo_perde_o_bom_do_powershell_e_o_resto_fica_intacto() {
     with_bom.extend_from_slice(text.as_bytes());
     assert_eq!(decode_text_file(&with_bom).unwrap(), text);
     // UTF-16 LE e BE com BOM (Out-File padrão).
-    let le: Vec<u8> = [0xFF, 0xFE].into_iter().chain(text.encode_utf16().flat_map(|u| u.to_le_bytes())).collect();
-    let be: Vec<u8> = [0xFE, 0xFF].into_iter().chain(text.encode_utf16().flat_map(|u| u.to_be_bytes())).collect();
+    let le: Vec<u8> = [0xFF, 0xFE]
+        .into_iter()
+        .chain(text.encode_utf16().flat_map(|u| u.to_le_bytes()))
+        .collect();
+    let be: Vec<u8> = [0xFE, 0xFF]
+        .into_iter()
+        .chain(text.encode_utf16().flat_map(|u| u.to_be_bytes()))
+        .collect();
     assert_eq!(decode_text_file(&le).unwrap(), text);
     assert_eq!(decode_text_file(&be).unwrap(), text);
     // Sem BOM nada muda, e bytes inválidos continuam sendo erro.
@@ -659,13 +1009,23 @@ fn run_cli_resolve_cwd_relativo_e_mantem_absoluto_em_windows_e_linux() {
         let args = run_defaults(json!({"cwd":relative}), &cwd).unwrap();
         let actual = std::path::Path::new(args["cwd"].as_str().unwrap());
         assert!(actual.is_absolute());
-        let expected = if relative == "." { cwd.clone() } else { cwd.join("src-tauri") };
+        let expected = if relative == "." {
+            cwd.clone()
+        } else {
+            cwd.join("src-tauri")
+        };
         assert_eq!(actual, expected);
     }
     let explicit = std::env::temp_dir();
     let args = run_defaults(json!({"cwd":explicit}), &cwd).unwrap();
-    assert_eq!(std::path::Path::new(args["cwd"].as_str().unwrap()), std::path::absolute(explicit).unwrap());
-    assert_eq!(run_defaults(json!({"cwd":true}), &cwd).unwrap_err(), "--cwd precisa de um caminho");
+    assert_eq!(
+        std::path::Path::new(args["cwd"].as_str().unwrap()),
+        std::path::absolute(explicit).unwrap()
+    );
+    assert_eq!(
+        run_defaults(json!({"cwd":true}), &cwd).unwrap_err(),
+        "--cwd precisa de um caminho"
+    );
 }
 
 #[test]
@@ -680,17 +1040,30 @@ fn run_id_e_task_sem_valor_sao_erros_de_uso_em_portugues() {
     }
     for (key, flag) in [("runId", "run-id"), ("run_id", "run-id"), ("task", "task")] {
         for invalid in [json!(true), json!(null), json!(" ")] {
-            assert_eq!(validate_usage("run.result", &json!({key:invalid})).unwrap_err(), format!("--{flag} precisa de um valor"));
+            assert_eq!(
+                validate_usage("run.result", &json!({key:invalid})).unwrap_err(),
+                format!("--{flag} precisa de um valor")
+            );
         }
     }
 }
 
 #[test]
 fn peer_check_sem_destino_mostra_uso_antes_de_conectar_ao_app() {
-    for args in [parse("peer.check", &[]).unwrap(), json!({"to":true}), json!({"to":" "})] {
-        assert_eq!(validate_usage("peer.check", &args).unwrap_err(), "Uso: ags peer check <nome> [--lines 60]");
+    for args in [
+        parse("peer.check", &[]).unwrap(),
+        json!({"to":true}),
+        json!({"to":" "}),
+    ] {
+        assert_eq!(
+            validate_usage("peer.check", &args).unwrap_err(),
+            "Uso: ags peer check <nome> [--lines 60]"
+        );
     }
-    for args in [parse("peer.check", &["Backend"]).unwrap(), parse("peer.check", &["--to", "Backend"]).unwrap()] {
+    for args in [
+        parse("peer.check", &["Backend"]).unwrap(),
+        parse("peer.check", &["--to", "Backend"]).unwrap(),
+    ] {
         validate_usage("peer.check", &args).unwrap();
     }
 }
@@ -698,39 +1071,96 @@ fn peer_check_sem_destino_mostra_uso_antes_de_conectar_ao_app() {
 #[test]
 fn portal_close_leva_o_nome_do_portal_e_vem_na_ajuda() {
     // `ags portal close Amazon`: o portal é o primeiro valor solto (plano v2, Fase 1.6, I6).
-    assert_eq!(parse("portal.close", &["Amazon"]).unwrap()["name"], "Amazon");
-    assert_eq!(parse("portal.close", &["--name", "portal-1"]).unwrap()["name"], "portal-1");
+    assert_eq!(
+        parse("portal.close", &["Amazon"]).unwrap()["name"],
+        "Amazon"
+    );
+    assert_eq!(
+        parse("portal.close", &["--name", "portal-1"]).unwrap()["name"],
+        "portal-1"
+    );
     // `ags portal close` com o mesmo caminho de grupo que as demais ações do portal manda `from` do terminal.
     let mut args = parse("portal.close", &["Amazon"]).unwrap();
     caller_from("portal.close", &mut args, Some("real-tab".into()), None);
     assert_eq!(args["from"], "real-tab");
     // A ajuda documenta o comando e os estados de `ags portals`.
     assert!(USAGE.contains("portal close <portal>"));
-    for estado in ["pronto", "carregando", "sem runtime", "oculto", "verificação anti-robô"] {
+    for estado in [
+        "pronto",
+        "carregando",
+        "sem runtime",
+        "oculto",
+        "verificação anti-robô",
+    ] {
         assert!(USAGE.contains(estado), "{estado}");
     }
 }
 
 #[test]
 fn sim_act_preserva_contrato_de_posicionais_fills_expectativas_e_timeout() {
-    let args=parse("sim.act", &["iPhone","abrir ajustes","--fill","screen=a=b","--expect","text:Ajustes","--expect","text:Geral","--steps","4","--timeout","90"]).unwrap();
-    assert_eq!(args["name"],"iPhone");assert_eq!(args["goal"],"abrir ajustes");assert_eq!(args["fill"],json!(["screen=a=b"]));
-    assert_eq!(args["expect"],json!(["text:Ajustes","text:Geral"]));
-    assert_eq!(read_timeout_for("sim.act",&args).as_secs(),165);
-    assert_eq!(read_timeout_for("sim.act",&json!({"timeout":"1800"})).as_secs(),1875);
-    let mut args=args;caller_from("sim.act",&mut args,Some("sim-agent".into()),None);assert_eq!(args["from"],"sim-agent");
+    let args = parse(
+        "sim.act",
+        &[
+            "iPhone",
+            "abrir ajustes",
+            "--fill",
+            "screen=a=b",
+            "--expect",
+            "text:Ajustes",
+            "--expect",
+            "text:Geral",
+            "--steps",
+            "4",
+            "--timeout",
+            "90",
+        ],
+    )
+    .unwrap();
+    assert_eq!(args["name"], "iPhone");
+    assert_eq!(args["goal"], "abrir ajustes");
+    assert_eq!(args["fill"], json!(["screen=a=b"]));
+    assert_eq!(args["expect"], json!(["text:Ajustes", "text:Geral"]));
+    assert_eq!(read_timeout_for("sim.act", &args).as_secs(), 165);
+    assert_eq!(
+        read_timeout_for("sim.act", &json!({"timeout":"1800"})).as_secs(),
+        1875
+    );
+    let mut args = args;
+    caller_from("sim.act", &mut args, Some("sim-agent".into()), None);
+    assert_eq!(args["from"], "sim-agent");
 }
 
 #[test]
-fn sim_act_ignora_identidade_e_sessao_injetadas_em_flags(){
-    let mut args=json!({"from":"outro","session":"forjada","taskId":"task-alheia","mission":"missao"});
-    caller_from("sim.act",&mut args,Some("tab-real".into()),Some("sessao-real".into()));
-    assert_eq!(args["from"],"tab-real");assert_eq!(args["session"],"sessao-real");assert!(args.get("taskId").is_none());assert!(args.get("mission").is_none());
+fn sim_act_ignora_identidade_e_sessao_injetadas_em_flags() {
+    let mut args =
+        json!({"from":"outro","session":"forjada","taskId":"task-alheia","mission":"missao"});
+    caller_from(
+        "sim.act",
+        &mut args,
+        Some("tab-real".into()),
+        Some("sessao-real".into()),
+    );
+    assert_eq!(args["from"], "tab-real");
+    assert_eq!(args["session"], "sessao-real");
+    assert!(args.get("taskId").is_none());
+    assert!(args.get("mission").is_none());
 }
 
 #[test]
 fn desk_act_tem_so_o_objetivo_posicional_e_o_mesmo_prazo_do_sim_act() {
-    let args = parse("desk.act", &["abrir o Mail", "--expect", "text:Caixa de Entrada", "--steps", "4", "--timeout", "90"]).unwrap();
+    let args = parse(
+        "desk.act",
+        &[
+            "abrir o Mail",
+            "--expect",
+            "text:Caixa de Entrada",
+            "--steps",
+            "4",
+            "--timeout",
+            "90",
+        ],
+    )
+    .unwrap();
     assert_eq!(args["goal"], "abrir o Mail");
     assert!(args.get("name").is_none());
     assert_eq!(args["expect"], json!(["text:Caixa de Entrada"]));
@@ -743,7 +1173,10 @@ fn conversa_chama_sim_e_desk_so_com_a_aba_thread_e_sem_sessao_mesmo_com_flag_for
         let mut args = json!({"from": "tab-de-terminal", "session": "forjada", "mission": "m"});
         caller_from(command, &mut args, Some("thread:abc".into()), None);
         assert_eq!(args["from"], "thread:abc", "{command}");
-        assert!(args.get("session").is_none(), "{command}: conversa não tem ADE_SESSION e a flag não vale");
+        assert!(
+            args.get("session").is_none(),
+            "{command}: conversa não tem ADE_SESSION e a flag não vale"
+        );
         assert!(args.get("mission").is_none());
     }
 }
@@ -759,7 +1192,17 @@ fn tab_create_leva_quem_chama_para_achar_o_terminal_do_chat() {
     let mut args = json!({ "agent": "bash" });
     caller_from("tab.create", &mut args, Some("thread:abc".into()), None);
     assert_eq!(args["from"], "thread:abc");
-    let args = parse("tab.create", &["--agent", "bash", "--in-chat", "--initprompt", "supabase login"]).unwrap();
+    let args = parse(
+        "tab.create",
+        &[
+            "--agent",
+            "bash",
+            "--in-chat",
+            "--initprompt",
+            "supabase login",
+        ],
+    )
+    .unwrap();
     assert_eq!(args["inChat"], true);
     assert_eq!(args["initprompt"], "supabase login");
 }
@@ -771,16 +1214,47 @@ fn comandos_que_exigem_prova_levam_so_a_identidade_do_ambiente() {
     for command in ["peer.answer", "tab.send", "tab.create", "fix.decide"] {
         assert!(takes_caller(command), "{command} não leva quem chama");
         let mut args = json!({ "from": "forjada", "session": "forjada", "taskId": "outra-tarefa", "mission": "m" });
-        caller_from(command, &mut args, Some("real-tab".into()), Some("pty-token".into()));
+        caller_from(
+            command,
+            &mut args,
+            Some("real-tab".into()),
+            Some("pty-token".into()),
+        );
         assert_eq!(args["from"], "real-tab", "{command}");
         assert_eq!(args["session"], "pty-token", "{command}");
-        assert!(args.get("taskId").is_none() && args.get("mission").is_none(), "{command}");
+        assert!(
+            args.get("taskId").is_none() && args.get("mission").is_none(),
+            "{command}"
+        );
         let mut sem_ambiente = json!({ "from": "forjada", "session": "forjada" });
         caller_from(command, &mut sem_ambiente, None, None);
-        assert!(sem_ambiente.get("from").is_none() && sem_ambiente.get("session").is_none(), "{command}: sobrou identidade declarada");
+        assert!(
+            sem_ambiente.get("from").is_none() && sem_ambiente.get("session").is_none(),
+            "{command}: sobrou identidade declarada"
+        );
     }
     // Quem só lê continua sem a exigência.
     let mut lista = json!({ "scope": "mission:m" });
-    caller_from("fix.list", &mut lista, Some("real-tab".into()), Some("pty-token".into()));
+    caller_from(
+        "fix.list",
+        &mut lista,
+        Some("real-tab".into()),
+        Some("pty-token".into()),
+    );
     assert_eq!(lista["from"], "real-tab");
+}
+
+#[test]
+fn credential_helper_sem_app_retorna_erro_em_portugues() {
+    let handshake =
+        std::env::temp_dir().join(format!("ags-ipc-ausente-{}.json", uuid::Uuid::new_v4()));
+    let error = send_at("credential.redeem", json!({}), &handshake).unwrap_err();
+    assert_ne!(error.code, EXIT_OK);
+    assert!(
+        error
+            .message
+            .contains("O ADE AGS não parece estar em execução"),
+        "{}",
+        error.message
+    );
 }

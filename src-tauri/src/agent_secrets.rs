@@ -65,17 +65,33 @@ fn delete_secret(id: &str) -> Result<(), String> {
     }
 }
 
-fn prune_locked(index: &mut IndexMap, now: i64) -> Result<(), String> {
+fn prune_expired(
+    index: &mut IndexMap,
+    now: i64,
+    mut delete: impl FnMut(&str) -> Result<(), String>,
+) -> bool {
     let expired: Vec<String> = index
         .iter()
         .filter(|(_, grant)| !grant.active || grant.expires_at <= now)
         .map(|(id, _)| id.clone())
         .collect();
-    for id in &expired {
-        delete_secret(id)?;
-        index.remove(id);
+    let mut changed = false;
+    for id in expired {
+        if delete(&id).is_ok() {
+            index.remove(&id);
+            changed = true;
+        } else if let Some(grant) = index.get_mut(&id) {
+            if grant.active {
+                grant.active = false;
+                changed = true;
+            }
+        }
     }
-    if !expired.is_empty() {
+    changed
+}
+
+fn prune_locked(index: &mut IndexMap, now: i64) -> Result<(), String> {
+    if prune_expired(index, now, delete_secret) {
         save_index(index)?;
     }
     Ok(())
@@ -95,7 +111,11 @@ pub fn issue(owner: &str, label: &str, secret: &str) -> Result<(String, i64), St
     let expires_at = now.saturating_add(TTL_SECS);
     let mut index = load_index()?;
     prune_locked(&mut index, now)?;
-    if index.len() >= MAX_SECRETS {
+    let live_count = index
+        .values()
+        .filter(|grant| grant.active && grant.expires_at > now)
+        .count();
+    if live_count >= MAX_SECRETS {
         return Err(
             "Já existem 32 segredos temporários. Revogue um ou aguarde a expiração.".into(),
         );
@@ -165,6 +185,13 @@ pub fn revoke(owner: &str, id: &str) -> Result<bool, String> {
     if grant.owner != owner {
         return Err("Esse segredo pertence a outra conversa".into());
     }
+    if !grant.active || grant.expires_at <= now {
+        if delete_secret(id).is_ok() {
+            index.remove(id);
+            save_index(&index)?;
+        }
+        return Ok(false);
+    }
     delete_secret(id)?;
     index.remove(id);
     save_index(&index)?;
@@ -178,4 +205,25 @@ pub fn cleanup_expired() {
     };
     let Ok(mut index) = load_index() else { return };
     let _ = prune_locked(&mut index, crate::util::now_ts());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn falha_ao_apagar_expirado_nao_bloqueia_e_desativa_a_concessao() {
+        let mut index = HashMap::from([(
+            "expirado".into(),
+            Grant {
+                owner: "conversa".into(),
+                expires_at: 10,
+                label: "teste".into(),
+                active: true,
+            },
+        )]);
+        let changed = prune_expired(&mut index, 11, |_| Err("keyring recusou delete".into()));
+        assert!(changed);
+        assert_eq!(index.get("expirado").map(|grant| grant.active), Some(false));
+    }
 }

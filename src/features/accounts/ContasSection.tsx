@@ -45,8 +45,34 @@ async function fetchInfo(account: AgentAccount, force: boolean, t: Translate): P
   return { plan, meters };
 }
 
-/** Uma consulta por conta e por "atualizar", mesmo que a linha e o uso a peçam juntos. */
+/** Uma consulta por conta em voo e cache curto compartilhado entre linha e popover. */
 const inflight = new Map<string, Promise<AccountInfo>>();
+const accountInfoCache = new Map<string, { promise: Promise<AccountInfo>; reload: number; expiresAt: number }>();
+const ACCOUNT_INFO_CACHE_MS = 4_000;
+
+function accountInfoRequest(account: AgentAccount, reload: number, t: Translate, language: string) {
+  const key = `${account.id}:${account.agentId}:${language}`;
+  const cached = accountInfoCache.get(key);
+  if (cached && cached.expiresAt > Date.now() && (reload === 0 || cached.reload === reload)) {
+    return cached.promise;
+  }
+  const active = inflight.get(account.id);
+  if (active) return active;
+
+  const promise = fetchInfo(account, reload > 0, t).catch(() => ({ plan: null, meters: [] }));
+  inflight.set(account.id, promise);
+  const entry = { promise, reload, expiresAt: Number.POSITIVE_INFINITY };
+  accountInfoCache.set(key, entry);
+  promise.finally(() => {
+    if (inflight.get(account.id) === promise) inflight.delete(account.id);
+    if (accountInfoCache.get(key) !== entry) return;
+    entry.expiresAt = Date.now() + ACCOUNT_INFO_CACHE_MS;
+    window.setTimeout(() => {
+      if (accountInfoCache.get(key) === entry && entry.expiresAt <= Date.now()) accountInfoCache.delete(key);
+    }, ACCOUNT_INFO_CACHE_MS);
+  });
+  return promise;
+}
 
 function useAccountInfo(account: AgentAccount, reload: number): AccountInfo & { loading: boolean } {
   const { t, i18n } = useTranslation();
@@ -54,14 +80,7 @@ function useAccountInfo(account: AgentAccount, reload: number): AccountInfo & { 
   useEffect(() => {
     let stale = false;
     setInfo((cur) => ({ ...cur, loading: true }));
-    const key = `${account.id}:${reload}:${i18n.language}`;
-    let promise = inflight.get(key);
-    if (!promise) {
-      promise = fetchInfo(account, reload > 0, t as Translate).catch(() => ({ plan: null, meters: [] }));
-      inflight.set(key, promise);
-      // Fica guardada só o tempo de as duas linhas a pedirem: depois, uma nova consulta é uma nova.
-      window.setTimeout(() => inflight.delete(key), 4000);
-    }
+    const promise = accountInfoRequest(account, reload, t as Translate, i18n.language);
     promise.then((r) => { if (!stale) setInfo({ ...r, loading: false }); });
     return () => { stale = true; };
   }, [account.id, account.agentId, reload, t, i18n.language]); // eslint-disable-line react-hooks/exhaustive-deps

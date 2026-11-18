@@ -78,12 +78,20 @@ fn kind_key(kind: ForgeKind) -> Option<&'static str> {
 
 /// Um Client ID plausível: letras, números e `._-`, sem espaços nem aspas (vai num corpo de formulário).
 pub fn valid_client_id(id: &str) -> bool {
-    (10..=120).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    (10..=120).contains(&id.len())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// O Client ID em uso: o do usuário, se houver, senão o embutido.
 fn client_id(kind: ForgeKind) -> String {
-    let own = kind_key(kind).and_then(|key| read_overrides().get(key).and_then(Value::as_str).map(str::to_string));
+    let own = kind_key(kind).and_then(|key| {
+        read_overrides()
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    });
     match own {
         Some(id) if valid_client_id(&id) => id,
         _ => match kind {
@@ -105,9 +113,17 @@ pub struct ClientInfo {
 
 pub fn client_info(kind: ForgeKind) -> ClientInfo {
     let custom = kind_key(kind)
-        .and_then(|key| read_overrides().get(key).and_then(Value::as_str).map(valid_client_id))
+        .and_then(|key| {
+            read_overrides()
+                .get(key)
+                .and_then(Value::as_str)
+                .map(valid_client_id)
+        })
         .unwrap_or(false);
-    ClientInfo { client_id: client_id(kind), custom }
+    ClientInfo {
+        client_id: client_id(kind),
+        custom,
+    }
 }
 
 /// Fixa (ou, com `None`, remove) o Client ID do aplicativo OAuth do usuário para este tipo de host.
@@ -123,23 +139,31 @@ pub fn set_client_override(kind: ForgeKind, id: Option<&str>) -> Result<(), Stri
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, serde_json::to_string_pretty(&Value::Object(map)).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    std::fs::write(
+        path,
+        serde_json::to_string_pretty(&Value::Object(map)).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn endpoints(kind: ForgeKind, host: &str) -> Option<Endpoints> {
     match (kind, host) {
-        (ForgeKind::Github, "github.com") if !client_id(ForgeKind::Github).is_empty() => Some(Endpoints {
-            client_id: client_id(ForgeKind::Github),
-            device: "https://github.com/login/device/code",
-            token: "https://github.com/login/oauth/access_token",
-            scopes: GITHUB_SCOPES,
-        }),
-        (ForgeKind::Gitlab, "gitlab.com") if !client_id(ForgeKind::Gitlab).is_empty() => Some(Endpoints {
-            client_id: client_id(ForgeKind::Gitlab),
-            device: "https://gitlab.com/oauth/authorize_device",
-            token: "https://gitlab.com/oauth/token",
-            scopes: GITLAB_SCOPES,
-        }),
+        (ForgeKind::Github, "github.com") if !client_id(ForgeKind::Github).is_empty() => {
+            Some(Endpoints {
+                client_id: client_id(ForgeKind::Github),
+                device: "https://github.com/login/device/code",
+                token: "https://github.com/login/oauth/access_token",
+                scopes: GITHUB_SCOPES,
+            })
+        }
+        (ForgeKind::Gitlab, "gitlab.com") if !client_id(ForgeKind::Gitlab).is_empty() => {
+            Some(Endpoints {
+                client_id: client_id(ForgeKind::Gitlab),
+                device: "https://gitlab.com/oauth/authorize_device",
+                token: "https://gitlab.com/oauth/token",
+                scopes: GITLAB_SCOPES,
+            })
+        }
         _ => None,
     }
 }
@@ -173,8 +197,14 @@ pub struct DeviceStart {
 }
 
 pub enum Poll {
-    Pending { interval: u64 },
-    Done { kind: ForgeKind, host: String, secret: Secret },
+    Pending {
+        interval: u64,
+    },
+    Done {
+        kind: ForgeKind,
+        host: String,
+        secret: Secret,
+    },
     Expired,
     Denied,
 }
@@ -188,7 +218,8 @@ fn http() -> Result<reqwest::Client, String> {
 }
 
 pub async fn start(kind: ForgeKind, host: &str) -> Result<DeviceStart, String> {
-    let ep = endpoints(kind, host).ok_or("Este host no tiene inicio de sesión con navegador; usá un token")?;
+    let ep = endpoints(kind, host)
+        .ok_or("Este host no tiene inicio de sesión con navegador; usá un token")?;
     let res: Value = http()?
         .post(ep.device)
         .header("Accept", "application/json")
@@ -200,18 +231,32 @@ pub async fn start(kind: ForgeKind, host: &str) -> Result<DeviceStart, String> {
         .await
         .map_err(|e| e.to_string())?;
     let field = |k: &str| res.get(k).and_then(Value::as_str).map(str::to_string);
-    let (Some(device_code), Some(user_code), Some(verification_uri)) =
-        (field("device_code"), field("user_code"), field("verification_uri"))
-    else {
-        let why = field("error_description").or_else(|| field("error")).unwrap_or_else(|| res.to_string());
+    let (Some(device_code), Some(user_code), Some(verification_uri)) = (
+        field("device_code"),
+        field("user_code"),
+        field("verification_uri"),
+    ) else {
+        let why = field("error_description")
+            .or_else(|| field("error"))
+            .unwrap_or_else(|| res.to_string());
         return Err(format!("{host} rechazó el inicio de sesión: {why}"));
     };
     let expires_in = res.get("expires_in").and_then(Value::as_u64).unwrap_or(900);
-    let interval = res.get("interval").and_then(Value::as_u64).unwrap_or(5).max(1);
+    let interval = res
+        .get("interval")
+        .and_then(Value::as_u64)
+        .unwrap_or(5)
+        .max(1);
     let flow_id = uuid::Uuid::new_v4().to_string();
     FLOWS.lock().unwrap().insert(
         flow_id.clone(),
-        Flow { kind, host: host.to_string(), device_code, interval, expires_at: now_ts() + expires_in as i64 },
+        Flow {
+            kind,
+            host: host.to_string(),
+            device_code,
+            interval,
+            expires_at: now_ts() + expires_in as i64,
+        },
     );
     Ok(DeviceStart {
         flow_id,
@@ -227,8 +272,16 @@ pub async fn start(kind: ForgeKind, host: &str) -> Result<DeviceStart, String> {
 pub async fn poll(flow_id: &str) -> Result<Poll, String> {
     let (kind, host, device_code, interval, expires_at) = {
         let flows = FLOWS.lock().unwrap();
-        let f = flows.get(flow_id).ok_or("Este inicio de sesión ya no existe; empezá de nuevo")?;
-        (f.kind, f.host.clone(), f.device_code.clone(), f.interval, f.expires_at)
+        let f = flows
+            .get(flow_id)
+            .ok_or("Este inicio de sesión ya no existe; empezá de nuevo")?;
+        (
+            f.kind,
+            f.host.clone(),
+            f.device_code.clone(),
+            f.interval,
+            f.expires_at,
+        )
     };
     if now_ts() > expires_at {
         FLOWS.lock().unwrap().remove(flow_id);
@@ -276,7 +329,10 @@ pub async fn poll(flow_id: &str) -> Result<Poll, String> {
         }
         other => {
             FLOWS.lock().unwrap().remove(flow_id);
-            let why = res.get("error_description").and_then(Value::as_str).unwrap_or(other);
+            let why = res
+                .get("error_description")
+                .and_then(Value::as_str)
+                .unwrap_or(other);
             Err(format!("{host}: {why}"))
         }
     }
@@ -290,8 +346,14 @@ fn secret_from(res: &Value) -> Option<Secret> {
     let access_token = res.get("access_token").and_then(Value::as_str)?.to_string();
     Some(Secret {
         access_token,
-        refresh_token: res.get("refresh_token").and_then(Value::as_str).map(str::to_string),
-        expires_at: res.get("expires_in").and_then(Value::as_i64).map(|s| now_ts() + s),
+        refresh_token: res
+            .get("refresh_token")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        expires_at: res
+            .get("expires_in")
+            .and_then(Value::as_i64)
+            .map(|s| now_ts() + s),
     })
 }
 
@@ -312,5 +374,27 @@ pub async fn refresh(kind: ForgeKind, host: &str, refresh_token: &str) -> Result
         .json()
         .await
         .map_err(|e| e.to_string())?;
-    secret_from(&res).ok_or_else(|| "La sesión venció; volvé a iniciar sesión".to_string())
+    let fresh =
+        secret_from(&res).ok_or_else(|| "La sesión venció; volvé a iniciar sesión".to_string())?;
+    Ok(preserve_refresh_token(fresh, Some(refresh_token)))
+}
+
+fn preserve_refresh_token(mut fresh: Secret, previous: Option<&str>) -> Secret {
+    if fresh.refresh_token.is_none() {
+        fresh.refresh_token = previous.map(str::to_string);
+    }
+    fresh
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renovacao_sem_refresh_novo_preserva_o_anterior() {
+        let response = serde_json::json!({ "access_token": "access-novo", "expires_in": 7200 });
+        let renewed =
+            preserve_refresh_token(secret_from(&response).unwrap(), Some("refresh-anterior"));
+        assert_eq!(renewed.refresh_token.as_deref(), Some("refresh-anterior"));
+    }
 }

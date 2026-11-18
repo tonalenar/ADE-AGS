@@ -30,18 +30,31 @@ export function AntigravityOAuthSection() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const timer = useRef<number | null>(null);
+  const flowRef = useRef<string | null>(null);
+  const mounted = useRef(false);
 
   const load = useCallback(async () => {
     try {
       const [cfg, list] = await Promise.all([antigravityOAuthConfig(), antigravityOAuthAccounts()]);
+      if (!mounted.current) return;
       setConfig(cfg);
       setAccounts(list);
     } catch (e) {
-      setError(String(e));
+      if (mounted.current) setError(String(e));
     }
   }, []);
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
+  useEffect(() => {
+    mounted.current = true;
+    void load();
+    return () => {
+      mounted.current = false;
+      if (timer.current !== null) window.clearTimeout(timer.current);
+      timer.current = null;
+      const activeFlow = flowRef.current;
+      flowRef.current = null;
+      if (activeFlow) void cancelAntigravityOAuth(activeFlow);
+    };
+  }, [load]);
 
   const saveClient = async () => {
     if (!clientIdLooksValid(clientId) || !clientSecretLooksValid(secret)) return;
@@ -62,9 +75,12 @@ export function AntigravityOAuthSection() {
 
   const poll = (flowId: string) => {
     timer.current = window.setTimeout(async () => {
+      timer.current = null;
       try {
         const progress = await pollAntigravityOAuth(flowId);
+        if (!mounted.current || flowRef.current !== flowId) return;
         if (progress.status === "pending") return poll(flowId);
+        flowRef.current = null;
         setFlow(null);
         if (progress.status === "connected") {
           setName("");
@@ -74,6 +90,8 @@ export function AntigravityOAuthSection() {
         }
         await load();
       } catch (e) {
+        if (!mounted.current || flowRef.current !== flowId) return;
+        flowRef.current = null;
         setFlow(null);
         setError(String(e));
       }
@@ -90,18 +108,32 @@ export function AntigravityOAuthSection() {
         setError(t("accounts.antigravity.oauth.badUrl"));
         return;
       }
+      if (!mounted.current) {
+        await cancelAntigravityOAuth(login.flowId);
+        return;
+      }
+      flowRef.current = login.flowId;
       setFlow(login.flowId);
       await openUrl(login.authorizationUrl);
+      if (!mounted.current || flowRef.current !== login.flowId) return;
       poll(login.flowId);
     } catch (e) {
-      setFlow(null);
-      setError(String(e));
+      if (mounted.current) {
+        const activeFlow = flowRef.current;
+        flowRef.current = null;
+        if (activeFlow) void cancelAntigravityOAuth(activeFlow);
+        setFlow(null);
+        setError(String(e));
+      }
     }
   };
 
   const cancel = () => {
-    if (timer.current) window.clearTimeout(timer.current);
-    if (flow) void cancelAntigravityOAuth(flow);
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+    const activeFlow = flowRef.current ?? flow;
+    flowRef.current = null;
+    if (activeFlow) void cancelAntigravityOAuth(activeFlow);
     setFlow(null);
   };
 

@@ -1,12 +1,17 @@
 //! Tests de la terminal: cómo se arma el lanzamiento y cómo se contiene el árbol de
 //! procesos de una tab.
 
-use super::pty_manager::{build_launch, launch_script, PARENT_SESSION_ENV};
+use super::pty_manager::{PARENT_SESSION_ENV, build_launch, launch_script};
 
 #[test]
 fn resize_measurements_preserve_valid_sizes_and_bound_extremes() {
-    use super::pty_manager::{measured_pty_size, MAX_PTY_DIMENSION};
-    for (cols, rows) in [(1, 1), (80, 24), (240, 80), (MAX_PTY_DIMENSION, MAX_PTY_DIMENSION)] {
+    use super::pty_manager::{MAX_PTY_DIMENSION, measured_pty_size};
+    for (cols, rows) in [
+        (1, 1),
+        (80, 24),
+        (240, 80),
+        (MAX_PTY_DIMENSION, MAX_PTY_DIMENSION),
+    ] {
         let size = measured_pty_size(cols, rows).unwrap();
         assert_eq!((size.cols, size.rows), (cols, rows));
         assert_eq!((size.pixel_width, size.pixel_height), (0, 0));
@@ -24,11 +29,16 @@ fn resize_measurements_preserve_valid_sizes_and_bound_extremes() {
 #[test]
 fn zero_slot_measurement_keeps_live_pty_size_until_next_fit() {
     use super::pty_manager::{measured_pty_size, resize_measured_pty};
-    use portable_pty::{native_pty_system, PtySize};
+    use portable_pty::{PtySize, native_pty_system};
 
-    let pair = native_pty_system().openpty(PtySize {
-        cols: 80, rows: 24, pixel_width: 0, pixel_height: 0,
-    }).unwrap();
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            cols: 80,
+            rows: 24,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
     for (cols, rows) in [(0, 0), (0, 24), (80, 0), (0, u16::MAX)] {
         assert!(measured_pty_size(cols, rows).is_none());
         resize_measured_pty(pair.master.as_ref(), cols, rows).unwrap();
@@ -41,7 +51,6 @@ fn zero_slot_measurement_keeps_live_pty_size_until_next_fit() {
 }
 
 // ── Lanzamiento del agente ──────────────────────────────────────
-
 
 #[test]
 fn un_solo_paso_precede_al_agente() {
@@ -68,7 +77,10 @@ fn los_pasos_conservan_el_orden() {
 fn los_pasos_se_encadenan_con_and_para_que_un_fallo_no_lance_el_agente() {
     let script = launch_script("claude", &["a".into(), "b".into()]);
     assert_eq!(script.matches("&&").count(), 2, "{script}");
-    assert!(!script.contains(';'), "un `;` dejaría arrancar el agente igual: {script}");
+    assert!(
+        !script.contains(';'),
+        "un `;` dejaría arrancar el agente igual: {script}"
+    );
 }
 
 #[cfg(unix)]
@@ -92,8 +104,11 @@ fn el_comando_de_reanudacion_llega_entero() {
 #[test]
 fn sin_pasos_se_lanza_el_binario_directo_sin_shell() {
     let cmd = build_launch("ade-test-missing-agent --resume abc", &[]).unwrap();
-    let argv: Vec<String> =
-        cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    let argv: Vec<String> = cmd
+        .get_argv()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     assert_eq!(argv, vec!["ade-test-missing-agent", "--resume", "abc"]);
 }
 
@@ -110,8 +125,11 @@ fn una_ruta_absoluta_se_lanza_tal_cual() {
     perms.set_mode(0o755);
     std::fs::set_permissions(&bin, perms).unwrap();
     let cmd = build_launch(&format!("{} --version", bin.display()), &[]).unwrap();
-    let argv: Vec<String> =
-        cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    let argv: Vec<String> = cmd
+        .get_argv()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     assert_eq!(argv[0], bin.to_string_lossy());
     assert_eq!(argv[1], "--version");
     let _ = std::fs::remove_dir_all(&dir);
@@ -122,8 +140,11 @@ fn una_ruta_absoluta_se_lanza_tal_cual() {
 #[test]
 fn con_pasos_el_comando_viaja_entero_como_argumento_del_shell() {
     let cmd = build_launch("claude --resume abc", &["nvm use".into()]).unwrap();
-    let argv: Vec<String> =
-        cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    let argv: Vec<String> = cmd
+        .get_argv()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     let last = argv.last().expect("el script va último");
     // En Windows el script viaja en un .cmd (ver `shell_running`): se lee de ahí.
     let script = if cfg!(windows) && last.ends_with(".cmd") {
@@ -134,7 +155,10 @@ fn con_pasos_el_comando_viaja_entero_como_argumento_del_shell() {
     let script = script.trim_end();
     assert!(script.contains("nvm use"), "{script}");
     assert!(script.ends_with("claude --resume abc"), "{script}");
-    assert!(argv.len() >= 2, "tendría que haber flags de shell antes del script: {argv:?}");
+    assert!(
+        argv.len() >= 2,
+        "tendría que haber flags de shell antes del script: {argv:?}"
+    );
 }
 
 /// `conda activate`, `nvm use`, `set` y `cd` tienen que quedar en el MISMO shell que el
@@ -153,13 +177,28 @@ fn prelaunch_e_agente_no_mesmo_processo_de_shell() {
         assert!(script.contains(step), "{script}");
     }
     assert!(script.contains("claude --resume abc"), "{script}");
-    assert!(!script.contains(';'), "un `;` seguiría aunque un paso fallara: {script}");
-    assert_eq!(script.matches("&&").count(), steps.len(), "un solo script, no un proceso por paso: {script}");
+    assert!(
+        !script.contains(';'),
+        "un `;` seguiría aunque un paso fallara: {script}"
+    );
+    assert_eq!(
+        script.matches("&&").count(),
+        steps.len(),
+        "un solo script, no un proceso por paso: {script}"
+    );
 
     let cmd = build_launch("claude --resume abc", &steps).unwrap();
-    let argv: Vec<String> = cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    let argv: Vec<String> = cmd
+        .get_argv()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     if cfg!(windows) {
-        assert_eq!(argv.len(), 3, "un único cmd /C, no un proceso por paso: {argv:?}");
+        assert_eq!(
+            argv.len(),
+            3,
+            "un único cmd /C, no un proceso por paso: {argv:?}"
+        );
         assert!(argv[0].eq_ignore_ascii_case("cmd"), "{argv:?}");
         assert_eq!(argv[1], "/C");
         assert!(argv[2].ends_with(".cmd"), "{argv:?}");
@@ -171,8 +210,14 @@ fn prelaunch_e_agente_no_mesmo_processo_de_shell() {
         assert!(!body.contains("\\\""), "{body}");
     } else {
         let last = argv.last().unwrap();
-        assert!(last.contains("conda activate base") && last.contains("claude --resume abc"), "{argv:?}");
-        assert!(argv.iter().any(|arg| arg == "-c"), "el shell recibe el script en un solo -c: {argv:?}");
+        assert!(
+            last.contains("conda activate base") && last.contains("claude --resume abc"),
+            "{argv:?}"
+        );
+        assert!(
+            argv.iter().any(|arg| arg == "-c"),
+            "el shell recibe el script en un solo -c: {argv:?}"
+        );
     }
 }
 
@@ -183,7 +228,11 @@ fn prelaunch_e_agente_no_mesmo_processo_de_shell() {
 fn con_pasos_las_comillas_del_comando_no_se_escapan() {
     let command = r#"claude --mcp-config "C:\Users\x\mcp\tab.json" --allowedTools "a,b""#;
     let cmd = build_launch(command, &["cd /d C:\\w".into()]).unwrap();
-    let argv: Vec<String> = cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    let argv: Vec<String> = cmd
+        .get_argv()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     let last = argv.last().unwrap();
     assert!(last.ends_with(".cmd"), "{argv:?}");
     let body = std::fs::read_to_string(last).unwrap();
@@ -194,13 +243,25 @@ fn con_pasos_las_comillas_del_comando_no_se_escapan() {
 #[test]
 fn conpty_windows_pede_create_no_window() {
     let src = include_str!("win_conpty.rs");
-    assert!(src.contains("CREATE_NO_WINDOW"), "o wrapper tem que passar a flag");
+    assert!(
+        src.contains("CREATE_NO_WINDOW"),
+        "o wrapper tem que passar a flag"
+    );
     assert!(src.contains("EXTENDED_STARTUPINFO_PRESENT"));
     assert!(src.contains("PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE") || src.contains("0x0002_0016"));
     let manager = include_str!("pty_manager.rs");
-    assert!(manager.contains("ags-launch"), "o prelaunch do Windows volta a gravar um .cmd");
-    assert!(manager.contains("CommandBuilder::new(\"cmd\")"), "o .cmd sobe num único cmd");
-    assert!(!manager.contains("run_prelaunch_steps"), "passos separados perdem conda/nvm/set/cd");
+    assert!(
+        manager.contains("ags-launch"),
+        "o prelaunch do Windows volta a gravar um .cmd"
+    );
+    assert!(
+        manager.contains("CommandBuilder::new(\"cmd\")"),
+        "o .cmd sobe num único cmd"
+    );
+    assert!(
+        !manager.contains("run_prelaunch_steps"),
+        "passos separados perdem conda/nvm/set/cd"
+    );
 }
 
 // ── Recorrido del árbol de procesos (unix) ──────────────────────
@@ -214,11 +275,17 @@ fn windows_pty_resolves_npm_shim_and_preserves_arguments() {
     std::fs::write(root.join("node_modules/cli.js"), b"fixture").unwrap();
     std::fs::write(root.join("agent"), b"#!/bin/sh").unwrap();
     std::fs::write(root.join("agent.cmd"), "@echo off\r\nIF EXIST \"%dp0%\\node.exe\" (\r\nSET \"_prog=%dp0%\\node.exe\"\r\n)\r\n\"%_prog%\" \"%dp0%\\node_modules\\cli.js\" %*\r\n").unwrap();
-    let command = format!("\"{}\" --resume \"session with spaces & literal\"", root.join("agent").display());
+    let command = format!(
+        "\"{}\" --resume \"session with spaces & literal\"",
+        root.join("agent").display()
+    );
     let cmd = build_launch(&command, &[]).unwrap();
     let argv = cmd.get_argv();
     assert_eq!(std::path::Path::new(&argv[0]), root.join("node.exe"));
-    assert_eq!(std::path::Path::new(&argv[1]), root.join("node_modules/cli.js"));
+    assert_eq!(
+        std::path::Path::new(&argv[1]),
+        root.join("node_modules/cli.js")
+    );
     assert_eq!(argv[2], "--resume");
     assert_eq!(argv[3], "session with spaces & literal");
     std::fs::remove_dir_all(&root).unwrap();
@@ -228,13 +295,29 @@ fn windows_pty_resolves_npm_shim_and_preserves_arguments() {
 #[test]
 #[ignore = "requires the installed Codex CLI; only runs --version, no inference"]
 fn installed_codex_starts_in_windows_pty_without_inference() {
-    use portable_pty::{native_pty_system, PtySize};
-    let pair = native_pty_system().openpty(PtySize { rows:24, cols:80, pixel_width:0, pixel_height:0 }).unwrap();
-    let mut child = pair.slave.spawn_command(build_launch("codex --version", &[]).unwrap()).unwrap();
+    use portable_pty::{PtySize, native_pty_system};
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+    let mut child = pair
+        .slave
+        .spawn_command(build_launch("codex --version", &[]).unwrap())
+        .unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     loop {
-        if let Some(status) = child.try_wait().unwrap() { assert!(status.success(), "{status:?}"); break; }
-        if std::time::Instant::now() >= deadline { let _ = child.kill(); panic!("Codex --version timed out"); }
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(status.success(), "{status:?}");
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("Codex --version timed out");
+        }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
@@ -242,7 +325,6 @@ fn installed_codex_starts_in_windows_pty_without_inference() {
 #[cfg(unix)]
 mod arbol {
     use crate::terminal::containment::unix_tree::descendants;
-
 
     #[test]
     fn recorre_el_arbol_completo_y_no_toca_ramas_ajenas() {
@@ -294,7 +376,7 @@ mod arbol {
 #[cfg(all(test, target_os = "linux"))]
 mod tests_e2e {
     use crate::terminal::containment::ProcessGroup;
-    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
     use std::io::Read;
     use std::time::{Duration, Instant};
 
@@ -305,7 +387,12 @@ mod tests_e2e {
     #[test]
     fn matar_una_tab_se_lleva_a_un_nieto_que_se_fue_a_su_propia_sesion() {
         let pty = native_pty_system()
-            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .expect("openpty");
 
         let mut cmd = CommandBuilder::new("sh");
@@ -345,8 +432,13 @@ mod tests_e2e {
                 }
             }
         });
-        let nieto = rx.recv_timeout(Duration::from_secs(10)).expect("pid del nieto");
-        assert!(vivo(nieto), "el nieto tendría que estar vivo antes de matar el grupo");
+        let nieto = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("pid del nieto");
+        assert!(
+            vivo(nieto),
+            "el nieto tendría que estar vivo antes de matar el grupo"
+        );
 
         group.kill_all();
         drop(pty);
@@ -361,13 +453,16 @@ mod tests_e2e {
         if sobrevivio {
             unsafe { libc::kill(nieto as i32, libc::SIGKILL) };
         }
-        assert!(!sobrevivio, "el nieto {nieto} quedó huérfano tras matar el grupo");
+        assert!(
+            !sobrevivio,
+            "el nieto {nieto} quedó huérfano tras matar el grupo"
+        );
     }
 }
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests_cgroup {
-    use crate::terminal::containment::{imp, ProcessGroup};
+    use crate::terminal::containment::{ProcessGroup, imp};
 
     fn cgroup_de(pid: u32) -> String {
         std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
@@ -395,7 +490,10 @@ mod tests_cgroup {
         // Si el entorno no permite cgroups (contenedor sin delegación, cgroup v1) el
         // módulo cae al recorrido por `ppid` y no hay nada que verificar acá.
         if imp::usa_cgroup(&group.imp) {
-            assert_ne!(despues, antes, "el proceso tendría que haber cambiado de cgroup");
+            assert_ne!(
+                despues, antes,
+                "el proceso tendría que haber cambiado de cgroup"
+            );
             assert!(
                 despues.ends_with("/cc-tab-9001"),
                 "quedó en {despues}, no en el cgroup de la tab"
@@ -412,7 +510,10 @@ mod tests_cgroup {
         let mut group = ProcessGroup::new(9_002);
         let dir: Option<std::path::PathBuf> = imp::dir_de(&group.imp);
         if let Some(d) = &dir {
-            assert!(d.exists(), "el cgroup tendría que existir tras crear el grupo");
+            assert!(
+                d.exists(),
+                "el cgroup tendría que existir tras crear el grupo"
+            );
         }
         group.kill_all();
         if let Some(d) = &dir {
@@ -427,18 +528,24 @@ mod tests_cgroup {
 /// existe la red del kernel que en unix tapa este caso.
 #[cfg(all(test, windows))]
 mod tests_e2e {
-    use crate::terminal::containment::{imp, ProcessGroup};
-    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    use crate::terminal::containment::{ProcessGroup, imp};
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
     use std::io::Read;
-    use std::time::Duration;
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use std::time::Duration;
     use windows_sys::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
-    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+    };
 
     fn process_handle(pid: u32) -> OwnedHandle {
         // O handle fica válido após a morte do processo; o PID pode ser reutilizado.
         let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE, 0, pid) };
-        assert!(!handle.is_null(), "OpenProcess({pid}): {}", std::io::Error::last_os_error());
+        assert!(
+            !handle.is_null(),
+            "OpenProcess({pid}): {}",
+            std::io::Error::last_os_error()
+        );
         // SAFETY: OpenProcess devolveu um handle válido, transferido uma única vez ao RAII.
         unsafe { OwnedHandle::from_raw_handle(handle as _) }
     }
@@ -446,7 +553,12 @@ mod tests_e2e {
     #[test]
     fn matar_una_tab_se_lleva_al_proceso_que_lanzo_el_agente() {
         let pty = native_pty_system()
-            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .expect("openpty");
 
         // PowerShell hace de agente: lanza un proceso aparte y reporta su pid.
@@ -487,10 +599,16 @@ mod tests_e2e {
                 }
             }
         });
-        let nieto = rx.recv_timeout(Duration::from_secs(30)).expect("pid del nieto");
+        let nieto = rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("pid del nieto");
         let original = process_handle(nieto);
         let handle = original.as_raw_handle() as HANDLE;
-        assert_eq!(unsafe { WaitForSingleObject(handle, 0) }, WAIT_TIMEOUT, "el nieto tendría que estar vivo antes de matar el grupo");
+        assert_eq!(
+            unsafe { WaitForSingleObject(handle, 0) },
+            WAIT_TIMEOUT,
+            "el nieto tendría que estar vivo antes de matar el grupo"
+        );
         group.kill_all();
         drop(pty);
 
@@ -498,9 +616,14 @@ mod tests_e2e {
         let wait = unsafe { WaitForSingleObject(handle, 5_000) };
         if wait != WAIT_OBJECT_0 {
             // A limpeza também usa identidade estável: nunca mata outro processo pelo PID reciclado.
-            unsafe { TerminateProcess(handle, 1); }
+            unsafe {
+                TerminateProcess(handle, 1);
+            }
         }
-        assert_eq!(wait, WAIT_OBJECT_0, "el nieto original {nieto} quedó vivo tras matar el grupo (wait={wait})");
+        assert_eq!(
+            wait, WAIT_OBJECT_0,
+            "el nieto original {nieto} quedó vivo tras matar el grupo (wait={wait})"
+        );
     }
 }
 
@@ -523,7 +646,10 @@ fn el_fin_del_buffer_no_corta_un_caracter_al_medio() {
 fn el_comando_se_parte_respetando_las_comillas() {
     use super::pty_manager::split_command;
 
-    assert_eq!(split_command("claude --resume abc"), vec!["claude", "--resume", "abc"]);
+    assert_eq!(
+        split_command("claude --resume abc"),
+        vec!["claude", "--resume", "abc"]
+    );
     assert_eq!(
         split_command("\"/home/u/mis tools/agente\" --flag"),
         vec!["/home/u/mis tools/agente", "--flag"]
@@ -532,9 +658,15 @@ fn el_comando_se_parte_respetando_las_comillas() {
         split_command("claude --system-prompt \"hola mundo\""),
         vec!["claude", "--system-prompt", "hola mundo"]
     );
-    assert_eq!(split_command("agente 'un solo arg'"), vec!["agente", "un solo arg"]);
+    assert_eq!(
+        split_command("agente 'un solo arg'"),
+        vec!["agente", "un solo arg"]
+    );
     // Un argumento vacío explícito es un argumento, no la ausencia de uno.
-    assert_eq!(split_command("agente --flag \"\""), vec!["agente", "--flag", ""]);
+    assert_eq!(
+        split_command("agente --flag \"\""),
+        vec!["agente", "--flag", ""]
+    );
     assert!(split_command("   ").is_empty());
 }
 
@@ -546,28 +678,47 @@ fn codex_recibe_el_id_de_la_tab_por_su_config() {
     let launched = with_codex_tab_id("codex resume abc", Some("tab-1"));
     assert_eq!(
         split_command(&launched),
-        vec!["codex", "-c", "shell_environment_policy.set.ADE_TAB_ID=\"tab-1\"", "resume", "abc"]
+        vec![
+            "codex",
+            "-c",
+            "shell_environment_policy.set.ADE_TAB_ID=\"tab-1\"",
+            "resume",
+            "abc"
+        ]
     );
     // Con ruta y .exe también es Codex.
-    assert!(with_codex_tab_id("\"C:\\bin\\codex.exe\"", Some("t")).contains("shell_environment_policy.set.ADE_TAB_ID"));
+    assert!(
+        with_codex_tab_id("\"C:\\bin\\codex.exe\"", Some("t"))
+            .contains("shell_environment_policy.set.ADE_TAB_ID")
+    );
     // Ruta entrecomillada con espacios: el flag va DESPUÉS de la ruta entera, no en medio.
     let spaced = with_codex_tab_id("\"C:\\Program Files\\codex.exe\" resume x", Some("t"));
     assert_eq!(
         split_command(&spaced),
-        vec!["C:\\Program Files\\codex.exe", "-c", "shell_environment_policy.set.ADE_TAB_ID=\"t\"", "resume", "x"]
+        vec![
+            "C:\\Program Files\\codex.exe",
+            "-c",
+            "shell_environment_policy.set.ADE_TAB_ID=\"t\"",
+            "resume",
+            "x"
+        ]
     );
     // Otras TUIs, sin id, ids raros o ya puesto: no se toca.
-    assert_eq!(with_codex_tab_id("claude --resume x", Some("t")), "claude --resume x");
+    assert_eq!(
+        with_codex_tab_id("claude --resume x", Some("t")),
+        "claude --resume x"
+    );
     assert_eq!(with_codex_tab_id("codex", None), "codex");
     assert_eq!(with_codex_tab_id("codex", Some("a b\"c")), "codex");
     assert_eq!(with_codex_tab_id(&launched, Some("tab-1")), launched);
 }
 
-/// O valor de `ADE_SESSION` não entra no argv do Codex (nem no Windows, onde
-/// a linha aparece no Gerenciador de Tarefas). O sandbox lê um perfil 0600.
+/// Codex recebe identidade pela configuração do agente e pela ancestralidade do IPC, sem `ADE_SESSION` em arquivo.
 #[test]
 fn codex_argv_nao_contem_o_token_da_sessao() {
-    use super::pty_manager::{split_command, with_codex_identity, write_codex_session_profile_at};
+    use super::pty_manager::{
+        split_command, with_codex_identity, write_codex_profile_with_auth_at,
+    };
 
     let token = "sess-1-token-secreto";
     let launched = with_codex_identity(
@@ -596,19 +747,42 @@ fn codex_argv_nao_contem_o_token_da_sessao() {
     let unsafe_profile = with_codex_identity("codex", Some("tab-1"), Some("a\"b;calc"));
     assert!(!unsafe_profile.contains("calc"));
     assert!(!unsafe_profile.contains("--profile"));
-    assert_eq!(with_codex_identity("claude", Some("t"), Some("ags-s")), "claude");
+    assert_eq!(
+        with_codex_identity("claude", Some("t"), Some("ags-s")),
+        "claude"
+    );
 
     let home = std::env::temp_dir().join(format!("ags-codex-profile-{}", uuid::Uuid::new_v4()));
-    let path = write_codex_session_profile_at(&home, "ags-perfil", token).unwrap();
+    let path = write_codex_profile_with_auth_at(&home, "ags-perfil", None).unwrap();
     let body = std::fs::read_to_string(&path).unwrap();
-    assert!(body.contains(token), "{body}");
-    assert!(body.contains("ADE_SESSION"));
+    assert!(
+        !body.contains(token),
+        "o perfil não deve persistir o token: {body}"
+    );
+    assert!(!body.contains("ADE_SESSION"));
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600, "o arquivo do token tem de ser só do usuário");
+        assert_eq!(mode & 0o777, 0o600, "o perfil temporário continua privado");
     }
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn perfil_codex_usa_o_auth_helper_sem_gravar_a_chave() {
+    use super::pty_manager::write_codex_profile_with_auth_at;
+
+    let home = std::env::temp_dir().join(format!("ags-codex-auth-{}", uuid::Uuid::new_v4()));
+    let ags = std::path::Path::new("/tmp/ags");
+    let auth = crate::accounts::broker::codex_provider_config(ags, "conta-123").unwrap();
+    let path = write_codex_profile_with_auth_at(&home, "ags-perfil", Some(&auth)).unwrap();
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(body.contains("model_providers.ade-openai.auth"));
+    assert!(body.contains("credential codex --account conta-123"));
+    assert!(!body.contains("--ticket"));
+    assert!(!body.contains("ADE_SESSION"));
+    assert!(!body.contains("sk-teste-nao-real"));
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -649,7 +823,12 @@ fn las_marcas_de_sesion_padre_no_pasan_a_los_terminales() {
     // `NO_COLOR` heredado dejaba los terminales de las misiones en blanco y negro.
     assert!(PARENT_SESSION_ENV.contains(&"NO_COLOR"));
     // La configuración del usuario NO es una marca de sesión: no se toca.
-    for keep in ["ANTHROPIC_MODEL", "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"] {
+    for keep in [
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+    ] {
         assert!(!PARENT_SESSION_ENV.contains(&keep), "{keep}");
     }
 }
@@ -659,7 +838,12 @@ fn las_marcas_de_sesion_padre_no_pasan_a_los_terminales() {
 fn la_tab_encuentra_su_terminal_vivo_y_el_mas_nuevo_gana() {
     use super::pty_manager::newest_for_tab;
 
-    let sessions = vec![(3u32, Some("tab-a")), (7, Some("tab-b")), (9, Some("tab-a")), (11, None)];
+    let sessions = vec![
+        (3u32, Some("tab-a")),
+        (7, Some("tab-b")),
+        (9, Some("tab-a")),
+        (11, None),
+    ];
     assert_eq!(newest_for_tab(sessions.iter().copied(), "tab-a"), Some(9));
     assert_eq!(newest_for_tab(sessions.iter().copied(), "tab-b"), Some(7));
     // Otra tab, o un PTY que no es de una tab, no se confunde.

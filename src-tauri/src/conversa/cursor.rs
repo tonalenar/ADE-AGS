@@ -289,7 +289,7 @@ async fn run_process(app: &AppHandle, db: &DbConnection, session: &Arc<Session>,
     cmd.kill_on_drop(true);
     let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir o Cursor: {e}"))?;
     // O `ags sim act` reconhece a conversa por este PID (sem ADE_SESSION): ver `terminal::authorize_actor`.
-    crate::chat_team::env::register_process(&row.id, child.id());
+    crate::chat_team::env::register_process(&row.id, child.id())?;
     super::memoria::record_unsupported(app, db, &row);
     let stdout = child.stdout.take().ok_or("sem stdout")?;
     let stderr = child.stderr.take();
