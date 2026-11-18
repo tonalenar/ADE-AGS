@@ -1357,7 +1357,8 @@ pub async fn start_memory_dream(
             1,
             None,
         )?;
-        let prompt=format!("Leia os dados e proponha somente melhorias justificadas.\nUNTRUSTED DATA BEGIN\n{}\nUNTRUSTED DATA END",input);
+        // O histórico é dado não confiável: vai no envelope único (`memory::dream::prompt_for`), não em marcadores soltos.
+        let prompt = crate::memory::dream::prompt_for(&input);
         let task = store::create_task(
             &tx,
             &store::NewTask {
