@@ -99,7 +99,7 @@ describe("detalle de un pedido", () => {
   });
 
   it("para un agente trae estado, cabeceras y cuerpos, marcando lo que cambió la vista previa", () => {
-    const text = detailForAgent(detailFromProxy(proxyDetail()));
+    const text = detailForAgent(detailFromProxy(proxyDetail()), "http://localhost:5173");
     expect(text).toContain("[p7] POST http://localhost:5173/api/login");
     expect(text).toContain("Estado: 401 Unauthorized · HTTP/1.1 · 127.0.0.1:5173 · visto por el proxy");
     expect(text).toContain("Tiempos: espera 12 ms · total 15 ms · 27 B");
@@ -111,9 +111,36 @@ describe("detalle de un pedido", () => {
     const failed = detailForAgent(detailFromProxy(proxyDetail({
       status: null, statusText: null, error: "tcp connect error: Connection refused", errorKind: "connectionRefused",
       responseHeaders: [], responseBody: null,
-    })));
+    })), "http://localhost:5173");
     expect(failed).toContain("Estado: sin respuesta (connectionRefused)");
     expect(failed).toContain("Error: tcp connect error: Connection refused");
+  });
+});
+
+describe("para un agente, en un sitio real", () => {
+  it("corpo_de_login_em_site_real_sai_redigido_no_detalhe", () => {
+    const bearer = "Bearer abc123";
+    const detail = detailFromProxy(proxyDetail({
+      url: "https://app.exemplo.com/api/login?next=%2Fpanel&access_token=abc",
+      requestHeaders: [
+        { name: "authorization", value: bearer, note: null },
+        { name: "accept", value: "application/json", note: null },
+      ],
+      requestBody: { size: 40, text: '{"email":"ana@x.com","password":"s3cr3t"}', truncated: false, contentType: "application/json" },
+      responseBody: { size: 60, text: '{"ok":true,"access_token":"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJh"}', truncated: false, contentType: "application/json" },
+    }));
+    const text = detailForAgent(detail, "https://app.exemplo.com");
+    // O segredo não sai em lugar nenhum: cabeçalho, corpo do pedido, corpo da resposta e query.
+    expect(text).not.toContain("s3cr3t");
+    expect(text).not.toContain("abc123");
+    expect(text).not.toContain("eyJhbGciOiJIUzI1NiJ9");
+    expect(text).not.toContain("access_token=abc");
+    // O que não é segredo continua, e a estrutura do JSON também.
+    expect(text).toContain('"password": "[redigido: 6 bytes]"');
+    expect(text).toContain('"email": "ana@x.com"');
+    expect(text).toContain(`  authorization: [redigido: ${bearer.length} bytes]`);
+    expect(text).toContain("  accept: application/json");
+    expect(text).toContain("access_token = [redigido: 3 bytes]");
   });
 });
 

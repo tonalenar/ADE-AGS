@@ -175,7 +175,7 @@ Só com o Vigia ligado, para as abas Claude Code e Codex da equipe (o canal estr
 - **Custo**: no máximo uma chamada headless por missão em voo, e cada aba é reconsultada só a cada ≥ 4 min. Nenhum processo fica vivo depois.
 
 ## Cutucada (`pokeAllowed`, `poke`)
-- Nunca com o agente `isWorking`.
+- Nunca com o agente `isWorking`, nem com um menu de permissão aberto: `pokeBusy` soma `isWaitingForUser`, que reconhece também o menu do Codex no fim da tela (ver `stalled.ts`). Colar Enter ali aprovaria ou negaria pela pessoa.
 - A primeira passa. As seguintes só passam se o agente mandou uma mensagem peer depois da cutucada anterior, ou se já se passaram 10 min.
 - O envio é por `sendWhenReady` (`terminalRegistry.ts`):
   - espera a TUI ficar viva e quieta (2,5 s de silêncio, desistindo em 45 s);

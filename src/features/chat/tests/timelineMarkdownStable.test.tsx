@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: () => Promise.resolve() }));
 
 import { Markdown, type CodeBlock } from "@/shared/ui/Markdown";
+import { ChatMessageMarkdown } from "../attachments/ChatMessageMarkdown";
 
 // Uma função estável, como o `renderChatCodeBlock` do chat (do módulo, não criada a cada render).
 const renderBlock = (block: CodeBlock) => <div data-code-block="">{block.pre}</div>;
@@ -34,6 +35,23 @@ describe("o markdown de uma fala não é remontado quando a conversa ganha mensa
     expect(block).not.toBeNull();
 
     await render();
+    expect(host.querySelector("p")).toBe(paragraph);
+    expect(host.querySelector("pre")).toBe(block);
+  });
+
+  it("uma fala que cresce pedaço a pedaço (streaming) mantém os nós já desenhados", async () => {
+    const draw = (content: string) => act(async () => {
+      root.render(<ChatMessageMarkdown content={content} renderCodeBlock={renderBlock} streaming />);
+    });
+    await draw("Primeiro parágrafo");
+    const paragraph = host.querySelector("p");
+    expect(paragraph).not.toBeNull();
+
+    await draw("Primeiro parágrafo com mais texto.\n\n```bash\nnpm run build\n```");
+    const block = host.querySelector("pre");
+    expect(host.querySelector("p")).toBe(paragraph);
+
+    await draw("Primeiro parágrafo com mais texto.\n\n```bash\nnpm run build\n```\n\nSegundo");
     expect(host.querySelector("p")).toBe(paragraph);
     expect(host.querySelector("pre")).toBe(block);
   });

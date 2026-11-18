@@ -216,6 +216,10 @@ impl Session {
 
     /// O turno acabou (o `result`, ou o processo caiu): tira o turno e o Parar pendente dele. Devolve o id, se havia um.
     pub(super) fn close_turn(&self) -> Option<String> {
+        // O estado do mapeamento (um corte sem `result`) não passa para o turno seguinte.
+        if let Ok(mut mapper) = self.mapper.lock() {
+            mapper.encerra_turno();
+        }
         self.gate(|gate| {
             let turn = self.turn()?;
             gate.on_completed(&turn);

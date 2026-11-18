@@ -71,7 +71,34 @@ pub fn evaluate_budget(
     }
 }
 
+#[cfg(test)]
 pub fn budget_for_conn(conn: &Connection, mission: &str) -> Result<BudgetStatus, String> {
+    let tokens = super::mission_tokens_for_conn(conn, mission)?;
+    budget_from_tokens(conn, mission, &tokens)
+}
+
+/// Como `budget_for_conn`, sem segurar o mutex do banco enquanto os transcripts são lidos:
+/// o banco é lido e solto, o disco é lido, e só então o status e o amostra são gravados.
+pub fn budget_for_db(db: &crate::database::DbConnection, mission: &str) -> Result<BudgetStatus, String> {
+    let tokens = super::mission_tokens_for_db(db, mission)?;
+    budget_status_from_tokens(db, mission, &tokens)
+}
+
+/// Status do orçamento a partir de tokens já lidos. Só toca o banco, sob o mutex curto.
+pub fn budget_status_from_tokens(
+    db: &crate::database::DbConnection,
+    mission: &str,
+    tokens: &super::MissionTokens,
+) -> Result<BudgetStatus, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    budget_from_tokens(&conn, mission, tokens)
+}
+
+fn budget_from_tokens(
+    conn: &Connection,
+    mission: &str,
+    tokens: &super::MissionTokens,
+) -> Result<BudgetStatus, String> {
     let budget = conn
         .query_row(
             "SELECT budget_usd FROM missions WHERE id=?1",
@@ -79,7 +106,6 @@ pub fn budget_for_conn(conn: &Connection, mission: &str) -> Result<BudgetStatus,
             |r| r.get::<_, Option<f64>>(0),
         )
         .map_err(|e| e.to_string())?;
-    let tokens = super::mission_tokens_for_conn(conn, mission)?;
     let mut status = evaluate_budget(budget, tokens.totals.estimate.as_ref(), None);
     status.mission_id = mission.into();
     status.unmeasured_agents = tokens
@@ -129,8 +155,19 @@ fn observed_trend(previous_at: i64, previous_cost: f64, now: i64, cost: f64) -> 
         .then(|| (cost - previous_cost) * 3600.0 / (now - previous_at) as f64)
 }
 
+#[cfg(test)]
 pub fn require_budget(conn: &Connection, mission: &str) -> Result<(), String> {
     let status = budget_for_conn(conn, mission)?;
+    require_from_status(&status)
+}
+
+/// Como `require_budget`, sem o mutex do banco preso durante a leitura dos transcripts.
+pub fn require_budget_db(db: &crate::database::DbConnection, mission: &str) -> Result<(), String> {
+    let status = budget_for_db(db, mission)?;
+    require_from_status(&status)
+}
+
+fn require_from_status(status: &BudgetStatus) -> Result<(), String> {
     if status.state != BudgetState::Exceeded || status.continue_anyway {
         return Ok(());
     }
@@ -166,19 +203,18 @@ pub fn confirm_spend(
     mission: &str,
     action: &str,
 ) -> Result<(), String> {
-    let (status, language) = {
+    let language = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let language = conn
-            .query_row(
-                "SELECT value FROM settings WHERE key='ui.language'",
-                [],
-                |r| r.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|e| e.to_string())?
-            .unwrap_or_else(|| "pt-BR".into());
-        (budget_for_conn(&conn, mission)?, language)
+        conn.query_row(
+            "SELECT value FROM settings WHERE key='ui.language'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "pt-BR".into())
     };
+    let status = budget_for_db(db, mission)?;
     {
         let c = db.lock().map_err(|e| e.to_string())?;
         if let Some(message) = claim_warning(&c, mission, &status)? {
@@ -261,25 +297,41 @@ fn confirmation_copy(
 }
 
 #[tauri::command]
-pub fn mission_budget(
+pub async fn mission_budget(
     app: tauri::AppHandle,
     mission_id: String,
     db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<BudgetStatus, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let status = budget_for_conn(&conn, &mission_id)?;
-    if let Some(message) = claim_warning(&conn, &mission_id, &status)? {
-        warn_lead(&app, &mission_id, &message);
-        let _ = app.emit(
-            "cc-budget-changed",
-            serde_json::json!({"missionId":mission_id}),
-        );
-    }
-    Ok(status)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let status = budget_for_db(&db, &mission_id)?;
+        // O aviso grava no banco; o mutex é solto antes de ler o canvas e emitir o evento.
+        let warning = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            claim_warning(&conn, &mission_id, &status)?
+        };
+        if let Some(message) = warning {
+            warn_lead(&app, &mission_id, &message);
+            let _ = app.emit(
+                "cc-budget-changed",
+                serde_json::json!({"missionId":mission_id}),
+            );
+        }
+        Ok(status)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 pub fn warn_lead(app: &tauri::AppHandle, mission: &str, message: &str) {
-    let boards = crate::canvas::load_boards();
+    let boards = match crate::canvas::load_boards() {
+        Ok(boards) => boards,
+        // Este caminho só mostra um aviso de orçamento; não há gravação a continuar sem canvas.
+        Err(error) => {
+            eprintln!("[ags] aviso: não foi possível mostrar o aviso de orçamento da missão {mission}: {error}");
+            return;
+        }
+    };
     for board in boards.values() {
         for tab in &board.orchestrators {
             if crate::canvas::mission_of_tab(&boards, tab).as_deref() == Some(mission) {
@@ -290,38 +342,62 @@ pub fn warn_lead(app: &tauri::AppHandle, mission: &str, message: &str) {
 }
 
 #[tauri::command]
-pub fn mission_raise_budget(
+pub async fn mission_raise_budget(
     app: tauri::AppHandle,
     mission_id: String,
     budget_usd: f64,
     db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<BudgetStatus, String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    let s = budget_for_conn(&c, &mission_id)?;
-    if !budget_usd.is_finite() || budget_usd <= s.budget_usd.unwrap_or(0.0) {
-        return Err("missions.budget.invalidCeiling".into());
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        raise_budget_now(&app, &db, &mission_id, budget_usd)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Sobe o teto. Não precisa dos transcripts: o teto atual é lido e conferido sob o mesmo
+/// mutex da gravação, então duas subidas simultâneas não regridem o valor.
+fn raise_budget_now(
+    app: &tauri::AppHandle,
+    db: &crate::database::DbConnection,
+    mission_id: &str,
+    budget_usd: f64,
+) -> Result<BudgetStatus, String> {
+    {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        let previous: Option<f64> = c
+            .query_row(
+                "SELECT budget_usd FROM missions WHERE id=?1",
+                [mission_id],
+                |r| r.get::<_, Option<f64>>(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !budget_usd.is_finite() || budget_usd <= previous.unwrap_or(0.0) {
+            return Err("missions.budget.invalidCeiling".into());
+        }
+        c.execute(
+            "UPDATE missions SET budget_usd=?1 WHERE id=?2",
+            rusqlite::params![budget_usd, mission_id],
+        )
+        .map_err(|e| e.to_string())?;
+        record_decision(
+            &c,
+            mission_id,
+            "raise",
+            serde_json::json!({"previous":previous,"budgetUsd":budget_usd}),
+        )?;
+        c.execute(
+            "DELETE FROM settings WHERE key=?1",
+            [format!("mission.budget.continue.{mission_id}")],
+        )
+        .map_err(|e| e.to_string())?;
     }
-    c.execute(
-        "UPDATE missions SET budget_usd=?1 WHERE id=?2",
-        rusqlite::params![budget_usd, mission_id],
-    )
-    .map_err(|e| e.to_string())?;
-    record_decision(
-        &c,
-        &mission_id,
-        "raise",
-        serde_json::json!({"previous":s.budget_usd,"budgetUsd":budget_usd}),
-    )?;
-    c.execute(
-        "DELETE FROM settings WHERE key=?1",
-        [format!("mission.budget.continue.{mission_id}")],
-    )
-    .map_err(|e| e.to_string())?;
     let _ = app.emit(
         "cc-budget-changed",
         serde_json::json!({"missionId":mission_id}),
     );
-    budget_for_conn(&c, &mission_id)
+    budget_for_db(db, mission_id)
 }
 
 fn record_decision(
@@ -345,7 +421,7 @@ fn record_decision(
 
 /// User-only Tauri command: intentionally absent from IPC/MCP dispatch.
 #[tauri::command]
-pub fn mission_budget_continue(
+pub async fn mission_budget_continue(
     app: tauri::AppHandle,
     mission_id: String,
     action: String,
@@ -354,24 +430,40 @@ pub fn mission_budget_continue(
     if !matches!(action.as_str(), "recruit" | "startTask") {
         return Err("invalid budget action".into());
     }
-    let c = db.lock().map_err(|e| e.to_string())?;
-    let s = budget_for_conn(&c, &mission_id)?;
-    record_decision(
-        &c,
-        &mission_id,
-        &action,
-        serde_json::json!({"budgetUsd":s.budget_usd,"costUsd":s.cost_usd,"decision":"continue"}),
-    )?;
-    c.execute(
-        "INSERT OR REPLACE INTO settings(key,value) VALUES (?1,?2)",
-        rusqlite::params![format!("mission.budget.continue.{mission_id}"), action],
-    )
-    .map_err(|e| e.to_string())?;
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || continue_budget_now(&app, &db, &mission_id, &action))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Registra a decisão de seguir além do teto. O orçamento medido é lido antes e sem o
+/// mutex; só a decisão e a flag são gravadas sob ele.
+fn continue_budget_now(
+    app: &tauri::AppHandle,
+    db: &crate::database::DbConnection,
+    mission_id: &str,
+    action: &str,
+) -> Result<BudgetStatus, String> {
+    let s = budget_for_db(db, mission_id)?;
+    {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        record_decision(
+            &c,
+            mission_id,
+            action,
+            serde_json::json!({"budgetUsd":s.budget_usd,"costUsd":s.cost_usd,"decision":"continue"}),
+        )?;
+        c.execute(
+            "INSERT OR REPLACE INTO settings(key,value) VALUES (?1,?2)",
+            rusqlite::params![format!("mission.budget.continue.{mission_id}"), action],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     let _ = app.emit(
         "cc-budget-changed",
         serde_json::json!({"missionId":mission_id}),
     );
-    budget_for_conn(&c, &mission_id)
+    budget_for_db(db, mission_id)
 }
 
 #[cfg(test)]

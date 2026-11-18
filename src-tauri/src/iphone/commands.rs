@@ -12,11 +12,14 @@ use super::model::{self, PhysicalDevice};
 use crate::simulator::model::Place;
 
 /// A lista para o seletor. `unavailable`: por que não dá para espelhar neste Mac (`xcode`, `helper`, `platform`).
+/// `error`: por que a consulta da lista falhou (`None` = deu certo). Com `timeout` a lista vem vazia e o front
+/// mantém a última que já mostrou.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceList {
     pub devices: Vec<PhysicalDevice>,
     pub unavailable: Option<&'static str>,
+    pub error: Option<model::DiscoveryError>,
 }
 
 #[cfg(target_os = "macos")]
@@ -57,17 +60,19 @@ pub(crate) mod mac {
         S.get_or_init(Default::default)
     }
 
-    pub fn devices() -> Result<Vec<PhysicalDevice>, String> {
-        let file = std::env::temp_dir().join(format!("ade-devicectl-{}-{}.json", std::process::id(), crate::util::now_ts_ms()));
+    pub fn devices() -> Result<Vec<PhysicalDevice>, model::DiscoveryError> {
+        let file = model::temp_json_path(&std::env::temp_dir());
         let mut cmd = crate::util::spawn::hidden_command("xcrun");
         cmd.args(["devicectl", "list", "devices", "--quiet", "--json-output"]).arg(&file);
-        let out = crate::util::spawn::output(&mut cmd, Duration::from_secs(20)).map_err(|e| format!("devicectl: {e}"))?;
+        // Só o ENOENT do `xcrun` é a falta do Xcode; o estouro do prazo e as outras falhas ficam com o próprio tipo.
+        let out = crate::util::spawn::output(&mut cmd, Duration::from_secs(20)).map_err(|e| model::classify_spawn_error(&e))?;
         let json = std::fs::read_to_string(&file);
         let _ = std::fs::remove_file(&file);
         if !out.status.success() {
-            return Err(format!("devicectl: {}", String::from_utf8_lossy(&out.stderr).trim()));
+            return Err(model::classify_failure(&String::from_utf8_lossy(&out.stderr)));
         }
-        let list = model::parse_devicectl(&json.map_err(|e| format!("devicectl: {e}"))?)?;
+        let text = json.map_err(|e| model::DiscoveryError::Other(format!("devicectl: {e}")))?;
+        let list = model::parse_devicectl(&text).map_err(model::DiscoveryError::Other)?;
         if let Ok(mut s) = state().lock() {
             for d in &list {
                 if let Some(ip) = &d.tunnel_ip {
@@ -112,6 +117,24 @@ pub(crate) mod mac {
         format!("agent:{device}")
     }
 
+    /// Solta a tela do agente se a chamada sair sem entregar a sessão (espera vencida, erro). Sem isso a tela ficava
+    /// visível para sempre e o aparelho nunca hibernava. Entregue a sessão, a tela segue até o `release` do agente.
+    struct AgentLease {
+        device: String,
+        kept: bool,
+    }
+
+    impl Drop for AgentLease {
+        fn drop(&mut self) {
+            if !self.kept {
+                release(&self.device);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod test;
+
     /// A sessão do aparelho para um agente, já ligada e com o toque pronto (espera até `wait`). Abre uma se não
     /// houver; `release` a solta (ela para sozinha depois de um tempo sem ninguém olhando).
     pub fn agent(app: &AppHandle, device: &str, wait: Duration) -> Result<(session::InputTx, session::Status, std::sync::Arc<super::super::native::view::Presenter>, String), String> {
@@ -126,6 +149,8 @@ pub(crate) mod mac {
             });
         }
         let (presenter, input) = open(app, &agent_screen(device), device, &identifier, true)?;
+        // Daqui em diante, qualquer erro solta a tela do agente (ver `AgentLease`).
+        let mut lease = AgentLease { device: device.to_string(), kept: false };
         let (waiter, family) = {
             let s = state().lock().unwrap_or_else(|e| e.into_inner());
             let session = s.sessions.get(device).ok_or("A sessão do aparelho não abriu.")?;
@@ -133,6 +158,7 @@ pub(crate) mod mac {
         };
         // Espera fora da trava do estado: as telas seguem atualizando enquanto o aparelho liga.
         let status = waiter.wait(wait)?;
+        lease.kept = true;
         Ok((input, status, presenter, family))
     }
 
@@ -268,16 +294,18 @@ pub fn iphone_devices() -> DeviceList {
     #[cfg(target_os = "macos")]
     {
         match mac::devices() {
-            Ok(devices) => DeviceList { devices, unavailable: mac::unavailable() },
-            Err(e) => {
-                eprintln!("[iphone] {e}");
-                DeviceList { devices: Vec::new(), unavailable: Some("xcode") }
+            Ok(devices) => DeviceList { devices, unavailable: mac::unavailable(), error: None },
+            Err(error) => {
+                eprintln!("[iphone] {error:?}");
+                // O aviso antigo de "falta o Xcode" só vale para a falta de fato; as outras falhas dizem o que foi.
+                let unavailable = (error == model::DiscoveryError::XcodeMissing).then_some("xcode");
+                DeviceList { devices: Vec::new(), unavailable, error: Some(error) }
             }
         }
     }
     #[cfg(not(target_os = "macos"))]
     {
-        DeviceList { devices: Vec::new(), unavailable: Some("platform") }
+        DeviceList { devices: Vec::new(), unavailable: Some("platform"), error: None }
     }
 }
 
@@ -439,7 +467,8 @@ pub fn iphone_type(app: tauri::AppHandle, device: String, text: String) -> Resul
 pub fn iphone_screenshot(app: tauri::AppHandle, device: String) -> Result<String, String> {
     let tmp = super::ops::screenshot(&app, &device)?;
     let dir = dirs::picture_dir().or_else(dirs::download_dir).unwrap_or_else(std::env::temp_dir);
-    let path = dir.join(format!("iPhone {}.png", chrono::Local::now().format("%Y-%m-%d %H.%M.%S")));
+    // Nome com o segundo: duas fotos no mesmo segundo ganham " (2)" em vez de substituir a primeira.
+    let path = model::primeiro_caminho_livre(&dir, &format!("iPhone {}", chrono::Local::now().format("%Y-%m-%d %H.%M.%S")), "png");
     std::fs::rename(&tmp, &path).or_else(|_| std::fs::copy(&tmp, &path).map(|_| ())).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().into_owned())
 }

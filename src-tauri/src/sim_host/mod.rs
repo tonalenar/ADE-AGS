@@ -151,9 +151,6 @@ pub fn start() {
     #[cfg(target_os = "macos")]
     {
         STOP.store(false, Ordering::SeqCst);
-        if let Err(error) = install() {
-            eprintln!("[ade-ags] não preparei o bloqueio do Device Hub: {error}");
-        }
         spawn_watcher();
     }
 }
@@ -309,8 +306,15 @@ fn spawn_watcher() {
     std::thread::Builder::new()
         .name("ade-device-hub".into())
         .spawn(|| {
+<<<<<<< HEAD
             // Começa como se o Device Hub tivesse acabado de aparecer: o Expo o abre logo no início do app.
             let mut ultimo_hit = std::time::Instant::now();
+=======
+            // A preparação pode compilar o chamariz com `clang` (até 30 s): fica aqui, fora da abertura da janela (A275).
+            if let Err(error) = install() {
+                eprintln!("[ade-ags] não preparei o bloqueio do Device Hub: {error}");
+            }
+>>>>>>> gh/dev
             while !STOP.load(Ordering::SeqCst) {
                 if dismiss_apple_device_hub() {
                     ultimo_hit = std::time::Instant::now();

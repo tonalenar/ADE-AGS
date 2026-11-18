@@ -216,7 +216,7 @@ export function TeamFeed({ items, colors = {} }: {
           <div className="mt-2.5 flex flex-wrap gap-1.5">
             {item.prompt.choices.map((choice) => (
               <button key={choice.id} type="button" disabled={!!done}
-                onClick={() => { if (answerTerminalPrompt(item.tabId, choice)) setAnswered((all) => ({ ...all, [item.key + item.prompt.signature]: choice.id })); }}
+                onClick={() => { if (answerTerminalPrompt(item.tabId, choice, item.prompt.signature)) setAnswered((all) => ({ ...all, [item.key + item.prompt.signature]: choice.id })); }}
                 className={`cc-t h-7 rounded-lg px-3 text-[12px] font-medium disabled:opacity-50 ${choice.id === "allow"
                   ? "bg-accent-500 text-white hover:bg-accent-600"
                   : choice.id === "deny"

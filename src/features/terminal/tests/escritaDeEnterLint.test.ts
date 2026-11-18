@@ -127,6 +127,12 @@ const PERMITIDOS_ENTER: { arquivo: string; linha: string; ocorrencias: number; m
     motivo: "a única primitiva do Enter do registro. Ela confere a política antes de cada Enter; sem política é ação da pessoa.",
   },
   {
+    arquivo: "features/terminal/terminalRegistry.ts",
+    linha: 'ptyWrite(id, "\\r").catch(() => undefined);',
+    ocorrencias: 1,
+    motivo: "reenvio do Enter na entrega composta do PTY sem política (ação da pessoa via sendWhenReady, A074).",
+  },
+  {
     arquivo: "features/canvas/useTerminalPrompts.ts",
     linha: 'if (needsEnter) window.setTimeout(() => sendKeysToTab(tabId, "\\r"), 200);',
     ocorrencias: 1,
@@ -144,7 +150,7 @@ const PERMITIDOS_EMISSOR: { arquivo: string; linha: string; ocorrencias: number;
   { arquivo: "features/chat/chatActions.ts", linha: "sendWhenReady(tabId, clean);", ocorrencias: 1, motivo: "fallback da mesma mensagem da pessoa, quando a cola direta não cabe" },
   { arquivo: "features/chat/shellTerminal.ts", linha: "sendWhenReady(tabId, commandText);", ocorrencias: 1, motivo: "comando que a pessoa roda num shell (botão Rodar)" },
   { arquivo: "features/chat/shellTerminal.ts", linha: "if (!runInTerminal(tabId, command)) sendWhenReady(tabId, command);", ocorrencias: 1, motivo: "comando que a pessoa roda num shell, quando o Rodar direto não tem terminal" },
-  { arquivo: "features/chat/team/teamStore.ts", linha: "sendWhenReady(ref, text);", ocorrencias: 1, motivo: "mensagem que a pessoa manda a um integrante do time (painel Time)" },
+  { arquivo: "features/chat/team/teamStore.ts", linha: "sendWhenReady(ref, text, {", ocorrencias: 1, motivo: "mensagem que a pessoa manda a um integrante do time (painel Time)" },
   { arquivo: "features/browser/BrowserTab.tsx", linha: "if (!pasteIntoTab(agent.id, text, true)) {", ocorrencias: 1, motivo: "elemento marcado no navegador que a pessoa envia ao agente" },
   { arquivo: "features/forge/ItemDetailView.tsx", linha: "if (!pasteIntoTab(tabId, itemPrompt(detail, pr), true)) {", ocorrencias: 1, motivo: "item de forge que a pessoa envia ao agente" },
   { arquivo: "features/compare/start.ts", linha: "sendWhenReady(tabId, promptFor(entry.agentId, request, entry, attachments.length > 0), {", ocorrencias: 1, motivo: "comparação que a pessoa inicia (um pedido por agente)" },

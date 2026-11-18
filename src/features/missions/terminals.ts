@@ -19,6 +19,7 @@ import { withModel } from "./modelFlags";
 import { STALL_GRACE_MS, shouldWarnStalled, startEventSpan, startupProgress, withActivity, allWorkingSpan, type StartupState } from "./startup";
 import { useStallAlerts } from "./stallAlerts";
 import { recordSpan } from "./timings";
+import { showWorktreeTrustWarnings } from "./trustWarning";
 import { missionTurns } from "./turns";
 import { VIGIA_NAME, vigiaAgentFor } from "./vigia";
 import { useVigiaSwitch } from "./vigiaSwitch";
@@ -117,6 +118,7 @@ export interface PreparedTeam {
   workspaces: TeamWorkspace[];
   precheck: string;
   memory: string;
+  trustWarnings?: string[];
 }
 
 /** Refuse incomplete isolation instead of opening any agent in the shared clone. */
@@ -469,6 +471,7 @@ export async function startMissionInTerminals(
   const prepared = await invoke<PreparedTeam>("mission_prepare_team", { missionId: mission.id, members: [LEAD_NAME, ...team.map((m) => m.name)] });
   const leadWorkspace = workspaceFor(prepared, LEAD_NAME);
   const memberWorkspaces = team.map((m) => workspaceFor(prepared, m.name));
+  showWorktreeTrustWarnings(prepared.trustWarnings);
   // Teste A/B: o braço "sem-memoria" (marcador no título) sai sem memória nem resumo de missões anteriores.
   const { findings, memory } = priorContext(mission.title, prepared);
 

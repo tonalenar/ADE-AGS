@@ -1,7 +1,9 @@
 import type { Terminal } from "@xterm/xterm";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { ptyWrite, ptyWriteComposto } from "@/features/terminal/ipc";
 
+import { markInput } from "./activity";
 import { requestPtyLaunch } from "./ptyLaunch";
 
 /**
@@ -33,6 +35,8 @@ export function recentPaste(tabId: string, now = Date.now(), within = 3000): str
 
 /** Mensajes para agentes que todavía no terminaron de arrancar. */
 const queued = new Map<string, string>();
+/** Cancelamento da espera da aba/PTY, para limpar ao entregar ou substituir a mensagem. */
+const ptyWaits = new Map<string, () => void>();
 
 /** Cuánto tiene que estar callada la terminal para dar por hecho que la TUI ya arrancó y
  *  espera que le escriban. Los comandos previos y el arranque imprimen en ráfagas. */
@@ -42,8 +46,7 @@ const GIVE_UP_MS = 45_000;
 /** Aba restaurada sem PTY: espera o lançamento e desiste com `onStalled`, sem o timer de 45 s. */
 const LAUNCH_WAIT_MS = 8_000;
 
-/** `missing` = o teste (ou um caller) não tem a aba no store: cola se o xterm existe.
- *  `idle` = a aba existe e ainda não lançou o processo. `live` = já tem PTY. */
+/** `missing` = a aba ainda não está no store; `idle` = existe sem processo; `live` = tem PTY. */
 function tabPtyState(tabId: string): "missing" | "idle" | "live" {
   const tab = useTabsStore.getState().tabs.find((tab) => tab.id === tabId);
   if (!tab) return "missing";
@@ -102,6 +105,11 @@ export interface SendTimings {
    * Sem ela, o envio é ação da pessoa e segue como antes.
    */
   policy?: SubmitPolicy;
+  /**
+   * A mensagem não entrou no terminal: a aba não ganhou PTY a tempo, o terminal fechou antes de colar, ou o PTY
+   * recusou a escrita. Nada foi enviado, então quem espera a entrega não deve contá-la como enviada.
+   */
+  onFailed?: (motivo: string) => void;
 }
 
 const queuedTimings = new Map<string, SendTimings>();
@@ -112,19 +120,24 @@ const TURN_QUIET_MS = 5000;
 const TURN_GIVE_UP_MS = 20 * 60_000;
 
 /** Mira la terminal hasta que el agente se calla y avisa cuándo escribió por última vez. */
-function watchTurn(term: Terminal, onEnd: (at: number) => void): void {
+export function watchTurn(term: Terminal, onEnd: (at: number) => void): void {
   let quiet: number | undefined;
   let lastOutput = 0;
   const finish = () => {
     sub.dispose();
-    window.clearTimeout(quiet);
     window.clearTimeout(giveUp);
     onEnd(lastOutput);
   };
+  // Um timer só, reagendado para o fim do silêncio: cada pedaço de saída apenas anota a hora (A087).
+  const check = () => {
+    quiet = undefined;
+    const left = lastOutput + TURN_QUIET_MS - Date.now();
+    if (left > 0) quiet = window.setTimeout(check, left);
+    else finish();
+  };
   const sub = term.onWriteParsed(() => {
     lastOutput = Date.now();
-    window.clearTimeout(quiet);
-    quiet = window.setTimeout(finish, TURN_QUIET_MS);
+    if (quiet === undefined) quiet = window.setTimeout(check, TURN_QUIET_MS);
   });
   const giveUp = window.setTimeout(() => {
     sub.dispose();
@@ -224,7 +237,16 @@ function forgetQueued(tabId: string): void {
  * silêncio, porque uma TUI livre não produz saída) e então cola e manda o Enter. `tentativa` conta os reagendamentos.
  */
 function sendQueued(tabId: string, term: Terminal, text: string, timings: SendTimings | undefined, tentativa: number): void {
-  if (terminals.get(tabId) !== term) return;
+  if (terminals.get(tabId) !== term) {
+    forgetQueued(tabId);
+    timings?.onFailed?.("o terminal foi fechado antes da entrada");
+    return;
+  }
+  if (tabPtyState(tabId) === "missing") {
+    // A aba pode sair do store durante a estabilização. Mantém a entrada na fila até o PTY reaparecer.
+    waitForPty(tabId, text, term);
+    return;
+  }
   if (timings?.guard && !safeGuard(timings.guard)) {
     forgetQueued(tabId);
     timings.onSkipped?.();
@@ -250,16 +272,21 @@ function sendQueued(tabId: string, term: Terminal, text: string, timings: SendTi
     }
   }
   forgetQueued(tabId);
+  if (!policy) {
+    // Só conta como enviada quando o PTY aceita a escrita da colagem (A074), não quando ela entra na fila do xterm.
+    sendPasteToPty(tabId, term, text, !timings?.draft, timings?.onRetry).then(
+      () => timings?.onSent?.(Date.now()),
+      (erro: unknown) => timings?.onFailed?.(erro instanceof Error ? erro.message : String(erro)),
+    );
+    if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
+    if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);
+    return;
+  }
   const started = () => {
     timings?.onSent?.(Date.now());
     if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
     if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);
   };
-  if (!policy) {
-    pasteIntoTab(tabId, text, !timings?.draft, timings?.onRetry);
-    started();
-    return;
-  }
   if (timings?.draft) {
     pasteIntoTab(tabId, text, false);
     started();
@@ -284,6 +311,7 @@ function sendQueued(tabId: string, term: Terminal, text: string, timings: SendTi
 
 /** Espera a que la TUI termine de arrancar y le manda `text` (o reagenda, se a guarda barra antes de colar). */
 function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
+  ptyWaits.get(tabId)?.();
   let timer: number | undefined;
   let sawOutput = false;
   const timings = queuedTimings.get(tabId);
@@ -302,49 +330,82 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
   // terminal vivo e quieto). Antes a mensagem era descartada em silêncio, sem reenvio nem aviso.
   // Agora é enviada assim mesmo e o aviso de "não mostrou atividade" continua pelo watchStart.
   const giveUp = window.setTimeout(() => {
-    if (terminals.get(tabId) !== term) { sub.dispose(); forgetQueued(tabId); return; }
+    if (terminals.get(tabId) !== term) {
+      sub.dispose();
+      const currentTimings = queuedTimings.get(tabId);
+      forgetQueued(tabId);
+      currentTimings?.onFailed?.("o terminal foi fechado antes da entrada");
+      return;
+    }
     if (!sawOutput) timings?.onStalled?.();
     send();
   }, GIVE_UP_MS);
 }
 
-/**
- * Deja un mensaje para el agente de `tabId`, que se envía cuando su TUI termina de
- * arrancar. Es para una tab recién abierta: pegar antes le escribiría al shell de los
- * comandos previos, o a una TUI que todavía no dibujó su entrada y lo tira.
- *
- * Ninguna de las TUIs tiene un flag común para "arrancá con este mensaje", así que se
- * espera a que la terminal se quede quieta, que es cuando la persona empezaría a escribir.
- */
-function waitUntilLive(tabId: string, term: Terminal, text: string): void {
-  requestPtyLaunch(tabId);
-  const started = Date.now();
-  const timer = window.setInterval(() => {
-    if (terminals.get(tabId) !== term) {
-      window.clearInterval(timer);
+/** Aguarda a aba e o PTY aparecerem; sem aba no store, ainda não há destino para lançar. */
+function waitForPty(tabId: string, text: string, expectedTerm = terminals.get(tabId)): void {
+  ptyWaits.get(tabId)?.();
+  let done = false;
+  let launchRequested = false;
+  let unsub: () => void = () => undefined;
+  let prazo = 0;
+  const parar = () => {
+    if (done) return;
+    done = true;
+    unsub();
+    window.clearTimeout(prazo);
+    if (ptyWaits.get(tabId) === parar) ptyWaits.delete(tabId);
+  };
+  const falhar = (motivo: string) => {
+    if (queued.get(tabId) !== text) {
+      parar();
       return;
     }
-    if (tabPtyState(tabId) === "live") {
-      window.clearInterval(timer);
-      sendWhenSettled(tabId, term, text);
+    parar();
+    queued.delete(tabId);
+    const timings = queuedTimings.get(tabId);
+    queuedTimings.delete(tabId);
+    timings?.onStalled?.();
+    timings?.onFailed?.(motivo);
+  };
+  const conferir = () => {
+    if (queued.get(tabId) !== text) {
+      parar();
       return;
     }
-    if (Date.now() - started >= LAUNCH_WAIT_MS) {
-      window.clearInterval(timer);
-      queued.delete(tabId);
-      queuedTimings.get(tabId)?.onStalled?.();
-      queuedTimings.delete(tabId);
+    if (expectedTerm && terminals.get(tabId) !== expectedTerm) {
+      falhar("o terminal foi fechado antes da entrada");
+      return;
     }
-  }, 100);
+    const tab = useTabsStore.getState().tabs.find((candidate) => candidate.id === tabId);
+    if (!tab) return;
+    if (tab.ptyId == null) {
+      if (!launchRequested) {
+        launchRequested = true;
+        requestPtyLaunch(tabId);
+      }
+      return;
+    }
+    const term = terminals.get(tabId);
+    // A aba pode ganhar o PTY antes de o componente montar o xterm. registerTerminal
+    // retoma a entrega quando esse terminal estiver pronto.
+    if (!term) return;
+    parar();
+    sendWhenSettled(tabId, term, text);
+  };
+  ptyWaits.set(tabId, parar);
+  unsub = useTabsStore.subscribe(conferir);
+  prazo = window.setTimeout(() => falhar("a aba não ganhou um terminal a tempo"), LAUNCH_WAIT_MS);
+  conferir();
 }
 
 export function sendWhenReady(tabId: string, text: string, timings?: SendTimings): void {
+  ptyWaits.get(tabId)?.();
   queued.set(tabId, text);
   if (timings) queuedTimings.set(tabId, timings);
   const term = terminals.get(tabId);
-  if (!term) return;
-  if (tabPtyState(tabId) === "idle") {
-    waitUntilLive(tabId, term, text);
+  if (!term || tabPtyState(tabId) !== "live") {
+    waitForPty(tabId, text, term);
     return;
   }
   sendWhenSettled(tabId, term, text);
@@ -362,8 +423,8 @@ export function registerTerminal(tabId: string, term: Terminal): () => void {
   });
   const pending = queued.get(tabId);
   if (pending !== undefined) {
-    if (tabPtyState(tabId) === "idle") waitUntilLive(tabId, term, pending);
-    else sendWhenSettled(tabId, term, pending);
+    if (tabPtyState(tabId) === "live") sendWhenSettled(tabId, term, pending);
+    else if (!ptyWaits.has(tabId)) waitForPty(tabId, pending, term);
   }
   return () => {
     input.dispose();
@@ -383,6 +444,80 @@ export function runInTerminal(tabId: string, text: string): boolean {
   setTimeout(() => pressEnter(term), 80);
   term.focus();
   return true;
+}
+
+/**
+ * O texto de uma colagem como o xterm o mandaria: quebra de linha vira CR, e com bracketed paste ligado o texto vem
+ * entre `ESC[200~` e `ESC[201~`. Pura. O envelope é montado aqui, e não pelo `paste` do xterm, para não depender de o
+ * `onData` disparar síncrono.
+ */
+export function pasteEnvelope(text: string, bracketed: boolean): string {
+  const body = text.replace(/\r?\n/g, "\r");
+  return bracketed ? `\x1b[200~${body}\x1b[201~` : body;
+}
+
+/** Pausa entre a colagem e o Enter: algumas TUIs ainda processam o pegado, e tomariam o Enter como parte dele. */
+const ENTER_PAUSE_MS = 80;
+
+/** O PTY da aba agora (ou `null`). */
+function ptyIdOf(tabId: string): number | null {
+  return useTabsStore.getState().tabs.find((tab) => tab.id === tabId)?.ptyId ?? null;
+}
+
+/**
+ * Manda a colagem pela fila do PTY e, se `submit`, o Enter depois da pausa. A promessa resolve quando o último envio
+ * (o Enter, se houver) foi aceito pelo PTY, e rejeita se algum foi recusado. Quem espera sabe que a mensagem entrou.
+ */
+export function sendPasteToPty(
+  tabId: string,
+  term: Terminal,
+  text: string,
+  submit: boolean,
+  onRetry?: (at: number) => void,
+): Promise<void> {
+  const id = ptyIdOf(tabId);
+  if (id == null) return Promise.reject(new Error("a aba não tem terminal vivo"));
+  markInput(tabId);
+  if (submit) lastPaste.set(tabId, { text, at: Date.now() });
+  const colada = pasteEnvelope(text, term.modes.bracketedPasteMode);
+  if (!submit) return ptyWrite(id, colada);
+  // A colagem, a pausa e o Enter vão como um pedido só: entram juntos, ou nenhum entra (A074). A pausa roda na thread de
+  // escrita, e a promessa só resolve quando o Enter é aceito.
+  const envio = ptyWriteComposto(id, [
+    { tipo: "texto", dados: colada },
+    { tipo: "pausa", ms: ENTER_PAUSE_MS },
+    { tipo: "texto", dados: "\r" },
+  ]);
+  // Os retries também pela fila do PTY, e não por `term.input`, para não misturar os dois canais de entrada.
+  scheduleSubmitRetries(tabId, term, text, onRetry, () => {
+    ptyWrite(id, "\r").catch(() => undefined);
+  });
+  return envio;
+}
+
+/**
+ * Um pegado grande (Codex: "[Pasted Content 3904 chars]") puede tragarse el Enter y dejar el briefing escrito sin
+ * enviar. Se mira la pantalla y se reintenta. Hermes y OpenCode no cambian el pegado por un marcador: el texto queda
+ * entero en la caja, con el cursor al final (`typedTextPending`). Si todavía dice "starting agent…", también se
+ * tragan el Enter.
+ */
+function scheduleSubmitRetries(
+  tabId: string,
+  term: Terminal,
+  text: string,
+  onRetry: ((at: number) => void) | undefined,
+  enviarEnter: () => void,
+): void {
+  SUBMIT_RETRY_MS.forEach((delay) =>
+    setTimeout(() => {
+      if (terminals.get(tabId) !== term) return;
+      const screen = screenOf(tabId, null, 12);
+      if ((screen && pasteStillPending(screen.lines)) || typedTextPending(beforeCursor(term), text)) {
+        enviarEnter();
+        onRetry?.(Date.now());
+      }
+    }, delay),
+  );
 }
 
 /** Pega `text` en la terminal de la tab y, con `submit`, lo manda. `false` si la tab no

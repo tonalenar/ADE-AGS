@@ -85,12 +85,17 @@ pub fn memory_hints(conn: &Connection, items: &[HintInput]) -> Result<Vec<Hint>,
 }
 
 #[tauri::command]
-pub fn decision_memory_hints(
-    db: tauri::State<crate::database::DbConnection>,
+pub async fn decision_memory_hints(
+    db: tauri::State<'_, crate::database::DbConnection>,
     items: Vec<HintInput>,
 ) -> Result<Vec<Hint>, String> {
-    let conn = db.lock().map_err(|_| "o banco de dados não está disponível".to_string())?;
-    memory_hints(&conn, &items)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|_| "o banco de dados não está disponível".to_string())?;
+        memory_hints(&conn, &items)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

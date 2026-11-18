@@ -12,6 +12,7 @@ vi.mock("@/shared/brand/botToastStore", async (importOriginal) => ({
   showBotToast: vi.fn(() => 1),
 }));
 
+import { useTabsStore } from "@/features/tabs/store";
 import { ptyWrite } from "@/features/terminal/ipc";
 import { setStructuredForTests } from "@/features/terminal/structuredState";
 import { showBotToast } from "@/shared/brand/botToastStore";
@@ -237,8 +238,14 @@ describe("sendAutonomous: a fila de espera da TUI usa a mesma guarda", () => {
     vi.useFakeTimers();
     vi.mocked(ptyWrite).mockClear();
     vi.mocked(showBotToast).mockClear();
+    useTabsStore.setState({
+      tabs: ["auto-poke", "auto-ok", "auto-reagenda", "auto-limite"].map((id) => ({ id, ptyId: PTY }) as never),
+    });
   });
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    useTabsStore.setState({ tabs: [] });
+  });
 
   it("cutucada do Vigia numa pergunta: não cola, não registra como enviada e avisa", () => {
     const term = fakeTerm(() => ["Editei o arquivo.", APROVACAO]);
