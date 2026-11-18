@@ -257,6 +257,7 @@ pub fn run() {
             crate::terminal::pty_output_total,
             crate::terminal::pty_for_tab,
             crate::terminal::pty_write,
+            crate::terminal::pty_write_composto,
             crate::terminal::save_pasted_image,
             crate::terminal::pty_resize,
             crate::terminal::pty_kill,

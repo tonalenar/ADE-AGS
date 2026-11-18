@@ -430,10 +430,21 @@ pub(super) fn peer_answer(app: &AppHandle, args: &Value) -> Result<Value, String
     if item.kind == pending::Kind::Approval && !screen_shows_dialog(&item.tab_id) {
         return Err(format!("O diálogo de \"{}\" não está mais na tela: nada foi digitado. Veja com ags peer check \"{}\".", item.tab_name, item.tab_name));
     }
-    crate::terminal::write_to_pty(pty, keys)?;
     if args.get("enter").and_then(Value::as_bool).unwrap_or(false) && keys != "\r" {
-        std::thread::sleep(Duration::from_millis(150));
-        crate::terminal::write_to_pty(pty, "\r")?;
+        // Teclas, pausa e Enter como um pedido só: a pausa roda na thread de escrita, fora do IPC, e o Enter não fica
+        // para trás se a fila encher no meio (achado 3). A pausa de 150 ms é por desenho: a TUI precisa de tempo para
+        // tratar as teclas antes do Enter. Por isso a digitação desta sessão espera essa pausa, já que a fila é uma só
+        // por terminal.
+        crate::terminal::write_passos_to_pty(
+            pty,
+            vec![
+                crate::terminal::Passo::Escreve(keys.as_bytes().to_vec()),
+                crate::terminal::Passo::Pausa(Duration::from_millis(150)),
+                crate::terminal::Passo::Escreve(b"\r".to_vec()),
+            ],
+        )?;
+    } else {
+        crate::terminal::write_to_pty(pty, keys)?;
     }
     with_db(app, |conn| pending::record_answer(conn, id, &answer, &me, now()))?;
     Ok(json!({

@@ -287,10 +287,16 @@ pub(crate) fn submit_style(agent_id: Option<&str>) -> SubmitStyle {
     if agent_id == Some(crate::agents::SHELL_AGENT_ID) { SubmitStyle::Line } else { SubmitStyle::Prompt }
 }
 
-/// Uma linha de shell: o texto e o Enter, uma vez só.
+/// Uma linha de shell: o texto e o Enter entram num pedido só, ou não entram. Em duas chamadas, uma fila
+/// cheia no meio deixava o texto no terminal sem o Enter.
 fn submit_line(pty_id: u32, text: &str) -> Result<(), String> {
-    crate::terminal::write_to_pty(pty_id, text)?;
-    crate::terminal::write_to_pty(pty_id, "\r")
+    crate::terminal::write_line_to_pty(pty_id, text)
+}
+
+/// Erro de um envio cujo texto já entrou na caixa da TUI, mas cujo Enter não foi confirmado. O chamador precisa saber
+/// que o texto pode estar lá sem o Enter, e não tratar a mensagem como enviada.
+fn sem_enter(erro: String) -> String {
+    format!("O texto entrou na caixa da TUI, mas o Enter não foi confirmado: {erro}")
 }
 
 /// Os terminais do chat que este processo já entregou a um agente. A aba nova só chega ao banco depois do debounce
@@ -506,7 +512,10 @@ pub(super) fn submit_prompt_seen(pty_id: u32, text: &str, author: &str) -> Resul
     // o envio; sem repositório git ou sem mudança desde o último, não faz nada).
     crate::tab_checkpoints::on_submit(pty_id, text, author);
 
-    crate::terminal::write_to_pty(pty_id, text)?;
+    // O texto entra com a vaga do Enter reservada: o Enter só é mandado depois da observação, mas nunca fica sem
+    // espaço (achado 3). Uma espera observada entre texto e Enter não cabe num pedido fixo, e um pedido assim
+    // travaria a fila (e a digitação) enquanto a TUI carrega.
+    let mut envio = crate::terminal::write_reserved_to_pty(pty_id, text)?;
     wait_until_quiet(pty_id, ECHO_QUIET, ECHO_MAX, false);
     // Uma TUI que ainda carregava (o OpenCode na tela inicial) joga fora o que chega: o texto nem aparece, e
     // não há o que enviar. Espera ela assentar e escreve de novo — só se NENHUM pedaço dele está na tela, para
@@ -519,14 +528,17 @@ pub(super) fn submit_prompt_seen(pty_id: u32, text: &str, author: &str) -> Resul
         if text_on_screen(pty_id, text) {
             break;
         }
-        crate::terminal::write_to_pty(pty_id, text)?;
+        // O envio novo é reservado antes de o antigo sair: se não couber, o antigo continua reservado e o erro sai
+        // como não confirmado (o texto já está na caixa).
+        let novo = crate::terminal::write_reserved_to_pty(pty_id, text).map_err(sem_enter)?;
+        envio = novo;
         wait_until_quiet(pty_id, ECHO_QUIET, ECHO_MAX, false);
     }
     // O rodapé de trabalho só vale se apareceu DEPOIS do Enter: nos últimos KB da saída ainda estão os quadros do
     // spinner do turno anterior, e um Enter engolido logo depois de um turno curto era dado por enviado (achado
     // pelo replay, fixture `claude-ocioso`).
     let enter_at = crate::terminal::output_total(pty_id).unwrap_or(0);
-    crate::terminal::write_to_pty(pty_id, "\r")?;
+    envio.enter().map_err(|e| sem_enter(e.to_string()))?;
     // Um pegado grande vira "[Pasted Content 3904 chars]" e pode engolir o Enter: a mensagem
     // fica escrita e ninguém a recebe. O Hermes e o OpenCode não usam o marcador: o texto fica
     // inteiro na caixa (e, ainda "starting agent…", eles engolem o Enter). Enquanto a TUI não mostra
