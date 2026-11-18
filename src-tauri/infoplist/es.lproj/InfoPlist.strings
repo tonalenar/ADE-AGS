@@ -3,3 +3,4 @@
 "NSLocationWhenInUseUsageDescription" = "ADE AGS permite que las páginas usen tu ubicación después de que apruebes el acceso.";
 "NSWebBrowserPublicKeyCredentialUsageDescription" = "ADE AGS usa passkeys cuando el sitio y el sistema ofrecen soporte.";
 "NSSpeechRecognitionUsageDescription" = "ADE AGS transcribe tu voz localmente e inserta el texto en el composer para que lo revises.";
+"NSBluetoothAlwaysUsageDescription" = "ADE AGS usa Bluetooth solo cuando una página pide iniciar sesión con una passkey de un teléfono cercano.";
