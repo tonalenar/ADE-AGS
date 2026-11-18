@@ -129,3 +129,30 @@ fn o_logcat_pede_200_linhas_por_padrao_e_no_maximo_2000() {
     assert_eq!(logcat_lines(Some(9999)), 2000);
     assert_eq!(logcat_lines(Some(0)), 1);
 }
+
+#[test]
+fn ferramenta_nao_achada_e_procurada_de_novo() {
+    // Sem o `adb` agora, a próxima chamada procura de novo (antes a falha ficava guardada até reiniciar a ADE, A271).
+    static SLOT: OnceLock<PathBuf> = OnceLock::new();
+    assert!(cached_tool(&SLOT, || None).is_none());
+    let achado = cached_tool(&SLOT, || Some(PathBuf::from("/sdk/platform-tools/adb")));
+    assert_eq!(achado.map(|p| p.as_path()), Some(std::path::Path::new("/sdk/platform-tools/adb")));
+    // Achado uma vez, o caminho fica: não procura de novo.
+    assert!(cached_tool(&SLOT, || panic!("não devia procurar de novo")).is_some());
+}
+
+#[test]
+fn emulador_sem_thread_de_espera_nao_fica_sem_dono() {
+    // Se a thread que espera o emulador não nasce, o processo é encerrado e o erro volta. Antes o erro era engolido e o
+    // filho ficava sem `wait`.
+    let child = std::process::Command::new("sleep").arg("30").spawn().expect("sleep");
+    let erro = watch_child(child, |_| Err(std::io::Error::other("sem threads"))).expect_err("sem thread de espera, não há ok");
+    assert!(erro.contains("sem threads"), "{erro}");
+}
+
+#[test]
+fn emulador_que_sai_e_esperado_pela_thread() {
+    let child = std::process::Command::new("sleep").arg("0").spawn().expect("sleep");
+    let resultado = watch_child(child, |job| std::thread::Builder::new().spawn(job).map(|_| ()));
+    assert!(resultado.is_ok(), "{resultado:?}");
+}

@@ -72,7 +72,7 @@ pub(super) fn action(app: &AppHandle, from: &str, id: &str, portal: &Portal, arg
     }
     if action == "start" {
         ops::boot(&udid, true)?;
-        crate::simulator::lifecycle::booted(app, &udid);
+        crate::simulator::lifecycle::booted(app, &udid, false);
         activity(app, id, &agent, "action", "start");
         return Ok(json!({ "device": who, "started": true }));
     }
