@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { DESKTOP_OS } from "@/app/platform";
 import { forgeErrorOf, type ForgeItem, type ForgeKind, type PullCodeFile, type PullFileContent, type PullReviewAction, type PullReviewCommentDraft, type PullReviewThread } from "./types";
 import { forgePullCode, forgePullFileContents, forgePullReviewThreads, forgeReplyPullReviewThread, forgeSetPullReviewThreadResolved, forgeSubmitPullReview } from "./ipc";
+import { searchHitsFromSources, type SearchHit } from "./searchHits";
 
 type FilesState = { status: "loading" } | {
   status: "ready";
@@ -59,12 +60,6 @@ function parseUnifiedDiff(patch: string): { lines: DiffLine[]; truncated: boolea
   return { lines, truncated: offset < patch.length };
 }
 
-interface SearchHit {
-  path: string;
-  line: number;
-  excerpt: string;
-}
-
 function isSnapshotChange(error: unknown): boolean {
   return forgeErrorOf(error).message.startsWith("PR_HEAD_CHANGED:");
 }
@@ -90,8 +85,6 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<"file" | "diff">("file");
-  const [searchState, setSearchState] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [searchError, setSearchError] = useState("");
   const [truncated, setTruncated] = useState(false);
   const [drafts, setDrafts] = useState<PullReviewCommentDraft[]>([]);
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null);
@@ -115,16 +108,12 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
   const codeScrollRef = useRef<HTMLDivElement>(null);
   const pendingLineRef = useRef<number | null>(null);
   const pendingThreadLineRef = useRef<{ line: number; side: "LEFT" | "RIGHT" | null } | null>(null);
-  const searchLoadStarted = useRef(false);
 
   const reloadCode = useCallback(async () => {
     setFilesState({ status: "loading" });
     setContents({});
     setFileLoadError("");
     setTruncated(false);
-    setSearchError("");
-    setSearchState("idle");
-    searchLoadStarted.current = false;
     setDrafts([]);
     setCommentTarget(null);
     setCommentText("");
@@ -198,51 +187,11 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
     if (searchOpen) requestAnimationFrame(() => searchRef.current?.focus());
   }, [searchOpen]);
 
-  useEffect(() => {
-    if (!query.trim() || filesState.status !== "ready" || searchLoadStarted.current) return;
-    searchLoadStarted.current = true;
-    setSearchState("loading");
-    setSearchError("");
-    const paths = filesState.files.filter((file) => file.status !== "removed").map((file) => file.path);
-    loadContents(paths)
-      .then(() => setSearchState("ready"))
-      .catch((error) => {
-        searchLoadStarted.current = false;
-        if (isSnapshotChange(error)) return;
-        setSearchState("error");
-        setSearchError(forgeErrorOf(error).message);
-      });
-  }, [contents, filesState, loadContents, query]);
-
-  const hits = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return [] as SearchHit[];
-    const result: SearchHit[] = [];
-    for (const file of Object.values(contents)) {
-      if (!file.content) continue;
-      const searchText = file.content.toLowerCase();
-      let from = 0;
-      let line = 1;
-      let lineStart = 0;
-      let lineEnd = file.content.indexOf("\n");
-      while (from < searchText.length && result.length < 500) {
-        const match = searchText.indexOf(needle, from);
-        if (match < 0) break;
-        while (lineEnd >= 0 && lineEnd < match) {
-          line++;
-          lineStart = lineEnd + 1;
-          lineEnd = file.content.indexOf("\n", lineStart);
-        }
-        const lineText = file.content.slice(lineStart, lineEnd < 0 ? file.content.length : lineEnd).replace(/\r$/, "");
-        const column = match - lineStart;
-        const start = Math.max(0, column - 36);
-        result.push({ path: file.path, line, excerpt: `${start ? "…" : ""}${lineText.slice(start, start + 100)}${lineText.length > start + 100 ? "…" : ""}` });
-        from = match + 1;
-      }
-      if (result.length >= 500) break;
-    }
-    return result;
-  }, [contents, query]);
+  const search = useMemo(() => {
+    if (filesState.status !== "ready") return { hits: [] as SearchHit[], partial: false };
+    return searchHitsFromSources(query, filesState.files, contents);
+  }, [contents, filesState, query]);
+  const hits = search.hits;
 
   const selectedFile = filesState.status === "ready" ? filesState.files.find((file) => file.path === selectedPath) : undefined;
   const selectedContent = contents[selectedPath];
@@ -404,7 +353,7 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
         if (result.actionSubmitted) setReviewSummary("");
       }
     } catch (error) {
-      setReviewFeedback(forgeErrorOf(error).message);
+      setReviewFeedback(`${t("forge.pr.reviewFailed")} ${forgeErrorOf(error).message}`);
     } finally {
       setReviewBusy(false);
     }
@@ -469,9 +418,8 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
           </div>
           {query.trim() && (
             <div className="max-h-48 overflow-auto border-t border-gray-100 dark:border-white/5">
-              {searchState === "loading" && <p className="px-3 py-2 text-[11px] text-gray-400">{t("forge.pr.searchLoading")}</p>}
-              {searchState === "error" && <p className="px-3 py-2 text-[11px] text-red-500">{searchError}</p>}
-              {searchState === "ready" && hits.length === 0 && <p className="px-3 py-2 text-[11px] text-gray-400">{t("forge.pr.searchEmpty")}</p>}
+              {hits.length === 0 && <p className="px-3 py-2 text-[11px] text-gray-400">{t("forge.pr.searchEmpty")}</p>}
+              {search.partial && <p className="px-3 py-2 text-[11px] text-amber-600 dark:text-amber-400">{t("forge.pr.searchPartial")}</p>}
               {hits.map((hit, index) => (
                 <button
                   key={`${hit.path}:${hit.line}:${index}`}

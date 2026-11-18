@@ -33,6 +33,7 @@ pub(crate) mod team;
 #[cfg(test)]
 mod test;
 pub(crate) mod timings;
+pub(crate) mod transcript_cache;
 mod types;
 pub mod vigia;
 #[cfg(test)]

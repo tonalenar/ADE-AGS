@@ -9,8 +9,8 @@ export const MCP_APP_SANDBOX = DESIGN_SANDBOX;
  * regra da tela cheia. O host ainda confere que o quadro está em foco, porque o app pode postar essa mensagem.
  *
  * O app avisa o host antes de sair da própria página. Link âncora (`#`) fica;
- * o resto (outro URL, formulário, `window.open`) é cancelado. A CSP
- * (`navigate-to 'none'`) é a segunda trava.
+ * o resto (outro URL, formulário, `window.open`) é cancelado. A outra trava é o sandbox, sem
+ * `allow-top-navigation`: a CSP não tem diretiva para navegação (`navigate-to` nunca foi aplicada por navegador).
  */
 const MCP_APP_GUARD = `(function(){
 var sent=false;

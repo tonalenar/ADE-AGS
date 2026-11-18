@@ -27,7 +27,9 @@ export function miniBrowserZoom(baseZoom: number, source: Box | null, mini: Box 
 export type Place = {
   rect: Box;
   zoom: number;
-  visible: Box | null;
+  /** Falso só no envio final de desmontagem; `visibleRect` pode ficar vazio enquanto a vista vive. */
+  visible: boolean;
+  visibleRect: Box | null;
   holes: Box[];
   clickToExpand?: boolean;
   cornerRadius?: number;
@@ -61,7 +63,8 @@ export function placeOf(rect: Box, layoutWidth: number, pageZoom: number, clips:
   return {
     rect,
     zoom: Math.round(canvasZoom * (pageZoom > 0 ? pageZoom : 1) * 1000) / 1000,
-    visible: visible && relativeTo(visible, rect),
+    visible: true,
+    visibleRect: visible && relativeTo(visible, rect),
     holes,
     clickToExpand: false,
     cornerRadius: 0,

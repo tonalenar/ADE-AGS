@@ -40,7 +40,19 @@ export function ReleasesView({ cwd, target }: { cwd: string; target: RepoTarget 
     }
   }, [cwd]);
 
-  useEffect(() => { setReleases(null); load(); }, [load]);
+  useEffect(() => {
+    let alive = true;
+    setReleases(null);
+    setError(null);
+    forgeReleases(cwd)
+      .then((rows) => { if (alive) setReleases(rows); })
+      .catch((e) => {
+        if (!alive) return;
+        setError(forgeErrorOf(e));
+        setReleases([]);
+      });
+    return () => { alive = false; };
+  }, [cwd]);
 
   if (!target.account) {
     return <ForgeErrorView error={{ kind: "noAccount", message: target.host }} target={target} />;

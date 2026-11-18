@@ -27,7 +27,7 @@ import { requestContinuity } from "./continuity";
 import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
 import { MEMORY_SUGGEST_HINT, memoryBlockFor, startupText, tabMemoryMessage } from "@/features/memory/tabMemory";
 import { BROWSER_HINT, computerUseHint } from "@/features/canvas/portalNotice";
-import { sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { sendAutonomous } from "@/features/terminal/safeWrite";
 import { CheckpointsDialog } from "@/features/tabCheckpoints/CheckpointsDialog";
 import { tabCheckpointCreate } from "@/features/tabCheckpoints/ipc";
 import { AlertaToast } from "@/shared/ui/alerts";
@@ -332,7 +332,8 @@ export function TabDialogs() {
             const desk = computerUseHint();
             const hint = agent.id === "bash" || draft ? null : `[ADE AGS] ${BROWSER_HINT}\n${desk ? `${desk}\n` : ""}${MEMORY_SUGGEST_HINT}`;
             const text = [briefing, startupText(memory, prompt), hint].filter(Boolean).join("\n\n");
-            if (text) sendWhenReady(tabId, text, draft ? { draft: true } : undefined);
+            // O texto junta o briefing do app com as dicas: é envio do app, então passa pela guarda (I4).
+            if (text) sendAutonomous(tabId, text, "peer", draft ? { draft: true } : undefined);
           });
         }}
       />

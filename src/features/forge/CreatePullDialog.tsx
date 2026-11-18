@@ -51,7 +51,7 @@ export function CreatePullDialog({ cwd, target, branch, onClose, onCreated }: {
   useEffect(() => {
     scmBranches(target.root)
       .then((list) => setBranches(hostBranches(list, target.remote)))
-      .catch(() => setBranches([]));
+      .catch((e) => { setBranches([]); setError(String(e)); });
     forgeDefaultBranch(cwd)
       .then((b) => b && setBase((prev) => prev || b))
       .catch(() => {});

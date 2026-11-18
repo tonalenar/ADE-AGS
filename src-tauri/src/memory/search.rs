@@ -463,9 +463,12 @@ pub fn briefing_block_with_keys(docs: &[Doc], mission_id: &str, objective: &str,
         if lines.len() >= max_entries {
             break;
         }
-        let body: String = doc.body.split_whitespace().collect::<Vec<_>>().join(" ");
+        // Chave e corpo são dados do envelope: ângulos viram ‹ › (a mesma troca do front), então nenhum
+        // delimitador (`<<<FIM_MEMORIA_APROVADA>>>`) sai daqui. Uma linha só, como antes.
+        let key = crate::util::untrusted::neutralize_angles(&doc.key.split_whitespace().collect::<Vec<_>>().join(" "));
+        let body: String = crate::util::untrusted::neutralize_angles(&doc.body.split_whitespace().collect::<Vec<_>>().join(" "));
         let body = if body.chars().count() > 280 { body.chars().take(280).collect::<String>() + "…" } else { body };
-        let line = format!("- [{}] {}: {}", if doc.scope == "mission" { "missão" } else { "projeto" }, doc.key, body);
+        let line = format!("- [{}] {}: {}", if doc.scope == "mission" { "missão" } else { "projeto" }, key, body);
         // Uma linha longa que não cabe não impede as curtas de depois.
         if used + line.chars().count() > max_chars {
             continue;
@@ -478,11 +481,13 @@ pub fn briefing_block_with_keys(docs: &[Doc], mission_id: &str, objective: &str,
         return (String::new(), Vec::new());
     }
     let omitted = docs.len().saturating_sub(lines.len());
-    let missing: Vec<&str> = relevant
+    // As chaves que ficaram de fora também entram no texto: saem com a mesma troca de ângulos.
+    let missing: Vec<String> = relevant
         .iter()
         .map(|d| d.key.as_str())
         .filter(|key| !keys.iter().any(|k| k == key))
         .take(MAX_OMITTED_KEYS)
+        .map(crate::util::untrusted::neutralize_angles)
         .collect();
     let mut more = String::new();
     if !missing.is_empty() {

@@ -29,6 +29,19 @@ export function installScaledMouseFix(win: Window = window): () => void {
     return el && scale > 0 && Math.abs(scale - 1) >= 0.001 ? { el, scale } : null;
   };
 
+  /** A origem medida neste quadro. Medir força o layout, e um `mousemove` por pixel fazia isso a cada evento. */
+  let origem: { tela: Element; rect: DOMRect } | null = null;
+  const origemDe = (host: HTMLElement): DOMRect => {
+    const tela = host.querySelector(".xterm-screen") ?? host;
+    if (origem && origem.tela === tela) return origem.rect;
+    const rect = tela.getBoundingClientRect();
+    origem = { tela, rect };
+    win.requestAnimationFrame(() => {
+      origem = null;
+    });
+    return rect;
+  };
+
   const onMouse = (event: Event) => {
     if (!(event instanceof MouseEvent) || synthetic.has(event)) return;
     const host = drag ?? scaledHost(event.target);
@@ -36,7 +49,7 @@ export function installScaledMouseFix(win: Window = window): () => void {
     if (event.type === "mousedown" && event.button === 0) drag = host;
     if (event.type === "mouseup") drag = null;
     // A origem é a tela do xterm (a mesma de onde ele mede), não o embrulho: o recuo entre os dois também é escalado.
-    const origin = (host.el.querySelector(".xterm-screen") ?? host.el).getBoundingClientRect();
+    const origin = origemDe(host.el);
     const point = unscaledPoint({ x: event.clientX, y: event.clientY }, origin, host.scale);
     const copy = new MouseEvent(event.type, {
       bubbles: event.bubbles, cancelable: event.cancelable, composed: event.composed, view: event.view, detail: event.detail,

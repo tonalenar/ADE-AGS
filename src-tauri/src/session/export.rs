@@ -441,6 +441,9 @@ pub(super) fn is_injected_context(text: &str) -> bool {
 /// Las líneas que no son mensajes (metadata, tool calls, deltas de streaming sin texto)
 /// se saltean solas al no tener rol + contenido textual.
 pub(super) fn extract_transcript(path: &Path) -> Vec<Turn> {
+    if let Ok(parsed) = crate::missions::transcript_cache::read_incremental(path) {
+        return parse_transcript_values(parsed.lines.iter());
+    }
     let Ok(bytes) = std::fs::read(path) else { return Vec::new() };
     parse_transcript(&String::from_utf8_lossy(&bytes))
 }
@@ -671,15 +674,22 @@ fn is_hermes_injected_text(text: &str) -> bool {
 }
 
 fn parse_transcript(content: &str) -> Vec<Turn> {
+    let values: Vec<Value> = content
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    parse_transcript_values(values.iter())
+}
+
+fn parse_transcript_values<'a>(values: impl IntoIterator<Item = &'a Value>) -> Vec<Turn> {
     let mut turns: Vec<Turn> = Vec::new();
 
-    for line in content.lines() {
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-        let Some(role) = role_of(&v) else { continue };
+    for v in values {
+        let Some(role) = role_of(v) else { continue };
         if role != "user" && role != "assistant" {
             continue;
         }
-        let Some(text) = content_of(&v) else { continue };
+        let Some(text) = content_of(v) else { continue };
         if is_injected_context(&text) {
             continue;
         }
@@ -713,6 +723,11 @@ fn parse_transcript(content: &str) -> Vec<Turn> {
 /// contém `id` e `role`; as partes ficam em `messages[].parts[]`. Só interessam partes do
 /// tipo `text`; as demais (`step-start`, `reasoning`, `tool`, `patch`) são etapas internas.
 pub(super) fn opencode_transcript(session_id: &str, profile: Option<&str>) -> Vec<Turn> {
+    const MAX_STDOUT_BYTES: usize = 4 * 1024 * 1024;
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+    if !valid_opencode_session_id(session_id) {
+        return Vec::new();
+    }
     let (program, env_var) = super::title::opencode_invocation();
     let mut command = crate::util::program(program);
     command.args(["export", session_id]).stdin(std::process::Stdio::null());
@@ -721,8 +736,11 @@ pub(super) fn opencode_transcript(session_id: &str, profile: Option<&str>) -> Ve
     if let Some(dir) = profile {
         command.env(env_var, dir);
     }
-    let Ok(output) =
-        crate::util::output_with_timeout(&mut command, std::time::Duration::from_secs(30))
+    let Ok(output) = crate::util::spawn::output_with_stdout_limit(
+        &mut command,
+        TIMEOUT,
+        MAX_STDOUT_BYTES,
+    )
     else {
         return Vec::new();
     };
@@ -730,6 +748,14 @@ pub(super) fn opencode_transcript(session_id: &str, profile: Option<&str>) -> Ve
         return Vec::new();
     }
     parse_opencode_export(&output.stdout)
+}
+
+fn valid_opencode_session_id(session_id: &str) -> bool {
+    session_id.len() <= 128
+        && session_id.starts_with("ses_")
+        && session_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 /// Parseo puro del JSON que emite `opencode export`, separado del proceso para poder
@@ -1122,4 +1148,17 @@ pub async fn export_session_markdown(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[cfg(test)]
+mod transcript_id_tests {
+    use super::valid_opencode_session_id;
+
+    #[test]
+    fn id_opencode_exige_prefixo_alfabeto_e_teto() {
+        assert!(valid_opencode_session_id("ses_abc_123"));
+        assert!(!valid_opencode_session_id("--help"));
+        assert!(!valid_opencode_session_id("ses_bad/id"));
+        assert!(!valid_opencode_session_id(&format!("ses_{}", "a".repeat(128))));
+    }
 }

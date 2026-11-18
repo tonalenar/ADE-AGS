@@ -658,3 +658,21 @@ mod recruit_depth {
         assert_eq!(active_recruits(&book, "lead", &open), MAX_ACTIVE_RECRUITS - 1, "aba fechada libera a vaga");
     }
 }
+#[test]
+fn recruits_ilegivel_recusa_atualizacao() {
+    let root = std::env::temp_dir().join(format!("ags-recruit-corrupt-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("recruits.json");
+    let original = br#"{"old": "#;
+    std::fs::write(&path, original).unwrap();
+    super::recruit::TEST_BOOK_PATH.with(|slot| *slot.borrow_mut() = Some(path.clone()));
+
+    let result = super::recruit::update_book(|book| {
+        super::recruit::record(book, "new", "lead", 1, 456);
+    });
+
+    super::recruit::TEST_BOOK_PATH.with(|slot| *slot.borrow_mut() = None);
+    assert!(result.unwrap_err().contains("ilegível"));
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    std::fs::remove_dir_all(root).unwrap();
+}

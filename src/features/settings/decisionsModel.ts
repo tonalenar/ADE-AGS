@@ -184,6 +184,11 @@ export interface ShadowSummary {
   sample: number;
 }
 
+/** Se o formulário está sujo, o modelo novo não recarrega os campos. */
+export function applyDecisionModelUpdate(dirty: boolean): "keep" | "reload" {
+  return dirty ? "keep" : "reload";
+}
+
 /**
  * Pontos sem heurística local: o piloto e a visão decidem sozinhos, e a coluna `heuristic` do log guarda outra coisa
  * (`foto_enviada=true superficie=ios rotulos=23`). Comparar isso com a decisão dá sempre "discorda": com o computer use

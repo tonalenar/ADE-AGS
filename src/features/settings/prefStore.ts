@@ -63,5 +63,15 @@ export function createPrefStore<T>(options: {
 
   if (typeof document !== "undefined") options.apply?.(current());
 
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", (event) => {
+      if (event.key !== options.key) return;
+      snapshot = null;
+      const value = current();
+      options.apply?.(value);
+      for (const listener of listeners) listener();
+    });
+  }
+
   return { read, save, use };
 }

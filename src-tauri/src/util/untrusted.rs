@@ -4,6 +4,9 @@
 //!
 //! O conteúdo que tenta fechar (ou abrir outra) tag do envelope é neutralizado: sem isso, um texto com
 //! `</untrusted_data>` "saía" do bloco e o resto parecia vir de fora dele.
+//!
+//! Este arquivo é a FONTE ÚNICA da regra de envelope. O espelho do front é `src/shared/untrusted.ts`, e os
+//! dois lados leem os mesmos vetores (`src/shared/untrusted.vectors.json`). Mudou a regra? Mude os dois.
 
 /// A tag do envelope.
 pub const UNTRUSTED_TAG: &str = "untrusted_data";
@@ -21,9 +24,9 @@ pub fn neutralize(text: &str) -> String {
     let bytes = lower.as_bytes();
     while i < bytes.len() {
         if bytes[i] == b'<' {
-            let rest = &lower[i + 1..];
-            let rest = rest.strip_prefix('/').unwrap_or(rest);
-            let rest = rest.trim_start();
+            // Espaço antes e depois da barra também conta: `< /untrusted_data>` é a mesma tag para quem lê.
+            let rest = lower[i + 1..].trim_start();
+            let rest = rest.strip_prefix('/').unwrap_or(rest).trim_start();
             if rest.starts_with(UNTRUSTED_TAG) {
                 out.push_str(&text[last..i]);
                 out.push('‹');
@@ -36,13 +39,26 @@ pub fn neutralize(text: &str) -> String {
     out
 }
 
-/// A origem como atributo: sem aspas, sinais de tag nem quebras de linha. Pura.
-fn clean_source(source: &str) -> String {
-    let flat: String = source
-        .chars()
-        .map(|c| if c == '"' || c == '<' || c == '>' || c.is_control() { ' ' } else { c })
-        .collect();
-    flat.split_whitespace().collect::<Vec<_>>().join(" ")
+/// Uma linha só: controles viram espaço e os espaços se juntam. Pura.
+fn flat(text: &str) -> String {
+    text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A origem, ou um rótulo entre aspas, como atributo: sem aspas, sinais de tag nem quebras de linha. Pura.
+pub fn clean_source(source: &str) -> String {
+    flat(&source.chars().map(|c| if matches!(c, '"' | '<' | '>') { ' ' } else { c }).collect::<String>())
+}
+
+/// Troca `<` e `>` por `‹` e `›`: o conteúdo de dado deixa de ter qualquer delimitador feito de ângulos
+/// (`<<<FIM_MEMORIA_APROVADA>>>`, `<untrusted_data>`). É a mesma troca do front (`neutralizeMemoryText`). Pura.
+pub fn neutralize_angles(text: &str) -> String {
+    text.replace('<', "‹").replace('>', "›")
+}
+
+/// O envelope de UMA linha, para texto digitado num terminal (uma quebra ali envia a mensagem antes do fim):
+/// `<untrusted_data source="…">texto</untrusted_data>`, com o texto em uma linha e neutralizado. Pura.
+pub fn untrusted_inline(source: &str, text: &str) -> String {
+    format!("<{UNTRUSTED_TAG} source=\"{}\">{}</{UNTRUSTED_TAG}>", clean_source(source), neutralize(&flat(text)))
 }
 
 /// O aviso de um PEDIDO de outro agente (`peer tell`/`ask`). Não é «dado, não instrução»: um pedido do
@@ -117,5 +133,27 @@ mod tests {
     fn a_origem_nao_quebra_o_atributo() {
         let block = untrusted_block("peer:\"Mau\">\nnome", "x");
         assert!(block.contains("source=\"peer: Mau nome\">"), "{block}");
+    }
+
+    // Os mesmos vetores que `src/shared/tests/untrusted.test.ts` lê: se um lado mudar, o outro cai.
+    #[test]
+    fn corpo_com_delimitador_nao_fecha_bloco() {
+        let v: serde_json::Value = serde_json::from_str(include_str!("../../../src/shared/untrusted.vectors.json")).unwrap();
+        let txt = |c: &serde_json::Value, k: &str| c[k].as_str().unwrap().to_string();
+        for c in v["neutralize"].as_array().unwrap() {
+            assert_eq!(neutralize(&txt(c, "in")), txt(c, "out"), "neutralize: {c}");
+        }
+        for c in v["neutralizeAngles"].as_array().unwrap() {
+            assert_eq!(neutralize_angles(&txt(c, "in")), txt(c, "out"), "neutralizeAngles: {c}");
+        }
+        for c in v["cleanSource"].as_array().unwrap() {
+            assert_eq!(clean_source(&txt(c, "in")), txt(c, "out"), "cleanSource: {c}");
+        }
+        for c in v["inline"].as_array().unwrap() {
+            assert_eq!(untrusted_inline(&txt(c, "source"), &txt(c, "text")), txt(c, "out"), "inline: {c}");
+        }
+        for c in v["block"].as_array().unwrap() {
+            assert_eq!(untrusted_block(&txt(c, "source"), &txt(c, "text")), txt(c, "out"), "block: {c}");
+        }
     }
 }

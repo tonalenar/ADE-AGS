@@ -282,13 +282,15 @@ fn run_start_task_now(
     budget_usd: Option<f64>,
     isolate: bool,
 ) -> Result<Task, String> {
-    let _update_guard = crate::agents::updates::activity_guard()?;
     let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
     // Deriva a proveniência do cwd da tarefa antes de travar o banco.
     let repository_key = crate::memory::repo_scope::repo_key(std::path::Path::new(&cwd));
     let repository_commit = crate::memory::repo::current_commit_for_db(db, &workspace_id);
 
+    // O guard de atualização é de leitura e não atravessa um `.await` (não é `Send`): cada trecho síncrono o toma por
+    // conta própria, e o isolamento o toma dentro da thread de bloqueio.
     let mut task = {
+        let _update_guard = crate::agents::updates::activity_guard()?;
         let conn = db.lock().map_err(|e| e.to_string())?;
         let tx =
             rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
@@ -338,12 +340,23 @@ fn run_start_task_now(
     };
 
     if isolate {
-        match worktrees_base().and_then(|base| isolate_task(&base, &db, &task)) {
+        // O `git worktree add` pode levar dezenas de segundos num checkout grande: não roda no worker async.
+        let isolated = match crate::agents::updates::activity_guard() {
+            Ok(_update_guard) => worktrees_base().and_then(|base| isolate_task(&base, db, &task)),
+            Err(error) => Err(error),
+        };
+        match isolated {
             Ok(isolated) => task = isolated,
             Err(e) => return fail(&task.id, e),
         }
     }
 
+    // A tarefa já existe: se a atividade do agente passou a ser bloqueada enquanto o worktree era preparado,
+    // ela precisa terminar como falha visível no histórico.
+    let _update_guard = match crate::agents::updates::activity_guard() {
+        Ok(guard) => guard,
+        Err(e) => return fail(&task.id, e),
+    };
     let memory = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         crate::memory::snapshot_context_for_run(&conn, &task.run_id)?
@@ -1578,10 +1591,8 @@ pub async fn start_memory_dream(
             repository_commit,
             repository_key,
         )?;
-        let prompt = format!(
-            "Leia os dados e proponha somente melhorias justificadas.\nUNTRUSTED DATA BEGIN\n{}\nUNTRUSTED DATA END",
-            input
-        );
+        // O histórico é dado não confiável: vai no envelope único (`memory::dream::prompt_for`), não em marcadores soltos.
+        let prompt = crate::memory::dream::prompt_for(&input);
         let task = store::create_task(
             &tx,
             &store::NewTask {

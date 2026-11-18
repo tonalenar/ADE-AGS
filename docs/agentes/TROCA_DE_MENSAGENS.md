@@ -18,6 +18,8 @@
   - nunca cole num PTY sem `delivery_lock`, espera de silêncio, dedupe e confirmação;
   - há **dois caminhos** de escrita no PTY (backend e frontend), e uma correção de "Enter engolido" vai nos dois;
   - `ADE_TAB_ID` não é segurança: o que precisa de garantia usa `ADE_SESSION` e a árvore de processos.
+  - No front, o Enter que o app manda sem a pessoa digitar sai só por `safeWrite.ts` (`writeToAgent`, `sendAutonomous`). A conferência roda antes de colar e antes de cada Enter: pergunta de aprovação e trabalho bloqueiam. Um bloqueio depois de colar devolve `unconfirmed` e não cola de novo (duplicaria o texto). `escritaDeEnterLint.test.ts` reprova emissor ou Enter novo fora dessa guarda e fora das listas com motivo.
+  - O Rust ainda não passa por essa guarda: ver o ponto de atenção abaixo.
 
 ## Quem fala com quem (`src-tauri/src/canvas/mod.rs`)
 - O arquivo é `~/.ags/canvas.json`, com a estrutura `Board { nodes, edges[{id,a,b}], orchestrators[], notes, portals, roles, subagents… }`. Chave do board de missão: `"<cwd>#m:<missionId>"`. Chave de conversa: `"#c:<id>"`.
@@ -119,4 +121,5 @@ Nas sessões MCP interativas, `peer_ask` oferece o mesmo pedido síncrono para u
   - `ags tab output` devolve só o que é novo (`cursors.rs`), já sem ANSI nem spinners (`digest.rs`).
 
 ## Pontos de atenção conhecidos
+- **Enter do Rust sem a guarda do front (N003, PR04 follow-up)**: `ipc/commands/tabs.rs` (`submit_line` e `submit_prompt_seen`, usados por `peer tell`, `peer ask`, `rotina`, `chat` e `tab send`) e `ipc/commands/canal.rs` (responder a um diálogo com `enter`). Esses caminhos não veem a pergunta de aprovação da tela antes do Enter. O PR08 deixou o Rust de fora porque o PR04 mexe nesses arquivos.
 - A fila do `watch` e os cursores de `tab output` são **globais por aba, não por leitor**: dois orquestradores consomem os eventos um do outro.

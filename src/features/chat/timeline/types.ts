@@ -2,7 +2,7 @@
 
 /**
  * `reasoning`: o trecho de raciocínio que o agente expõe. `usage`: os tokens de uma chamada (só para a conta do turno).
- * `notice`: um aviso do próprio app no fio (`label` = o código: `resumeLost`, `queueDropped`, `optionIgnored`, `toolOutcomeUnknown`, `turnTimeout`;
+ * `notice`: um aviso do próprio app no fio (`label` = o código: `resumeLost`, `queueDropped`, `optionIgnored`, `toolOutcomeUnknown`, `turnTimeout`, `responseTruncated`;
  * `compaction` = a compactação de contexto: `status` running/done/error, `text` = o gatilho, `contextTokens` = antes, `tokens` = depois).
  */
 export type TimelineItemKind = "user" | "assistant" | "tool" | "turnEnd" | "reasoning" | "usage" | "notice";

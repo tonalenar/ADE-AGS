@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { AlertaToast } from "@/shared/ui/alerts";
@@ -19,16 +19,31 @@ function SideButton({ b, device, name, height, width, enabled }: { b: FrameButto
   const { t } = useTranslation();
   const [pressed, setPressed] = useState(false);
   const [hover, setHover] = useState(false);
+  // O `down` que já foi ao aparelho. O `up` sai sempre que ele existir: se a sessão cair no meio do aperto (`enabled`
+  // vira `false`), o botão do aparelho não pode ficar apertado (volume subindo, Siri aberta) até a próxima interação.
+  const downSent = useRef(false);
   const label = t(labelKey(b));
   const send = (down: boolean) => {
-    if (!enabled) return;
     iphoneButtonState(device, b.button, down).catch((e) => { void AlertaToast(name, String(e), "error", 4000); });
   };
+  const press = () => {
+    if (!enabled) return;
+    setPressed(true);
+    downSent.current = true;
+    send(true);
+  };
   const release = () => {
-    if (!pressed) return;
     setPressed(false);
+    if (!downSent.current) return;
+    downSent.current = false;
     send(false);
   };
+  // Se o botão some (o nó fecha, a aba muda) com o dedo ainda no botão, o aparelho também recebe o soltar.
+  useEffect(() => () => {
+    if (!downSent.current) return;
+    downSent.current = false;
+    void iphoneButtonState(device, b.button, false).catch(() => undefined);
+  }, [device, b.button]);
   // O botão sai da borda só o que sai no aparelho (~0,9% da largura) e tem o mesmo metal do aro; a área de clique é
   // maior que o desenho e avança um pouco sobre o aro, para não exigir mira de pixel.
   const thick = Math.max(2.5, width * 0.009);
@@ -45,7 +60,7 @@ function SideButton({ b, device, name, height, width, enabled }: { b: FrameButto
   return (
     <>
       <button type="button" aria-label={label} title={label} disabled={!enabled}
-        onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); setPressed(true); send(true); }}
+        onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); press(); }}
         onPointerUp={release} onPointerCancel={release} onLostPointerCapture={release}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         className="nodrag group absolute z-[2] cursor-pointer disabled:cursor-default focus-visible:outline-none" style={pos}>

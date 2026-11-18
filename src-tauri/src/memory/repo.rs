@@ -240,7 +240,7 @@ pub fn render(conn: &Connection, workspace: &str, overrides: &[(String, i64)]) -
 }
 
 pub fn default_root() -> Result<PathBuf,String> {
-    Ok(crate::util::datadir::ags_home().ok_or("home unavailable")?.join("memory"))
+    Ok(crate::util::datadir::ags_home().ok_or("a pasta do usuário não está disponível")?.join("memory"))
 }
 
 /// Read provenance only; launching a Run must not export or mutate user files.

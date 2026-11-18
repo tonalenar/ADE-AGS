@@ -86,7 +86,9 @@ export function useRevealedText(id: string, text: string, animate: boolean, live
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [id, revealing, text.length]);
+    // O crescimento do texto não reinicia o quadro: o alvo novo entra em `progress` e o passo seguinte já o usa.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, revealing]);
 
   if (arrivedAsStream || !r) return { text, revealing: false };
   return { text: text.slice(0, revealCut(text, r.shown)), revealing };

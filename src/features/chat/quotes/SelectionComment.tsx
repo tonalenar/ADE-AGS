@@ -84,6 +84,19 @@ export function SelectionComment({
       onDismiss: clear,
     });
     actionsRef.current = actions;
+    // A pílula é fixa na tela, no lugar onde a seleção estava. Quando o texto rola (o streaming segue o fim, ou a pessoa
+    // rola), ela é recalculada com a seleção atual; senão ficaria parada, longe do trecho.
+    const reposition = () => {
+      if (!floatingRef.current) return;
+      // Fora da janela a pílula sai (o observador dispensa o trecho); dentro dela, acompanha o trecho.
+      const rect = selectionTarget(window.getSelection(), element)?.rect;
+      if (!rect || rect.bottom <= 0 || rect.top >= window.innerHeight) {
+        clear();
+        return;
+      }
+      update(null);
+    };
+    element.addEventListener("scroll", reposition, { passive: true });
 
     const focusActions = (event: KeyboardEvent) => {
       const toolbar = toolbarRef.current;
@@ -140,6 +153,7 @@ ${target.text}`
       document.removeEventListener("keydown", focusActions, true);
       document.removeEventListener("keydown", onShortcut, true);
       document.removeEventListener("selectionchange", actions.selectionChanged);
+      element.removeEventListener("scroll", reposition);
       actions.dispose();
       actionsRef.current = null;
     };

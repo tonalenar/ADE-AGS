@@ -320,6 +320,57 @@ mod claude {
         assert_eq!(todo[0].plan.as_ref().map(Vec::len), Some(2));
     }
 
+    /// O corte no limite de saída: o modelo para com `stop_reason: max_tokens`. O texto parcial fica e o turno acaba
+    /// sem erro, mas o aviso `responseTruncated` diz que a resposta ficou pela metade (o id é o da mensagem: repetir a
+    /// linha não duplica).
+    #[test]
+    fn resposta_cortada_pelo_limite_de_tokens_vira_aviso_e_o_turno_segue_sem_erro() {
+        let mut m = Mapper::default();
+        let corte = json!({ "type": "assistant", "message": { "id": "msg_9", "role": "assistant", "stop_reason": "max_tokens",
+            "content": [{ "type": "text", "text": "a resposta para no meio" }] }, "parent_tool_use_id": null, "uuid": "u-9" });
+        let out = items(m.feed(&corte, 1));
+        let aviso: Vec<_> = out.iter().filter(|i| i.kind == ItemKind::Notice).collect();
+        assert_eq!(aviso.len(), 1, "o corte vira um aviso: {out:?}");
+        assert_eq!((aviso[0].id.as_str(), aviso[0].label.as_deref()), ("n:responseTruncated:msg_9", Some("responseTruncated")));
+        assert!(out.iter().any(|i| i.kind == ItemKind::Assistant && i.text.as_deref() == Some("a resposta para no meio")), "o texto parcial fica");
+        let fim = m.feed(&json!({ "type": "result", "subtype": "success", "is_error": false, "result": "", "duration_ms": 900 }), 2);
+        let turno = fim.into_iter().find_map(|o| if let Out::Done(t) = o { Some(t) } else { None }).expect("o turno acaba");
+        assert_eq!(turno.error, None, "o corte não é falha do turno: o aviso é que diz");
+        // Um fim normal não ganha aviso.
+        let normal = json!({ "type": "assistant", "message": { "id": "msg_10", "role": "assistant", "stop_reason": "end_turn",
+            "content": [{ "type": "text", "text": "pronto" }] }, "parent_tool_use_id": null, "uuid": "u-10" });
+        assert!(items(m.feed(&normal, 3)).iter().all(|i| i.kind != ItemKind::Notice));
+    }
+
+    /// Se o turno só traz o subtipo de limite no resultado, o aviso sai pelo `uuid` dele. Se a mensagem do turno já
+    /// avisou, o resultado do mesmo turno não repete.
+    #[test]
+    fn subtipo_de_limite_no_resultado_avisa_uma_vez_so() {
+        let mut m = Mapper::default();
+        // Turno 1: só o resultado traz o limite.
+        let so_resultado = json!({ "type": "result", "subtype": "error_max_tokens", "is_error": false, "result": "", "uuid": "r-1", "duration_ms": 10 });
+        assert_eq!(items(m.feed(&so_resultado, 5)).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["n:responseTruncated:r-1"]);
+        // Turno 2: a mensagem avisa, e o resultado do mesmo turno não repete.
+        let corte = json!({ "type": "assistant", "message": { "id": "msg_20", "role": "assistant", "stop_reason": "max_tokens",
+            "content": [{ "type": "text", "text": "parcial" }] }, "parent_tool_use_id": null, "uuid": "u-20" });
+        assert_eq!(items(m.feed(&corte, 6)).iter().filter(|i| i.kind == ItemKind::Notice).count(), 1);
+        let fim = json!({ "type": "result", "subtype": "error_max_tokens", "is_error": false, "result": "", "uuid": "r-2", "duration_ms": 10 });
+        assert!(items(m.feed(&fim, 7)).iter().all(|i| i.kind != ItemKind::Notice), "o resultado não repete o aviso da mensagem");
+    }
+
+    /// O corte de um turno que acabou sem `result` (o processo caiu) não pode suprimir o aviso por subtipo do turno
+    /// seguinte: o app fecha o turno com `encerra_turno`, e o estado do corte sai com ele.
+    #[test]
+    fn corte_sem_resultado_nao_suprime_o_aviso_do_turno_seguinte() {
+        let mut m = Mapper::default();
+        let corte = json!({ "type": "assistant", "message": { "id": "msg_30", "role": "assistant", "stop_reason": "max_tokens",
+            "content": [{ "type": "text", "text": "parcial" }] }, "parent_tool_use_id": null, "uuid": "u-30" });
+        assert_eq!(items(m.feed(&corte, 1)).iter().filter(|i| i.kind == ItemKind::Notice).count(), 1);
+        m.encerra_turno();
+        let limite = json!({ "type": "result", "subtype": "error_max_tokens", "is_error": false, "result": "", "uuid": "r-31", "duration_ms": 5 });
+        assert_eq!(items(m.feed(&limite, 2)).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["n:responseTruncated:r-31"]);
+    }
+
     #[test]
     fn o_acesso_vira_o_modo_de_permissao_do_claude_e_volta() {
         let pairs = [("ask", "default"), ("edits", "acceptEdits"), ("safe", "auto"), ("full", "bypassPermissions"), ("plan", "plan")];
@@ -761,6 +812,19 @@ mod envio {
             task.await.unwrap();
         }
         assert_eq!(highest.load(Ordering::SeqCst), 1);
+    }
+
+    /// O gate de envio de uma conversa é o mesmo para quem usa e para quem espera. Quando ninguém mais o segura, sai do
+    /// mapa: o mapa não guarda as conversas que já passaram.
+    #[test]
+    fn o_gate_da_conversa_some_quando_ninguem_o_segura() {
+        let mut mapa = std::collections::HashMap::new();
+        let a = crate::conversa::api::gate_in(&mut mapa, "t1");
+        let a2 = crate::conversa::api::gate_in(&mut mapa, "t1");
+        assert!(Arc::ptr_eq(&a, &a2), "quem chega enquanto há dono pega o mesmo gate");
+        drop((a, a2));
+        let _b = crate::conversa::api::gate_in(&mut mapa, "t2");
+        assert_eq!(mapa.keys().collect::<Vec<_>>(), ["t2"], "o gate de t1 saiu: ninguém o segura");
     }
 }
 
