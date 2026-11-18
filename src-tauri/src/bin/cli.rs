@@ -47,7 +47,7 @@ TABS
   tab create <caminho> --agent <id>           Abre uma tab nova
              [--skills a,b]                   · skills a anexar, por nome
              [--account <nome>]               · conta dessa TUI (veja `accounts`)
-             [--pre <comando|salvo>]          · a executar ANTES do agente; repetível
+             [--pre <comando|salvo>]          · a executar ANTES do agente; repetível (comando digitado: só a pessoa ou o orquestrador do canvas)
              [--pre-preset <nome>]            · força que seja um item salvo, não um comando
              [--initprompt \"...\"]             · prompt inicial, enviado com Enter
              [--window <label>]                 quando a TUI terminou de iniciar
@@ -57,7 +57,7 @@ TABS
                                               para comando interativo (login, código, pergunta, assistente)
              [--in-chat]                      · o mesmo de qualquer conversa ou aba do chat (sem --agent)
              [--new-tab]                      · uma aba comum, fora do painel
-  tab close <id>                              Fecha uma tab (a sua, as conectadas a você, as que você abriu)
+  tab close <id>                              Fecha uma tab (o agente só fecha as que ele mesmo abriu; a pessoa fecha o resto)
   tab output <id> [--lines 40]                O que é NOVO desde a leitura anterior,
              [--full] [--raw]                 comprimido (erros, avisos, final). Mesmo alcance de `tab send`
   tab send <id> \"...\" [--no-enter]            Escreve no terminal dela (+ Enter) —
@@ -436,7 +436,7 @@ deixa a original recebendo atualizações. `--copy` força essa cópia também p
 skill própria. `--file` é lido a partir do diretório onde você roda o comando.
 Sem --account, a tab usa a conta principal (a de sempre).
 --pre se repete sem limite e seus valores rodam NA ORDEM ESCRITA; se um falhar, o
-agente não inicia. Cada valor pode ser o nome de um item salvo ou um comando literal:
+agente não inicia. Cada valor pode ser o nome de um item salvo ou um comando literal (este só a pessoa ou o orquestrador do canvas; o integrante usa --pre-preset):
   ags tab create --cwd . --agent claude-code --pre \"ambiente conda\" --pre \"nvm use\"
 
 A saída é sempre uma linha JSON no stdout (exceto `mcp`, que fala JSON-RPC). Em `tab output`,

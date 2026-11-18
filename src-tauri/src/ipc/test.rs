@@ -1153,6 +1153,86 @@ fn una_llamada_cancelada_no_se_contesta_y_la_app_se_entera() {
     assert_eq!(call.1, cancel.1, "la cancelación nombra a la misma llamada");
 }
 
+/// A227: um quadro maior que 8 MB é recusado com erro e descartado, sem ser guardado nem executado; o servidor segue
+/// atendendo o pedido seguinte da mesma conexão.
+#[test]
+fn frame_mcp_grande_recusado() {
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
+    let grande = json!({ "jsonrpc": "2.0", "id": 1, "method": "ping", "params": { "pad": "x".repeat(8 * 1024 * 1024 + 1) } });
+    let out = raw_session(&cwd, &[grande, json!({ "jsonrpc": "2.0", "id": 2, "method": "ping" })], |_, _| Ok(json!({})));
+    assert_eq!(out.len(), 2, "o quadro grande não pode ser respondido como ping: {out:?}");
+    assert!(out[0]["id"].is_null(), "{}", out[0]);
+    assert_eq!(out[0]["error"]["code"], -32600, "{}", out[0]);
+    assert!(out[0]["error"]["message"].as_str().unwrap_or_default().contains("8 MB"), "{}", out[0]);
+    assert_eq!(out[1], json!({ "jsonrpc": "2.0", "id": 2, "result": {} }), "a conexão tem de seguir viva depois do quadro recusado");
+}
+
+/// Cabo de entrada que só abre o portão quando acaba: as chamadas aceitas ficam em voo até o servidor ler tudo.
+struct CaboComPortao {
+    dados: std::io::Cursor<Vec<u8>>,
+    portao: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl std::io::Read for CaboComPortao {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = std::io::Read::read(&mut self.dados, buf)?;
+        if n == 0 {
+            let (aberto, sinal) = &*self.portao;
+            *aberto.lock().unwrap_or_else(|e| e.into_inner()) = true;
+            sinal.notify_all();
+        }
+        Ok(n)
+    }
+}
+
+/// Uma sessão MCP em que cada `tools/call` fica em voo até o cabo acabar. Devolve as respostas na ordem em que saíram.
+fn sessao_com_chamadas_presas(context: &McpContext, chamadas: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let portao = std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let cabo: String = chamadas.iter().map(|c| format!("{c}\n")).collect();
+    let entrada = std::io::BufReader::new(CaboComPortao { dados: std::io::Cursor::new(cabo.into_bytes()), portao: portao.clone() });
+    let espera = move |_: &str, _: serde_json::Value| {
+        let (aberto, sinal) = &*portao;
+        let mut aberto = aberto.lock().unwrap_or_else(|e| e.into_inner());
+        while !*aberto {
+            aberto = sinal.wait(aberto).unwrap_or_else(|e| e.into_inner());
+        }
+        Ok(json!({ "text": "ok" }))
+    };
+    let mut saida = Vec::new();
+    serve(context, "", entrada, &mut saida, espera).unwrap();
+    String::from_utf8(saida).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+}
+
+/// A227: um `id` já em voo não pode ser reaproveitado. O `insert` substituiria a chamada que ainda roda e a conta do
+/// limite de 32 deixaria de bater: a repetição sai logo com erro JSON-RPC, e a chamada em voo segue e responde.
+#[test]
+fn id_repetido_com_a_chamada_em_voo_e_recusado() {
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
+    let chamada = |id: u64| json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": "facts_read", "arguments": {} } });
+    let out = sessao_com_chamadas_presas(&cwd, vec![chamada(1), chamada(1)]);
+    assert_eq!(out.len(), 2, "{out:?}");
+    assert_eq!(out[0]["id"], 1, "{}", out[0]);
+    assert_eq!(out[0]["error"]["code"], -32600, "a repetição tem de sair logo, com erro: {}", out[0]);
+    assert!(out[1].get("result").is_some(), "a chamada em voo tem de seguir e responder: {}", out[1]);
+}
+
+/// A227: no máximo 32 `tools/call` em voo por conexão. A 33ª sai logo, com a mensagem em português, e as 32 que já
+/// estavam em voo respondem.
+#[test]
+fn trinta_e_duas_chamadas_em_voo_e_a_trigesima_terceira_recusada() {
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
+    let chamada = |id: u64| json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": "facts_read", "arguments": {} } });
+    let out = sessao_com_chamadas_presas(&cwd, (1..=33).map(chamada).collect());
+    assert_eq!(out.len(), 33, "{out:?}");
+    assert_eq!(out[0]["id"], 33, "a 33ª sai antes das respostas das 32 presas: {}", out[0]);
+    assert_eq!(out[0]["error"]["code"], -32603, "{}", out[0]);
+    let msg = out[0]["error"]["message"].as_str().unwrap_or_default();
+    assert!(msg.starts_with("Chamadas demais em voo") && msg.contains("32"), "mensagem em PT-BR, com o teto: {msg}");
+    let mut respondidas: Vec<u64> = out[1..].iter().map(|r| r["id"].as_u64().unwrap_or_default()).collect();
+    respondidas.sort();
+    assert_eq!(respondidas, (1..=32).collect::<Vec<u64>>(), "as 32 em voo seguem e respondem");
+}
+
 /// Con `progressToken`, una llamada larga avisa que sigue viva; sin él, no se manda nada.
 #[test]
 fn una_llamada_larga_avisa_su_progreso_si_se_lo_piden() {
@@ -1965,10 +2045,14 @@ mod provas {
 // ── F-03: limites antes da autenticação ──────────────────────────────────────────────────────
 
 mod entrada {
-    use super::super::intake::{read_request, Intake, Slots, MAX_REQUEST_BYTES, TOKEN_DEADLINE_MS, REQUEST_DEADLINE_MS, TOKEN_WINDOW};
+    use super::super::intake::{
+        read_request, try_reserve_inflight_bytes, InFlightBytes, Intake, Slots, MAX_IN_FLIGHT_BYTES, MAX_REQUEST_BYTES, REQUEST_DEADLINE_MS,
+        TOKEN_DEADLINE_MS, TOKEN_WINDOW,
+    };
     use std::cell::Cell;
-    use std::io::{BufReader, Read};
+    use std::io::{BufRead, BufReader, Read};
     use std::rc::Rc;
+    use std::sync::Mutex;
 
     const TOKEN: &str = "0e6f2c1a-3c2b-4e7d-9a53-1f0d5b8c7a21";
 
@@ -1999,15 +2083,37 @@ mod entrada {
         autenticou: Cell<u32>,
     }
 
+    /// O orçamento de bytes em voo é global ao processo: quem o enche não pode correr junto de quem lê pedidos.
+    static ORCAMENTO: Mutex<()> = Mutex::new(());
+
     fn ler(dados: Vec<u8>, chunk: usize, tick_ms: u64) -> (Intake, Cena) {
+        let _trava = ORCAMENTO.lock().unwrap_or_else(|e| e.into_inner());
         let cena = Cena { relogio: Rc::new(Cell::new(0)), lidos: Rc::new(Cell::new(0)), autenticou: Cell::new(0) };
         let origem = Gotejando { dados, pos: 0, chunk, tick_ms, relogio: cena.relogio.clone(), lidos: cena.lidos.clone() };
         let mut leitor = BufReader::with_capacity(chunk.max(16), origem);
         let relogio = cena.relogio.clone();
         let mut agora = move || relogio.get();
         let mut marca = || cena.autenticou.set(cena.autenticou.get() + 1);
-        let resultado = read_request(&mut leitor, TOKEN, &mut agora, &mut marca);
+        let mut budget = super::super::intake::InFlightBytes::empty();
+        let resultado = read_request(&mut leitor, TOKEN, &mut agora, &mut marca, &mut budget);
         (resultado, cena)
+    }
+
+    /// Como [`ler`], com `reserva` bytes do orçamento global já tomados por outras conexões. Devolve também o que
+    /// sobrou no leitor depois do resultado: o que não foi copiado para a linha continua lá.
+    fn ler_com_reserva(dados: Vec<u8>, chunk: usize, reserva: usize) -> (Intake, Vec<u8>, u32) {
+        let _trava = ORCAMENTO.lock().unwrap_or_else(|e| e.into_inner());
+        let _outras = try_reserve_inflight_bytes(reserva).expect("a reserva cabe no teto");
+        let relogio = Rc::new(Cell::new(0));
+        let origem = Gotejando { dados, pos: 0, chunk, tick_ms: 0, relogio: relogio.clone(), lidos: Rc::new(Cell::new(0)) };
+        let mut leitor = BufReader::with_capacity(chunk.max(16), origem);
+        let mut agora = move || relogio.get();
+        let autenticou = Cell::new(0);
+        let mut marca = || autenticou.set(autenticou.get() + 1);
+        let mut budget = InFlightBytes::empty();
+        let resultado = read_request(&mut leitor, TOKEN, &mut agora, &mut marca, &mut budget);
+        let resto = leitor.fill_buf().map(<[u8]>::to_vec).unwrap_or_default();
+        (resultado, resto, autenticou.get())
     }
 
     fn pedido(token: &str, args: &str) -> Vec<u8> {
@@ -2064,6 +2170,34 @@ mod entrada {
     fn linha_em_branco_ou_fim_da_conexao_nao_respondem_nada() {
         assert_eq!(ler(b"\n".to_vec(), 16, 0).0, Intake::Closed);
         assert_eq!(ler(Vec::new(), 16, 0).0, Intake::Closed);
+    }
+
+    /// A225: bytes em voo no processo, não só por pedido. Com o teto de 64 MB já tomado, um pedido
+    /// autenticado extra é recusado e não aumenta o orçamento.
+    #[test]
+    fn orcamento_global_recusa_excesso() {
+        let (resultado, _, autenticou) = ler_com_reserva(pedido(TOKEN, "{}"), 256, MAX_IN_FLIGHT_BYTES);
+        assert!(
+            matches!(&resultado, Intake::Refused(m) if m.contains("64 MB")),
+            "com o orçamento cheio o pedido tem de ser recusado: {resultado:?}"
+        );
+        assert_eq!(autenticou, 0, "não autentica um pedido que estourou o orçamento global");
+        let (depois, _, _) = ler_com_reserva(pedido(TOKEN, "{}"), 256, 0);
+        assert!(matches!(depois, Intake::Line(_)), "soltar a reserva reabre o orçamento: {depois:?}");
+    }
+
+    /// A225: o orçamento confere os bytes **antes** de copiá-los para a linha. Com 2 KiB livres no teto global, um
+    /// pedido de 8 MiB é recusado, e o trecho que não coube continua no leitor (não foi copiado nem consumido).
+    #[test]
+    fn orcamento_quase_cheio_nao_copia_o_pedido() {
+        let dados = pedido(TOKEN, &format!("\"{}\"", "b".repeat(MAX_REQUEST_BYTES as usize)));
+        let (resultado, resto, _) = ler_com_reserva(dados.clone(), 4096, MAX_IN_FLIGHT_BYTES - 2048);
+        assert!(matches!(&resultado, Intake::Refused(m) if m.contains("64 MB")), "{resultado:?}");
+        assert!(
+            resto == dados[TOKEN_WINDOW..4096],
+            "o trecho que estourou o orçamento foi copiado para a linha antes da conferência (sobraram {} bytes no leitor)",
+            resto.len()
+        );
     }
 
     #[test]
@@ -2412,7 +2546,7 @@ mod autorizacao {
 
     // ── 4. Escopo de aba (tab.output, tab.close, tab.state, tab.send, watch, replay) ──
 
-    const POR_ABA: [&str; 8] = ["tab.output", "tab.close", "tab.state", "tab.send", "watch.add", "watch.remove", "replay.start", "replay.stop"];
+    const POR_ABA: [&str; 7] = ["tab.output", "tab.state", "tab.send", "watch.add", "watch.remove", "replay.start", "replay.stop"];
 
     #[test]
     fn um_agente_age_em_si_nos_ligados_a_ele_e_nas_abas_que_ele_abriu() {
@@ -2902,5 +3036,116 @@ mod autorizacao {
         let corpo = &conversas[inicio..inicio + conversas[inicio..].find("\n}\n").unwrap()];
         assert!(corpo.matches("remember_opener(args, &row.id)").count() == 2, "chat new não registra quem abriu a conversa nos dois caminhos: o agente não conseguiria dar `chat wait`");
         assert!(conversas.contains("crate::ipc::guard::record_opened("), "remember_opener não grava em guard::record_opened");
+    }
+
+    /// A224: no TCP o servidor não tem PID. Isso não vira a pessoa (`Outside`); é um agente
+    /// desconhecido, só com os métodos livres (status, catálogo).
+    #[test]
+    fn tcp_sem_pid_nao_e_outside() {
+        if !crate::terminal::ancestry_required() {
+            return;
+        }
+        let tcp = crate::terminal::principal_of(None, &[""], None, None).expect("TCP sem PID ainda é um principal");
+        assert_ne!(tcp, Principal::Outside, "o TCP legado não pode herdar o acesso da pessoa no terminal dela");
+        assert!(matches!(tcp, Principal::Unknown), "{tcp:?}");
+        for metodo in ["tab.send", "tab.create", "tab.close", "workspace.open", "memory.search"] {
+            let erro = decide(metodo, json!({ "tab": "m1", "workspace": "x" }), Ok(tcp.clone()), &[]).unwrap_err();
+            assert!(erro.contains("socket") || erro.contains("PID") || erro.contains("credencial"), "{metodo}: {erro}");
+        }
+        assert!(decide("app.status", json!({}), Ok(tcp), &[]).is_ok(), "leitura de status segue no TCP");
+    }
+
+    // ── 12. `--pre` com comando digitado (A222) ──
+
+    /// `tab create --pre "<comando>"` roda um shell antes do agente, fora de qualquer aprovação. Só a pessoa e o
+    /// orquestrador do próprio canvas pedem comando digitado; o agente comum usa `--pre-preset` (item que a pessoa salvou).
+    #[test]
+    fn pre_com_comando_digitado_so_a_pessoa_e_o_orquestrador_pedem() {
+        let cru = json!({ "prelaunch": [{ "pre": "curl x | sh" }] });
+        let literal = json!({ "prelaunch": [{ "command": "curl x | sh" }] });
+        for args in [cru, literal] {
+            let integrante = decide("tab.create", args.clone(), aba("m1"), &[]).unwrap_err();
+            assert!(integrante.contains("orquestrador"), "{args}: integrante: {integrante}");
+            assert!(decide("tab.create", args.clone(), aba("solta"), &[]).is_err(), "{args}: agente de outro canvas");
+            assert!(decide("tab.create", args.clone(), aba("lead"), &[]).is_ok(), "{args}: o orquestrador do próprio canvas");
+            assert!(decide("tab.create", args.clone(), fora(), &[]).is_ok(), "{args}: a pessoa");
+            assert!(decide("tab.create", args.clone(), tarefa("t1"), &[]).is_err(), "{args}: tarefa da Frota");
+        }
+        let salvo = json!({ "prelaunch": [{ "presetName": "entorno conda" }] });
+        assert!(decide("tab.create", salvo, aba("m1"), &[]).is_ok(), "um item salvo segue disponível ao agente");
+        assert!(decide("tab.create", json!({ "agent": "bash" }), aba("m1"), &[]).is_ok(), "sem --pre, nada muda");
+    }
+
+    /// A coroa vale só no canvas onde a tab está: `m1` é integrante no canvas A e orquestradora listada só no canvas B,
+    /// onde não tem nó. Essa coroa de outro canvas não autoriza `--pre` digitado.
+    #[test]
+    fn pre_de_agente_de_outro_canvas_recusado() {
+        let dois_canvas = || {
+            let a: Board = serde_json::from_value(json!({ "nodes": { "lead": {}, "m1": {} }, "orchestrators": ["lead"] })).unwrap();
+            let b: Board = serde_json::from_value(json!({ "nodes": { "solta": {}, "m2": {} }, "orchestrators": ["m1"] })).unwrap();
+            Ok(Boards::from([("/a".to_string(), a), ("/b".to_string(), b)]))
+        };
+        let pede = |quem: &str| {
+            authz::authorize(
+                "tab.create",
+                &json!({ "prelaunch": [{ "pre": "curl x | sh" }] }),
+                || Ok(Principal::Tab(quem.into())),
+                dois_canvas,
+                &|_| None,
+            )
+        };
+        assert!(pede("lead").is_ok(), "o orquestrador do próprio canvas");
+        let erro = pede("m1").expect_err("a coroa de outro canvas não pode pedir --pre digitado");
+        assert!(erro.contains("orquestrador"), "{erro}");
+        assert!(pede("m2").is_err(), "integrante comum");
+    }
+
+    /// Coroa e nó têm de estar no mesmo quadro do canvas do pedido: nó+coroa em B e só nó em A
+    /// não autorizam `--pre` digitado em A (senão a coroa de B vaza).
+    #[test]
+    fn pre_com_coroa_em_b_e_so_no_em_a_recusado() {
+        let dois = || {
+            let a: Board = serde_json::from_value(json!({ "nodes": { "lead-b": {}, "m-a": {} }, "orchestrators": ["m-a"] })).unwrap();
+            let b: Board = serde_json::from_value(json!({ "nodes": { "lead-b": {}, "m-b": {} }, "orchestrators": ["lead-b"] })).unwrap();
+            Ok(Boards::from([("/a".to_string(), a), ("/b".to_string(), b)]))
+        };
+        let pede = |quem: &str| {
+            authz::authorize(
+                "tab.create",
+                &json!({ "prelaunch": [{ "pre": "curl x | sh" }] }),
+                || Ok(Principal::Tab(quem.into())),
+                dois,
+                &|_| None,
+            )
+        };
+        let erro = pede("lead-b").expect_err("nó+coroa em B e só nó em A não passa --pre em A");
+        assert!(erro.contains("orquestrador"), "{erro}");
+        assert!(pede("m-a").is_ok(), "orquestrador só de A (nó+coroa no próprio quadro)");
+    }
+
+    // ── 13. Fechar aba (A226) ──
+
+    /// Um agente fecha só a aba que ele mesmo abriu (`ags tab create`), como AGENTS.md §2.1 e §2.3: a própria aba, as
+    /// ligadas a ele no canvas e as da pessoa não são dele para fechar. Quem fecha o resto é a pessoa.
+    #[test]
+    fn um_agente_fecha_so_a_aba_que_ele_abriu() {
+        let fecha = |de: Result<Principal, String>, alvo: &str, abriu: &[(&str, &str)]| decide("tab.close", json!({ "tab": alvo }), de, abriu).is_ok();
+        assert!(fecha(aba("solta"), "terminal-que-abri", &[("terminal-que-abri", "solta")]), "a aba que ele abriu");
+        assert!(!fecha(aba("m1"), "m1", &[]), "a própria aba, que a pessoa abriu");
+        assert!(!fecha(aba("m1"), "lead", &[]), "o orquestrador ligado a ele");
+        assert!(!fecha(aba("m1"), "m2", &[]), "o outro integrante da estrela");
+        assert!(!fecha(aba("lead"), "m2", &[]), "o orquestrador não fecha integrante do time");
+        assert!(!fecha(aba("solta"), "terminal-que-abri", &[("terminal-que-abri", "outro")]), "aba aberta por outro agente");
+        assert!(fecha(fora(), "aba-da-pessoa", &[]), "a pessoa fecha o que quiser");
+        let erro = decide("tab.close", json!({ "tab": "m2" }), aba("m1"), &[]).unwrap_err();
+        assert!(erro.contains("abriu") && erro.contains("m2"), "a recusa diz qual aba e quem fecha: {erro}");
+    }
+
+    /// A regra de fechar só a aba que o agente abriu mora na classe do método, não numa comparação por nome: `tab.close`
+    /// tem classe própria e não divide a de `tab.send` nem a de `tab.state`.
+    #[test]
+    fn fechar_aba_tem_classe_propria_na_tabela() {
+        assert_ne!(authz::class_of("tab.close"), authz::class_of("tab.send"), "tab.close divide a classe de tab.send: a regra de fechar está por nome");
+        assert_ne!(authz::class_of("tab.close"), authz::class_of("tab.state"));
     }
 }

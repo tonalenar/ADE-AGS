@@ -50,6 +50,11 @@ pub const ACT_TIMEOUT_SECS: u64 = 115;
 /// Faixa aceita para o `timeout` de um `act`, em segundos.
 pub const ACT_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 10..=1800;
 
+/// Teto de uma linha JSON-RPC neste ponte (A227).
+const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
+/// Chamadas `tools/call` ao mesmo tempo nesta conexão.
+const MAX_INFLIGHT_CALLS: usize = 32;
+
 /// O prazo pedido para um `act` (número ou texto), dentro da faixa; sem pedido, o padrão.
 pub fn act_timeout_secs(asked: Option<&Value>) -> u64 {
     asked
@@ -1334,12 +1339,24 @@ where
     };
 
     std::thread::scope(|scope| -> std::io::Result<()> {
-        for line in input.lines() {
-            let line = line?;
-            if line.trim().is_empty() {
+        let mut input = input;
+        loop {
+            let frame = match read_mcp_frame(&mut input)? {
+                None => break,
+                Some(McpFrame::TooBig) => {
+                    write(&json!({
+                        "jsonrpc": "2.0",
+                        "id": Value::Null,
+                        "error": { "code": -32600, "message": "Quadro MCP recusado: máximo 8 MB" },
+                    }))?;
+                    continue;
+                }
+                Some(McpFrame::Line(line)) => line,
+            };
+            if frame.trim().is_empty() {
                 continue;
             }
-            let Ok(req) = serde_json::from_str::<Value>(&line) else {
+            let Ok(req) = serde_json::from_str::<Value>(&frame) else {
                 continue;
             };
 
@@ -1397,10 +1414,22 @@ where
                     // pedido solo es único dentro de esta sesión.
                     let call_id = uuid::Uuid::new_v4().to_string();
                     let cancelled = Arc::new(AtomicBool::new(false));
-                    inflight
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .insert(key.clone(), (call_id.clone(), cancelled.clone()));
+                    {
+                        let mut map = inflight.lock().unwrap_or_else(|e| e.into_inner());
+                        // Um id repetido trocaria a chamada que ainda roda e a conta do teto deixaria de bater.
+                        let repetido = map.contains_key(&key);
+                        if repetido || map.len() >= MAX_INFLIGHT_CALLS {
+                            drop(map);
+                            let erro = if repetido {
+                                json!({ "code": -32600, "message": "Já há uma chamada em voo com este id: espere a resposta antes de repetir o id" })
+                            } else {
+                                json!({ "code": -32603, "message": "Chamadas demais em voo (máximo 32): espere uma terminar" })
+                            };
+                            write(&json!({ "jsonrpc": "2.0", "id": id, "error": erro }))?;
+                            continue;
+                        }
+                        map.insert(key.clone(), (call_id.clone(), cancelled.clone()));
+                    }
                     let (write, send, inflight) = (&write, &send, &inflight);
                     scope.spawn(move || {
                         let (done, finished) = mpsc::channel::<()>();
@@ -1480,6 +1509,59 @@ where
 
 fn ok(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
+}
+
+enum McpFrame {
+    Line(String),
+    TooBig,
+}
+
+/// Lê uma linha JSON-RPC sem acumular mais que [`MAX_FRAME_BYTES`].
+fn read_mcp_frame(input: &mut impl BufRead) -> std::io::Result<Option<McpFrame>> {
+    let mut buf = Vec::new();
+    let mut overflow = false;
+    loop {
+        let available = match input.fill_buf() {
+            Ok(buf) => buf,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
+        if available.is_empty() {
+            if buf.is_empty() {
+                return Ok(None);
+            }
+            break;
+        }
+        let newline = available.iter().position(|b| *b == b'\n');
+        let take = newline.map_or(available.len(), |at| at + 1);
+        if overflow {
+            input.consume(take);
+            if newline.is_some() {
+                return Ok(Some(McpFrame::TooBig));
+            }
+            continue;
+        }
+        if buf.len().saturating_add(take) > MAX_FRAME_BYTES {
+            overflow = true;
+            input.consume(take);
+            if newline.is_some() {
+                return Ok(Some(McpFrame::TooBig));
+            }
+            continue;
+        }
+        buf.extend_from_slice(&available[..take]);
+        input.consume(take);
+        if newline.is_some() {
+            break;
+        }
+    }
+    if overflow {
+        return Ok(Some(McpFrame::TooBig));
+    }
+    while matches!(buf.last(), Some(b'\n' | b'\r')) {
+        buf.pop();
+    }
+    Ok(Some(McpFrame::Line(String::from_utf8_lossy(&buf).into_owned())))
 }
 
 fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
