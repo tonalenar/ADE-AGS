@@ -1,10 +1,17 @@
 use serde::Serialize;
 use crate::agents::SessionSource;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
+
+fn user_home() -> PathBuf {
+    dirs::home_dir()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| PathBuf::from("/var/empty/ags-missing-home"))
+}
 
 #[derive(Serialize, Clone)]
 pub struct SessionTitleResult {
@@ -69,12 +76,34 @@ pub(super) fn mtime_secs(path: &Path) -> Option<i64> {
     Some(modified.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64)
 }
 
+const COLLECT_MAX_DEPTH: usize = 8;
+const COLLECT_MAX_FILES: usize = 2_000;
+
 pub(super) fn collect_files(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
+    let mut visited = HashSet::new();
+    collect_files_limited(dir, ext, out, 0, &mut visited);
+}
+
+fn collect_files_limited(dir: &Path, ext: &str, out: &mut Vec<PathBuf>, depth: usize, visited: &mut HashSet<PathBuf>) {
+    if depth > COLLECT_MAX_DEPTH || out.len() >= COLLECT_MAX_FILES {
+        return;
+    }
+    let Ok(canon) = dir.canonicalize() else { return };
+    if !visited.insert(canon) {
+        return;
+    }
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
+        if out.len() >= COLLECT_MAX_FILES {
+            return;
+        }
         let path = entry.path();
-        if path.is_dir() {
-            collect_files(&path, ext, out);
+        let Ok(ft) = entry.file_type() else { continue };
+        if ft.is_symlink() {
+            continue;
+        }
+        if ft.is_dir() {
+            collect_files_limited(&path, ext, out, depth + 1, visited);
         } else if path.extension().is_some_and(|e| e == ext) {
             out.push(path);
         }
@@ -346,7 +375,7 @@ pub(super) fn claude_project_slug(cwd: &str) -> String {
 pub(crate) fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
     let root = match profile {
         Some(dir) => dir.to_path_buf(),
-        None => dirs::home_dir().unwrap_or_default().join(".claude"),
+        None => user_home().join(".claude"),
     };
     let projects = root.join("projects");
     let dir = projects.join(claude_project_slug(cwd));
@@ -545,7 +574,7 @@ fn cached_title(path: &Path, fallback: &str, compute: impl FnOnce() -> SessionTi
 pub(super) fn gemini_home(profile: Option<&Path>) -> PathBuf {
     match profile {
         Some(dir) => dir.join(".gemini"),
-        None => dirs::home_dir().unwrap_or_default().join(".gemini"),
+        None => user_home().join(".gemini"),
     }
 }
 
@@ -702,7 +731,7 @@ pub(crate) fn codex_root(profile: Option<&Path>) -> PathBuf {
     // está definida cae en ~/.codex.
     let home = std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".codex"));
+        .unwrap_or_else(|| user_home().join(".codex"));
     home.join("sessions")
 }
 
@@ -996,7 +1025,7 @@ pub(super) fn kimi_root(profile: Option<&Path>) -> PathBuf {
         Some(dir) => dir.to_path_buf(),
         None => std::env::var_os("KIMI_CODE_HOME")
             .map(PathBuf::from)
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".kimi-code")),
+            .unwrap_or_else(|| user_home().join(".kimi-code")),
     };
     home.join("sessions")
 }
@@ -1207,7 +1236,7 @@ pub(super) fn hermes_home(profile: Option<&Path>) -> PathBuf {
             return PathBuf::from(local).join("hermes");
         }
     }
-    dirs::home_dir().unwrap_or_default().join(".hermes")
+    user_home().join(".hermes")
 }
 
 /// O banco do Hermes só para leitura (ele é quem escreve). `None` = sem banco ainda.

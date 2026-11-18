@@ -116,17 +116,35 @@ pub fn start(db: DbConnection) {
     if STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
-    std::thread::Builder::new()
+    let loop_db = db.clone();
+    let loop_id = id.clone();
+    let started = std::thread::Builder::new()
         .name("harness-presence".into())
         .spawn(move || {
             loop {
                 std::thread::sleep(Duration::from_millis(HEARTBEAT_EVERY_MS as u64));
-                if let Err(error) = beat_now(&db, &id, pid) {
+                if let Err(error) = beat_now(&loop_db, &loop_id, pid) {
                     eprintln!("[harness] não foi possível renovar a presença: {error}");
                 }
             }
-        })
-        .expect("hilo de presença do harness");
+        });
+    if let Err(error) = started {
+        eprintln!("[harness] não foi possível criar o hilo de presença: {error}");
+        if let Err(fallback) = std::thread::Builder::new()
+            .name("harness-presence-fallback".into())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(Duration::from_millis(HEARTBEAT_EVERY_MS as u64));
+                    if let Err(error) = beat_now(&db, &id, pid) {
+                        eprintln!("[harness] não foi possível renovar a presença: {error}");
+                    }
+                }
+            })
+        {
+            eprintln!("[harness] também falhou o fallback de presença: {fallback}");
+            STARTED.store(false, Ordering::SeqCst);
+        }
+    }
 }
 
 fn beat_now(db: &DbConnection, id: &str, pid: i64) -> Result<(), String> {

@@ -160,11 +160,22 @@ pub struct AgentProposal<'a> {
 }
 
 /// Propõe uma memória em nome de um agente. Fica **pendente**; nunca ativa.
+#[cfg(test)]
 pub fn propose_for_mission(conn: &Connection, p: &AgentProposal<'_>) -> Result<ProposalResult, String> {
+    let repo_key = super::repo_scope::mission_repo_key(conn, p.mission_id);
+    propose_for_mission_with_repo(conn, p, repo_key.as_deref())
+}
+
+/// Propõe memória usando uma chave derivada antes do chamador adquirir o mutex do banco.
+pub fn propose_for_mission_with_repo(
+    conn: &Connection,
+    p: &AgentProposal<'_>,
+    repo_key: Option<&str>,
+) -> Result<ProposalResult, String> {
     let (workspace_id,): (String,) = conn
         .query_row("SELECT workspace_id FROM missions WHERE id = ?1", [p.mission_id], |r| Ok((r.get(0)?,)))
         .map_err(|_| format!("Não existe a missão {}.", p.mission_id))?;
-    propose_in(conn, &workspace_id, Some(p.mission_id), p)
+    propose_in(conn, &workspace_id, Some(p.mission_id), p, repo_key)
 }
 
 /// Propõe uma memória do PROJETO a partir de uma conversa (sem missão): vale só o escopo `workspace`,
@@ -173,10 +184,16 @@ pub fn propose_for_workspace(conn: &Connection, workspace_id: &str, p: &AgentPro
     if p.scope != "workspace" {
         return Err("Fora de uma missão só existe o escopo 'workspace' (memória do projeto): use --scope workspace.".into());
     }
-    propose_in(conn, workspace_id, None, p)
+    propose_in(conn, workspace_id, None, p, None)
 }
 
-fn propose_in(conn: &Connection, workspace_id: &str, mission: Option<&str>, p: &AgentProposal<'_>) -> Result<ProposalResult, String> {
+fn propose_in(
+    conn: &Connection,
+    workspace_id: &str,
+    mission: Option<&str>,
+    p: &AgentProposal<'_>,
+    repo_key: Option<&str>,
+) -> Result<ProposalResult, String> {
     let workspace_id = workspace_id.to_string();
     let scope = match p.scope {
         "workspace" | "mission" => p.scope,
@@ -223,7 +240,7 @@ fn propose_in(conn: &Connection, workspace_id: &str, mission: Option<&str>, p: &
     )?;
     // A memória nova de uma missão é do repositório dela (ver `repo_scope`).
     if let Some(mission) = mission {
-        super::repo_scope::tag_new_entry(conn, &result.entry_id, mission)?;
+        super::repo_scope::tag_new_entry(conn, &result.entry_id, mission, repo_key)?;
     }
     Ok(result)
 }

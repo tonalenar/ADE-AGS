@@ -506,6 +506,21 @@ fn extra_members_validation_rejects_bad_entries_with_their_position() {
 }
 
 #[test]
+fn extra_members_json_invalido_aparece_como_erro_e_lista_vazia() {
+    let conn = test_db();
+    conn.execute(
+        "INSERT INTO squads (id, name, description, lead_agent_id, created_at, updated_at, extra_members)
+         VALUES ('bad', 'Bad', '', 'claude-code', 0, 0, '{nao-json')",
+        [],
+    )
+    .unwrap();
+    let squad = store::get(&conn, "bad").unwrap().unwrap();
+    assert!(squad.extra_members.is_empty());
+    assert!(!squad.available);
+    assert!(squad.unavailable_reasons.iter().any(|r| r.contains("JSON inválido")), "{:?}", squad.unavailable_reasons);
+}
+
+#[test]
 fn squad_saved_before_extra_members_reads_as_empty() {
     let conn = test_db();
     conn.execute(

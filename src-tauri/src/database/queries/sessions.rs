@@ -4,6 +4,8 @@
 //! cerrar la tab, cerrar la ventana, salir de la app— así que lo que se resuelva acá vale
 //! para todos.
 
+use std::collections::{HashMap, HashSet};
+
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult, params};
 use serde::{Deserialize, Deserializer};
 use uuid::Uuid;
@@ -447,17 +449,30 @@ pub(crate) fn dedupe_session_history_once(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
+fn same_session() -> &'static str {
+    "h2.workspace_id = session_history.workspace_id
+                          AND h2.agent_id = session_history.agent_id
+                          AND h2.cwd = session_history.cwd
+                          AND COALESCE(h2.session_id, '') = COALESCE(session_history.session_id, '')"
+}
+
 pub(crate) fn dedupe_session_history(conn: &Connection) -> SqlResult<()> {
     // El opened_at se normaliza ANTES de borrar: después ya no habría de dónde sacarlo.
     conn.execute(
-        "UPDATE session_history SET
-           opened_at = (SELECT MIN(h2.opened_at) FROM session_history h2
-                        WHERE h2.workspace_id = session_history.workspace_id
-                          AND h2.agent_id = session_history.agent_id
-                          AND h2.cwd = session_history.cwd
-                          AND COALESCE(h2.session_id, '') = COALESCE(session_history.session_id, ''))",
+        &format!(
+            "UPDATE session_history SET
+           opened_at = (SELECT MIN(h2.opened_at) FROM session_history h2 WHERE {same}),
+           pinned = (SELECT MAX(COALESCE(h2.pinned, 0)) FROM session_history h2 WHERE {same}),
+           hidden = (SELECT MIN(COALESCE(h2.hidden, 0)) FROM session_history h2 WHERE {same}),
+           custom_title = COALESCE(NULLIF(custom_title, ''),
+             (SELECT h2.custom_title FROM session_history h2 WHERE {same} AND h2.custom_title IS NOT NULL AND h2.custom_title != '' ORDER BY h2.closed_at DESC LIMIT 1)),
+           account_id = COALESCE(account_id,
+             (SELECT h2.account_id FROM session_history h2 WHERE {same} AND h2.account_id IS NOT NULL AND h2.account_id != '' ORDER BY h2.closed_at DESC LIMIT 1))",
+            same = same_session()
+        ),
         [],
     )?;
+    union_session_skills(conn)?;
 
     // `rowid` desempata para que el resultado sea determinista si dos filas del mismo
     // grupo comparten `closed_at`.
@@ -501,6 +516,57 @@ pub fn archived_skills_of_session(
 /// Lee la columna `skills` de `session_history` tolerando el formato viejo, que era un
 /// array plano de nombres (`["git-helper"]`) sin id ni scope. Esas entradas se leen como
 /// skills sin id: se pueden mostrar y buscar por nombre, pero no reattachear directo.
+fn union_session_skills(conn: &Connection) -> SqlResult<()> {
+    let mut stmt = conn.prepare(
+        "SELECT workspace_id, agent_id, cwd, COALESCE(session_id, ''), COALESCE(skills, '[]') FROM session_history ORDER BY rowid",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?
+        .collect::<SqlResult<Vec<_>>>()?;
+    let mut groups: HashMap<(String, String, String, String), Vec<String>> = HashMap::new();
+    for (workspace_id, agent_id, cwd, session_id, skills) in rows {
+        groups
+            .entry((workspace_id, agent_id, cwd, session_id))
+            .or_default()
+            .push(skills);
+    }
+    for ((workspace_id, agent_id, cwd, session_id), jsons) in groups {
+        let merged = union_archived_skills(jsons);
+        conn.execute(
+            "UPDATE session_history SET skills = ?1
+             WHERE workspace_id = ?2 AND agent_id = ?3 AND cwd = ?4 AND COALESCE(session_id, '') = ?5",
+            params![merged, workspace_id, agent_id, cwd, session_id],
+        )?;
+    }
+    Ok(())
+}
+
+fn union_archived_skills(jsons: Vec<String>) -> String {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for json in jsons {
+        for skill in parse_archived_skills(&json) {
+            let key = if skill.id.is_empty() {
+                format!("n:{}:{}", skill.scope, skill.name)
+            } else {
+                format!("i:{}", skill.id)
+            };
+            if seen.insert(key) {
+                out.push(skill);
+            }
+        }
+    }
+    serde_json::to_string(&out).unwrap_or_else(|_| "[]".into())
+}
+
 fn parse_archived_skills(json: &str) -> Vec<ArchivedSkill> {
     if let Ok(v) = serde_json::from_str::<Vec<ArchivedSkill>>(json) {
         return v;
@@ -1484,5 +1550,22 @@ mod tests {
 
         // Idempotente: migrar otra vez no falla ni vuelve a agregar la columna.
         crate::database::migrate_for_tests(&conn).unwrap();
+    }
+
+    #[test]
+    fn union_de_skills_ordena_as_linhas_de_origem_de_forma_estavel() {
+        let conn = crate::database::test_db();
+        conn.execute_batch(
+            "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+             INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, session_id, skills, opened_at, closed_at)
+               VALUES ('h1', 'ws', 'codex', 'Codex', 'codex', '/p', 's', '[\"primeira\"]', 1, 1),
+                      ('h2', 'ws', 'codex', 'Codex', 'codex', '/p', 's', '[\"segunda\"]', 1, 2);
+             PRAGMA reverse_unordered_selects = ON;",
+        ).unwrap();
+
+        dedupe_session_history(&conn).unwrap();
+        let skills = archived_skills_of_session(&conn, "h2").unwrap();
+        let names: Vec<_> = skills.into_iter().map(|skill| skill.name).collect();
+        assert_eq!(names, ["primeira", "segunda"]);
     }
 }

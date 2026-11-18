@@ -42,7 +42,11 @@ pub(crate) fn label_options(labels: &[TextBox]) -> Vec<(usize, String)> {
         .enumerate()
         .filter_map(|(i, l)| {
             let text: String = l.text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(80).collect();
-            (l.rect.valid() && text.chars().any(char::is_alphanumeric) && seen.insert(text.to_lowercase())).then_some((i, text))
+            (l.rect.valid()
+                && text.chars().any(char::is_alphanumeric)
+                && !crate::memory::agent::looks_like_secret(&text)
+                && seen.insert(text.to_lowercase()))
+            .then_some((i, text))
         })
         .take(MAX_LABELS)
         .collect()
@@ -367,6 +371,8 @@ mod label_test {
         let mac = body(&Query { surface: "desktop", gestures: false, labels: &[], ..q });
         assert!(mac["questions"].get("rotulo").is_none());
         assert!(mac["questions"]["operacao"]["criteria"].get("swipe_left").is_none());
+        let secret = [TextBox { text: "token ghp_abcdefghijklmnopqrstuvwxyz0123456789".into(), rect: Rect { left: 0.1, right: 0.3, top: 0.1, bottom: 0.14 } }];
+        assert!(label_options(&secret).is_empty());
     }
     #[test]
     fn o_toque_pelo_texto_cai_no_centro_da_caixa_do_ocr_mesmo_com_caixa_desenhada_fraca() {

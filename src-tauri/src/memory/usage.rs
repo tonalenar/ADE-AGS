@@ -14,6 +14,7 @@ use rusqlite::{Connection, params};
 use serde::Serialize;
 
 use crate::database::DbConnection;
+use super::agent::looks_like_secret;
 
 const QUERY_CHARS: usize = 200;
 const ENTRY_KEYS_MAX: usize = 40;
@@ -64,7 +65,13 @@ pub fn record(conn: &Connection, row: &UsageRow) {
 
 fn try_record(conn: &Connection, row: &UsageRow) -> rusqlite::Result<()> {
     conn.execute_batch(SCHEMA)?;
-    let query: Option<String> = row.query.map(|q| q.chars().take(QUERY_CHARS).collect());
+    let query: Option<String> = row.query.and_then(|q| {
+        if looks_like_secret(q) {
+            None
+        } else {
+            Some(q.chars().take(QUERY_CHARS).collect())
+        }
+    });
     let entry_keys = row
         .entry_keys
         .iter()
@@ -76,10 +83,17 @@ fn try_record(conn: &Connection, row: &UsageRow) -> rusqlite::Result<()> {
         "INSERT INTO memory_usage(ts,workspace_id,mission_id,tab_id,action,query,hits,entry_keys) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
         params![row.ts, row.workspace_id, row.mission_id, row.tab_id, row.action, query, row.hits, entry_keys],
     )?;
-    conn.execute(
-        "DELETE FROM memory_usage WHERE workspace_id=?1 AND id NOT IN (SELECT id FROM memory_usage WHERE workspace_id=?1 ORDER BY id DESC LIMIT ?2)",
-        params![row.workspace_id, RETAIN_PER_WORKSPACE],
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM memory_usage WHERE workspace_id=?1",
+        [row.workspace_id],
+        |r| r.get(0),
     )?;
+    if count > RETAIN_PER_WORKSPACE {
+        conn.execute(
+            "DELETE FROM memory_usage WHERE workspace_id=?1 AND id NOT IN (SELECT id FROM memory_usage WHERE workspace_id=?1 ORDER BY id DESC LIMIT ?2)",
+            params![row.workspace_id, RETAIN_PER_WORKSPACE],
+        )?;
+    }
     Ok(())
 }
 
@@ -494,5 +508,22 @@ mod test {
         assert_eq!(r.total, 0);
         assert_eq!(r.never_read, 1);
         assert!(r.top_read.is_empty() && r.missions.is_empty());
+    }
+
+    #[test]
+    fn busca_com_segredo_nao_grava_a_consulta() {
+        let conn = setup();
+        let empty: Vec<String> = Vec::new();
+        record(
+            &conn,
+            &UsageRow {
+                query: Some("token ghp_abcdefghijklmnopqrstuvwxyz0123456789"),
+                ..row(1, "search", None, Some("t1"), 0, &empty)
+            },
+        );
+        let stored: Option<String> = conn
+            .query_row("SELECT query FROM memory_usage", [], |r| r.get(0))
+            .unwrap();
+        assert!(stored.is_none());
     }
 }
