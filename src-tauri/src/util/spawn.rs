@@ -42,8 +42,30 @@ pub enum WindowMode {
 pub fn command(program: impl AsRef<OsStr>, window: WindowMode) -> Command {
     let mut cmd = Command::new(program);
     apply_window(&mut cmd, window);
+    sinais_padrao_no_filho(&mut cmd);
     cmd
 }
+
+/// Os filhos voltam `SIGINT` e `SIGQUIT` ao padrão. Um processo herda do pai a disposição desses sinais: se quem
+/// lançou o app ignora `SIGINT` (um job em segundo plano de shell ignora), o filho ignoraria o Ctrl+C e não
+/// responderia a quem o encerra por sinal. O teste da gravação de tela pegou exatamente isso: o `sleep` do teste
+/// não morria com `SIGINT` quando a suíte rodava em segundo plano. Só `signal` roda entre o fork e o exec, e ele é
+/// seguro nesse ponto.
+#[cfg(unix)]
+fn sinais_padrao_no_filho(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: `signal` é async-signal-safe, e é a única chamada entre o fork e o exec.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::signal(libc::SIGINT, libc::SIG_DFL);
+            libc::signal(libc::SIGQUIT, libc::SIG_DFL);
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn sinais_padrao_no_filho(_cmd: &mut Command) {}
 
 /// Atalho de [`command`] com [`WindowMode::Hidden`].
 pub fn hidden_command(program: impl AsRef<OsStr>) -> Command {
@@ -261,27 +283,76 @@ pub fn output_with_input(cmd: &mut Command, input: Option<Vec<u8>>, timeout: Dur
         });
     }
 
-    let mut out_pipe = child.stdout.take();
-    let mut err_pipe = child.stderr.take();
-    let out_reader = std::thread::spawn(move || read_all(out_pipe.as_mut()));
-    let err_reader = std::thread::spawn(move || read_all(err_pipe.as_mut()));
+    let out = drain_pipe(child.stdout.take());
+    let err = drain_pipe(child.stderr.take());
 
     let status = match wait_deadline(&mut child, &mut guard, timeout) {
         Ok(status) => status,
         Err(error) => {
             log_finish(&program, &argv, started.elapsed(), None);
-            let _ = out_reader.join();
-            let _ = err_reader.join();
             return Err(error);
         }
     };
 
+    // Um pipe fecha quando o filho e os netos que herdaram o stdout saem. Um neto que deixa o pipe aberto não pode
+    // travar a chamada além do prazo do comando: volta o que já saiu, e o grupo é encerrado.
+    let deadline = started + timeout;
+    let (stdout, out_closed) = out.collect(deadline);
+    let (stderr, err_closed) = err.collect(deadline);
+    if !out_closed || !err_closed {
+        guard.kill();
+    }
     log_finish(&program, &argv, started.elapsed(), status.code());
-    Ok(Output {
-        status,
-        stdout: out_reader.join().unwrap_or_default(),
-        stderr: err_reader.join().unwrap_or_default(),
-    })
+    Ok(Output { status, stdout, stderr })
+}
+
+/// Um pipe lido numa thread: o que já chegou fica num buffer compartilhado, e `closed` avisa quando o pipe fecha.
+struct DrainedPipe {
+    buf: Arc<std::sync::Mutex<Vec<u8>>>,
+    closed: std::sync::mpsc::Receiver<()>,
+    /// Ligado pela thread antes do sinal: quem já consumiu o sinal ainda vê que o pipe fechou.
+    finished: Arc<AtomicBool>,
+}
+
+fn drain_pipe<R: Read + Send + 'static>(pipe: Option<R>) -> DrainedPipe {
+    let buf = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (done, closed) = std::sync::mpsc::channel();
+    let finished = Arc::new(AtomicBool::new(false));
+    match pipe {
+        Some(mut pipe) => {
+            let sink = buf.clone();
+            let flag = finished.clone();
+            std::thread::spawn(move || {
+                let mut chunk = [0_u8; 8192];
+                loop {
+                    match pipe.read(&mut chunk) {
+                        Ok(0) => break,
+                        Ok(count) => sink.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(&chunk[..count]),
+                        Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(_) => break,
+                    }
+                }
+                flag.store(true, Ordering::Release);
+                let _ = done.send(());
+            });
+        }
+        None => {
+            finished.store(true, Ordering::Release);
+            let _ = done.send(());
+        }
+    }
+    DrainedPipe { buf, closed, finished }
+}
+
+impl DrainedPipe {
+    /// O que o pipe trouxe até `deadline`, e se ele já tinha fechado até lá.
+    fn collect(self, deadline: Instant) -> (Vec<u8>, bool) {
+        // Só o `Timeout` quer dizer "ainda aberto": `Disconnected` é a thread que já terminou (o pipe fechou).
+        let waited = self.closed.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        let closed = self.finished.load(Ordering::Acquire) || !matches!(waited, Err(std::sync::mpsc::RecvTimeoutError::Timeout));
+        let bytes = std::mem::take(&mut *self.buf.lock().unwrap_or_else(|e| e.into_inner()));
+        (bytes, closed)
+    }
 }
 
 /// Executa um programa com um segredo temporário em `stdin`, sem herdar nem capturar a saída.
@@ -430,14 +501,6 @@ fn redact_arg(arg: &str) -> String {
 
 fn program_of(cmd: &Command) -> String {
     cmd.get_program().to_string_lossy().into_owned()
-}
-
-fn read_all(pipe: Option<&mut impl Read>) -> Vec<u8> {
-    let mut buf = Vec::new();
-    if let Some(pipe) = pipe {
-        let _ = pipe.read_to_end(&mut buf);
-    }
-    buf
 }
 
 fn wait_deadline(child: &mut std::process::Child, guard: &mut GroupGuard, timeout: Duration) -> io::Result<ExitStatus> {
@@ -647,4 +710,46 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
     }
+
+    // A regra do prazo sem relógio está nos testes `pipe_*` abaixo.
+    #[cfg(unix)]
+    #[test]
+    // quarantine: processo real (espera o prazo de 300 ms e um neto de 5 s; roda com `cargo test -- --ignored`).
+    #[ignore]
+    fn neto_que_herda_o_pipe_nao_trava_a_chamada_alem_do_prazo() {
+        // O filho sai logo, mas um neto que herdou o stdout o mantém aberto por 5 s. A chamada volta no prazo com o
+        // que já saiu, em vez de esperar o neto.
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "sleep 5 & echo hi"]);
+        let started = Instant::now();
+        let out = output(&mut cmd, Duration::from_millis(300)).expect("o filho saiu no prazo");
+        assert!(started.elapsed() < Duration::from_secs(3), "a chamada esperou o neto");
+        assert_eq!(out.stdout, b"hi\n");
+    }
+
+
+    #[test]
+    fn pipe_aberto_volta_na_hora_com_prazo_vencido() {
+        // Sem relógio: o pipe continua aberto (o escritor vive), então a coleta com prazo já vencido não espera.
+        let (reader, writer) = std::io::pipe().expect("pipe");
+        let drained = drain_pipe(Some(reader));
+        let (_, closed) = drained.collect(Instant::now());
+        assert!(!closed, "pipe com escritor vivo não pode ser dado como fechado");
+        drop(writer);
+    }
+
+    #[test]
+    fn pipe_fechado_entrega_o_que_saiu() {
+        // Sem relógio: o fim do pipe é sinalizado pelo próprio canal, então a leitura só segue depois de tudo chegar.
+        use std::io::Write;
+        let (reader, mut writer) = std::io::pipe().expect("pipe");
+        let drained = drain_pipe(Some(reader));
+        writer.write_all(b"hi\n").expect("escreve");
+        drop(writer);
+        drained.closed.recv().expect("o leitor chega ao fim quando o escritor sai");
+        let (bytes, closed) = drained.collect(Instant::now());
+        assert!(closed);
+        assert_eq!(bytes, b"hi\n");
+    }
+
 }

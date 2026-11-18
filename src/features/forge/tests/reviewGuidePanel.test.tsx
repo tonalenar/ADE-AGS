@@ -140,6 +140,18 @@ describe("ReviewGuidePanel", () => {
     expect(arg.draft).toContain("## Stop 1 of 2: Primeira");
   });
 
+  it("falha ao listar agentes não aparece como 'nenhum agente'", async () => {
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "review_guide_get") return { entry: null, headSha: "aaa111", stale: false };
+      if (cmd === "run_roster") throw new Error("ipc");
+      throw new Error(`inesperado: ${cmd}`);
+    });
+    await mount();
+    await act(async () => { await Promise.resolve(); });
+    expect(text()).toContain("forge.guide.rosterError");
+    expect(text()).not.toContain("forge.guide.noAgents");
+  });
+
   it("nada é publicado: só leituras e a geração local", async () => {
     respond({ entry, headSha: "aaa111", stale: false });
     await mount();

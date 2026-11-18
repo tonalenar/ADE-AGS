@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
 
 import { createActivity, describeWait, NAV_STALE_MS, type ActivityEnv, type SettleOptions } from "../page/activity";
@@ -196,6 +197,8 @@ describe("activity.quietFor: há quanto tempo a rede está quieta (J4)", () => {
     expect(activity.quietFor()).toBe(0);
     await advance(450);
     // A espera `wait idle` já pode responder: a rede está quieta há mais de 400 ms.
-    expect(activity.size() === 0 && activity.quietFor() >= 400).toBe(true);
+    // Duas asserções separadas: quando uma falhar, a mensagem diz qual das duas condições não se cumpriu (A201).
+    expect(activity.size()).toBe(0);
+    expect(activity.quietFor()).toBeGreaterThanOrEqual(400);
   });
 });

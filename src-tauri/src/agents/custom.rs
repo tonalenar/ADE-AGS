@@ -117,6 +117,20 @@ pub fn find(conn: &rusqlite::Connection, id: &str) -> Option<CustomAgent> {
     .flatten()
 }
 
+/// Carrega as TUIs custom em uma consulta para snapshots que classificam várias abas.
+pub(crate) fn list_for_conn(conn: &rusqlite::Connection) -> Result<Vec<CustomAgent>, String> {
+    let mut statement = conn
+        .prepare(&format!(
+            "SELECT {COLUMNS} FROM custom_agents ORDER BY created_at ASC"
+        ))
+        .map_err(|error| error.to_string())?;
+    statement
+        .query_map([], row_to_custom_agent)
+        .map_err(|error| error.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())
+}
+
 // ── Comandos ─────────────────────────────────────────────────────
 
 pub(crate) fn list_custom_agents_now(db: &DbConnection) -> Result<Vec<CustomAgent>, String> {

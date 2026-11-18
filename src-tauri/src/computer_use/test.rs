@@ -542,3 +542,78 @@ fn rolar_para_liberar_o_alvo_que_nao_mexe_a_tela_para_com_incerteza_sem_tocar() 
     assert!(report.reason.contains("teclado ou a barra"), "{}", report.reason);
     assert_eq!(driver.executions, 1, "rolou uma vez; o toque coberto nunca aconteceu");
 }
+
+#[test]
+fn botao_permitir_de_dialogo_pede_confirmacao() {
+    // Diálogo de sistema (localização, câmera): o controle tocado tem o rótulo "Permitir" e o modelo
+    // respondeu `sensivel: no`. A categoria do rótulo decide sozinha: sem a pessoa, nada é tocado.
+    let mut obs = observation("a", "Permitir que o app use a câmera?");
+    obs.targets[0].label = "Permitir".into();
+    let mut driver = Mock::new(vec![obs], vec![]);
+    driver.approved = false;
+    let report = run(
+        &request(),
+        &mut driver,
+        &mut model(vec![decision(Operation::Click)]),
+    );
+    assert_eq!(report.status, Status::Blocked, "{}", report.reason);
+    assert_eq!((driver.confirmations, driver.executions), (1, 0));
+}
+
+#[test]
+fn rotulo_desconhecido_em_dialogo_de_permissao_herda_a_categoria() {
+    // Um botão que o OCR não leu, ou com outro nome ("Ativar"), dentro de um diálogo de permissão é a própria concessão.
+    assert_eq!(category("Ativar", Some(Category::GrantPermission)), Some(Category::GrantPermission));
+    assert_eq!(category("", Some(Category::GrantPermission)), Some(Category::GrantPermission));
+    assert_eq!(category("Ativar", None), None, "fora de diálogo, rótulo desconhecido não é sensível");
+    assert_eq!(category("Cancelar", Some(Category::GrantPermission)), None, "recusar nunca pede");
+    assert_eq!(category("Não permitir", Some(Category::GrantPermission)), None, "negar nunca pede");
+}
+
+#[test]
+fn categorias_de_acao_sao_multilingues_e_sem_acento() {
+    // Cada termo da taxonomia pede confirmação, em português, inglês e espanhol, com ou sem acento.
+    for label in [
+        "Permitir", "Allow", "Autorizar", "Aceitar", "Accept", "Instalar", "Install", "Enviar", "Send",
+        "Publicar", "Comprar", "Buy", "Pagar", "Excluir", "Apagar", "Delete", "Borrar", "Concluir", "Finalizar",
+        "Finish", "Confirmar", "Sair", "Logout", "Sign out", "Desligar", "Senha", "Password", "Contraseña",
+        "Cerrar sesión", "Instálar", "Concluír",
+    ] {
+        assert!(sensitive_label(label), "{label}");
+    }
+    for label in ["Abrir detalhes", "Continuar", "Cancelar", "Voltar", "Rolar para baixo", "Concluído"] {
+        assert!(!sensitive_label(label), "{label} não é ação sensível");
+    }
+}
+
+#[test]
+fn termos_de_cada_categoria_valem_em_pt_en_e_es() {
+    // Rodada 1: cada termo da taxonomia, sozinho, é sensível na categoria certa, e os equivalentes dos três idiomas valem igual.
+    for (label, expected) in [
+        ("Permitir", Category::GrantPermission), ("Allow", Category::GrantPermission), ("Autorizar", Category::GrantPermission),
+        ("Authorize", Category::GrantPermission), ("Aceitar", Category::GrantPermission), ("Aceptar", Category::GrantPermission),
+        ("Accept", Category::GrantPermission), ("Confiar", Category::GrantPermission), ("Trust", Category::GrantPermission),
+        ("Abrir mesmo assim", Category::GrantPermission), ("Open anyway", Category::GrantPermission),
+        ("Abrir de todos modos", Category::GrantPermission),
+        ("Instalar", Category::Install), ("Install", Category::Install),
+        ("Enviar", Category::Send), ("Send", Category::Send),
+        ("Comprar", Category::Purchase), ("Buy", Category::Purchase), ("Purchase", Category::Purchase),
+        ("Excluir", Category::Delete), ("Apagar", Category::Delete), ("Delete", Category::Delete), ("Remove", Category::Delete),
+        ("Eliminar", Category::Delete), ("Borrar", Category::Delete),
+        ("Concluir", Category::Finish), ("Finalizar", Category::Finish), ("Finish", Category::Finish), ("Done", Category::Finish),
+        ("Terminar", Category::Finish),
+    ] {
+        assert_eq!(category(label, None), Some(expected), "{label}");
+    }
+    // Varredura: cada termo de TERMS, sozinho, cai na sua categoria. Um termo novo sem teste não passa despercebido.
+    for (cat, terms) in TERMS {
+        for term in *terms {
+            assert_eq!(category(term, None), Some(*cat), "{term}");
+        }
+    }
+    // Recusa continua livre em espanhol também, e o diálogo em espanhol ainda marca o botão genérico.
+    assert_eq!(category("Ahora no", Some(Category::GrantPermission)), None);
+    assert_eq!(category("Cerrar", Some(Category::GrantPermission)), None);
+    assert_eq!(dialog_cue("¿Quiere acceder a Documentos?"), Some(Category::GrantPermission));
+    assert_eq!(dialog_cue("Desea instalar esta aplicación"), Some(Category::Install));
+}

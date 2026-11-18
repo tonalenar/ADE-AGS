@@ -58,21 +58,36 @@ export function SkillDetailPage() {
   const fromRegistry = meta?.registryName != null;
   const dirty = content !== savedContent || name !== savedName;
 
-  const load = (skillId: string) =>
+  const applyDetail = (detail: {
+    name: string;
+    content: string;
+    version: string;
+    categories: string[];
+    compatibleAgents: string[];
+    author: string | null;
+    license: string | null;
+    homepage: string | null;
+    registryName: string | null;
+  }) => {
+    setSavedName(detail.name);
+    setName(detail.name);
+    setContent(detail.content);
+    setSavedContent(detail.content);
+    setMeta({
+      version: detail.version,
+      categories: detail.categories,
+      compatibleAgents: detail.compatibleAgents,
+      author: detail.author,
+      license: detail.license,
+      homepage: detail.homepage,
+      registryName: detail.registryName,
+    });
+  };
+
+  const load = (skillId: string, isAlive: () => boolean = () => true) =>
     getSkillDetail(skillId).then((detail) => {
-      setSavedName(detail.name);
-      setName(detail.name);
-      setContent(detail.content);
-      setSavedContent(detail.content);
-      setMeta({
-        version: detail.version,
-        categories: detail.categories,
-        compatibleAgents: detail.compatibleAgents,
-        author: detail.author,
-        license: detail.license,
-        homepage: detail.homepage,
-        registryName: detail.registryName,
-      });
+      if (!isAlive()) return;
+      applyDetail(detail);
     });
 
   useEffect(() => {
@@ -95,9 +110,13 @@ export function SkillDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    load(id)
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
+    let alive = true;
+    setLoading(true);
+    setError("");
+    load(id, () => alive)
+      .catch((e) => { if (alive) setError(String(e)); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 

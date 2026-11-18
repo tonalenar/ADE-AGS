@@ -19,7 +19,7 @@ describe("«Citar» está ligado às duas conversas (protocolo e TUI) igual ao T
 
   it("o texto que vai ao agente leva as citações depois do texto e antes dos anexos", () => {
     const composer = read("../ChatComposer.tsx");
-    expect(composer).toContain("send(withQuotes(text, quotes), attachments.list)");
+    expect(composer).toContain("send(withQuotes(sentText, quotes), sentAttachments)");
     expect(composer).toContain("onQueue(withQuotes(text, quotes), attachments.list)");
     const attach = read("../attachments/send.ts");
     expect(attach).toContain("const context = takeImageContext");

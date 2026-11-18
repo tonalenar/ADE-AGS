@@ -10,6 +10,7 @@ import { useSkillReadme } from "./useSkillReadme";
 import { flatOrder, groupByRegistry, keyOf } from "./palette";
 import { moveSelection, reconcileSelection, useSelectionVisible } from "@/shared/ui/paletteNav";
 import { RegistryFilterSidebar, type RegistryFilter } from "./RegistryFilterSidebar";
+import { skipInitialEmptySkillsLoad } from "./marketplaceQuery";
 
 export function MarketplacePage() {
   const { t } = useTranslation();
@@ -38,12 +39,17 @@ export function MarketplacePage() {
   const loadInstalledSkills = useSkillsStore((s) => s.loadSkills);
 
   useEffect(() => {
-    loadRegistries();
-    loadSkills();
-    loadInstalledSkills();
+    void loadRegistries().catch(() => {});
+    void loadSkills();
+    void loadInstalledSkills();
   }, [loadRegistries, loadSkills, loadInstalledSkills]);
 
+  const skipFirstQuery = useRef(true);
   useEffect(() => {
+    if (skipFirstQuery.current) {
+      skipFirstQuery.current = false;
+      if (skipInitialEmptySkillsLoad(true, query)) return;
+    }
     const handle = setTimeout(() => loadSkills(query), 250);
     return () => clearTimeout(handle);
   }, [query, loadSkills]);
@@ -117,7 +123,11 @@ export function MarketplacePage() {
   };
 
   const handleRefresh = async (id: string) => {
-    await refreshRegistry(id);
+    try {
+      await refreshRegistry(id);
+    } catch {
+      /* o store já mostra o erro */
+    }
   };
 
   const groups = useMemo(() => groupByRegistry(visible), [visible]);
@@ -154,7 +164,7 @@ export function MarketplacePage() {
       setSelectedKey((current) => moveSelection(order.map(keyOf), current, e.key === "ArrowDown" ? 1 : -1));
       return;
     }
-    if (e.key === "Enter" && selected && !isInstalled(selected)) {
+    if (e.key === "Enter" && selected && !isInstalled(selected) && installingKey === null) {
       e.preventDefault();
       handleInstall(selected.registryId, selected.id);
     }

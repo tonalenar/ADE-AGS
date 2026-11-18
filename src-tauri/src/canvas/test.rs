@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn arquivo_ilegivel_nao_e_regravado() {
+    let root = std::env::temp_dir().join(format!("ags-canvas-corrupt-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("canvas.json");
+    let original = br#"{"boards":"#;
+    std::fs::write(&path, original).unwrap();
+    TEST_FILE_PATH.with(|slot| *slot.borrow_mut() = Some(path.clone()));
+
+    let result = save_board("w|a", Board::default());
+
+    TEST_FILE_PATH.with(|slot| *slot.borrow_mut() = None);
+    assert!(result.unwrap_err().contains("ilegível"));
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn gemini_desktop_is_a_peer_and_its_crown_reaches_the_team_but_browsers_are_not_peers() {
     let mut b=Board::default();
     b.portals.insert("portal-g".into(),Portal{kind:Some("gemini".into()),..Default::default()});

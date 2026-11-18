@@ -327,25 +327,41 @@ fn data_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// `floors.json` dentro da pasta dada. Ausente ou ilegível vira lista vazia, como antes.
-fn read_file_in(dir: &Path) -> Vec<Floor> {
-    std::fs::read_to_string(dir.join("floors.json"))
-        .ok()
-        .and_then(|raw| serde_json::from_str::<FloorsFile>(&raw).ok())
-        .map(|f| f.floors)
-        .unwrap_or_default()
+/// Lê a lista preservando erros de leitura ou parse; arquivo ilegível nunca vira lista vazia.
+fn read_file_in(dir: &Path) -> Result<Vec<Floor>, String> {
+    crate::util::user_json::read_user_json::<FloorsFile>(&dir.join("floors.json"))
+        .map(|file| file.map(|f| f.floors).unwrap_or_default())
+        .map_err(|error| error.to_string())
 }
 
-fn read_file() -> Vec<Floor> {
-    data_dir().map(|dir| read_file_in(&dir)).unwrap_or_default()
+fn read_file() -> Result<Vec<Floor>, String> {
+    read_file_in(&data_dir()?)
 }
 
 fn write_file_in(dir: &Path, floors: &[Floor]) -> Result<(), String> {
-    let path = dir.join("floors.json");
-    let tmp = path.with_extension("json.tmp");
-    let body = serde_json::to_string_pretty(&FloorsFile { floors: floors.to_vec() }).map_err(|e| e.to_string())?;
-    std::fs::write(&tmp, body).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    crate::util::user_json::write_user_json(
+        &dir.join("floors.json"),
+        &FloorsFile { floors: floors.to_vec() },
+    )
+}
+
+fn persist_floor(
+    floors: &mut Vec<Floor>,
+    floor: Floor,
+    persist: impl FnOnce(&[Floor]) -> Result<(), String>,
+    rollback: impl FnOnce() -> Result<(), String>,
+) -> Result<Floor, String> {
+    floors.push(floor.clone());
+    if let Err(persist_error) = persist(floors) {
+        floors.pop();
+        return match rollback() {
+            Ok(()) => Err(persist_error),
+            Err(rollback_error) => Err(format!(
+                "{persist_error}; não foi possível reverter o worktree recém-criado: {rollback_error}"
+            )),
+        };
+    }
+    Ok(floor)
 }
 
 /// Una ruta en forma comparable: barras `/`, sin barra final y, en Windows, sin
@@ -494,7 +510,7 @@ pub(crate) fn apply_exclusions(root: &Path, excluded: &[String]) -> Result<(), S
 }
 
 /// Todos los pisos guardados.
-pub fn all() -> Vec<Floor> {
+pub fn all() -> Result<Vec<Floor>, String> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     read_file()
 }
@@ -529,7 +545,7 @@ fn create_with_in(
 ) -> Result<Floor, String> {
     let (ground, name, excluded) = {
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let floors = read_file_in(dir);
+        let floors = read_file_in(dir)?;
         let ground = ground_for(&floors, cwd);
         let name = check_name(&floors, &ground, name)?;
         // Se valida antes de crear nada: una pasta mala no deja un worktree a medias.
@@ -616,30 +632,34 @@ fn create_with_in(
         branch: wt.branch.clone(),
         excluded,
     };
-    let duplicate_floor = {
+    let rollback_wt = wt.clone();
+    let persist_result = (|| {
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut floors = read_file_in(dir);
-        let duplicate = floors
+        let mut floors = read_file_in(dir)?;
+        if floors
             .iter()
-            .any(|existing| existing.ground == floor.ground && existing.name == floor.name);
-        if !duplicate {
-            floors.push(floor.clone());
-            write_file_in(dir, &floors)?;
+            .any(|existing| existing.ground == floor.ground && existing.name == floor.name)
+        {
+            return Err("já existe um andar com esse nome nesse projeto".to_string());
         }
-        duplicate
-    };
-    if duplicate_floor {
-        let error = "já existe um andar com esse nome nesse projeto";
+        persist_floor(
+            &mut floors,
+            floor.clone(),
+            |updated| write_file_in(dir, updated),
+            || Ok(()),
+        )
+    })();
+    if let Err(error) = persist_result {
         antes_do_io();
         let undo = crate::runs::worktrees::remove_with_branch(
             Path::new(&ground),
-            &wt,
+            &rollback_wt,
             Path::new(""),
             Path::new(""),
             existing.is_none(),
         );
         return Err(match undo {
-            Ok(_) => error.into(),
+            Ok(_) => error,
             Err(cleanup) => format!(
                 "{error}; além disso, o worktree ficou em {}: {cleanup}",
                 wt.root.display()
@@ -694,7 +714,7 @@ fn remove_with_in(
 ) -> Result<Dropped, String> {
     let floor = {
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let floors = read_file_in(dir);
+        let floors = read_file_in(dir)?;
         floors
             .iter()
             .find(|f| f.id == id)
@@ -732,7 +752,7 @@ fn remove_with_in(
 
     {
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut floors = read_file_in(dir);
+        let mut floors = read_file_in(dir)?;
         let current = floors
             .iter()
             .find(|candidate| candidate.id == id)
@@ -758,22 +778,22 @@ pub struct FloorList {
     pub floors: Vec<Floor>,
 }
 
-pub fn list_for(cwd: &str) -> FloorList {
-    let floors = all();
+pub fn list_for(cwd: &str) -> Result<FloorList, String> {
+    let floors = all()?;
     let ground = ground_for(&floors, cwd);
-    FloorList {
+    Ok(FloorList {
         floors: floors_of(&floors, &ground),
         ground,
-    }
+    })
 }
 
 /// Piso que contém `cwd`, quando a pasta já é ou está dentro de um worktree gerido.
-pub(crate) fn floor_for_path(cwd: &str) -> Option<Floor> {
+pub(crate) fn floor_for_path(cwd: &str) -> Result<Option<Floor>, String> {
     let here = norm(cwd);
-    all().into_iter().find(|floor| {
+    Ok(all()?.into_iter().find(|floor| {
         let root = norm(&floor.root);
         here == root || here.starts_with(&format!("{root}/"))
-    })
+    }))
 }
 
 /// El evento que avisa al frontend que cambió la lista de pisos (por ejemplo, porque un
@@ -784,7 +804,7 @@ pub const CHANGED_EVENT: &str = "cc-floors-changed";
 pub async fn floor_list(cwd: String) -> Result<FloorList, String> {
     tauri::async_runtime::spawn_blocking(move || list_for(&cwd))
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?
 }
 
 /// `async`: `git worktree add` hace un checkout completo y en un repo grande tarda; en la
@@ -1217,7 +1237,7 @@ mod test {
             .expect("remover o andar");
         assert!(passos.get() > depois_de_criar, "a sonda não foi alcançada ao remover");
         assert_eq!(dropped.name, "andar-teste");
-        assert!(read_file_in(&data).is_empty(), "o andar removido continuou na lista");
+        assert!(read_file_in(&data).unwrap().is_empty(), "o andar removido continuou na lista");
 
         let _ = std::fs::remove_dir_all(scratch);
     }

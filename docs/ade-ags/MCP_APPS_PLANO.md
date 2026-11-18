@@ -33,7 +33,7 @@ Auditado diretamente no código-fonte da ADE:
 
 1. **Prévia visual isolada de blocos HTML (estática):**
    - [`src/features/chat/timeline/VisualReplyPreview.tsx`](../../src/features/chat/timeline/VisualReplyPreview.tsx#L10-L47): a função `appThemeDeclarations()` (linhas 10–24) extrai e sanitiza os tokens de tema CSS (`COLOR_TOKENS`, `FONT_TOKENS`), rejeitando caracteres perigosos como `<>;{}`.
-   - [`src/features/chat/timeline/VisualReplyPreview.tsx`](../../src/features/chat/timeline/VisualReplyPreview.tsx#L26-L47): `visualReplyDocument(html)` monta um documento HTML com CSP restritiva (`default-src 'none'; connect-src 'none'; img-src data: blob:; style-src 'unsafe-inline' data:; script-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; navigate-to 'none'`) e injeta script para interceptar e prevenir navegação por cliques em `a[href]` (linhas 45–46).
+   - [`src/features/chat/timeline/VisualReplyPreview.tsx`](../../src/features/chat/timeline/VisualReplyPreview.tsx#L26-L47): `visualReplyDocument(html)` monta um documento HTML com CSP restritiva (`default-src 'none'; connect-src 'none'; img-src data: blob:; style-src 'unsafe-inline' data:; script-src 'unsafe-inline'; frame-src 'none'; form-action 'none'`) e injeta script para interceptar e prevenir navegação por cliques em `a[href]` (linhas 45–46).
    - [`src/features/chat/timeline/VisualReplyPreview.tsx`](../../src/features/chat/timeline/VisualReplyPreview.tsx#L49-L74): o componente `VisualReplyPreview` renderiza a página em um modal `ViewModal` com `<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" srcDoc={...} />`.
    - [`src/features/chat/timeline/CodeBlockFrame.tsx`](../../src/features/chat/timeline/CodeBlockFrame.tsx#L8-L62): exibe a ação explícita de "Visualizar" apenas para blocos de código com linguagem `html`/`htm`, abrindo o modal.
 
@@ -109,7 +109,7 @@ flowchart TD
 - **Escopo:** Componente visual para a timeline do chat substituindo a caixa rígida de tool call quando há app interativo.
 - **Isolamento:**
   - `<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" srcDoc={...}>`
-  - CSP rigorosa: `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; navigate-to 'none'`.
+  - CSP rigorosa: `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob: https:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'`.
   - Injeção das variáveis de tema CSS da ADE (`appThemeDeclarations()` já validado em `VisualReplyPreview.tsx` L10-24).
 - **Contenção de Navegação:** Interceptar eventos de clique em `<a>`, submissões de formulário e tentativas de alteração de `window.location`. Qualquer tentativa de navegação fora da página interrompe e desmonta o app imediatamente, exibindo banner informativo.
 
@@ -153,7 +153,7 @@ flowchart TD
 | **Execução Não Autorizada de Ferramentas** | Alta | O app só pode invocar ferramentas do seu próprio servidor MCP de origem. Ferramentas que causam mutação exigem autorização via broker de permissões (`user.ask`). |
 | **SSRF e Varredura de Rede Local** | Alta | Bloqueio de conexões para IPs privados/reservados (RFC 1918) e loopback direto a partir do app MCP. A CSP padrão impõe `connect-src 'none'`, exigindo que dados transitem apenas pelo protocolo MCP autorizado. |
 | **Clickjacking / Sequestro de Foco em Tela Cheia** | Média | Debounce de 5 segundos sem eventos externos antes de permitir transição para tela cheia; desarme instantâneo com `Escape` ou na chegada de qualquer aprovação. |
-| **Navegação Maliciosa / Phishing** | Média | Tentativas de navegação externa ou desvio da página original causam desligamento imediato do app (`navigate-to 'none'`, listener de descarregamento). Links externos abrem exclusivamente no navegador padrão do sistema. |
+| **Navegação Maliciosa / Phishing** | Média | Clique em link, envio de formulário e `window.open` são cancelados pelo guarda do quadro, e o app é desligado. A navegação de primeiro nível fica com o sandbox (sem `allow-top-navigation`). A diretiva `navigate-to` não entra: nenhum navegador a aplica. Links externos abrem exclusivamente no navegador padrão do sistema. Risco residual: um script do próprio app pode trocar o documento do quadro (`location.href`), e o sandbox não impede isso; o app do MCP ainda não é bloqueado nesse caso (a prévia de resposta visual é). |
 
 ---
 
@@ -196,7 +196,7 @@ No resultado que a timeline já guarda em `tool.output`, o mesmo objeto aparece 
 ### O que a fatia faz
 
 - `parseMcpAppResource` acha o recurso. A linha da ferramenta (`ToolRow`) mostra o app no lugar do `<pre>` do resultado.
-- Contêiner: iframe `srcdoc`, `sandbox="allow-scripts"` (a constante `DESIGN_SANDBOX`, sem `allow-same-origin`), `referrerpolicy="no-referrer"`. CSP reaproveitada de `isolatedFrame.ts` (`ISOLATED_FRAME_CSP`, a mesma da prévia visual: `connect-src 'none'`, `navigate-to 'none'`, sem `https:`). `<meta http-equiv>` e `<base>` saem com `stripUnsafeHead` de `srcdoc.ts`. O tema entra como variáveis CSS via `appThemeDeclarations()`.
+- Contêiner: iframe `srcdoc`, `sandbox="allow-scripts"` (a constante `DESIGN_SANDBOX`, sem `allow-same-origin`), `referrerpolicy="no-referrer"`. CSP reaproveitada de `isolatedFrame.ts` (`ISOLATED_FRAME_CSP`, a mesma da prévia visual: `connect-src 'none'`, sem `navigate-to`, que nenhum navegador aplica, e sem `https:`). `<meta http-equiv>` e `<base>` saem com `stripUnsafeHead` de `srcdoc.ts`. O tema entra como variáveis CSS via `appThemeDeclarations()`.
 - Navegação: o script do srcdoc cancela clique em link externo, submit e `window.open`, e avisa `navigate-away`. O host desmonta o iframe e mostra que o app parou. Âncora (`#`) fica na página.
 - Na fatia 1, qualquer JSON-RPC com `id` (`tools/call`, `ui/message`, `ui/request-display-mode`, `ui/initialize`, …) volta erro `-32601` com a mensagem `não suportado ainda`, e o método entra no registro da sessão. Notificação sem `id` só é registrada. Erro do app não sobe para a timeline (`McpAppBoundary` e `try/catch` na ponte). Desde a fatia 2 isso vale para o que não tem handler (ver 7.1).
 - `close()` tira o listener de `message`. Esta fatia não arma timer no host. O documento do iframe some com o quadro, e os timers de lá vão junto.

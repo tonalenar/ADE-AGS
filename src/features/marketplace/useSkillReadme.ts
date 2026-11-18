@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { marketplaceSkillReadme } from "./ipc";
+import { README_DEBOUNCE_MS, skillReadmeCache } from "./skillReadme";
 
 export interface ReadmeState {
   /** El markdown crudo. `null` mientras carga o si este repo no puede servirlo. */
@@ -26,18 +27,29 @@ export function useSkillReadme(registryId: string | null, skillId: string | null
       return;
     }
 
+    const cached = skillReadmeCache.get(registryId, skillId);
+    if (cached !== undefined) {
+      setState({ content: cached, loading: false, unavailable: false });
+      return;
+    }
+
     let stale = false;
     setState({ content: null, loading: true, unavailable: false });
+    const handle = window.setTimeout(() => {
+      marketplaceSkillReadme(registryId, skillId)
+        .then((content) => {
+          skillReadmeCache.set(registryId, skillId, content);
+          if (!stale) setState({ content, loading: false, unavailable: false });
+        })
+        .catch(() => {
+          if (!stale) setState({ content: null, loading: false, unavailable: true });
+        });
+    }, README_DEBOUNCE_MS);
 
-    marketplaceSkillReadme(registryId, skillId)
-      .then((content) => {
-        if (!stale) setState({ content, loading: false, unavailable: false });
-      })
-      .catch(() => {
-        if (!stale) setState({ content: null, loading: false, unavailable: true });
-      });
-
-    return () => { stale = true; };
+    return () => {
+      stale = true;
+      window.clearTimeout(handle);
+    };
   }, [registryId, skillId]);
 
   return state;

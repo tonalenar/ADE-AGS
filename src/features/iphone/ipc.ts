@@ -6,10 +6,22 @@ import type { SimPlace } from "@/features/simulator/ipc";
 
 import type { HardwareButton, MirrorStatus, PhysicalDevice, SystemGesture, Unavailable } from "./model";
 
+/**
+ * Por que a lista não veio (`DiscoveryError` no Rust). Cada variante tem a sua mensagem; `timeout` é falha momentânea
+ * e a lista anterior continua na tela.
+ */
+export type DiscoveryError =
+  | { kind: "xcodeMissing" }
+  | { kind: "timeout" }
+  | { kind: "notTrusted" }
+  | { kind: "other"; message: string };
+
 export interface PhysicalList {
   devices: PhysicalDevice[];
   /** Por que não dá para espelhar neste Mac (`null` = dá). */
   unavailable: Unavailable | null;
+  /** Por que a consulta falhou (`null` = deu certo). */
+  error: DiscoveryError | null;
 }
 
 export const iphoneDevices = () => invoke<PhysicalList>("iphone_devices");

@@ -363,4 +363,89 @@ mod espelho {
         let chamadas = env.chamadas.lock().unwrap();
         assert!(chamadas.devicectl.is_empty() && chamadas.espelho.is_empty());
     }
+
+    /// Um pedido de parada que já tirou a gravação da lista, mas ainda não terminou, segura o início de
+    /// outra: `stopping` tem que estar ligado antes de a gravação sair da lista (sem a janela de corrida).
+    #[test]
+    fn parar_marca_a_finalizacao_antes_de_soltar_a_gravacao() {
+        struct Parado;
+        impl MirrorHandle for Parado {
+            fn stop(self: Box<Self>) -> Result<(), String> {
+                Ok(())
+            }
+        }
+        let env = falso(None);
+        let registro = Registry::new();
+        *registro.active.lock().unwrap() = Some(ActiveRecording {
+            id: "iphone:ALVO".into(),
+            kind: "iphone".into(),
+            backend: Backend::Mirror(Box::new(Parado)),
+            path: env.dir.join("antiga.mp4"),
+        });
+        let (_tirada, _freio) = registro.tomar_para_parar("iphone:ALVO").unwrap();
+        assert!(registro.status().is_none());
+        let erro = registro.start(&env, "android", "serial").unwrap_err();
+        assert!(erro.contains("ainda está sendo finalizada"), "{erro}");
+    }
+}
+
+/// O teto da parada na saída: quem chama volta no máximo no prazo, mesmo que a parada não termine.
+#[test]
+fn parada_que_estoura_o_teto_devolve_o_controle_sem_esperar() {
+    // A parada fica presa até o teste soltá-la: com teto zero, quem chamou tem que voltar na hora.
+    let (soltar, preso) = std::sync::mpsc::channel::<()>();
+    let terminou = encerrar_dentro_do_teto(
+        move || {
+            // Limitado: a versão síncrona falha aqui em vez de travar o teste. A parada real fica presa até soltada.
+            let _ = preso.recv_timeout(Duration::from_secs(5));
+        },
+        Duration::ZERO,
+    );
+    assert!(!terminou, "a parada presa não pode segurar quem chama além do teto");
+    let _ = soltar.send(());
+}
+
+#[test]
+fn parada_que_termina_dentro_do_teto_conta_como_terminada() {
+    assert!(encerrar_dentro_do_teto(|| {}, Duration::from_secs(5)));
+}
+
+/// Uma falha ao finalizar tem que chegar ao log com o id da gravação, não só ao stderr.
+#[test]
+fn falha_ao_parar_e_relatada_com_o_id() {
+    struct Falha;
+    impl MirrorHandle for Falha {
+        fn stop(self: Box<Self>) -> Result<(), String> {
+            Err("escritor travado".into())
+        }
+    }
+    let registro = Registry::new();
+    *registro.active.lock().unwrap() = Some(ActiveRecording {
+        id: "iphone:ALVO".into(),
+        kind: "iphone".into(),
+        backend: Backend::Mirror(Box::new(Falha)),
+        path: PathBuf::from("/nao/usado.mp4"),
+    });
+    let (id, erro) = registro.parar_ativa().expect("a falha de parada precisa aparecer");
+    assert_eq!(id, "iphone:ALVO");
+    assert!(erro.contains("escritor travado"), "{erro}");
+    let dir = std::env::temp_dir().join(format!("ade-parada-{}", uuid::Uuid::new_v4()));
+    let caminho = registrar_erro_de_parada(&dir, &id, &erro).unwrap();
+    let texto = std::fs::read_to_string(&caminho).unwrap();
+    assert!(texto.contains("iphone:ALVO") && texto.contains("escritor travado"), "{texto}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn parar_sem_gravacao_nao_relata_falha() {
+    assert!(Registry::new().parar_ativa().is_none());
+}
+
+#[test]
+fn nao_ha_parada_legada_que_engole_o_erro_da_finalizacao() {
+    let fonte = include_str!("../screen_recording.rs");
+    assert!(
+        !fonte.contains("pub fn stop_all()"),
+        "a parada legada descarta o Err da finalização; só vale stop_all_with_deadline"
+    );
 }

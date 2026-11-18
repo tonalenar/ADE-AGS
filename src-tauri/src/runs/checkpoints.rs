@@ -421,21 +421,56 @@ pub fn rollback(
     run_id: &str,
     plan: &Plan,
 ) -> Result<Vec<Checkpoint>, String> {
-    let mut safeties = Vec::new();
+    rollback_com(db, run_id, plan, || {})
+}
+
+/// Reserva de um run para rollback ou restauração de foto. O marcador sai ao descartar a reserva.
+pub(super) struct Reserva {
+    run_id: String,
+}
+
+impl Drop for Reserva {
+    fn drop(&mut self) {
+        super::scheduler::desmarcar_manutencao(&self.run_id);
+    }
+}
+
+/// Confere e marca o run antes do I/O; o tick não pode despachar tarefas enquanto o git trabalha.
+fn reservar(db: &crate::database::DbConnection, run_id: &str, ocupado: impl FnOnce(&str) -> String) -> Result<Reserva, String> {
+    let _tick = super::scheduler::tick_lock();
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        if let Some(live) = live_task(&conn, run_id)? {
+            return Err(ocupado(&live));
+        }
+    }
+    if !super::scheduler::marcar_manutencao(run_id) {
+        return Err("Este run já está voltando atrás ou restaurando uma foto: espere terminar.".into());
+    }
+    Ok(Reserva { run_id: run_id.to_string() })
+}
+
+/// Igual a `rollback`; a sonda roda depois da reserva e antes de qualquer I/O.
+fn rollback_com(db: &crate::database::DbConnection, run_id: &str, plan: &Plan, antes_do_git: impl FnOnce()) -> Result<Vec<Checkpoint>, String> {
+    let reserva = reservar(db, run_id, |live| format!("A tarefa '{live}' está rodando: pare-a antes de voltar atrás."))?;
     // Todo se valida y se fotografía ANTES de tocar nada: si algo no se puede, no queda a medias.
     let mut to_restore = Vec::new();
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         for (dir, cp_id) in &plan.restores {
             let cp = get(&conn, cp_id)?.ok_or("Uma foto do plano já não existe.")?;
-            if !Path::new(dir).exists() {
-                return Err(format!(
-                    "A pasta {dir} já não existe (worktree descartado?): não dá para restaurá-la."
-                ));
-            }
             to_restore.push((dir.clone(), cp));
         }
     }
+    for (dir, _) in &to_restore {
+        if !Path::new(dir).exists() {
+            return Err(format!(
+                "A pasta {dir} já não existe (worktree descartado?): não dá para restaurá-la."
+            ));
+        }
+    }
+    antes_do_git();
+    let mut safeties = Vec::new();
     for (dir, _) in &to_restore {
         safeties.push(take(
             db,
@@ -450,6 +485,9 @@ pub fn rollback(
         let head = cp.head_sha.as_deref().ok_or("A foto não guardou o HEAD.")?;
         restore(Path::new(dir), &cp.commit_sha, head)?;
     }
+    // A gravação das tarefas volta a tomar o lock do tick. A marca só sai depois (`Reserva::drop`), então o tick nunca
+    // vê o meio-termo: ou o run ainda está marcado, ou já está com as tarefas na fila.
+    let _tick = super::scheduler::tick_lock();
     let conn = db.lock().map_err(|e| e.to_string())?;
     for id in &plan.tasks {
         conn.execute(
@@ -461,10 +499,23 @@ pub fn rollback(
         .map_err(|e| e.to_string())?;
     }
     super::store::refresh_run_status(&conn, run_id)?;
+    drop(reserva);
     Ok(safeties)
 }
 
 // ── Para la pantalla ────────────────────────────────────────────────
+
+/// A primeira tarefa do run que está rodando ou pronta para rodar (ocupa a vaga), se houver.
+fn live_task(conn: &Connection, run_id: &str) -> Result<Option<String>, String> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT id FROM tasks WHERE run_id = ?1 AND status IN (?2, ?3) LIMIT 1",
+        params![run_id, status::RUNNING, status::READY],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
 
 fn db_of(app: &tauri::AppHandle) -> Result<crate::database::DbConnection, String> {
     use tauri::Manager;
@@ -622,28 +673,27 @@ pub async fn run_checkpoint_create(
 #[tauri::command(async)]
 pub async fn run_restore_checkpoint(app: tauri::AppHandle, id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-
-            let db = db_of(&app)?;
-            let (cp, live) = {
-                let conn = db.lock().map_err(|e| e.to_string())?;
-                let cp = get(&conn, &id)?.ok_or("A foto não existe mais.")?;
-                let live: i64 = conn
-                    .query_row("SELECT COUNT(*) FROM tasks WHERE run_id = ?1 AND status IN ('running','ready')", [&cp.run_id], |r| r.get(0))
-                    .map_err(|e| e.to_string())?;
-                (cp, live)
-            };
-            if live > 0 {
-                return Err("Há tarefas rodando neste run: pare-as antes de restaurar uma foto.".into());
-            }
-            if !Path::new(&cp.dir).exists() {
-                return Err(format!("A pasta {} já não existe.", cp.dir));
-            }
-            let head = cp.head_sha.as_deref().ok_or("A foto não guardou o HEAD.")?;
-            take(&db, &cp.run_id, None, Path::new(&cp.dir), kind::SAFETY, "antes de restaurar uma foto")?;
-            restore(Path::new(&cp.dir), &cp.commit_sha, head)
+        let db = db_of(&app)?;
+        restaurar_com(&db, &id, || {})
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|error| error.to_string())?
+}
+
+/// Restaura uma foto depois de reservar o run e conferir que não há tarefa ativa.
+fn restaurar_com(db: &crate::database::DbConnection, id: &str, antes_do_git: impl FnOnce()) -> Result<(), String> {
+    let cp = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        get(&conn, id)?.ok_or("A foto não existe mais.")?
+    };
+    let _reserva = reservar(db, &cp.run_id, |_| "Há tarefas rodando neste run: pare-as antes de restaurar uma foto.".into())?;
+    if !Path::new(&cp.dir).exists() {
+        return Err(format!("A pasta {} já não existe.", cp.dir));
+    }
+    let head = cp.head_sha.as_deref().ok_or("A foto não guardou o HEAD.")?;
+    antes_do_git();
+    take(db, &cp.run_id, None, Path::new(&cp.dir), kind::SAFETY, "antes de restaurar uma foto")?;
+    restore(Path::new(&cp.dir), &cp.commit_sha, head)
 }
 
 /// Foto automática antes o después de una tarea: nunca rompe nada si falla.

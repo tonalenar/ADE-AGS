@@ -7,9 +7,7 @@ import { Button, Tooltip } from "neogestify-ui-components";
 import { useAccountsStore } from "@/features/accounts/store";
 import { systemAccounts } from "@/features/accounts/usage";
 import { AccountUsagePopover } from "@/features/accounts/AccountUsagePopover";
-import { LoginTerminal } from "@/features/accounts/LoginTerminal";
-import { accountLoginCommand } from "@/features/accounts/login";
-import { AppDialog } from "@/shared/ui/AppDialog";
+import { useStatusLoginStore } from "@/app/statusLoginStore";
 import type { AgentAccount } from "@/features/accounts/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { agentIcon } from "@/features/agents/agentIcons";
@@ -42,7 +40,10 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const [system, setSystem] = useState<AgentAccount[]>([]);
   const [open, setOpen] = useState<string | null>(null);
-  const [loginFor, setLoginFor] = useState<AgentAccount | null>(null);
+  // O login aberto mora na store (ver `statusLoginStore.ts`), fora desta barra: o diálogo não cai com ela.
+  const loginOpen = useStatusLoginStore((s) => s.account !== null);
+  const openLogin = useStatusLoginStore((s) => s.open);
+  const loginOpenedRef = useRef(false);
   const popRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -62,11 +63,17 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
   // La principal de cada TUI instalada, más los perfiles con sesión iniciada: un perfil
   // creado y nunca logueado no dice nada acá y solo llenaría la barra.
   const shown = [...system, ...profiles.filter((a) => a.loggedIn)];
-  const closeLogin = () => {
-    setLoginFor(null);
+  // Ao fechar o login (a store volta a nulo), recarrega as contas: o login pode ter mudado a sessão.
+  useEffect(() => {
+    if (loginOpen) {
+      loginOpenedRef.current = true;
+      return;
+    }
+    if (!loginOpenedRef.current) return;
+    loginOpenedRef.current = false;
     load().catch(console.error);
     systemAccounts().then(setSystem).catch(console.error);
-  };
+  }, [loginOpen, load]);
 
   return (
     <footer className="relative flex items-center gap-2.5 h-6 shrink-0 px-3
@@ -129,7 +136,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
         >
           <AccountUsagePopover
             account={shown.find((a) => a.id === open)!}
-            onLogin={() => { setLoginFor(shown.find((a) => a.id === open)!); setOpen(null); }}
+            onLogin={() => { openLogin(shown.find((a) => a.id === open)!); setOpen(null); }}
           />
         </div>
       )}
@@ -156,19 +163,6 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
       <span className="font-mono">{t("status.agents", { n: tabs.length })}</span>
       <FleetIndicator />
       <OrchestratorIndicator />
-      {loginFor && (
-        <AppDialog
-          title={t("settings.accounts.login.title", { name: loginFor.label ?? loginFor.name })}
-          onClose={closeLogin}
-          size="lg"
-          footer={<Button variant="primary" onClick={closeLogin}>{t("settings.accounts.login.done")}</Button>}
-        >
-          <p className="text-xs text-gray-500 dark:text-white/50 mb-3">
-            {t("settings.accounts.login.helper", { command: accountLoginCommand(loginFor) })}
-          </p>
-          <LoginTerminal key={loginFor.id} account={loginFor} />
-        </AppDialog>
-      )}
     </footer>
   );
 }

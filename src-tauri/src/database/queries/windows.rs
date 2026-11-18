@@ -102,7 +102,7 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     // ANTES de tomar el lock: resolver la sesión lee disco y puede lanzar un proceso, y
     // hacerlo con el mutex tomado bloquea la base para toda la app (ver `ResolvedSession`).
     let resolved = resolve_closing_tabs(&state, db);
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards()?;
 
     let conn = db.lock().map_err(|e| e.to_string())?;
     // Una sola transacción: un commit (un fsync) por guardado y no uno por fila, y un
@@ -395,7 +395,7 @@ pub fn forget_or_close_single_window(
     // Antes del lock: si esta ventana pierde sus tabs, hay que resolverles la sesión, y eso
     // lee disco y puede lanzar procesos (ver `ResolvedSession`).
     let resolved = resolve_tabs_of_window(db, label);
-    let boards = crate::canvas::load_boards();
+    let boards = crate::canvas::load_boards()?;
 
     let conn = db.lock().map_err(|e| e.to_string())?;
 

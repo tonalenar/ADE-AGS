@@ -4,12 +4,7 @@
 //! supervisor. When a PR is supplied, `gh` reads its check rollup; it never writes to
 //! GitHub.
 
-use std::{
-    path::Path,
-    process::Stdio,
-    thread,
-    time::{Duration, Instant},
-};
+use std::{path::Path, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -339,37 +334,17 @@ pub(crate) fn check_pr_status(cwd: &Path, reference: &str) -> (PrState, CiStatus
     if let Some(repo) = repo {
         args.extend(["--repo".to_string(), repo]);
     }
-    let mut child = match crate::util::spawn::hidden_command("gh")
-        .args(&args)
-        .current_dir(cwd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => return (PrState::Unknown, CiStatus::Unavailable),
-    };
+    pr_view_status(crate::util::spawn::hidden_command("gh"), &args, cwd, GH_CHECK_TIMEOUT)
+}
 
-    let started = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                if !status.success() {
-                    return (PrState::Unknown, CiStatus::Unavailable);
-                }
-                let Ok(output) = child.wait_with_output() else {
-                    return (PrState::Unknown, CiStatus::Unavailable);
-                };
-                return parse_pr_status(&output.stdout);
-            }
-            Ok(None) if started.elapsed() < GH_CHECK_TIMEOUT => thread::sleep(Duration::from_millis(100)),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return (PrState::Unknown, CiStatus::Unavailable);
-            }
-            Err(_) => return (PrState::Unknown, CiStatus::Unavailable),
-        }
+/// Roda o `gh pr view` e lê o JSON dele. O stdout é lido enquanto o processo roda (`util::spawn::output`): um JSON
+/// maior que o buffer do pipe (64 KB, um PR com muitos checks) travava o `gh` no meio da escrita, e a entrega virava
+/// "CI indisponível" depois do prazo.
+fn pr_view_status(mut command: std::process::Command, args: &[String], cwd: &Path, timeout: Duration) -> (PrState, CiStatus) {
+    command.args(args).current_dir(cwd);
+    match crate::util::spawn::output(&mut command, timeout) {
+        Ok(output) if output.status.success() => parse_pr_status(&output.stdout),
+        _ => (PrState::Unknown, CiStatus::Unavailable),
     }
 }
 
@@ -462,6 +437,26 @@ mod tests {
         assert_eq!(parse_ci_status(br#"{"statusCheckRollup":[{"conclusion":"SUCCESS"},{"status":"IN_PROGRESS"}]}"#), CiStatus::Pending);
         assert_eq!(parse_ci_status(br#"{"statusCheckRollup":[{"conclusion":"SUCCESS"},{"conclusion":"FAILURE"}]}"#), CiStatus::Failure);
         assert_eq!(parse_ci_status(br#"{"statusCheckRollup":[]}"#), CiStatus::Pending);
+    }
+
+    #[test]
+    fn saida_grande_do_gh_e_interpretada_sem_processo() {
+        // O mesmo JSON do `gh`, seguido de 300 KB de espaços: a interpretação não depende do pipe nem do relógio.
+        let mut stdout = br#"{"state":"OPEN","statusCheckRollup":[]}"#.to_vec();
+        stdout.extend(std::iter::repeat(b' ').take(300_000));
+        assert_eq!(parse_pr_status(&stdout).0, PrState::Open);
+    }
+
+    #[test]
+    // quarantine: processo real (roda um `sh` que escreve 300 KB pelo pipe; roda com `cargo test -- --ignored`).
+    #[ignore]
+    fn stdout_maior_que_o_pipe_nao_trava_o_gh() {
+        // O comando escreve bem mais que o buffer de um pipe antes de sair: um `gh` com muitos checks faz isso.
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "printf '{\"state\":\"OPEN\",\"statusCheckRollup\":[]}'; head -c 300000 /dev/zero | tr '\\0' ' '"]);
+        // Guarda contra travamento: o caminho que passa devolve assim que o processo sai, sem esperar o prazo.
+        let (state, _) = pr_view_status(command, &[], Path::new("/"), Duration::from_secs(10));
+        assert_eq!(state, PrState::Open);
     }
 
     #[test]

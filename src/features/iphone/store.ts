@@ -2,13 +2,15 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 
-import { iphoneDevices, iphoneMirrorSessionPaused, iphoneMirrorStatus, IPHONE_SESSION_EVENT, IPHONE_STATUS_EVENT } from "./ipc";
+import { iphoneDevices, iphoneMirrorSessionPaused, iphoneMirrorStatus, IPHONE_SESSION_EVENT, IPHONE_STATUS_EVENT, type DiscoveryError } from "./ipc";
 import { pickedPhysical, sortForPicker, type MirrorStatus, type PhysicalDevice, type Unavailable } from "./model";
 
 interface IphoneState {
   devices: PhysicalDevice[];
   loaded: boolean;
   unavailable: Unavailable | null;
+  /** Por que a última consulta da lista falhou (`null` = deu certo). Com `timeout`, a lista anterior continua. */
+  discovery: DiscoveryError | null;
   /** O estado do espelhamento de cada aparelho (por id). */
   statuses: Record<string, MirrorStatus>;
   /** Aparelhos cuja sessão ADE foi pausada pela pessoa no painel. */
@@ -27,7 +29,7 @@ function readPick(): string | null {
   }
 }
 
-export const useIphoneStore = create<IphoneState>(() => ({ devices: [], loaded: false, unavailable: null, statuses: {}, disconnectedDevices: [], panelPick: readPick() }));
+export const useIphoneStore = create<IphoneState>(() => ({ devices: [], loaded: false, unavailable: null, discovery: null, statuses: {}, disconnectedDevices: [], panelPick: readPick() }));
 
 /** Sincroniza a pausa local da sessão com as outras janelas e com o comando nativo. */
 export function setMirrorDisconnected(device: string, disconnected: boolean) {
@@ -59,7 +61,12 @@ export function refreshPhysical(force = false): Promise<void> {
     if (previous) await previous;
     try {
       const list = await iphoneDevices();
-      useIphoneStore.setState({ devices: sortForPicker(list.devices), unavailable: list.unavailable, loaded: true });
+      if (list.error?.kind === "timeout") {
+        // Um `devicectl` lento não apaga a lista que a pessoa já via: mantém a última e só registra o atraso.
+        useIphoneStore.setState({ discovery: list.error, loaded: true });
+      } else {
+        useIphoneStore.setState({ devices: sortForPicker(list.devices), unavailable: list.unavailable, discovery: list.error, loaded: true });
+      }
     } catch {
       useIphoneStore.setState({ loaded: true });
     }
@@ -120,13 +127,27 @@ export function setStatus(status: MirrorStatus) {
   useIphoneStore.setState((s) => ({ statuses: { ...s.statuses, [status.device]: status } }));
 }
 
+/** Aplica o estado que o backend devolveu. `null` quer dizer sem sessão: o último status sai, senão a barra segue
+ *  "ao vivo" e o toque fica habilitado sem sessão. */
+export function applyMirrorStatus(device: string, status: MirrorStatus | null) {
+  if (status) {
+    setStatus(status);
+    return;
+  }
+  useIphoneStore.setState((s) => {
+    const statuses = { ...s.statuses };
+    delete statuses[device];
+    return { statuses };
+  });
+}
+
 /** O estado do espelhamento de `device`, acompanhado (pede o atual ao abrir). */
 export function useMirrorStatus(device: string | null): MirrorStatus | undefined {
   useEffect(() => {
     listenMirrorStatus();
     listenMirrorSession();
     if (device) {
-      iphoneMirrorStatus(device).then((s) => s && setStatus(s)).catch(() => undefined);
+      iphoneMirrorStatus(device).then((s) => applyMirrorStatus(device, s)).catch(() => undefined);
       iphoneMirrorSessionPaused(device).then((paused) => setMirrorDisconnected(device, paused)).catch(() => undefined);
     }
   }, [device]);

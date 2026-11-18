@@ -301,6 +301,8 @@ pub enum Principal {
     /// Fora de todo processo do ADE e sem identidade declarada: a pessoa num terminal próprio, ou CI. Não prova que não seja
     /// um agente que se destacou da árvore (`setsid`, duplo fork): é o limite conhecido (HOST_REMOTO.md, F-09).
     Outside,
+    /// Canal sem PID (TCP legado, CLI antiga) nas plataformas em que o socket local existe. Só os métodos livres.
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -349,7 +351,7 @@ fn owner_of(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> Option<Owne
 /// - o cliente está na árvore de uma aba ou conversa: é essa aba, e o que ele declarou (`from`, `tabId`, sessão) tem de bater;
 /// - o cliente está na árvore de uma tarefa: é essa tarefa (e não declara aba);
 /// - fora de toda árvore: [`Principal::Outside`], **desde que não declare identidade**: um `from` sem prova é forjado;
-/// - sem PID (TCP, CLI antiga): recusa, porque nada prova de que lado está.
+/// - sem PID (TCP, CLI antiga), nas plataformas com socket local: [`Principal::Unknown`] (só métodos livres).
 pub fn principal_of(session: Option<&str>, claims: &[&str], task_id: Option<&str>, client_pid: Option<u32>) -> Result<Principal, String> {
     principal_with(session, claims, task_id, client_pid, parent_lookup())
 }
@@ -384,7 +386,8 @@ fn principal_with(
         };
     }
     let Some(client) = client_pid.filter(|pid| *pid > 0) else {
-        return Err(ERR_NO_PID.into());
+        // TCP legado: não é a pessoa (`Outside`). Sem PID não há o que provar.
+        return Ok(Principal::Unknown);
     };
     match owner_of(client, &mut parent) {
         Some(Owner::Tab(tab)) => {
@@ -851,9 +854,9 @@ mod tests {
         let forjada = principal_with(None, &[&aba.tab], None, Some(4_100_000_041), parent).unwrap_err();
         assert!(forjada.contains("não está dentro dela"), "{forjada}");
         assert!(principal_with(Some(&aba.token), &[], None, Some(4_100_000_041), parent).is_err());
-        // O TCP não traz PID: nada prova de que lado está.
-        assert!(principal_with(None, &[], None, None, parent).unwrap_err().contains("PID"));
-        assert!(principal_with(None, &[&aba.tab], None, Some(0), parent).is_err());
+        // O TCP não traz PID: não é a pessoa, é um chamador desconhecido.
+        assert_eq!(principal_with(None, &[], None, None, parent), Ok(Principal::Unknown));
+        assert_eq!(principal_with(None, &[&aba.tab], None, Some(0), parent), Ok(Principal::Unknown));
     }
 
     #[test]

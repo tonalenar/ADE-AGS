@@ -128,7 +128,7 @@ describe("anel da miniatura do navegador", () => {
     act(() => { frame.dispatchEvent(new PointerEvent("pointerout", { bubbles: true })); });
     expect(container.querySelector<HTMLElement>("[data-browser-mini-dock]")!.dataset.visible).toBe("false");
 
-    act(() => setChatBrowserMiniHover(true));
+    act(() => setChatBrowserMiniHover("v1", true));
     expect(container.querySelector<HTMLElement>("[data-browser-mini-dock]")!.dataset.visible).toBe("true");
 
     act(() => root.unmount());

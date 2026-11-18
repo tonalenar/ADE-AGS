@@ -32,7 +32,7 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); vi.restoreAllMocks(); });
 
 const mount = (props: { controls?: React.ReactNode; leading?: React.ReactNode } = {}) => act(async () => {
-  root.render(<ChatComposer placeholder="p" onSubmit={() => undefined} controls={props.controls} leading={props.leading} />);
+  root.render(<ChatComposer placeholder="p" onSubmit={async () => true} controls={props.controls} leading={props.leading} />);
 });
 const left = () => host.querySelector("[data-composer-left]") as HTMLElement;
 const right = () => host.querySelector("[data-composer-right]") as HTMLElement;

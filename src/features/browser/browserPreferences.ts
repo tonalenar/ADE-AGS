@@ -3,7 +3,8 @@ export const BROWSER_PREFERENCES_KEY = "cc-browser-preferences-v1";
 
 export interface BrowserPreferences {
   autoShowFloatingPreview: boolean;
-  maxRecordingFps: 30 | 60;
+  /** Teto de quadros da gravação: 30. A UI não oferece mais 60, e a gravação não passa de 30 (ver `recordingStart.ts`). */
+  maxRecordingFps: 30;
 }
 
 export const DEFAULT_BROWSER_PREFERENCES: BrowserPreferences = {
@@ -18,7 +19,8 @@ export function readBrowserPreferences(): BrowserPreferences {
     const candidate = value as Partial<BrowserPreferences>;
     return {
       autoShowFloatingPreview: candidate.autoShowFloatingPreview !== false,
-      maxRecordingFps: candidate.maxRecordingFps === 60 ? 60 : 30,
+      // Uma preferência salva de 60 (a opção que saiu) cai para 30: é o que a gravação faz de qualquer forma.
+      maxRecordingFps: 30,
     };
   } catch {
     return DEFAULT_BROWSER_PREFERENCES;

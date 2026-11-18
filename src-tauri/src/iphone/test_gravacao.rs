@@ -658,3 +658,33 @@ fn sonda_grava_mp4_de_verdade() {
     // Girou no meio: retrato e depois paisagem.
     write("girou.mp4", &[(&portrait, 12, None), (&landscape, 12, None)], 33);
 }
+
+/// Um escritor que só avança quando o teste manda: é um disco parado.
+struct Gated(mpsc::Receiver<()>);
+
+impl Writer for Gated {
+    fn write(&mut self, _frame: &Frame) -> Result<(), String> {
+        let _ = self.0.recv();
+        Ok(())
+    }
+
+    fn finish(&mut self, _tail: Duration) -> Result<mp4::Summary, String> {
+        Err("o teste não finaliza".into())
+    }
+
+    fn abort(&mut self) {}
+}
+
+#[test]
+fn fila_cheia_falha_a_gravacao_em_vez_de_crescer() {
+    // Disco que não acompanha: a fila de quadros tem limite. Passou disso, a gravação falha com aviso, em vez de
+    // crescer a memória sem limite ou descartar quadros e corromper o vídeo.
+    let (liberar, gate) = mpsc::channel();
+    let recording = Recording::start(Gated(gate));
+    let tap = recording.tap();
+    let aceitos = (0..super::recording::QUEUE_LIMIT as u32 + 10).filter(|ts| tap.push(frame(*ts, false))).count();
+    assert!(aceitos <= super::recording::QUEUE_LIMIT + 1, "aceitou {aceitos} quadros com o disco parado");
+    assert!(recording.error().is_some(), "a gravação precisa dizer que parou");
+    drop(liberar);
+    recording.abort();
+}

@@ -104,7 +104,19 @@ export function ForgeItemsView({ cwd, target, what, branch, filter, linkedBranch
     }
   }, [cwd, filter, pr]);
 
-  useEffect(() => { setItems(null); load(); }, [load]);
+  useEffect(() => {
+    let alive = true;
+    setItems(null);
+    setError(null);
+    (pr ? forgePulls : forgeIssues)(cwd, filter)
+      .then((rows) => { if (alive) setItems(rows); })
+      .catch((e) => {
+        if (!alive) return;
+        setError(forgeErrorOf(e));
+        setItems([]);
+      });
+    return () => { alive = false; };
+  }, [cwd, filter, pr]);
 
   if (!target.account) {
     return <ForgeErrorView error={{ kind: "noAccount", message: target.host }} target={target} />;

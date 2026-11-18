@@ -128,13 +128,40 @@ describe("atalhos", () => {
   const press = (key: string, target: EventTarget = document.body) =>
     act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })); });
 
-  it("N nega e ⏎ permite com o foco fora de um campo", async () => {
+  it("N nega de fora de um campo; ⏎ só permite com o foco dentro do cartão (A161)", async () => {
     await mount(<PermissionCard ask={ask} terminal />);
     (document.activeElement as HTMLElement).blur();
     await press("n");
     expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "deny");
     await press("Enter");
+    expect(store.answerAsk).not.toHaveBeenCalledWith(ask, "allow");
+    await press("Enter", document.querySelector("[data-permission-dock]") as HTMLElement);
     expect(store.answerAsk).toHaveBeenLastCalledWith(ask, "allow");
+  });
+
+  it("⏎ não aprova um comando colapsado, mesmo com o foco no cartão (A161)", async () => {
+    await mount(<PermissionCard ask={{ ...ask, detail: LONG }} terminal />);
+    await press("Enter", document.querySelector("[data-permission-dock]") as HTMLElement);
+    expect(store.answerAsk).not.toHaveBeenCalled();
+    await act(async () => { button("chat.permission.expand").click(); });
+    await press("Enter", document.querySelector("[data-permission-dock]") as HTMLElement);
+    expect(store.answerAsk).toHaveBeenLastCalledWith(expect.objectContaining({ id: ask.id }), "allow");
+  });
+
+  it("⏎ no botão Permitir não dispara o clique nativo quando o comando está colapsado (C1)", async () => {
+    await mount(<PermissionCard ask={{ ...ask, detail: LONG }} terminal />);
+    const allow = button("chat.permission.allow");
+    const keepsDefault = allow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    // Cancelado (dispatchEvent devolve falso): o Enter não vira clique em Permitir.
+    expect(keepsDefault).toBe(false);
+    expect(store.answerAsk).not.toHaveBeenCalled();
+  });
+
+  it("⏎ no botão Permitir segue o clique normal quando o comando está inteiro (C1)", async () => {
+    await mount(<PermissionCard ask={ask} terminal />);
+    const allow = button("chat.permission.allow");
+    const keepsDefault = allow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(keepsDefault).toBe(true);
   });
 
   it("digitando no composer, as teclas são texto", async () => {

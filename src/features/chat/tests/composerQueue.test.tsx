@@ -130,7 +130,7 @@ describe("a fila do composer", () => {
     enqueueMessage(KEY, "agora", true);
     const Composer = () => {
       const queue = useChatStore((s) => s.queues[KEY]) ?? [];
-      return <ChatComposer placeholder="p" onSubmit={() => undefined} onQueue={() => undefined} queue={queue}
+      return <ChatComposer placeholder="p" onSubmit={async () => true} onQueue={() => undefined} queue={queue}
         onUnqueue={(id) => unqueueMessage(KEY, id)} onUpdateQueued={(id, text) => updateQueuedMessage(KEY, id, text)} />;
     };
     await act(async () => { root.render(<Composer />); });
@@ -175,7 +175,7 @@ describe("a fila do composer", () => {
     enqueueMessage(KEY, "original");
     const Composer = () => {
       const queue = useChatStore((s) => s.queues[KEY]) ?? [];
-      return <ChatComposer placeholder="p" onSubmit={() => undefined} onQueue={() => undefined} queue={queue}
+      return <ChatComposer placeholder="p" onSubmit={async () => true} onQueue={() => undefined} queue={queue}
         onUnqueue={(id) => unqueueMessage(KEY, id)} onUpdateQueued={(id, text) => updateQueuedMessage(KEY, id, text)} />;
     };
     await act(async () => { root.render(<Composer />); });
@@ -197,7 +197,7 @@ describe("a fila do composer", () => {
     const sent: string[] = [];
     const queued: string[] = [];
     await act(async () => {
-      root.render(<ChatComposer placeholder="p" turnActive onSubmit={(text) => { sent.push(text); }}
+      root.render(<ChatComposer placeholder="p" turnActive onSubmit={async (text) => { sent.push(text); return true; }}
         onQueue={(text) => { queued.push(text); }} />);
     });
     const composer = host.querySelector("textarea[data-chat-composer]") as HTMLTextAreaElement;
@@ -223,7 +223,7 @@ describe("a fila do composer", () => {
     enqueueMessage(KEY, "mais recente");
     const Composer = () => {
       const queue = useChatStore((s) => s.queues[KEY]) ?? [];
-      return <ChatComposer placeholder="p" onSubmit={() => undefined} onQueue={() => undefined} queue={queue}
+      return <ChatComposer placeholder="p" onSubmit={async () => true} onQueue={() => undefined} queue={queue}
         onUnqueue={(id) => unqueueMessage(KEY, id)} onUpdateQueued={(id, text) => updateQueuedMessage(KEY, id, text)} />;
     };
     await act(async () => { root.render(<Composer />); });

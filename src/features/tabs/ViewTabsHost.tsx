@@ -14,7 +14,8 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { placeChatBrowserFloat, useChatStore } from "@/features/chat/store";
 import { chatFloatBounds, dragFloatRect, FLOAT_RING, type FloatEdges } from "@/features/chat/floatRect";
 import { useTranslation } from "react-i18next";
-import { BrowserMiniControls, BrowserMiniDock } from "@/features/browser/BrowserMiniControls";
+import { BrowserFloatGrip } from "@/features/browser/BrowserFloatGrip";
+import { BrowserMiniDock } from "@/features/browser/BrowserMiniControls";
 import { floatAspectRatioOf, isFramedViewport } from "@/features/browser/deviceMode";
 import { FLOATING_PREVIEW_CORNER_RADIUS } from "@/features/browser/nativeCorner";
 import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
@@ -113,14 +114,16 @@ export function ViewTabsHost() {
         const floatingPreview = view.kind === "browser" && view.id === floatingBrowserId;
         if (!shown && !seen.has(view.id) && !keepMountedIds.includes(view.id)) return null;
         if (placement) lastRect.current.set(key, placement.rect);
+        if (floatingPreview && floatRect) lastRect.current.set(key, floatRect);
+        const rectToPlace = floatingPreview ? (floatRect ?? lastRect.current.get(key) ?? null) : (lastRect.current.get(key) ?? null);
         const focused = key === focusedItem && onWorkspace;
         return (
           <div
             key={view.id}
             data-view-key={key}
             style={{
-              ...placeStyle(lastRect.current.get(key) ?? null),
-              ...(floatingPreview ? { zIndex: 30, borderRadius: FLOATING_PREVIEW_CORNER_RADIUS } : {}),
+              ...placeStyle(rectToPlace),
+              ...(floatingPreview ? { zIndex: 35, borderRadius: FLOATING_PREVIEW_CORNER_RADIUS } : {}),
               visibility: shown ? undefined : "hidden",
               pointerEvents: shown ? "auto" : "none",
             }}
@@ -132,7 +135,7 @@ export function ViewTabsHost() {
               onPointerLeave: () => setFloatDomHover(false),
             } : {})}
           >
-            {floatingPreview && <BrowserFloatGrip />}
+            {floatingPreview && <BrowserFloatGrip viewId={view.id} />}
             <Suspense fallback={null}>
               {view.kind === "file" && <FileTab view={view} active={shown && onWorkspace} focused={focused} />}
               {view.kind === "diff" && <DiffTab view={view} active={shown && onWorkspace} />}
@@ -145,18 +148,6 @@ export function ViewTabsHost() {
       {floatView && floatRect && placementOf(floatView) !== undefined && (
         <BrowserFloatFrame rect={floatRect} viewId={floatView.id} aspectRatio={floatAspectRatio} hover={floatDomHover} />
       )}
-    </div>
-  );
-}
-
-/** Controles da miniatura, no canto da página (abrem um buraco na vista nativa só enquanto aparecem). */
-function BrowserFloatGrip() {
-  // O mouse sobre a página nativa não chega ao DOM: quem avisa é o motor (`real-browser-mini-hover`).
-  const hover = useChatStore((state) => state.browserMiniHover);
-  return (
-    <div className="group absolute right-2.5 top-2.5 z-40 pointer-events-auto" data-browser-mini-controls data-hover={hover}
-      {...(hover ? { "data-over-webview": "" } : {})}>
-      <BrowserMiniControls />
     </div>
   );
 }
@@ -241,7 +232,7 @@ export function BrowserFloatFrame({
     ? explicitAspectRatio
     : floatAspectRatioOf(view?.kind === "browser" ? view.viewport : null);
   const { begin, move, end } = useFloatDrag(aspectRatio);
-  const miniHover = useChatStore((state) => state.browserMiniHover);
+  const miniHover = useChatStore((state) => state.browserMiniHover[viewId ?? ""] ?? false);
   const [frameHover, setFrameHover] = useState(false);
   const r = FLOAT_RING;
   const dockVisible = hover || frameHover || miniHover;
