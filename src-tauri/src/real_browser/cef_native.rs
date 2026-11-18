@@ -29,6 +29,7 @@ use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 use tokio::sync::oneshot;
 
+use super::surface::{diff_place, effective_zoom, open_step, visibility_change, ClipState, keeps_pumping, OpenStep, outline, rounded_parts, CreationState, PathStep, PlaceState, RoundedPart};
 use super::{emit, on_binding};
 
 const CEF_FRAMEWORK_BUNDLE: &str = "Chromium Embedded Framework.framework";
@@ -51,6 +52,8 @@ macro_rules! cef_trace {
     };
 }
 static PUMP_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Cada criação de Portal ganha uma geração; um callback tardio de outra geração não mexe no Portal novo.
+static NEXT_PORTAL_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 fn is_helper_switch(argument: &OsStr) -> bool {
     let argument = argument.to_string_lossy();
@@ -132,9 +135,15 @@ struct Portal {
     _observer: Option<DevToolsMessageObserver>,
     _registration: Option<Registration>,
     pending: PendingCdp,
-    /// Avisa `create` quando o CEF entrega o browser (a criação é assíncrona: o perfil do runtime
-    /// Chrome só fica pronto depois).
-    ready: Option<oneshot::Sender<()>>,
+    /// Quem espera a criação do browser: o `create` que a iniciou e os pedidos que chegaram com o Portal ainda em
+    /// preparo. Todos são avisados quando o CEF entrega o browser (a criação é assíncrona).
+    waiters: Vec<oneshot::Sender<()>>,
+    /// O último `place` recebido: o que já foi aplicado à vista e ao navegador, para não refazer o que não mudou.
+    last_place: Option<PlaceState>,
+    /// Visibilidade da vista: quadros seguidos sem recorte, e se ela está escondida (ver `visibility_change`).
+    clip: ClipState,
+    /// A criação deste Portal: um timeout a cancela enquanto ela não ficou pronta.
+    creation: CreationState,
 }
 
 #[derive(Default)]
@@ -361,9 +370,11 @@ fn pump() {
     PUMPING.with(|pumping| pumping.set(false));
     // Sem pedido novo durante o trabalho, garante a próxima volta no teto de espera.
     let generation = PUMP_GENERATION.load(Ordering::SeqCst);
-    let _ = dispatch2::DispatchQueue::main().after(dispatch2::DispatchTime::NOW.time(MAX_PUMP_DELAY_MS * 1_000_000), move || {
-        if PUMP_GENERATION.load(Ordering::SeqCst) == generation { pump(); }
-    });
+    if keeps_pumping(OPEN_BROWSERS.load(Ordering::SeqCst)) {
+        let _ = dispatch2::DispatchQueue::main().after(dispatch2::DispatchTime::NOW.time(MAX_PUMP_DELAY_MS * 1_000_000), move || {
+            if PUMP_GENERATION.load(Ordering::SeqCst) == generation { pump(); }
+        });
+    }
 }
 
 wrap_browser_process_handler! {
@@ -500,7 +511,7 @@ wrap_dev_tools_message_observer! {
 }
 
 wrap_life_span_handler! {
-    struct ADELifeSpanHandler { id: String }
+    struct ADELifeSpanHandler { id: String, generation: u64 }
     impl LifeSpanHandler {
         /// Pop-ups (OAuth, `window.open`, `target=_blank`) viram uma aba nova da ADE. O CEF cria o
         /// browser como vista filha de um host oculto; a aba adota esse id e o `opener` continua vivo.
@@ -523,7 +534,7 @@ wrap_life_span_handler! {
             let Some(url) = target_url.map(ToString::to_string) else { return 1 };
             cef_trace!("on_before_popup {} -> {url}", self.id);
             match prepare_popup(&self.id, &url) {
-                Some((popup, host, app)) => {
+                Some((popup, host, app, generation)) => {
                     if let Some(window_info) = window_info {
                         let bounds = host.bounds();
                         *window_info = window_info.clone().set_as_child(
@@ -531,7 +542,7 @@ wrap_life_span_handler! {
                             &Rect { x: 0, y: 0, width: bounds.size.width.max(1.0) as i32, height: bounds.size.height.max(1.0) as i32 },
                         );
                     }
-                    if let Some(client) = client { *client = Some(ADEClient::new(popup.clone(), app.clone())); }
+                    if let Some(client) = client { *client = Some(ADEClient::new(popup.clone(), app.clone(), generation)); }
                     emit(&app, "real-browser-popup", json!({ "id": self.id, "popup": popup, "url": url }));
                     0
                 }
@@ -542,19 +553,43 @@ wrap_life_span_handler! {
         fn on_after_created(&self, browser: Option<&mut Browser>) {
             cef_trace!("on_after_created {}", self.id);
             OPEN_BROWSERS.fetch_add(1, Ordering::SeqCst);
+            // Com o primeiro navegador a bomba volta a rodar (ela para quando não há nenhum).
+            schedule_pump(0);
             let Some(browser) = browser else { return };
-            PORTALS.with(|portals| {
-                if let Some(portal) = portals.borrow_mut().get_mut(&self.id) {
-                    portal.browser = Some(browser.clone());
-                    if let Some(ready) = portal.ready.take() { let _ = ready.send(()); }
+            let accepted = PORTALS.with(|portals| {
+                let mut portals = portals.borrow_mut();
+                let Some(portal) = portals.get_mut(&self.id) else { return false };
+                if !portal.creation.mark_ready(self.generation) { return false; }
+                portal.browser = Some(browser.clone());
+                // O `place` que chegou antes da criação ficou só registrado: aplica agora o zoom e a medida
+                // dele, senão a página segue com o zoom padrão até o próximo movimento.
+                if let Some(state) = portal.last_place.as_ref() {
                     if let Some(host) = browser.host() {
-                        let mut observer = ADEDevToolsObserver::new(self.id.clone(), app_handle_for_portal(&self.id), portal.pending.clone());
-                        let registration = host.add_dev_tools_message_observer(Some(&mut observer));
-                        portal._observer = Some(observer);
-                        portal._registration = registration;
+                        host.set_zoom_level(chrome_zoom_level(state.zoom));
+                        host.was_resized();
                     }
                 }
+                let bounds = portal.host_view.bounds();
+                if let Some(host) = browser.host() {
+                    let child = host.window_handle() as *mut AnyObject;
+                    if !child.is_null() {
+                        let view: &NSView = unsafe { &*child.cast() };
+                        view.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), bounds.size));
+                    }
+                }
+                for waiter in portal.waiters.drain(..) { let _ = waiter.send(()); }
+                if let Some(host) = browser.host() {
+                    let mut observer = ADEDevToolsObserver::new(self.id.clone(), app_handle_for_portal(&self.id), portal.pending.clone());
+                    let registration = host.add_dev_tools_message_observer(Some(&mut observer));
+                    portal._observer = Some(observer);
+                    portal._registration = registration;
+                }
+                true
             });
+            if !accepted {
+                // A criação foi cancelada (o `create` estourou o prazo): este navegador tardio não tem dono.
+                if let Some(host) = browser.host() { host.close_browser(1); }
+            }
         }
 
         /// Nunca deixa o CEF mandar `performClose:` à janela de topo: para uma vista filha, ela é a
@@ -600,7 +635,7 @@ wrap_life_span_handler! {
 }
 
 /// Prepara o host oculto e o registro de um pop-up aberto por `opener`. `None` recusa o pop-up.
-fn prepare_popup(opener: &str, url: &str) -> Option<(String, Retained<ADEPortalHost>, AppHandle)> {
+fn prepare_popup(opener: &str, url: &str) -> Option<(String, Retained<ADEPortalHost>, AppHandle, u64)> {
     let mtm = MainThreadMarker::new()?;
     if !super::popup_allowed(url) { return None; }
     let app = PORTAL_APPS.with(|apps| apps.borrow().get(opener).cloned())?;
@@ -610,6 +645,7 @@ fn prepare_popup(opener: &str, url: &str) -> Option<(String, Retained<ADEPortalH
         Some((unsafe { host.superview() }?, host.frame()))
     })?;
     let popup = uuid::Uuid::new_v4().to_string();
+    let generation = NEXT_PORTAL_GENERATION.fetch_add(1, Ordering::SeqCst);
     super::adopt_popup(opener, &popup)?;
     let host = ADEPortalHost::new(mtm, &popup, frame);
     // Escondido até a aba nova mandar o primeiro `place`.
@@ -619,10 +655,10 @@ fn prepare_popup(opener: &str, url: &str) -> Option<(String, Retained<ADEPortalH
     PORTALS.with(|portals| {
         portals.borrow_mut().insert(popup.clone(), Portal {
             host_view: host.clone(), browser: None, _observer: None, _registration: None,
-            pending: Arc::new(Mutex::new(HashMap::new())), ready: None,
+            pending: Arc::new(Mutex::new(HashMap::new())), waiters: Vec::new(), last_place: None, clip: ClipState { empty_count: 0, hidden: true }, creation: CreationState::new(generation),
         });
     });
-    Some((popup, host, app))
+    Some((popup, host, app, generation))
 }
 
 fn ask_permission(origin: &str, resources: &str) -> bool {
@@ -734,9 +770,9 @@ wrap_load_handler! {
 }
 
 wrap_client! {
-    struct ADEClient { id: String, app: AppHandle }
+    struct ADEClient { id: String, app: AppHandle, generation: u64 }
     impl Client {
-        fn life_span_handler(&self) -> Option<LifeSpanHandler> { Some(ADELifeSpanHandler::new(self.id.clone())) }
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> { Some(ADELifeSpanHandler::new(self.id.clone(), self.generation)) }
         fn display_handler(&self) -> Option<DisplayHandler> { Some(ADEDisplayHandler::new(self.id.clone(), self.app.clone())) }
         fn load_handler(&self) -> Option<LoadHandler> { Some(ADELoadHandler::new(self.id.clone(), self.app.clone())) }
         fn permission_handler(&self) -> Option<PermissionHandler> { Some(ADEPermissionHandler::new()) }
@@ -782,12 +818,32 @@ pub async fn create(app: &AppHandle, parent: isize, id: &str, profile: PathBuf, 
     let app = app.clone();
     let main_thread_app = app.clone();
     let id = id.to_string();
+    let timeout_id = id.clone();
     let (ready, created) = oneshot::channel();
-    on_main(&app, move || create_on_main(&main_thread_app, parent as *mut AnyObject, &id, profile, rect, ready)).await?;
-    tokio::time::timeout(BROWSER_READY_TIMEOUT, created)
-        .await
-        .map_err(|_| "O Chromium não abriu a página a tempo.".to_string())?
-        .map_err(|_| "O Chromium fechou a página antes de abri-la.".to_string())
+    let generation = on_main(&app, move || create_on_main(&main_thread_app, parent as *mut AnyObject, &id, profile, rect, ready)).await?;
+    match tokio::time::timeout(BROWSER_READY_TIMEOUT, created).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) => Err("O Chromium fechou a página antes de abri-la.".to_string()),
+        Err(_) => {
+            // O prazo estourou: o Portal sai do registro e a NSView sai da janela. Um navegador que o CEF entregar
+            // depois não tem dono e é fechado em `on_after_created`.
+            on_main(&app, move || {
+                PORTALS.with(|portals| {
+                    let mut portals = portals.borrow_mut();
+                    let cancelled = portals.get_mut(&timeout_id).is_some_and(|portal| portal.creation.cancel_if_pending(generation));
+                    if cancelled {
+                        if let Some(portal) = portals.remove(&timeout_id) {
+                            portal.host_view.removeFromSuperview();
+                        }
+                        PORTAL_APPS.with(|apps| { apps.borrow_mut().remove(&timeout_id); });
+                    }
+                });
+                Ok(())
+            })
+            .await?;
+            Err("O Chromium não abriu a página a tempo.".to_string())
+        }
+    }
 }
 
 const BROWSER_READY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -800,7 +856,7 @@ pub async fn wait_ready(app: &AppHandle, id: &str) -> Result<(), String> {
         PORTALS.with(|portals| {
             let mut portals = portals.borrow_mut();
             let portal = portals.get_mut(&id).ok_or("O pop-up já foi fechado.")?;
-            if portal.browser.is_some() { let _ = ready.send(()); } else { portal.ready = Some(ready); }
+            if portal.browser.is_some() { let _ = ready.send(()); } else { portal.waiters.push(ready); }
             Ok::<_, String>(())
         })?;
         Ok(created)
@@ -811,25 +867,42 @@ pub async fn wait_ready(app: &AppHandle, id: &str) -> Result<(), String> {
         .map_err(|_| "O pop-up fechou antes de abrir.".to_string())
 }
 
-fn create_on_main(app: &AppHandle, parent: *mut AnyObject, id: &str, profile: PathBuf, rect: [i32; 4], ready: oneshot::Sender<()>) -> Result<(), String> {
+fn create_on_main(app: &AppHandle, parent: *mut AnyObject, id: &str, profile: PathBuf, rect: [i32; 4], ready: oneshot::Sender<()>) -> Result<u64, String> {
     let _mtm = MainThreadMarker::new().ok_or("A vista CEF precisa ser criada na thread principal do macOS.")?;
     load_cef(false)?;
     initialize_cef(Some(app.clone()))?;
-    if PORTALS.with(|portals| portals.borrow().contains_key(id)) {
-        let _ = ready.send(());
-        return Ok(());
+    // Um Portal com o mesmo id já existe: pronto, o pedido é atendido; ainda preparando, o pedido espera a mesma
+    // criação (a fila `waiters`). Nenhum dos dois cria um segundo navegador.
+    let existing = PORTALS.with(|portals| {
+        portals.borrow().get(id).map(|portal| (portal.browser.is_some(), portal.creation.generation()))
+    });
+    match open_step(existing.is_some(), existing.is_some_and(|(attached, _)| attached)) {
+        OpenStep::Create => {}
+        OpenStep::Attached => {
+            let _ = ready.send(());
+            return Ok(existing.map_or(0, |(_, generation)| generation));
+        }
+        OpenStep::Join => {
+            PORTALS.with(|portals| {
+                if let Some(portal) = portals.borrow_mut().get_mut(id) {
+                    portal.waiters.push(ready);
+                }
+            });
+            return Ok(existing.map_or(0, |(_, generation)| generation));
+        }
     }
     let context = request_context(&profile)?;
     let root: &NSView = unsafe { &*parent.cast() };
     let host = ADEPortalHost::new(_mtm, id, frame_in_parent(root, rect));
     root.addSubview(&host);
     let pending = Arc::new(Mutex::new(HashMap::new()));
+    let generation = NEXT_PORTAL_GENERATION.fetch_add(1, Ordering::SeqCst);
     PORTAL_APPS.with(|apps| { apps.borrow_mut().insert(id.to_string(), app.clone()); });
     PORTALS.with(|portals| {
-        portals.borrow_mut().insert(id.to_string(), Portal { host_view: host.clone(), browser: None, _observer: None, _registration: None, pending: pending.clone(), ready: Some(ready) });
+        portals.borrow_mut().insert(id.to_string(), Portal { host_view: host.clone(), browser: None, _observer: None, _registration: None, pending: pending.clone(), waiters: vec![ready], last_place: None, clip: ClipState::default(), creation: CreationState::new(generation) });
     });
 
-    let mut client = ADEClient::new(id.to_string(), app.clone());
+    let mut client = ADEClient::new(id.to_string(), app.clone(), generation);
     let child = WindowInfo::default().set_as_child(
         Retained::as_ptr(&host) as *mut AnyObject as *mut std::ffi::c_void,
         &Rect { x: 0, y: 0, width: rect[2].max(1), height: rect[3].max(1) },
@@ -842,10 +915,11 @@ fn create_on_main(app: &AppHandle, parent: *mut AnyObject, id: &str, profile: Pa
     cef_trace!("create_browser {id} -> {created}");
     if created != 1 {
         PORTALS.with(|portals| { portals.borrow_mut().remove(id); });
+        PORTAL_APPS.with(|apps| { apps.borrow_mut().remove(id); });
         host.removeFromSuperview();
         return Err("O CEF não criou uma vista filha para o navegador.".into());
     }
-    Ok(())
+    Ok(generation)
 }
 
 async fn on_main<T: Send + 'static>(app: &AppHandle, task: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
@@ -885,48 +959,65 @@ pub async fn cdp(app: &AppHandle, id: &str, method: &str, params: JsonValue) -> 
 
 static NEXT_CDP_ID: AtomicI32 = AtomicI32::new(1);
 
-pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i32; 4]>, corner_radius: f64, click_to_expand: bool) {
+pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i32; 4]>, corner_radius: f64, click_to_expand: bool, visible: bool) {
     let app = app.clone();
     let id = id.to_string();
     let _ = app.run_on_main_thread(move || {
         let _ = MainThreadMarker::new();
         PORTALS.with(|portals| {
             if let Some(portal) = portals.borrow_mut().get_mut(&id) {
+                // Só o que mudou desde o último `place` é reaplicado: a posição, a máscara, o zoom e a repintura do CEF.
                 let parent = unsafe { portal.host_view.superview() };
-                portal.host_view.setFrame(parent.as_deref().map(|parent| frame_in_parent(parent, rect)).unwrap_or_else(|| view_frame(rect)));
-                apply_rect_mask(&portal.host_view, rect[2], rect[3], &parts, corner_radius);
+                let zoom = effective_zoom(zoom, portal.last_place.as_ref().map(|state| state.zoom));
+                let next = PlaceState { frame: rect, parts: parts.clone(), radius: corner_radius, zoom };
+                let changes = diff_place(portal.last_place.as_ref(), &next);
+                if changes.frame {
+                    portal.host_view.setFrame(parent.as_deref().map(|parent| frame_in_parent(parent, rect)).unwrap_or_else(|| view_frame(rect)));
+                }
+                if changes.mask && !parts.is_empty() {
+                    apply_rect_mask(&portal.host_view, rect[2], rect[3], &parts, corner_radius);
+                }
+                // Só a transição de escondido para visível (ou o contrário) mexe na vista: um recorte vazio de um
+                // quadro não a esconde, e a desmontagem (`visible: false`) esconde na hora.
+                if let Some(hidden) = visibility_change(&mut portal.clip, parts.is_empty(), !visible) {
+                    portal.host_view.setHidden(hidden);
+                }
                 *portal.host_view.ivars().parts.borrow_mut() = parts.iter().map(|[l, t, r, b]| [*l as f64, *t as f64, *r as f64, *b as f64]).collect();
                 portal.host_view.ivars().mini.set(click_to_expand);
                 if let Some(host) = portal.browser.as_ref().and_then(Browser::host) {
-                    host.set_zoom_level(if zoom > 0.0 { zoom.ln() / 1.2_f64.ln() } else { 0.0 });
-                    host.was_resized();
+                    if changes.resized {
+                        let child = host.window_handle() as *mut AnyObject;
+                        if !child.is_null() {
+                            let view: &NSView = unsafe { &*child.cast() };
+                            view.setFrame(view_frame([0, 0, rect[2], rect[3]]));
+                        }
+                    }
+                    if changes.zoom { host.set_zoom_level(chrome_zoom_level(zoom)); }
+                    if changes.resized { host.was_resized(); }
                 }
+                portal.last_place = Some(next);
             }
         });
     });
 }
 
-/// Recorta a vista às partes visíveis e, com `radius > 0`, arredonda os cantos (tela do celular, miniatura).
-/// O arredondamento fica na própria máscara: o `cornerRadius` da layer de uma NSView do AppKit não recorta a
-/// vista do CEF (o AppKit administra essa layer), e a página saía quadrada para fora da curva da tela.
+/// O nível de zoom do CEF para um fator: o fator é 1,2 elevado ao nível, então o nível é o log de base 1,2 do fator.
+/// Zero (vista sem largura) volta a 100%; quem chama decide se zero deve ser aplicado.
+fn chrome_zoom_level(zoom: f64) -> f64 {
+    if zoom > 0.0 { zoom.ln() / 1.2_f64.ln() } else { 0.0 }
+}
+
+/// Uma única `CAShapeLayer` recorta as partes e arredonda só os cantos externos da vista (tela do celular, miniatura).
+/// O arredondamento entra no próprio path: o Core Animation não aplica máscara de máscara, e o `cornerRadius` da layer
+/// da NSView não recorta a vista do CEF.
 fn apply_rect_mask(view: &NSView, width: i32, height: i32, parts: &[[i32; 4]], radius: f64) {
-    if parts.is_empty() {
-        view.setHidden(true);
-        return;
-    }
-    view.setHidden(false);
+    if parts.is_empty() { return; }
     let (w, h) = (width.max(1) as f64, height.max(1) as f64);
-    let whole = parts.len() == 1 && parts[0][0] <= 0 && parts[0][1] <= 0 && parts[0][2] >= width - 1 && parts[0][3] >= height - 1;
     let radius = radius.min(w / 2.0).min(h / 2.0).max(0.0);
     let path = unsafe { CGPathCreateMutable() };
     if path.is_null() { return; }
-    if radius > 0.0 && whole {
-        // Caso comum (tela do celular, miniatura sem nada por cima): a própria forma da máscara é arredondada.
-        unsafe { CGPathAddRoundedRect(path, ptr::null(), cg_rect(0.0, 0.0, w, h), radius, radius); }
-    } else {
-        for [left, top, right, bottom] in parts {
-            unsafe { CGPathAddRect(path, ptr::null(), cg_rect(*left as f64, *top as f64, (right-left).max(0) as f64, (bottom-top).max(0) as f64)); }
-        }
+    for part in rounded_parts(width, height, parts, radius) {
+        unsafe { add_outline(path, &part) };
     }
     let class = objc2::runtime::AnyClass::get(c"CAShapeLayer").expect("CAShapeLayer disponível no macOS");
     let mask: *mut AnyObject = unsafe { msg_send![class, layer] };
@@ -936,41 +1027,32 @@ fn apply_rect_mask(view: &NSView, width: i32, height: i32, parts: &[[i32; 4]], r
         let _: () = msg_send![mask, setFrame: frame];
         let _: () = msg_send![mask, setGeometryFlipped: Bool::YES];
         let _: () = msg_send![mask, setPath: path];
-        if radius > 0.0 && !whole {
-            // Com partes escondidas (um menu por cima), as partes recortam e uma segunda forma arredondada recorta
-            // a primeira: a máscara da máscara. Um `cornerRadius` de CALayer não recorta a vista do CEF.
-            let rounded: *mut AnyObject = msg_send![class, layer];
-            let round_path = CGPathCreateMutable();
-            if !round_path.is_null() {
-                CGPathAddRoundedRect(round_path, ptr::null(), cg_rect(0.0, 0.0, w, h), radius, radius);
-                let _: () = msg_send![rounded, setFrame: frame];
-                let _: () = msg_send![rounded, setGeometryFlipped: Bool::YES];
-                let _: () = msg_send![rounded, setPath: round_path];
-                let _: () = msg_send![mask, setMask: rounded];
-                CGPathRelease(round_path);
-            }
-        }
         let _: () = msg_send![layer, setMask: mask];
         CGPathRelease(path);
     }
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CGRect { origin: CGPoint, size: CGSize }
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CGPoint { x: f64, y: f64 }
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct CGSize { width: f64, height: f64 }
-fn cg_rect(x: f64, y: f64, width: f64, height: f64) -> CGRect { CGRect { origin: CGPoint { x, y }, size: CGSize { width, height } } }
+/// Escreve o contorno de uma parte no path; cada canto arredondado é um arco tangente às bordas.
+unsafe fn add_outline(path: *mut std::ffi::c_void, part: &RoundedPart) {
+    for step in outline(part) {
+        unsafe {
+            match step {
+                PathStep::Move([x, y]) => CGPathMoveToPoint(path, ptr::null(), x, y),
+                PathStep::Line([x, y]) => CGPathAddLineToPoint(path, ptr::null(), x, y),
+                PathStep::Arc { corner: [cx, cy], end: [ex, ey], radius } => CGPathAddArcToPoint(path, ptr::null(), cx, cy, ex, ey, radius),
+                PathStep::Close => CGPathCloseSubpath(path),
+            }
+        }
+    }
+}
 
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
     fn CGPathCreateMutable() -> *mut std::ffi::c_void;
-    fn CGPathAddRect(path: *mut std::ffi::c_void, transform: *const std::ffi::c_void, rect: CGRect);
-    fn CGPathAddRoundedRect(path: *mut std::ffi::c_void, transform: *const std::ffi::c_void, rect: CGRect, corner_width: f64, corner_height: f64);
+    fn CGPathMoveToPoint(path: *mut std::ffi::c_void, transform: *const std::ffi::c_void, x: f64, y: f64);
+    fn CGPathAddLineToPoint(path: *mut std::ffi::c_void, transform: *const std::ffi::c_void, x: f64, y: f64);
+    fn CGPathAddArcToPoint(path: *mut std::ffi::c_void, transform: *const std::ffi::c_void, x1: f64, y1: f64, x2: f64, y2: f64, radius: f64);
+    fn CGPathCloseSubpath(path: *mut std::ffi::c_void);
     fn CGPathRelease(path: *mut std::ffi::c_void);
 }
 

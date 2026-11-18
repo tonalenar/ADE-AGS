@@ -14,7 +14,8 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { placeChatBrowserFloat, useChatStore } from "@/features/chat/store";
 import { chatFloatBounds, dragFloatRect, FLOAT_RING, type FloatEdges } from "@/features/chat/floatRect";
 import { useTranslation } from "react-i18next";
-import { BrowserMiniControls, BrowserMiniDock } from "@/features/browser/BrowserMiniControls";
+import { BrowserFloatGrip } from "@/features/browser/BrowserFloatGrip";
+import { BrowserMiniDock } from "@/features/browser/BrowserMiniControls";
 import { floatAspectRatioOf, isFramedViewport } from "@/features/browser/deviceMode";
 import { FLOATING_PREVIEW_CORNER_RADIUS } from "@/features/browser/nativeCorner";
 import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
@@ -134,7 +135,7 @@ export function ViewTabsHost() {
               onPointerLeave: () => setFloatDomHover(false),
             } : {})}
           >
-            {floatingPreview && <BrowserFloatGrip />}
+            {floatingPreview && <BrowserFloatGrip viewId={view.id} />}
             <Suspense fallback={null}>
               {view.kind === "file" && <FileTab view={view} active={shown && onWorkspace} focused={focused} />}
               {view.kind === "diff" && <DiffTab view={view} active={shown && onWorkspace} />}
@@ -147,27 +148,6 @@ export function ViewTabsHost() {
       {floatView && floatRect && placementOf(floatView) !== undefined && (
         <BrowserFloatFrame rect={floatRect} viewId={floatView.id} aspectRatio={floatAspectRatio} hover={floatDomHover} />
       )}
-    </div>
-  );
-}
-
-/** Controles da miniatura, no canto da página (abrem um buraco na vista nativa só enquanto aparecem). */
-function BrowserFloatGrip() {
-  // O mouse sobre a página nativa não chega ao DOM: quem avisa é o motor (`real-browser-mini-hover`).
-  // Mantém hover em DOM para que, ao entrar no buraco dos botões, os controles não sumam quando o CEF avisar saída.
-  const miniHover = useChatStore((state) => state.browserMiniHover);
-  const [domHover, setDomHover] = useState(false);
-  const hover = miniHover || domHover;
-  return (
-    <div
-      className="group absolute right-2.5 top-2.5 z-40 pointer-events-auto"
-      data-browser-mini-controls
-      data-hover={hover}
-      onPointerEnter={() => setDomHover(true)}
-      onPointerLeave={() => setDomHover(false)}
-      {...(hover ? { "data-over-webview": "" } : {})}
-    >
-      <BrowserMiniControls />
     </div>
   );
 }
@@ -252,7 +232,7 @@ export function BrowserFloatFrame({
     ? explicitAspectRatio
     : floatAspectRatioOf(view?.kind === "browser" ? view.viewport : null);
   const { begin, move, end } = useFloatDrag(aspectRatio);
-  const miniHover = useChatStore((state) => state.browserMiniHover);
+  const miniHover = useChatStore((state) => state.browserMiniHover[viewId ?? ""] ?? false);
   const [frameHover, setFrameHover] = useState(false);
   const r = FLOAT_RING;
   const dockVisible = hover || frameHover || miniHover;
