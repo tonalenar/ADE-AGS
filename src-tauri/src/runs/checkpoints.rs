@@ -348,7 +348,41 @@ pub fn items_of(conn: &Connection, run_id: &str, tasks: &[Task]) -> Result<Vec<I
 /// Ejecuta un rollback ya planeado: foto de seguridad por carpeta, restaurar y poner las tareas
 /// en cola. Devuelve las fotos de seguridad.
 pub fn rollback(db: &crate::database::DbConnection, run_id: &str, plan: &Plan) -> Result<Vec<Checkpoint>, String> {
-    let mut safeties = Vec::new();
+    rollback_com(db, run_id, plan, || {})
+}
+
+/// Reserva de um run para rollback ou restauração de foto. Enquanto ela vive, o tick não despacha nada do run. A marca
+/// sai no `Drop`, então ela não fica presa se o git falhar no meio.
+pub(super) struct Reserva {
+    run_id: String,
+}
+
+impl Drop for Reserva {
+    fn drop(&mut self) {
+        super::scheduler::desmarcar_manutencao(&self.run_id);
+    }
+}
+
+/// Toma a reserva: sob o lock do tick, confere que nenhuma tarefa do run está viva e marca o run. Solta o lock antes de
+/// qualquer I/O, então o git nunca roda com o agendador travado.
+fn reservar(db: &crate::database::DbConnection, run_id: &str, ocupado: impl FnOnce(&str) -> String) -> Result<Reserva, String> {
+    let _tick = super::scheduler::tick_lock();
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        // O plano se calculou antes deste lock: uma tarefa pode ter sido despachada desde então.
+        if let Some(live) = live_task(&conn, run_id)? {
+            return Err(ocupado(&live));
+        }
+    }
+    if !super::scheduler::marcar_manutencao(run_id) {
+        return Err("Este run já está voltando atrás ou restaurando uma foto: espere terminar.".into());
+    }
+    Ok(Reserva { run_id: run_id.to_string() })
+}
+
+/// Igual a `rollback`; `antes_do_git` roda depois da reserva e antes de qualquer I/O (gancho dos testes).
+fn rollback_com(db: &crate::database::DbConnection, run_id: &str, plan: &Plan, antes_do_git: impl FnOnce()) -> Result<Vec<Checkpoint>, String> {
+    let reserva = reservar(db, run_id, |live| format!("A tarefa '{live}' está rodando: pare-a antes de voltar atrás."))?;
     // Todo se valida y se fotografía ANTES de tocar nada: si algo no se puede, no queda a medias.
     let mut to_restore = Vec::new();
     {
@@ -361,6 +395,8 @@ pub fn rollback(db: &crate::database::DbConnection, run_id: &str, plan: &Plan) -
             to_restore.push((dir.clone(), cp));
         }
     }
+    antes_do_git();
+    let mut safeties = Vec::new();
     for (dir, _) in &to_restore {
         safeties.push(take(db, run_id, None, Path::new(dir), kind::SAFETY, "antes de voltar atrás")?);
     }
@@ -368,6 +404,9 @@ pub fn rollback(db: &crate::database::DbConnection, run_id: &str, plan: &Plan) -
         let head = cp.head_sha.as_deref().ok_or("A foto não guardou o HEAD.")?;
         restore(Path::new(dir), &cp.commit_sha, head)?;
     }
+    // A gravação das tarefas volta a tomar o lock do tick. A marca só sai depois (`Reserva::drop`), então o tick nunca
+    // vê o meio-termo: ou o run ainda está marcado, ou já está com as tarefas na fila.
+    let _tick = super::scheduler::tick_lock();
     let conn = db.lock().map_err(|e| e.to_string())?;
     for id in &plan.tasks {
         conn.execute(
@@ -379,10 +418,23 @@ pub fn rollback(db: &crate::database::DbConnection, run_id: &str, plan: &Plan) -
         .map_err(|e| e.to_string())?;
     }
     super::store::refresh_run_status(&conn, run_id)?;
+    drop(reserva);
     Ok(safeties)
 }
 
 // ── Para la pantalla ────────────────────────────────────────────────
+
+/// A primeira tarefa do run que está rodando ou pronta para rodar (ocupa a vaga), se houver.
+fn live_task(conn: &Connection, run_id: &str) -> Result<Option<String>, String> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT id FROM tasks WHERE run_id = ?1 AND status IN (?2, ?3) LIMIT 1",
+        params![run_id, status::RUNNING, status::READY],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
 
 fn db_of(app: &tauri::AppHandle) -> Result<crate::database::DbConnection, String> {
     use tauri::Manager;
@@ -466,22 +518,22 @@ pub fn run_checkpoint_create(app: tauri::AppHandle, run_id: String, label: Strin
 #[tauri::command(async)]
 pub fn run_restore_checkpoint(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let db = db_of(&app)?;
-    let (cp, live) = {
+    restaurar_com(&db, &id, || {})
+}
+
+/// Restaura a pasta de uma foto. `antes_do_git` roda depois da reserva e antes do I/O (gancho dos testes).
+fn restaurar_com(db: &crate::database::DbConnection, id: &str, antes_do_git: impl FnOnce()) -> Result<(), String> {
+    let cp = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let cp = get(&conn, &id)?.ok_or("A foto não existe mais.")?;
-        let live: i64 = conn
-            .query_row("SELECT COUNT(*) FROM tasks WHERE run_id = ?1 AND status IN ('running','ready')", [&cp.run_id], |r| r.get(0))
-            .map_err(|e| e.to_string())?;
-        (cp, live)
+        get(&conn, id)?.ok_or("A foto não existe mais.")?
     };
-    if live > 0 {
-        return Err("Há tarefas rodando neste run: pare-as antes de restaurar uma foto.".into());
-    }
+    let _reserva = reservar(db, &cp.run_id, |_| "Há tarefas rodando neste run: pare-as antes de restaurar uma foto.".into())?;
     if !Path::new(&cp.dir).exists() {
         return Err(format!("A pasta {} já não existe.", cp.dir));
     }
     let head = cp.head_sha.as_deref().ok_or("A foto não guardou o HEAD.")?;
-    take(&db, &cp.run_id, None, Path::new(&cp.dir), kind::SAFETY, "antes de restaurar uma foto")?;
+    antes_do_git();
+    take(db, &cp.run_id, None, Path::new(&cp.dir), kind::SAFETY, "antes de restaurar uma foto")?;
     restore(Path::new(&cp.dir), &cp.commit_sha, head)
 }
 

@@ -666,3 +666,76 @@ fn la_tab_encuentra_su_terminal_vivo_y_el_mas_nuevo_gana() {
     assert_eq!(newest_for_tab(sessions.iter().copied(), "tab-z"), None);
     assert_eq!(newest_for_tab(sessions.iter().copied(), ""), None);
 }
+
+// ── Encerramento escalado (ACP): SIGTERM agora, SIGKILL depois do prazo, com relógio falso ──
+#[cfg(unix)]
+mod escalada_falsa {
+    use super::super::containment::{Adoptable, ProcessGroup, Sinais};
+    use std::cell::RefCell;
+    use std::time::Duration;
+
+    #[derive(Debug, PartialEq)]
+    enum Evento {
+        Sinal(i32, libc::c_int),
+        Espera(Duration),
+    }
+
+    /// Um mundo sem processos de verdade: quem ignora SIGTERM continua no grupo até o SIGKILL.
+    struct Falso {
+        vivos: RefCell<Vec<u32>>,
+        ignoram_term: Vec<u32>,
+        eventos: RefCell<Vec<Evento>>,
+    }
+
+    impl Falso {
+        fn novo(membros: Vec<u32>, ignoram_term: Vec<u32>) -> Self {
+            Falso { vivos: RefCell::new(membros), ignoram_term, eventos: RefCell::new(Vec::new()) }
+        }
+    }
+
+    impl Sinais for Falso {
+        fn enviar_grupo(&self, pgid: i32, sinal: libc::c_int) -> bool {
+            self.eventos.borrow_mut().push(Evento::Sinal(-pgid, sinal));
+            let encontrou_membros = !self.vivos.borrow().is_empty();
+            if sinal == libc::SIGTERM {
+                self.vivos.borrow_mut().retain(|pid| self.ignoram_term.contains(pid));
+            } else if sinal == libc::SIGKILL {
+                self.vivos.borrow_mut().clear();
+            }
+            encontrou_membros
+        }
+        fn esperar(&self, prazo: Duration) {
+            self.eventos.borrow_mut().push(Evento::Espera(prazo));
+        }
+    }
+
+    /// Um pid que não existe no kernel (acima do teto do Linux): o `adopt` só o anota, e nenhum processo real é tocado.
+    struct PidInexistente;
+    impl Adoptable for PidInexistente {
+        fn pid(&self) -> Option<u32> {
+            Some(0x7FFF_FFF0)
+        }
+    }
+
+    #[test]
+    fn escalada_manda_term_e_kill_ao_grupo_do_lider() {
+        const PGID: u32 = 0x7FFF_FFF0;
+        let falso = Falso::novo(vec![30, 20, 10], vec![30, 10]);
+        let mut grupo = ProcessGroup::new_acp();
+        grupo.adopt(&PidInexistente);
+        let prazo = Duration::from_secs(2);
+        let escalada = grupo.encerrar_escalando_com(&falso);
+        let forcados = escalada.concluir_com(&falso, prazo);
+
+        assert!(forcados, "o SIGKILL encontrou membros no grupo");
+        assert_eq!(
+            *falso.eventos.borrow(),
+            vec![
+                Evento::Sinal(-(PGID as i32), libc::SIGTERM),
+                Evento::Espera(prazo),
+                Evento::Sinal(-(PGID as i32), libc::SIGKILL),
+            ],
+            "os dois sinais vão ao PGID negativo, com a espera entre eles"
+        );
+    }
+}
