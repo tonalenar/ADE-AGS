@@ -18,6 +18,8 @@ export function SaveWorkspaceDialog({ onClose }: SaveWorkspaceDialogProps) {
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
+    // Enter repetido enquanto salva não salva de novo (A172).
+    if (saving) return;
     const trimmed = name.trim();
     if (!trimmed) {
       setError(t("workspace.save.error.empty"));

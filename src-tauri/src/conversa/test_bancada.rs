@@ -107,9 +107,11 @@ mod fake {
         let max = |p| simular(&Roteiro::new(p, vec![Passo::Sessao { id: "s".into() }, Passo::MaxTokens])).unwrap();
         assert!(max(Protocolo::Acp).erro().is_some_and(|e| e.contains("limite de tokens")));
         assert!(max(Protocolo::CodexAppServer).erro().is_some_and(|e| e.contains("max_output_tokens")));
-        // Achado da bancada: o `claude_map` não lê o `stop_reason` da mensagem; um turno cortado no limite de tokens
-        // acaba como "ok" na timeline. Registrado aqui para quem corrigir mudar este teste.
-        assert_eq!(max(Protocolo::ClaudeStream).fim.unwrap().error, None);
+        // O Claude não falha o turno no limite de tokens: o turno acaba sem erro e a timeline ganha o aviso
+        // `responseTruncated` (o texto parcial fica). Antes o `claude_map` ignorava o `stop_reason` e o corte passava como ok.
+        let claude = max(Protocolo::ClaudeStream);
+        assert_eq!(claude.erro(), None, "{claude:?}");
+        assert!(claude.itens.iter().any(|i| i.label.as_deref() == Some("responseTruncated")), "{:?}", claude.itens);
     }
 
     #[test]

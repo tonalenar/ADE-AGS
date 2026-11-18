@@ -28,7 +28,8 @@ import { designRoute, parseDesignOpen } from "@/features/design/openRoute";
 import { notifyFromLabel } from "./notifyFrom";
 import { recruitCommand } from "./recruitCommand";
 import { respondToCli } from "./ipc";
-import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { screenOf } from "@/features/terminal/terminalRegistry";
+import { sendAutonomous } from "@/features/terminal/safeWrite";
 import { requestPtyLaunch } from "@/features/terminal/ptyLaunch";
 import { boardKey, boardKeyOfTab, canvasActions, flushSave, setWorkMode, useCanvasStore } from "@/features/canvas/store";
 import { AGENT_PORTAL_SIZE } from "@/features/canvas/board";
@@ -250,7 +251,7 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
     const timer = setTimeout(() => {
       if (owner?.kind === "tab") {
         const tabId = owner.id;
-        useAskStore.getState().expire(id, (late) => sendWhenReady(tabId, i18n.t("ask.lateMessage", { question, answer: late })));
+        useAskStore.getState().expire(id, (late) => sendAutonomous(tabId, i18n.t("ask.lateMessage", { question, answer: late }), "peer"));
       } else {
         // Sem aba para a resposta tardia: sai da tela. Nunca `answer(id, null)`: resolveria `null`
         // antes do `pending`, e o agente (ou o computer use) leria "não respondeu" como falha.

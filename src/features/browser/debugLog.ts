@@ -8,7 +8,7 @@
  * el MCP la formatea para un agente con las mismas funciones.
  */
 import type { CookieReport, ProxyNetworkPage, ProxyRequest } from "./ipc";
-import type { ConsoleEntry, ConsoleLevel, DebugBatch, NetErrorKind, PageNetworkEntry } from "./protocol";
+import type { ConsoleEntry, ConsoleLevel, DebugBatch, NetBody, NetErrorKind, PageNetworkEntry } from "./protocol";
 
 export interface LoggedConsole extends ConsoleEntry {
   id: number;
@@ -45,6 +45,40 @@ export interface DebugLog {
 
 export const MAX_CONSOLE = 2000;
 export const MAX_REQUESTS = 1500;
+/**
+ * Teto de caracteres de corpo guardados no log, somados sobre todos os pedidos. `MAX_REQUESTS` limita a
+ * contagem, e cada corpo pode trazer até 256 KB: sem este teto, 1500 pedidos grandes pesariam centenas de MB.
+ */
+export const MAX_LOG_BODY_CHARS = 16 * 1024 * 1024;
+
+const bodyChars = (body: NetBody | null | undefined): number =>
+  (body?.text?.length ?? 0) + (body?.base64?.length ?? 0) + (body?.summary?.length ?? 0);
+
+/** O corpo sem conteúdo, marcado como liberado: o metadado (tipo, tamanho) fica para o painel e para o agente. */
+const evictedBody = (body: NetBody | null | undefined): NetBody | null | undefined =>
+  body && bodyChars(body) > 0 ? { ...body, text: null, base64: null, summary: null, evicted: true } : body;
+
+/**
+ * Libera o corpo dos pedidos mais velhos até caber no teto de `max` caracteres (o mais novo tem prioridade).
+ * Devolve a própria lista quando não há nada para liberar.
+ */
+export function limitBodyBytes(requests: LoggedRequest[], max = MAX_LOG_BODY_CHARS): LoggedRequest[] {
+  const out = [...requests];
+  let budget = 0;
+  let changed = false;
+  for (let i = out.length - 1; i >= 0; i--) {
+    const req = out[i];
+    const size = bodyChars(req.requestBody) + bodyChars(req.responseBody);
+    if (size === 0) continue;
+    if (budget + size <= max) {
+      budget += size;
+      continue;
+    }
+    out[i] = { ...req, requestBody: evictedBody(req.requestBody), responseBody: evictedBody(req.responseBody) };
+    changed = true;
+  }
+  return changed ? out : requests;
+}
 
 export const EMPTY_LOG: DebugLog = { console: [], docs: [], requests: [], proxy: [], proxyNext: 0, proxyOrigin: null, nextId: 1 };
 
@@ -69,7 +103,7 @@ export function appendBatch(log: DebugLog, batch: DebugBatch): DebugLog {
   next = {
     ...next,
     console: tail([...next.console, ...console], MAX_CONSOLE),
-    requests: tail([...next.requests, ...requests], MAX_REQUESTS),
+    requests: limitBodyBytes(tail([...next.requests, ...requests], MAX_REQUESTS)),
     nextId: id,
   };
   return next;

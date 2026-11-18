@@ -175,3 +175,11 @@ describe("missionOfTab resolution", () => {
     expect(missionOfTab({ id: "tab-1", cwd: "/repo" }, boards)).toBeNull();
   });
 });
+
+describe("el comando del TUI con un caminho raro", () => {
+  it("quote_escapa_dolar_crase_e_barra_no_caminho", () => {
+    const out = appendBrowserMcp("claude", { configPath: "/tmp/$(rm -rf ~)`x`\\y.json", allowedTools: ["a"] } as TabMcp);
+    // Dentro de aspas duplas o shell expande `$` e crase: o caminho tem de chegar como texto literal.
+    expect(out).toContain('--mcp-config "/tmp/\\$(rm -rf ~)\\`x\\`\\\\y.json"');
+  });
+});

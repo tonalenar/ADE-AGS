@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 
@@ -6,7 +6,8 @@ import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
 import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, jevModels, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
 import { NO_HEURISTIC, POINT_MODE, shadowSummary, type PointMode } from "@/features/settings/decisionsModel";
-import { defaultDecisionSettings, isDirty, modelAfterProviderChange, modelOptions, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
+import { applyDecisionModelUpdate, defaultDecisionSettings, isDirty, modelAfterProviderChange, modelOptions, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 const PROVIDERS: DecisionProviderId[] = ["none", "laya_local", "laya_studio", "jev"];
 const POINT_LABEL: Record<string, string> = {
@@ -170,6 +171,7 @@ export function DecisionsSection() {
   const [secondaryConn, setSecondaryConn] = useState<{ ok: boolean; text: string } | null>(null);
   const [report, setReport] = useState<ShadowReport | null>(null);
   const [jevList, setJevList] = useState<string[]>([]);
+  const dirtyRef = useRef(false);
 
   useEffect(() => {
     const loadSettings = () => getDecisionSettings()
@@ -179,7 +181,7 @@ export function DecisionsSection() {
         setSettings({ ...loaded, model: modelAfterProviderChange(loaded.model, loaded.provider) });
         setSaved(loaded);
       })
-      .catch((error: unknown) => setStatus(String(error)));
+      .catch((error: unknown) => setStatus(uiErrorText(error)));
     void loadSettings();
     jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
     decisionShadowReport().then(setReport).catch(() => undefined);
@@ -188,6 +190,11 @@ export function DecisionsSection() {
     let off: Promise<() => void> = Promise.resolve(() => {});
     try {
       off = listen<string>("decisions-model-updated", (event) => {
+        if (applyDecisionModelUpdate(dirtyRef.current) === "keep") {
+          setStatus(t("settings.decisions.autoUpdatedKeepEdits", { model: event.payload }));
+          jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
+          return;
+        }
         void loadSettings();
         jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
         setStatus(t("settings.decisions.autoUpdated", { model: event.payload }));
@@ -203,6 +210,7 @@ export function DecisionsSection() {
     () => isDirty(settings, saved) || keyDraft.trim() !== "" || secondaryKeyDraft.trim() !== "",
     [settings, saved, keyDraft, secondaryKeyDraft],
   );
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
   const providerLabel = (id: DecisionProviderId) => t(`settings.decisions.provider.${id === "laya_local" ? "layaLocal" : id === "laya_studio" ? "layaStudio" : id}`);
   const active = settings.enabled && settings.provider !== "none";
   const secondaryOn = settings.secondaryProvider !== "none";
@@ -244,7 +252,7 @@ export function DecisionsSection() {
       setSaved(stored);
       setStatus(t("settings.decisions.saved"));
     } catch (error) {
-      setStatus(String(error));
+      setStatus(uiErrorText(error));
     }
   };
 
@@ -256,7 +264,7 @@ export function DecisionsSection() {
       setSettings((cur) => ({ ...cur, ...flag }));
       setSaved((cur) => ({ ...cur, ...flag }));
     } catch (error) {
-      setStatus(String(error));
+      setStatus(uiErrorText(error));
     }
   };
 
@@ -271,7 +279,7 @@ export function DecisionsSection() {
         ? { ok: true, text: t("settings.decisions.testOk", { ms: result.latencyMs }) }
         : { ok: false, text: t("settings.decisions.testFail", { ms: result.latencyMs, error: result.error ?? "" }) });
     } catch (error) {
-      put({ ok: false, text: String(error) });
+      put({ ok: false, text: uiErrorText(error) });
     } finally {
       setTesting(null);
     }
@@ -282,7 +290,7 @@ export function DecisionsSection() {
     try {
       setReport(await decisionShadowReport());
     } catch (error) {
-      setStatus(String(error));
+      setStatus(uiErrorText(error));
     }
   };
 
@@ -485,7 +493,7 @@ export function DecisionsSection() {
         action={
           <span className="flex gap-2">
             <button type="button" onClick={() => void loadReport()} className={BTN}>{t("settings.decisions.refresh")}</button>
-            <button type="button" onClick={() => void exportCsv().catch((error: unknown) => setStatus(String(error)))} className={BTN}>{t("settings.decisions.export")}</button>
+            <button type="button" onClick={() => void exportCsv().catch((error: unknown) => setStatus(uiErrorText(error)))} className={BTN}>{t("settings.decisions.export")}</button>
           </span>
         }
       >

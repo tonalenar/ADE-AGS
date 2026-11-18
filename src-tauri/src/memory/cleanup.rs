@@ -14,7 +14,8 @@ use serde::Serialize;
 use super::repo_sync::{self, RepoSync};
 use super::{ProposalActor, ProposalInput};
 use crate::database::DbConnection;
-use crate::decisions::hints::{memory_hints, HintInput};
+use crate::decisions::hints::{HintInput, memory_hints};
+use tauri::Manager;
 
 /// Limite de ids por chamada de apply.
 pub const APPLY_MAX_IDS: usize = 100;
@@ -27,7 +28,19 @@ const TEST_KEY_PREFIXES: &[&str] = &["neg-", "test-", "tmp-", "teste-"];
 /// Chaves que são, por inteiro, de teste (sem hífen depois).
 const TEST_KEYS: &[&str] = &["test", "teste", "tmp", "temp", "foo", "asdf"];
 /// Corpos que não dizem nada: o que se escreve para ver se funciona.
-const PLACEHOLDER_BODIES: &[&str] = &["test", "teste", "testing", "tmp", "ok", "asdf", "foo", "bar", "lorem ipsum", "xxx", "..."];
+const PLACEHOLDER_BODIES: &[&str] = &[
+    "test",
+    "teste",
+    "testing",
+    "tmp",
+    "ok",
+    "asdf",
+    "foo",
+    "bar",
+    "lorem ipsum",
+    "xxx",
+    "...",
+];
 /// Semelhança (Jaccard das palavras de chave + corpo) a partir da qual duas memórias do mesmo escopo
 /// são «parecidas». No banco real havia ~8 grupos assim (ex.: `missao-startedat-em-segundos` e
 /// `vigia-unidades-tempo`), que a duplicata exata não pegava.
@@ -79,7 +92,13 @@ struct ActiveRow {
 
 /// As palavras (já normalizadas pelo mesmo tokenizador da busca) de chave + corpo.
 fn words(row: &ActiveRow) -> HashSet<String> {
-    super::search::tokenize(&format!("{} {}", row.key.replace(['-', '_'], " "), row.body)).into_iter().collect()
+    super::search::tokenize(&format!(
+        "{} {}",
+        row.key.replace(['-', '_'], " "),
+        row.body
+    ))
+    .into_iter()
+    .collect()
 }
 
 /// Jaccard de dois conjuntos de palavras. Pura.
@@ -92,7 +111,10 @@ pub(crate) fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
 }
 
 fn normalize_body(body: &str) -> String {
-    body.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    body.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 fn active_rows(conn: &Connection, workspace_id: &str) -> Result<Vec<ActiveRow>, String> {
@@ -170,7 +192,12 @@ pub fn candidates_for(conn: &Connection, workspace_id: &str) -> Result<Vec<Candi
 
     // (a3) Memória de missão encerrada: só valia nela (a busca de outra missão não a carrega).
     for (i, row) in rows.iter().enumerate() {
-        if row.scope == "mission" && row.mission_status.as_deref().is_some_and(|s| FINISHED_MISSION.contains(&s)) {
+        if row.scope == "mission"
+            && row
+                .mission_status
+                .as_deref()
+                .is_some_and(|s| FINISHED_MISSION.contains(&s))
+        {
             reasons[i].push("missão encerrada".to_string());
         }
         // Memória do projeto que nasceu numa missão de teste (ex.: `qa-v9-01`, «Cache timeout 300 s»).
@@ -182,7 +209,11 @@ pub fn candidates_for(conn: &Connection, workspace_id: &str) -> Result<Vec<Candi
     // (b) Chaves de teste.
     for (i, row) in rows.iter().enumerate() {
         let key = row.key.to_lowercase();
-        if TEST_KEY_PREFIXES.iter().any(|prefix| key.starts_with(prefix)) || TEST_KEYS.contains(&key.trim()) {
+        if TEST_KEY_PREFIXES
+            .iter()
+            .any(|prefix| key.starts_with(prefix))
+            || TEST_KEYS.contains(&key.trim())
+        {
             reasons[i].push("chave de teste".to_string());
         }
         // Corpo sem conteúdo: de até 2 caracteres ou uma das palavras de preenchimento.
@@ -234,12 +265,22 @@ pub fn candidates_for(conn: &Connection, workspace_id: &str) -> Result<Vec<Candi
             reasons,
         })
         .collect();
-    out.sort_by(|a, b| b.reasons.len().cmp(&a.reasons.len()).then_with(|| a.key.cmp(&b.key)));
+    out.sort_by(|a, b| {
+        b.reasons
+            .len()
+            .cmp(&a.reasons.len())
+            .then_with(|| a.key.cmp(&b.key))
+    });
     Ok(out)
 }
 
 /// Apaga uma entrada ativa pelo caminho do usuário: proposta de exclusão + aprovação imediata.
-fn delete_as_user(conn: &Connection, sync: &RepoSync, workspace_id: &str, entry_id: &str) -> Result<(), String> {
+fn delete_as_user(
+    conn: &Connection,
+    sync: &RepoSync,
+    workspace_id: &str,
+    entry_id: &str,
+) -> Result<(), String> {
     let row: Option<(String, String, Option<String>, String, String, i64, String, Option<i64>, Option<String>)> = conn
         .query_row(
             "SELECT e.scope, e.workspace_id, e.mission_id, e.key, e.kind, e.priority, e.status, e.current_revision, r.body \
@@ -278,56 +319,89 @@ fn delete_as_user(conn: &Connection, sync: &RepoSync, workspace_id: &str, entry_
         workspace_id,
         mission_id.as_deref(),
         &input,
-        ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None },
+        ProposalActor {
+            kind: "user",
+            run_id: None,
+            task_id: None,
+            fact_id: None,
+        },
     )?;
     repo_sync::decide_and_schedule(conn, sync, &proposal.entry_id, proposal.revision, true)?;
     // Apagar pela limpeza é a rejeição humana da proposta (origem `limpeza`), não uma aprovação.
     // Falha ao gravar o rótulo nunca derruba a exclusão, que já aconteceu.
-    if let Err(error) = crate::decisions::scorecard::record_cleanup_rejection(conn, &key, &kind, &body) {
+    if let Err(error) =
+        crate::decisions::scorecard::record_cleanup_rejection(conn, &key, &kind, &body)
+    {
         eprintln!("limpeza de memória: rótulo do gabarito não gravado: {error}");
     }
     Ok(())
 }
 
 /// Apaga as entradas pedidas, uma a uma, sem parar na primeira falha. Ids repetidos contam uma vez.
-pub fn apply_for(conn: &Connection, sync: &RepoSync, workspace_id: &str, entry_ids: &[String]) -> Result<CleanupResult, String> {
+pub fn apply_for(
+    conn: &Connection,
+    sync: &RepoSync,
+    workspace_id: &str,
+    entry_ids: &[String],
+) -> Result<CleanupResult, String> {
     if entry_ids.len() > APPLY_MAX_IDS {
         return Err(format!("no máximo {APPLY_MAX_IDS} memórias por chamada"));
     }
     let mut seen = HashSet::new();
-    let mut result = CleanupResult { deleted: 0, failed: Vec::new() };
+    let mut result = CleanupResult {
+        deleted: 0,
+        failed: Vec::new(),
+    };
     for entry_id in entry_ids {
         if !seen.insert(entry_id.as_str()) {
             continue;
         }
         match delete_as_user(conn, sync, workspace_id, entry_id) {
             Ok(()) => result.deleted += 1,
-            Err(error) => result.failed.push(CleanupFailure { entry_id: entry_id.clone(), error }),
+            Err(error) => result.failed.push(CleanupFailure {
+                entry_id: entry_id.clone(),
+                error,
+            }),
         }
     }
     Ok(result)
 }
 
 #[tauri::command]
-pub fn memory_cleanup_candidates(workspace_id: String, db: tauri::State<DbConnection>) -> Result<Vec<Candidate>, String> {
-    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    candidates_for(&conn, &workspace_id)
+pub async fn memory_cleanup_candidates(
+    workspace_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<Candidate>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        candidates_for(&conn, &workspace_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn memory_cleanup_apply(
+pub async fn memory_cleanup_apply(
     workspace_id: String,
     entry_ids: Vec<String>,
     app: tauri::AppHandle,
-    db: tauri::State<DbConnection>,
-    sync: tauri::State<RepoSync>,
+    db: tauri::State<'_, DbConnection>,
+    sync: tauri::State<'_, RepoSync>,
 ) -> Result<CleanupResult, String> {
-    let result = {
-        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-        apply_for(&conn, &sync, &workspace_id, &entry_ids)
-    };
-    crate::memory::notify_changed(&app);
-    result
+    let db = db.inner().clone();
+    let _ = &sync;
+    tauri::async_runtime::spawn_blocking(move || {
+        let sync = app.state::<RepoSync>();
+        let result = {
+            let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+            apply_for(&conn, &sync, &workspace_id, &entry_ids)
+        };
+        crate::memory::notify_changed(&app);
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -336,10 +410,10 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::decisions::log::{migrate as migrate_log, record, LogRow};
-    use crate::decisions::{memory_state_hash, POINT_MEMORY};
+    use crate::decisions::log::{LogRow, migrate as migrate_log, record};
     use crate::decisions::scorecard::CLEANUP_POINT;
-    use crate::memory::{decide, propose, ProposalResult};
+    use crate::decisions::{POINT_MEMORY, memory_state_hash};
+    use crate::memory::{ProposalResult, decide, propose};
 
     fn db() -> Connection {
         crate::database::test_db()
@@ -365,7 +439,14 @@ mod tests {
         .unwrap();
     }
 
-    fn add(conn: &Connection, scope: &str, workspace: &str, mission: Option<&str>, key: &str, body: &str) -> ProposalResult {
+    fn add(
+        conn: &Connection,
+        scope: &str,
+        workspace: &str,
+        mission: Option<&str>,
+        key: &str,
+        body: &str,
+    ) -> ProposalResult {
         let input = ProposalInput {
             scope: scope.into(),
             key: key.into(),
@@ -378,35 +459,104 @@ mod tests {
             reason: None,
             acknowledge_secret: false,
         };
-        let actor = ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None };
+        let actor = ProposalActor {
+            kind: "user",
+            run_id: None,
+            task_id: None,
+            fact_id: None,
+        };
         let created = propose(conn, scope, workspace, mission, &input, actor).unwrap();
         decide(conn, &created.entry_id, created.revision, true).unwrap();
         created
     }
 
     fn reasons_of(list: &[Candidate], key: &str) -> Option<Vec<String>> {
-        list.iter().find(|c| c.key == key).map(|c| c.reasons.clone())
+        list.iter()
+            .find(|c| c.key == key)
+            .map(|c| c.reasons.clone())
     }
 
     #[test]
     fn parecidas_missao_encerrada_e_missao_de_teste_viram_candidatas() {
         let conn = db();
         seed(&conn);
-        add(&conn, "workspace", "w1", None, "missao-startedat-em-segundos", "started_at da missão vem em segundos do banco; converter para ms antes de comparar com Date.now");
-        add(&conn, "workspace", "w1", None, "vigia-unidades-tempo", "o started_at da missão vem do banco em segundos: converter para ms antes de comparar com Date.now no Vigia");
-        add(&conn, "workspace", "w1", None, "outra-coisa", "o pool de contas escolhe a conta com cota disponível antes de abrir o terminal");
-        add(&conn, "mission", "w1", Some("m1"), "so-da-missao", "detalhe que só valia nesta missão");
+        add(
+            &conn,
+            "workspace",
+            "w1",
+            None,
+            "missao-startedat-em-segundos",
+            "started_at da missão vem em segundos do banco; converter para ms antes de comparar com Date.now",
+        );
+        add(
+            &conn,
+            "workspace",
+            "w1",
+            None,
+            "vigia-unidades-tempo",
+            "o started_at da missão vem do banco em segundos: converter para ms antes de comparar com Date.now no Vigia",
+        );
+        add(
+            &conn,
+            "workspace",
+            "w1",
+            None,
+            "outra-coisa",
+            "o pool de contas escolhe a conta com cota disponível antes de abrir o terminal",
+        );
+        add(
+            &conn,
+            "mission",
+            "w1",
+            Some("m1"),
+            "so-da-missao",
+            "detalhe que só valia nesta missão",
+        );
         let list = candidates_for(&conn, "w1").unwrap();
-        assert_eq!(reasons_of(&list, "vigia-unidades-tempo"), Some(vec!["parecida com missao-startedat-em-segundos".to_string()]));
-        assert_eq!(reasons_of(&list, "missao-startedat-em-segundos"), None, "a mais antiga fica");
+        assert_eq!(
+            reasons_of(&list, "vigia-unidades-tempo"),
+            Some(vec![
+                "parecida com missao-startedat-em-segundos".to_string()
+            ])
+        );
+        assert_eq!(
+            reasons_of(&list, "missao-startedat-em-segundos"),
+            None,
+            "a mais antiga fica"
+        );
         assert_eq!(reasons_of(&list, "outra-coisa"), None);
-        assert_eq!(reasons_of(&list, "so-da-missao"), None, "missão ainda aberta");
-        conn.execute("UPDATE missions SET status='done', is_test=1 WHERE id='m1'", []).unwrap();
-        let entry = add(&conn, "workspace", "w1", None, "qa-v9-01", "Cache timeout configurado para 300 segundos");
-        conn.execute("UPDATE memory_entries SET source_mission='m1' WHERE id=?1", [&entry.entry_id]).unwrap();
+        assert_eq!(
+            reasons_of(&list, "so-da-missao"),
+            None,
+            "missão ainda aberta"
+        );
+        conn.execute(
+            "UPDATE missions SET status='done', is_test=1 WHERE id='m1'",
+            [],
+        )
+        .unwrap();
+        let entry = add(
+            &conn,
+            "workspace",
+            "w1",
+            None,
+            "qa-v9-01",
+            "Cache timeout configurado para 300 segundos",
+        );
+        conn.execute(
+            "UPDATE memory_entries SET source_mission='m1' WHERE id=?1",
+            [&entry.entry_id],
+        )
+        .unwrap();
         let list = candidates_for(&conn, "w1").unwrap();
-        assert_eq!(reasons_of(&list, "so-da-missao"), Some(vec!["missão encerrada".to_string()]));
-        assert_eq!(reasons_of(&list, "qa-v9-01"), Some(vec!["veio de missão de teste".to_string()]));
+        assert_eq!(
+            reasons_of(&list, "so-da-missao"),
+            Some(vec!["missão encerrada".to_string()])
+        );
+        assert_eq!(
+            reasons_of(&list, "qa-v9-01"),
+            Some(vec!["veio de missão de teste".to_string()])
+        );
         let a: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
         assert_eq!(jaccard(&a, &a), 1.0);
         assert_eq!(jaccard(&HashSet::new(), &HashSet::new()), 0.0);
@@ -416,16 +566,43 @@ mod tests {
     fn duplicatas_marcam_as_mais_novas_e_mantem_a_mais_antiga() {
         let conn = db();
         seed(&conn);
-        add(&conn, "workspace", "w1", None, "dup-a", "Usar  SQLite\n local");
+        add(
+            &conn,
+            "workspace",
+            "w1",
+            None,
+            "dup-a",
+            "Usar  SQLite\n local",
+        );
         add(&conn, "workspace", "w1", None, "dup-b", "usar sqlite local");
         add(&conn, "workspace", "w1", None, "dup-c", "USAR SQLITE LOCAL");
-        add(&conn, "mission", "w1", Some("m1"), "dup-m", "usar sqlite local");
+        add(
+            &conn,
+            "mission",
+            "w1",
+            Some("m1"),
+            "dup-m",
+            "usar sqlite local",
+        );
         let list = candidates_for(&conn, "w1").unwrap();
         assert_eq!(reasons_of(&list, "dup-a"), None);
-        assert_eq!(reasons_of(&list, "dup-m"), None, "escopo de mission é outro grupo");
-        assert_eq!(reasons_of(&list, "dup-b"), Some(vec!["duplicada de dup-a".to_string()]));
-        assert_eq!(reasons_of(&list, "dup-c"), Some(vec!["duplicada de dup-a".to_string()]));
-        assert!(list.iter().all(|c| c.body_preview.chars().count() <= PREVIEW_CHARS));
+        assert_eq!(
+            reasons_of(&list, "dup-m"),
+            None,
+            "escopo de mission é outro grupo"
+        );
+        assert_eq!(
+            reasons_of(&list, "dup-b"),
+            Some(vec!["duplicada de dup-a".to_string()])
+        );
+        assert_eq!(
+            reasons_of(&list, "dup-c"),
+            Some(vec!["duplicada de dup-a".to_string()])
+        );
+        assert!(
+            list.iter()
+                .all(|c| c.body_preview.chars().count() <= PREVIEW_CHARS)
+        );
     }
 
     #[test]
@@ -438,11 +615,18 @@ mod tests {
         add(&conn, "workspace", "w1", None, "tmpfoo", "delta");
         let list = candidates_for(&conn, "w1").unwrap();
         for key in ["neg-x", "TEST-y", "Teste-z"] {
-            assert_eq!(reasons_of(&list, key), Some(vec!["chave de teste".to_string()]), "{key}");
+            assert_eq!(
+                reasons_of(&list, key),
+                Some(vec!["chave de teste".to_string()]),
+                "{key}"
+            );
         }
         assert_eq!(reasons_of(&list, "tmpfoo"), None);
         // Ordenação: número de motivos desc, depois chave.
-        assert_eq!(list.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), vec!["TEST-y", "Teste-z", "neg-x"]);
+        assert_eq!(
+            list.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(),
+            vec!["TEST-y", "Teste-z", "neg-x"]
+        );
     }
 
     #[test]
@@ -451,13 +635,36 @@ mod tests {
         seed(&conn);
         add(&conn, "workspace", "w1", None, "test", "test");
         add(&conn, "workspace", "w1", None, "regra-real", "ok");
-        add(&conn, "workspace", "w1", None, "testando", "A regra do projeto é X e vale para todos os módulos");
+        add(
+            &conn,
+            "workspace",
+            "w1",
+            None,
+            "testando",
+            "A regra do projeto é X e vale para todos os módulos",
+        );
         add(&conn, "workspace", "w1", None, "contexto", "Lorem Ipsum");
         let list = candidates_for(&conn, "w1").unwrap();
-        assert_eq!(reasons_of(&list, "test"), Some(vec!["chave de teste".to_string(), "corpo sem conteúdo".to_string()]));
-        assert_eq!(reasons_of(&list, "regra-real"), Some(vec!["corpo sem conteúdo".to_string()]));
-        assert_eq!(reasons_of(&list, "contexto"), Some(vec!["corpo sem conteúdo".to_string()]));
-        assert_eq!(reasons_of(&list, "testando"), None, "só a chave inteira conta, não o começo de uma palavra");
+        assert_eq!(
+            reasons_of(&list, "test"),
+            Some(vec![
+                "chave de teste".to_string(),
+                "corpo sem conteúdo".to_string()
+            ])
+        );
+        assert_eq!(
+            reasons_of(&list, "regra-real"),
+            Some(vec!["corpo sem conteúdo".to_string()])
+        );
+        assert_eq!(
+            reasons_of(&list, "contexto"),
+            Some(vec!["corpo sem conteúdo".to_string()])
+        );
+        assert_eq!(
+            reasons_of(&list, "testando"),
+            None,
+            "só a chave inteira conta, não o começo de uma palavra"
+        );
         // Mais motivos primeiro.
         assert_eq!(list[0].key, "test");
     }
@@ -467,7 +674,14 @@ mod tests {
         let conn = db();
         seed(&conn);
         migrate_log(&conn).unwrap();
-        add(&conn, "workspace", "w1", None, "para-revisar", "texto que o Jev quer ver");
+        add(
+            &conn,
+            "workspace",
+            "w1",
+            None,
+            "para-revisar",
+            "texto que o Jev quer ver",
+        );
         record(
             &conn,
             &LogRow {
@@ -475,7 +689,12 @@ mod tests {
                 point: POINT_MEMORY.into(),
                 provider: "jev".into(),
                 model: "m".into(),
-                state_hash: memory_state_hash("para-revisar", "note", "create", "texto que o Jev quer ver"),
+                state_hash: memory_state_hash(
+                    "para-revisar",
+                    "note",
+                    "create",
+                    "texto que o Jev quer ver",
+                ),
                 heuristic: "acao=revisar;segredo=nao".into(),
                 provider_decision: Some("acao=revisar;segredo=nao".into()),
                 probability: Some(0.7),
@@ -488,7 +707,10 @@ mod tests {
         )
         .unwrap();
         let list = candidates_for(&conn, "w1").unwrap();
-        assert_eq!(reasons_of(&list, "para-revisar"), Some(vec![REVIEW_REASON.to_string()]));
+        assert_eq!(
+            reasons_of(&list, "para-revisar"),
+            Some(vec![REVIEW_REASON.to_string()])
+        );
     }
 
     #[test]
@@ -498,7 +720,14 @@ mod tests {
         migrate_log(&conn).unwrap();
         add(&conn, "workspace", "w1", None, "jev-sim", "corpo jev");
         add(&conn, "workspace", "w1", None, "jev-baixo", "corpo baixo");
-        add(&conn, "workspace", "w1", None, "jev-segredo", "corpo segredo");
+        add(
+            &conn,
+            "workspace",
+            "w1",
+            None,
+            "jev-segredo",
+            "corpo segredo",
+        );
         add(&conn, "workspace", "w1", None, "jev-aprova", "corpo aprova");
         let log = |key: &str, body: &str, decision: &str, probability: f64| {
             record(
@@ -523,10 +752,23 @@ mod tests {
         };
         log("jev-sim", "corpo jev", "acao=rejeitar;segredo=nao", 0.9);
         log("jev-baixo", "corpo baixo", "acao=rejeitar;segredo=nao", 0.2);
-        log("jev-segredo", "corpo segredo", "acao=rejeitar;segredo=sim", 0.9);
-        log("jev-aprova", "corpo aprova", "acao=aprovar;segredo=nao", 0.9);
+        log(
+            "jev-segredo",
+            "corpo segredo",
+            "acao=rejeitar;segredo=sim",
+            0.9,
+        );
+        log(
+            "jev-aprova",
+            "corpo aprova",
+            "acao=aprovar;segredo=nao",
+            0.9,
+        );
         let list = candidates_for(&conn, "w1").unwrap();
-        assert_eq!(reasons_of(&list, "jev-sim"), Some(vec!["o Jev rejeitaria".to_string()]));
+        assert_eq!(
+            reasons_of(&list, "jev-sim"),
+            Some(vec!["o Jev rejeitaria".to_string()])
+        );
         assert_eq!(reasons_of(&list, "jev-baixo"), None);
         assert_eq!(reasons_of(&list, "jev-segredo"), None);
         assert_eq!(reasons_of(&list, "jev-aprova"), None);
@@ -545,7 +787,11 @@ mod tests {
             &conn,
             &sync,
             "w1",
-            &[old.entry_id.clone(), other.entry_id.clone(), old.entry_id.clone()],
+            &[
+                old.entry_id.clone(),
+                other.entry_id.clone(),
+                old.entry_id.clone(),
+            ],
         )
         .unwrap();
         assert_eq!(result.deleted, 1);
@@ -553,7 +799,10 @@ mod tests {
         assert_eq!(result.failed[0].entry_id, other.entry_id);
 
         let status = |id: &str| -> String {
-            conn.query_row("SELECT status FROM memory_entries WHERE id=?1", [id], |r| r.get(0)).unwrap()
+            conn.query_row("SELECT status FROM memory_entries WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap()
         };
         assert_eq!(status(&old.entry_id), "deleted");
         assert_eq!(status(&keep.entry_id), "active");
@@ -567,9 +816,16 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!((operation.as_str(), decided.as_str()), ("delete", "approved"));
+        assert_eq!(
+            (operation.as_str(), decided.as_str()),
+            ("delete", "approved")
+        );
         let revisions: i64 = conn
-            .query_row("SELECT COUNT(*) FROM memory_revisions WHERE entry_id=?1", [&old.entry_id], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM memory_revisions WHERE entry_id=?1",
+                [&old.entry_id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(revisions, 2);
 
@@ -577,7 +833,12 @@ mod tests {
         let again = apply_for(&conn, &sync, "w1", &[old.entry_id.clone()]).unwrap();
         assert_eq!(again.deleted, 0);
         assert_eq!(again.failed[0].error, "memória não está ativa");
-        assert!(candidates_for(&conn, "w1").unwrap().iter().all(|c| c.entry_id != old.entry_id));
+        assert!(
+            candidates_for(&conn, "w1")
+                .unwrap()
+                .iter()
+                .all(|c| c.entry_id != old.entry_id)
+        );
     }
 
     #[test]
@@ -585,28 +846,65 @@ mod tests {
         let conn = db();
         seed(&conn);
         let old = add(&conn, "workspace", "w1", None, "rot-key", "para rotular");
-        let other = add(&conn, "workspace", "w2", None, "rot-other", "de outro workspace");
+        let other = add(
+            &conn,
+            "workspace",
+            "w2",
+            None,
+            "rot-other",
+            "de outro workspace",
+        );
         let sync = sync();
         let hash = memory_state_hash("rot-key", "note", "proposta", "para rotular");
         let count = |point: &str| -> i64 {
-            conn.query_row("SELECT COUNT(*) FROM decision_human_log WHERE point = ?1", [point], |r| r.get(0)).unwrap()
+            conn.query_row(
+                "SELECT COUNT(*) FROM decision_human_log WHERE point = ?1",
+                [point],
+                |r| r.get(0),
+            )
+            .unwrap()
         };
 
         // Recusada (outro workspace): nada é rotulado.
-        assert_eq!(apply_for(&conn, &sync, "w1", &[other.entry_id.clone()]).unwrap().deleted, 0);
+        assert_eq!(
+            apply_for(&conn, &sync, "w1", &[other.entry_id.clone()])
+                .unwrap()
+                .deleted,
+            0
+        );
         assert_eq!(count(CLEANUP_POINT), 0);
 
-        assert_eq!(apply_for(&conn, &sync, "w1", &[old.entry_id.clone()]).unwrap().deleted, 1);
+        assert_eq!(
+            apply_for(&conn, &sync, "w1", &[old.entry_id.clone()])
+                .unwrap()
+                .deleted,
+            1
+        );
         assert_eq!(count(CLEANUP_POINT), 1);
         let (stored_hash, decision): (String, String) = conn
-            .query_row("SELECT state_hash, decision FROM decision_human_log WHERE point = ?1", [CLEANUP_POINT], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_row(
+                "SELECT state_hash, decision FROM decision_human_log WHERE point = ?1",
+                [CLEANUP_POINT],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
-        assert_eq!((stored_hash.as_str(), decision.as_str()), (hash.as_str(), "rejeitar"));
+        assert_eq!(
+            (stored_hash.as_str(), decision.as_str()),
+            (hash.as_str(), "rejeitar")
+        );
         // A exclusão não entra como aprovação da tela normal.
         assert_eq!(count(POINT_MEMORY), 0);
 
         // Repetir o rótulo (mesma proposta) não duplica.
-        assert!(!crate::decisions::scorecard::record_cleanup_rejection(&conn, "rot-key", "note", "para rotular").unwrap());
+        assert!(
+            !crate::decisions::scorecard::record_cleanup_rejection(
+                &conn,
+                "rot-key",
+                "note",
+                "para rotular"
+            )
+            .unwrap()
+        );
         assert_eq!(count(CLEANUP_POINT), 1);
     }
 

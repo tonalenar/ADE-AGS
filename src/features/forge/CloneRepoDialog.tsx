@@ -11,6 +11,7 @@ import { AddGitAccountDialog } from "./AddGitAccountDialog";
 import { cloneDirName } from "./cloneName";
 import { forgeClone, forgeRepos } from "./ipc";
 import { useForgeStore } from "./store";
+import { cloneDialogError } from "./cloneDialogError";
 import { forgeErrorOf, type ForgeRepo } from "./types";
 
 const URL_SOURCE = "__url__";
@@ -49,7 +50,7 @@ export function CloneRepoDialog({ onClose, onCloned }: {
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
 
-  useEffect(() => { if (!loaded) load().catch(console.error); }, [loaded, load]);
+  useEffect(() => { if (!loaded) load().catch((e) => setError(cloneDialogError(e))); }, [loaded, load]);
   useEffect(() => {
     const last = readLastParent();
     if (last) setParent(last);
@@ -89,8 +90,12 @@ export function CloneRepoDialog({ onClose, onCloned }: {
   }, [repos, query]);
 
   const browse = async () => {
-    const dir = await open({ directory: true, multiple: false, title: t("forge.clone.parent") });
-    if (typeof dir === "string" && dir) setParent(dir);
+    try {
+      const dir = await open({ directory: true, multiple: false, title: t("forge.clone.parent") });
+      if (typeof dir === "string" && dir) setParent(dir);
+    } catch (e) {
+      setError(cloneDialogError(e));
+    }
   };
 
   const clone = async () => {

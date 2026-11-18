@@ -555,16 +555,19 @@ declare global {
   }
 
   // Los diálogos nativos (`alert`, `confirm`, `prompt`) frenan el motor hasta que alguien
-  // contesta, y adentro de un iframe eso deja esperando a la app entera. Mientras maneja un
-  // agente se contestan solos —si no, su acción quedaría colgada hasta que pase una
-  // persona— y quedan anotados. Cuando la página la usa el usuario, el diálogo sale como
-  // siempre: contestarle por él podría borrarle algo sin preguntar.
+  // contesta, y adentro de un iframe eso deja esperando a la app entera. Cuando la página la usa
+  // la persona, salen como siempre. Cuando la maneja un agente NO se contestan solos: un
+  // «¿Excluir la cuenta?» no puede aceptarlo el agente por la persona. Se rechazan (así la acción
+  // no sigue) y la pregunta sale a la app (`dialog:asked`), que la muestra en `AppConfirmHost`. Si la
+  // persona la permite, queda anotado para el próximo diálogo igual, una sola vez (`dialogs allow`).
   const dialogs: { type: string; message: string; answer: string; at: number }[] = [];
-  const dialogPolicy = { accept: true, text: "" };
   const nativeAlert = window.alert.bind(window);
   const nativeConfirm = window.confirm.bind(window);
   const nativePrompt = window.prompt.bind(window);
-  /** Hay una orden de un agente en curso. */
+  /** Diálogos que la persona autorizó (`confirm:texto`). Cada uno vale una vez; se pierden al navegar. */
+  const allowedDialogs = new Set<string>();
+  /** Órdenes de agente en curso. Dos pueden solaparse (un `act` y un `eval` del panel): `driving` vale mientras quede una. */
+  let activeCommands = 0;
   let driving = false;
 
   function recordDialog(type: string, message: string, answer: string): void {
@@ -577,13 +580,24 @@ declare global {
     });
   }
 
+  /** Lo que la app le pregunta a la persona por un diálogo que disparó un agente. */
+  function askPerson(kind: "alert" | "confirm" | "prompt", message: string): void {
+    post({ type: "dialog:asked", payload: { kind, message: clip(message, 1000), key: `${kind}:${message}` } });
+  }
+
+  /** `true` si la persona ya autorizó este diálogo; lo gasta. */
+  function takeAllowance(kind: string, message: string): boolean {
+    return allowedDialogs.delete(`${kind}:${message}`);
+  }
+
   window.alert = (message?: unknown) => {
     if (!driving) {
       recordDialog("alert", String(message ?? ""), "lo contestó el usuario");
       nativeAlert(message as string);
       return;
     }
-    recordDialog("alert", String(message ?? ""), "aceptado por el agente");
+    recordDialog("alert", String(message ?? ""), "mostrado a la persona (el agente no lo contesta)");
+    askPerson("alert", String(message ?? ""));
   };
   window.confirm = (message?: string) => {
     if (!driving) {
@@ -591,8 +605,14 @@ declare global {
       recordDialog("confirm", String(message ?? ""), answer ? "aceptado por el usuario" : "cancelado por el usuario");
       return answer;
     }
-    recordDialog("confirm", String(message ?? ""), dialogPolicy.accept ? "aceptado por el agente" : "cancelado por el agente");
-    return dialogPolicy.accept;
+    const text = String(message ?? "");
+    if (takeAllowance("confirm", text)) {
+      recordDialog("confirm", text, "aceptado por la persona");
+      return true;
+    }
+    recordDialog("confirm", text, "rechazado: la pregunta va a la persona en la app");
+    askPerson("confirm", text);
+    return false;
   };
   window.prompt = (message?: string, fallback?: string) => {
     if (!driving) {
@@ -600,9 +620,10 @@ declare global {
       recordDialog("prompt", String(message ?? ""), answer === null ? "cancelado por el usuario" : `"${answer}" (el usuario)`);
       return answer;
     }
-    const answer = dialogPolicy.accept ? (dialogPolicy.text || fallback || "") : null;
-    recordDialog("prompt", String(message ?? ""), answer === null ? "cancelado por el agente" : `"${answer}" (el agente)`);
-    return answer;
+    // Un texto no lo escribe el agente: la persona lo ve en la app y lo hace ella.
+    recordDialog("prompt", String(message ?? ""), "rechazado: la pregunta va a la persona en la app");
+    askPerson("prompt", String(message ?? ""));
+    return null;
   };
 
   window.addEventListener("pagehide", flush);
@@ -1130,9 +1151,10 @@ declare global {
 
   /** Espera a que la página termine de reaccionar: sin cambios en el DOM por un rato, o el
    *  tope. Con timers y no con frames: un iframe que no se está mostrando no pinta. */
-  /** O comando em curso é do piloto do Jev: esperas curtas (a página que mudou depois é lida de novo, é barato). */
-  let fastCommand = false;
-  /** Os pedidos que já estavam em voo quando o comando começou: não são «da ação» (ver `SettleOptions.baseline`). */
+  /** O comando em curso é do piloto do Jev: esperas curtas (a página que mudou depois é lida de novo, é barato).
+   *  É um contador, não uma bandera: dois comandos podem solaparse e o que termina antes não apaga o modo do outro. */
+  let fastCommands = 0;
+  /** Os pedidos que já estavam em voo quando o primeiro comando começou: não são «da ação» (ver `SettleOptions.baseline`). */
   let commandBaseline: ReadonlySet<number> | undefined;
 
   /** Até quando esperar algo pendente (navegação, pedidos, documento carregando), por tipo de ação. Uma busca é a que
@@ -1145,13 +1167,14 @@ declare global {
    * se está mostrando não pinta. Devolve o relatório do que esperou.
    */
   function settle(maxMs = 1500, quietMs = 150, pendingMs: number = PENDING_MS.navigate): Promise<SettleReport> {
-    if (fastCommand) {
+    const fast = fastCommands > 0;
+    if (fast) {
       // O repositório jev-ultrafast espera 2 quadros ou 50 ms. Aqui, quieto por 60 ms e no máximo 350 ms (um React que re-renderiza).
       maxMs = Math.min(maxMs, 350);
       quietMs = Math.min(quietMs, 60);
     }
     return activity.settle({
-      maxMs, quietMs, pendingMaxMs: pendingMs, netIdleMs: fastCommand ? 120 : 250, minMs: fastCommand ? 100 : quietMs,
+      maxMs, quietMs, pendingMaxMs: pendingMs, netIdleMs: fast ? 120 : 250, minMs: fast ? 100 : quietMs,
       baseline: commandBaseline,
     });
   }
@@ -1693,7 +1716,9 @@ declare global {
         return Array.from({ length: s.length }, (_, i) => {
           const key = s.key(i) ?? "";
           const value = s.getItem(key) ?? "";
-          return { key, value: clip(value, 4000), size: key.length + value.length };
+          // Sin `values` (un sitio real, ver `egressPolicy.ts`) solo van la clave y el tamaño: el valor puede ser la sesión.
+          const withValue = command.values === true ? { value: clip(value, 4000) } : {};
+          return { key, ...withValue, size: key.length + value.length };
         });
       } catch (e) {
         return { error: formatValue(e) };
@@ -1736,6 +1761,9 @@ declare global {
     }
     if (command.action === "set") {
       if (/[;\r\n]/.test(command.value) || /[=;\s]/.test(command.name)) throw new Error("O nome ou o valor têm caracteres que um cookie não aceita.");
+      // Um `path` com `;` acrescentaria atributos ao cookie (`domain=…`): a mesma regra do valor. E o `max-age` tem de ser um número.
+      if (command.path != null && /[;\r\n]/.test(command.path)) throw new Error("O caminho tem caracteres que um cookie não aceita.");
+      if (command.maxAge != null && !Number.isFinite(command.maxAge)) throw new Error("O max_age tem de ser um número.");
       const maxAge = command.maxAge != null ? `; max-age=${Math.round(command.maxAge)}` : "";
       document.cookie = `${command.name}=${command.value}; path=${command.path ?? "/"}${maxAge}; samesite=lax`;
       return { set: documentCookies().some((c) => c.name === command.name) };
@@ -1933,24 +1961,24 @@ declare global {
       case "drag": return drag(command.from, command.to);
       case "upload": return upload(command.target, command.name, command.mime, command.data);
       case "dialogs": {
-        if (command.accept !== undefined) dialogPolicy.accept = command.accept;
-        if (command.text !== undefined) dialogPolicy.text = command.text;
-        return {
-          policy: { accept: dialogPolicy.accept, promptText: dialogPolicy.text },
-          seen: dialogs.slice(-20),
-        };
+        // Solo la persona autoriza: `allow` llega de la app cuando contesta la pregunta. El agente no puede aceptar un diálogo por su cuenta.
+        if (command.allow) allowedDialogs.add(command.allow);
+        return { pending: [...allowedDialogs], seen: dialogs.slice(-20) };
       }
     }
   }
 
   async function run(id: string, command: PageCommand): Promise<void> {
     let payload: { id: string; ok: true; result: unknown } | { id: string; ok: false; error: string };
-    // Mientras dura la orden, los diálogos de la página los contesta el runtime: si no, la
-    // acción del agente quedaría esperando a una persona que quizá no está mirando.
+    // Mientras dura la orden, los diálogos de la página no los contesta la página ni la persona
+    // sola: los rechaza el runtime y la pregunta sale a la app (ver `askPerson`).
+    // Contadores, no banderas: dos órdenes pueden solaparse, y la que termina antes no debe apagar
+    // el modo de agente, el modo rápido ni la línea base de la otra (ver `activeCommands`).
+    const fast = (command as { fast?: boolean }).fast === true;
+    if (activeCommands++ === 0) commandBaseline = activity.liveIds();
     driving = true;
-    commandBaseline = activity.liveIds();
-    fastCommand = (command as { fast?: boolean }).fast === true;
-    cursor.setFast(fastCommand);
+    if (fast) fastCommands++;
+    cursor.setFast(fastCommands > 0);
     try {
       payload = { id, ok: true, result: await execute(command) };
     } catch (e) {
@@ -1959,10 +1987,11 @@ declare global {
     if (!post({ type: "page:reply", payload })) {
       post({ type: "page:reply", payload: { id, ok: false, error: "O resultado não pode ser transferido para o app." } });
     }
-    driving = false;
-    fastCommand = false;
-    commandBaseline = undefined;
-    cursor.setFast(false);
+    activeCommands--;
+    driving = activeCommands > 0;
+    if (fast) fastCommands--;
+    cursor.setFast(fastCommands > 0);
+    if (activeCommands === 0) commandBaseline = undefined;
     // Lo que la acción haya logueado viaja enseguida: la app lo junta con la respuesta.
     flush();
   }

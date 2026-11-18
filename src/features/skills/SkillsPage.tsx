@@ -30,6 +30,7 @@ import {
   flatSkillOrder,
   groupSkillsByOrigin,
 } from "@/features/skills/skillGroups";
+import { skillsPageBanner } from "@/features/skills/skillsPageBanner";
 import { moveSelection, reconcileSelection, useSelectionVisible } from "@/shared/ui/paletteNav";
 
 /** Una skill instalada, como fila de la paleta. */
@@ -86,6 +87,7 @@ export function SkillsPage() {
   const navigate = useNavigate();
   const skills = useSkillsStore((s) => s.skills);
   const loadSkills = useSkillsStore((s) => s.loadSkills);
+  const storeError = useSkillsStore((s) => s.error);
   const detachSkill = useSkillsStore((s) => s.detachSkill);
   const checkHealth = useSkillsStore((s) => s.checkHealth);
   const brokenSymlinks = useSkillsStore((s) => s.brokenSymlinks);
@@ -100,9 +102,11 @@ export function SkillsPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    loadSkills();
-    checkHealth(workspaceId).catch(() => {});
+    void loadSkills();
+    checkHealth(workspaceId).catch((e) => setError(String(e)));
   }, [loadSkills, checkHealth, workspaceId]);
+
+  const banner = skillsPageBanner(storeError, error);
 
   const groups = useMemo(
     () => groupSkillsByOrigin(filterSkills(skills, query)),
@@ -195,7 +199,12 @@ export function SkillsPage() {
         </div>
 
         <div className="flex-1 min-h-0 cc-scroll py-1.5">
-          {error && <div className="px-3 pb-2"><Alert variant="danger">{error}</Alert></div>}
+          {banner && (
+            <div className="px-3 pb-2 flex flex-col gap-2">
+              <Alert variant="danger">{banner}</Alert>
+              <Button size="sm" variant="outline" onClick={() => { setError(null); void loadSkills(); }}>{t("app.panelError.retry")}</Button>
+            </div>
+          )}
 
           {/* Los symlinks rotos van arriba de todo: mientras uno esté roto, la skill no
               llega al agente aunque la lista la muestre como instalada. */}
@@ -233,7 +242,8 @@ export function SkillsPage() {
                         <Button variant="custom"
                           onClick={() => useSkillsStore.getState()
                             .attachSkill(skill.id, usage.workspaceId, usage.scope, usage.tabId ?? undefined, usage.cwd)
-                            .then(() => checkHealth(workspaceId))}
+                            .then(() => checkHealth(workspaceId))
+                            .catch((e) => setError(String(e)))}
                           className="cc-t px-1.5 h-5 rounded text-[10px] font-sans
                             bg-amber-200/60 dark:bg-amber-500/15
                             hover:bg-amber-300/70 dark:hover:bg-amber-500/25 inline-block"
@@ -243,7 +253,8 @@ export function SkillsPage() {
                         <Button variant="custom"
                           onClick={() => useSkillsStore.getState()
                             .detachSkill(skill.id, usage.workspaceId, usage.scope, usage.tabId ?? undefined, usage.cwd)
-                            .then(() => checkHealth(workspaceId))}
+                            .then(() => checkHealth(workspaceId))
+                            .catch((e) => setError(String(e)))}
                           className="cc-t px-1.5 h-5 rounded text-[10px] font-sans
                             bg-amber-200/60 dark:bg-amber-500/15
                             hover:bg-amber-300/70 dark:hover:bg-amber-500/25 inline-block"

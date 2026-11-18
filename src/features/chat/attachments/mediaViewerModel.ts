@@ -10,6 +10,14 @@ export interface MarkdownImageMedia extends ConversationMedia {
   source: string;
 }
 
+/** As mesmas imagens (mesmo caminho, origem, nome e prévia)? Serve para manter a lista estável enquanto só o texto cresce. */
+export function sameMarkdownImages(a: readonly MarkdownImageMedia[], b: readonly MarkdownImageMedia[]): boolean {
+  return a.length === b.length && a.every((x, i) => {
+    const y = b[i]!;
+    return x.path === y.path && x.source === y.source && x.name === y.name && x.kind === y.kind && x.preview === y.preview;
+  });
+}
+
 const IMAGE_EXTENSION = /\.(png|jpe?g|webp|gif)$/i;
 const VIDEO_EXTENSION = /\.(mp4|mov|m4v|webm|mkv|avi)$/i;
 

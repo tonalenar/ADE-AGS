@@ -30,6 +30,7 @@ export function RepoSyncNotice({ workspaceId }: { workspaceId: string }) {
   useEffect(() => {
     const subscription = listen<RepoSyncStatus>("cc-memory-repo-sync", (event) => {
       if (event.payload.workspaceId === workspaceId) apply(event.payload);
+      else if (event.payload.workspaceId === "*") apply({ ...event.payload, workspaceId });
     });
     return () => { subscription.then((unlisten) => unlisten()).catch(() => undefined); };
   }, [workspaceId, apply]);

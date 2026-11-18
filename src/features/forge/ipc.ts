@@ -4,6 +4,7 @@
  * El único archivo de esta feature que habla con Tauri (ver `accounts/ipc.ts`).
  */
 import { invoke } from "@tauri-apps/api/core";
+import { setCapped } from "@/shared/cappedMap";
 
 import type {
   DevicePoll, DeviceStart, ForgeItem, ForgeItemDetail, ForgeKind, ForgeKindInfo, ForgeRepo, GitAccount,
@@ -117,6 +118,8 @@ export function resolveForgeImage(src: string, pageUrl: string): string {
   }
 }
 
+export const FORGE_IMAGE_CACHE_LIMIT = 80;
+
 export function forgeImage(cwd: string, url: string): Promise<string> {
   const key = `${cwd}\n${url}`;
   let p = imageCache.get(key);
@@ -124,7 +127,7 @@ export function forgeImage(cwd: string, url: string): Promise<string> {
     p = invoke<string>("forge_image", { cwd, url });
     // Un fallo no se recuerda: puede ser la red, y reabrir tiene que volver a intentar.
     p.catch(() => imageCache.delete(key));
-    imageCache.set(key, p);
+    setCapped(imageCache, key, p, FORGE_IMAGE_CACHE_LIMIT);
   }
   return p;
 }

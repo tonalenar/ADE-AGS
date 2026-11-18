@@ -5,7 +5,7 @@ import { useTabsStore } from "@/features/tabs/store";
 
 import { readAccess, type ConversationCard } from "../chatModel";
 import { useChatLive } from "../liveStore";
-import { threadIdOf } from "../structured/model";
+import { threadIdOf, threadStatusSignature } from "../structured/model";
 import { useStructured } from "../structured/store";
 import type { TeamPolicy } from "./ipc";
 import { CLOSED, type LiveInput } from "./teamModel";
@@ -20,7 +20,9 @@ export function useTeamLive(cards: ConversationCard[] = []) {
   const question = useChatLive((s) => s.question);
   const awaiting = useChatLive((s) => s.awaiting);
   const threads = useStructured((s) => s.threads);
-  const live = useStructured((s) => s.live);
+  // Assina só a assinatura de fase, pedido e falha das conversas (não o `live` inteiro): o texto que chega numa conversa
+  // não re-renderiza quem usa este hook, a barra inclusive. O registro é lido no momento da consulta.
+  const threadSignature = useStructured((s) => threadStatusSignature(s.live, s.threads.map((t) => t.id)));
   const byKey = useMemo(() => new Map(cards.map((c) => [c.tabId, c])), [cards]);
 
   const liveOf = useCallback((ref: string): LiveInput => {
@@ -28,7 +30,7 @@ export function useTeamLive(cards: ConversationCard[] = []) {
     if (thread) {
       const row = threads.find((t) => t.id === thread);
       if (!row || row.state !== "active") return CLOSED;
-      const state = live[thread];
+      const state = useStructured.getState().live[thread];
       const requests = state?.requests ?? [];
       return {
         open: true,
@@ -39,7 +41,7 @@ export function useTeamLive(cards: ConversationCard[] = []) {
     }
     if (!tabs.some((t) => t.id === ref)) return CLOSED;
     return { open: true, working: phase[ref] === "working", awaiting: ref in awaiting, question: !!question[ref] };
-  }, [tabs, phase, question, awaiting, threads, live]);
+  }, [tabs, phase, question, awaiting, threads, threadSignature]);
 
   const nameOf = useCallback((ref: string): string | null => {
     const card = byKey.get(ref);
@@ -77,5 +79,6 @@ export function useTeamLive(cards: ConversationCard[] = []) {
     return "ask";
   }, [threads, tabs]);
 
-  return { liveOf, nameOf, modelOf, branchOf, accessOf };
+  // O objeto devolvido é o mesmo enquanto as funções forem as mesmas (antes era novo a cada render).
+  return useMemo(() => ({ liveOf, nameOf, modelOf, branchOf, accessOf }), [liveOf, nameOf, modelOf, branchOf, accessOf]);
 }

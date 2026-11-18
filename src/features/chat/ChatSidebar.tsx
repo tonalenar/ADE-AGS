@@ -28,8 +28,7 @@ import { appConfirm } from "@/shared/ui/appConfirm";
 import { useLiveSummary } from "./liveSummary";
 import { useChatLive } from "./liveStore";
 import { INBOX_SHORTCUT } from "./permissions/PermissionCard";
-import { waitingAgents } from "./permissions/permissionModel";
-import { toggleInbox, usePendingAsks } from "./permissions/permissionsStore";
+import { toggleInbox, usePendingAskCounts } from "./permissions/permissionsStore";
 import { archiveConversation, expireSnoozed, moveConversation, moveConversationToSection, reopenSettled, restoreArchivedConversation, setCollapsed, setUnread, settleConversation, snoozeConversation, togglePinned, toggleSection, undoMoveConversation, unsnoozeConversation, useArchived, useShelf } from "./shelf";
 import { SnoozeDialog } from "./SnoozeDialog";
 import { addSurface, openArchivedMessagePreview, requestTabSearchJump, requestThreadSearchJump } from "./store";
@@ -40,7 +39,7 @@ import { closeWorkspaceFolder, forgetWorkspaceFolder } from "./sidebar/workspace
 import { useAutoUnread } from "./sidebar/useAutoUnread";
 import { recordProjectsFirstSeen, useProjectOrderPrefs } from "./sidebar/projectOrderPrefs";
 import { useAutoSettle } from "./sidebar/useAutoSettle";
-import { folderName, threadIdOf, threadKey } from "./structured/model";
+import { folderName, threadIdOf, threadKey, threadStatusSignature } from "./structured/model";
 import { chatThreadRename, chatThreadSearch, type MessageSearchHit } from "./structured/ipc";
 import { chatThreadRegenerateTitle } from "./threadTextIpc";
 import { searchArchivedSessionMessages, type ArchivedMessageSearchHit } from "@/features/sessions/ipc.conversations";
@@ -140,10 +139,13 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
   const tabQuestion = useChatLive((s) => s.question);
   const tabAwaiting = useChatLive((s) => s.awaiting);
   const tabTurn = useChatLive((s) => s.turn);
-  const threadLive = useStructured((s) => s.live);
+  // Só o que a barra mostra de cada conversa (fase, pedido e falha) refaz as seções. O texto que chega numa conversa
+  // não muda a assinatura, então não re-renderiza a barra (antes, assinar o `live` inteiro fazia isso a cada pedaço).
+  const threadIds = useMemo(() => cards.map((c) => threadIdOf(c.tabId)).filter((id): id is string => id !== null), [cards]);
+  const threadSignature = useStructured((s) => threadStatusSignature(s.live, threadIds));
   const liveStates = useMemo(
-    () => noticeStatesOf(cards.map((c) => c.tabId), { phase: tabPhase, question: tabQuestion, awaiting: tabAwaiting }, threadLive),
-    [cards, tabPhase, tabQuestion, tabAwaiting, threadLive],
+    () => noticeStatesOf(cards.map((c) => c.tabId), { phase: tabPhase, question: tabQuestion, awaiting: tabAwaiting }, useStructured.getState().live),
+    [cards, tabPhase, tabQuestion, tabAwaiting, threadSignature],
   );
   // Quem precisa de você (aprovação ou pergunta pendente) sobe; quem só trabalha vai para a seção Trabalhando.
   const shelf = useMemo<WorkingShelf>(() => {
@@ -247,13 +249,8 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
     return () => window.removeEventListener("ade:chat-quick-select", onQuickSelect);
   }, [onOpened, sections]);
 
-  const asks = usePendingAsks();
-  const waiting = waitingAgents(asks);
-  const asksBy = useMemo(() => {
-    const by: Record<string, number> = {};
-    for (const a of asks) if (a.conversation) by[a.conversation] = (by[a.conversation] ?? 0) + 1;
-    return by;
-  }, [asks]);
+  // A contagem por conversa (a barra não assina a lista de pedidos: o texto do streaming não a re-renderiza).
+  const { waiting, byConversation: asksBy } = usePendingAskCounts();
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
     return cards.filter((c) => (!folder || c.project === folder) && (!q || `${c.title} ${c.project} ${c.agentLabel}`.toLowerCase().includes(q)));

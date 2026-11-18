@@ -130,6 +130,10 @@ struct Inner {
     stop: AtomicBool,
     running: AtomicBool,
     notify: Mutex<Option<Arc<dyn Fn(&RepoSyncStatus) + Send + Sync>>>,
+    /// Recuperação pendente impede toda exportação até o banco voltar a aceitar a restauração.
+    recovery_error: Mutex<Option<String>>,
+    /// Falha ao criar a thread do worker: a sincronização fica desligada até um `retry` conseguir subí-la.
+    worker_error: Mutex<Option<String>>,
     /// Só em teste: quanto o worker fica parado, COM a trava do estado, entre conferir `stop` e dormir sem prazo. Imita a
     /// thread perdendo a CPU nessa janela, que é onde o aviso do `Drop` se perdia num runner de CI carregado.
     #[cfg(test)]
@@ -165,6 +169,8 @@ impl RepoSync {
                 before_idle_wait_ms: std::sync::atomic::AtomicU64::new(0),
                 running: AtomicBool::new(false),
                 notify: Mutex::new(None),
+                recovery_error: Mutex::new(None),
+                worker_error: Mutex::new(None),
             }),
             worker: Mutex::new(None),
         }
@@ -174,19 +180,47 @@ impl RepoSync {
         *self.inner.notify.lock().unwrap_or_else(|err| err.into_inner()) = Some(notify);
     }
 
-    pub fn spawn(&self) {
-        let mut worker = self.worker.lock().unwrap_or_else(|err| err.into_inner());
-        if worker.is_some() {
-            return;
-        }
-        self.inner.running.store(true, Ordering::SeqCst);
-        let inner = Arc::clone(&self.inner);
-        *worker = Some(
+    /// Sobe o worker de exportação. Sem ele a memória continua no banco, mas nada vai para o repositório Markdown.
+    /// A falha vai para o status (ver `snapshot`) e pode ser tentada de novo com `retry`.
+    pub fn spawn(&self) -> Result<(), String> {
+        self.spawn_com(|inner| {
             std::thread::Builder::new()
                 .name("memory-repo-sync".into())
                 .spawn(move || worker_loop(inner))
-                .expect("memory repo sync thread"),
-        );
+        })
+    }
+
+    /// Núcleo de `spawn`, com a criação da thread injetada: o teste força a falha sem depender do sistema.
+    fn spawn_com(&self, criar: impl FnOnce(Arc<Inner>) -> std::io::Result<JoinHandle<()>>) -> Result<(), String> {
+        let mut worker = self.worker.lock().unwrap_or_else(|err| err.into_inner());
+        if worker.is_some() {
+            return Ok(());
+        }
+        self.inner.running.store(true, Ordering::SeqCst);
+        let inner = Arc::clone(&self.inner);
+        match criar(inner) {
+            Ok(handle) => {
+                *self.inner.worker_error.lock().unwrap_or_else(|err| err.into_inner()) = None;
+                *worker = Some(handle);
+                Ok(())
+            }
+            Err(erro) => {
+                self.inner.running.store(false, Ordering::SeqCst);
+                let motivo = erro.to_string();
+                *self.inner.worker_error.lock().unwrap_or_else(|err| err.into_inner()) = Some(motivo.clone());
+                drop(worker);
+                self.emit(&self.status(""));
+                Err(motivo)
+            }
+        }
+    }
+
+    fn falha_do_worker(&self) -> Option<String> {
+        self.inner
+            .worker_error
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .clone()
     }
 
     /// Anota que `workspace` precisa de exportação. Devolve a geração que o chamador espera.
@@ -221,6 +255,22 @@ impl RepoSync {
     }
 
     pub fn retry(&self, workspace: &str) -> RepoSyncStatus {
+        let recovery_error = self.inner.recovery_error.lock().unwrap_or_else(|error| error.into_inner()).clone();
+        if recovery_error.is_some() {
+            match super::purge::recover_pending_restores(&self.inner.db) {
+                Ok(()) => {
+                    *self.inner.recovery_error.lock().unwrap_or_else(|error| error.into_inner()) = None;
+                    self.inner.wake.notify_all();
+                    if let Err(error) = self.spawn() {
+                        eprintln!("[memory] sincronização de memória desligada: {error}");
+                    }
+                    self.reconcile_pending();
+                }
+                Err(error) => self.mark_recovery_failed(&error),
+            }
+            return self.status(workspace);
+        }
+        let _ = self.spawn();
         let status = {
             let mut state = self.lock_state();
             if let Some(slot) = state.slots.get_mut(workspace) {
@@ -231,12 +281,47 @@ impl RepoSync {
             }
             snapshot(&state, workspace)
         };
+        let status = if self.falha_do_worker().is_some() {
+            self.status(workspace)
+        } else {
+            status
+        };
         self.emit(&status);
         status
     }
 
     pub fn status(&self, workspace: &str) -> RepoSyncStatus {
-        snapshot(&self.lock_state(), workspace)
+        if let Some(error) = self.inner.recovery_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone() {
+            return RepoSyncStatus {
+                workspace_id: workspace.to_string(),
+                phase: "failed".into(),
+                error: Some(error),
+                commit: None,
+                pending: 0,
+                warnings: Vec::new(),
+            };
+        }
+        let falha = self.falha_do_worker();
+        let mut status = snapshot(&self.lock_state(), workspace);
+        if let Some(error) = falha {
+            status.phase = "failed".into();
+            status.error = Some(format!("A sincronização de memória está desligada: {error}"));
+        }
+        status
+    }
+
+    pub(super) fn mark_recovery_failed(&self, error: &str) {
+        *self.inner.recovery_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(error.to_string());
+        self.inner.wake.notify_all();
+        let status = RepoSyncStatus {
+            workspace_id: "*".into(),
+            phase: "failed".into(),
+            error: Some(error.to_string()),
+            commit: None,
+            pending: 0,
+            warnings: Vec::new(),
+        };
+        self.emit(&status);
     }
 
     /// Pausa o workspace para o purge reescrever o repositório. Ver o contrato no módulo.
@@ -411,7 +496,24 @@ impl RepoSync {
     fn emit(&self, status: &RepoSyncStatus) {
         let notify = self.inner.notify.lock().unwrap_or_else(|err| err.into_inner()).clone();
         if let Some(notify) = notify {
-            notify(status);
+            let recovery_error = self.inner.recovery_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+            let worker_error = self.falha_do_worker();
+            if let Some(error) = recovery_error {
+                let mut failed = status.clone();
+                failed.phase = "failed".into();
+                failed.error = Some(error);
+                failed.commit = None;
+                failed.pending = 0;
+                failed.warnings.clear();
+                notify(&failed);
+            } else if let Some(error) = worker_error {
+                let mut failed = status.clone();
+                failed.phase = "failed".into();
+                failed.error = Some(format!("A sincronização de memória está desligada: {error}"));
+                notify(&failed);
+            } else {
+                notify(status);
+            }
         }
     }
 }
@@ -536,6 +638,10 @@ fn worker_loop(inner: Arc<Inner>) {
     loop {
         if inner.stop.load(Ordering::SeqCst) {
             break;
+        }
+        if inner.recovery_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_some() {
+            state = inner.wake.wait(state).unwrap_or_else(|error| error.into_inner());
+            continue;
         }
         let now = Instant::now();
         if let Some(job) = next_job(&state, now) {
@@ -761,17 +867,29 @@ fn dirty_workspaces(conn: &rusqlite::Connection) -> Result<Vec<String>, String> 
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
-pub fn install(app: &tauri::App) {
+/// Sem pasta do usuário a memória não tem onde morar: o erro sobe para o `setup` (ver `app::run`),
+/// que mostra o aviso de boot, em vez de um `expect` que fecharia o app sem mensagem.
+pub fn install(app: &tauri::App) -> Result<(), String> {
     let db = app.state::<DbConnection>().inner().clone();
-    let root = repo::default_root().expect("home unavailable");
+    let restore_error = super::purge::recover_pending_restores(&db).err();
+    let root = repo::default_root()?;
     let sync = RepoSync::new(db, root);
     let handle = app.handle().clone();
     sync.set_notifier(Arc::new(move |status: &RepoSyncStatus| {
         let _ = handle.emit(SYNC_EVENT, status);
     }));
-    sync.spawn();
-    sync.reconcile_pending();
+    if let Some(error) = restore_error {
+        sync.mark_recovery_failed(&error);
+        eprintln!("[memory] sincronização desativada porque a recuperação pendente falhou: {error}");
+    } else {
+        if let Err(error) = sync.spawn() {
+            // A sincronização é opcional: a memória continua no banco e o status mostra o motivo.
+            eprintln!("[memory] sincronização de memória desligada: {error}");
+        }
+        sync.reconcile_pending();
+    }
     app.manage(sync);
+    Ok(())
 }
 
 #[tauri::command]
@@ -810,6 +928,7 @@ pub fn decide_and_schedule(
 mod tests {
     use super::*;
     use crate::memory::{ProposalActor, ProposalInput};
+    use rusqlite::OptionalExtension;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Barrier;
 
@@ -996,7 +1115,7 @@ mod tests {
             }
         }
         let started = Instant::now();
-        sync.spawn();
+        sync.spawn().unwrap();
         let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(30)).unwrap();
         assert!(started.elapsed() < Duration::from_secs(3));
         assert_eq!(probe.commits.load(Ordering::SeqCst), 1, "a batch must become one commit");
@@ -1017,7 +1136,7 @@ mod tests {
         let probe = Probe::new(db.clone());
         probe.block_commit.store(true, Ordering::SeqCst);
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         {
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "first", "approved body 0");
@@ -1058,7 +1177,7 @@ mod tests {
         let probe = Probe::new(db.clone());
         probe.fail_commits.store(true, Ordering::SeqCst);
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         let proposal = {
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "kept", "approved body kept");
@@ -1121,7 +1240,7 @@ mod tests {
             Ok(hash)
         });
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), runner, hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         std::thread::scope(|scope| {
             for index in 0..4 {
                 let db = &db;
@@ -1217,7 +1336,7 @@ mod tests {
         probe.fail_commits.store(true, Ordering::SeqCst);
         {
             let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
-            sync.spawn();
+            sync.spawn().unwrap();
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "kept", "survives restart");
             decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
@@ -1228,7 +1347,7 @@ mod tests {
         }
         probe.fail_commits.store(false, Ordering::SeqCst);
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         sync.reconcile_pending();
         let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(3)).unwrap();
         assert!(status.error.is_none(), "{:?}", status.error);
@@ -1253,7 +1372,7 @@ mod tests {
         let probe = Probe::new(db.clone());
         let sync = RepoSync::with_runner(db, root.path().to_path_buf(), probe.runner(), hour());
         sync.inner.before_idle_wait_ms.store(400, Ordering::SeqCst);
-        sync.spawn();
+        sync.spawn().unwrap();
         // O worker já conferiu `stop` e está parado no gancho, segurando a trava, prestes a dormir.
         std::thread::sleep(Duration::from_millis(150));
         let (done_tx, done_rx) = std::sync::mpsc::channel();
@@ -1277,7 +1396,7 @@ mod tests {
         }
         sync.pause_workspace("w").unwrap();
         assert_eq!(sync.status("w").pending, 0);
-        sync.spawn();
+        sync.spawn().unwrap();
         sync.resume_workspace("w");
         let replayed = sync.wait_until("w", |item| item.phase == "synced", Duration::from_millis(300));
         assert!(replayed.is_err(), "a pausa tem de descartar o que ainda não entrou no git");
@@ -1301,7 +1420,7 @@ mod tests {
         let probe = Probe::new(db.clone());
         probe.block_commit.store(true, Ordering::SeqCst);
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         {
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "first", "inflight body");
@@ -1341,7 +1460,7 @@ mod tests {
         let probe = Probe::new(db.clone());
         probe.block_commit.store(true, Ordering::SeqCst);
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         {
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "cli", "cli body");
@@ -1382,7 +1501,7 @@ mod tests {
             events_root: None,
         };
         crate::memory::purge::revisions_coordinated(&db, &sync, &entry.entry_id, Some(entry.revision), &scope).unwrap();
-        sync.spawn();
+        sync.spawn().unwrap();
         std::thread::sleep(Duration::from_millis(400));
         assert_eq!(probe.commits.load(Ordering::SeqCst), 0, "a fila descartada não pode commitar depois do purge");
         let repo = root.path().join(repo::workspace_repo_name("w"));
@@ -1426,7 +1545,7 @@ mod tests {
             real(path, args)
         });
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), runner, hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         let entry = {
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "target", sentinel);
@@ -1504,7 +1623,7 @@ mod tests {
         let db = fixture();
         let root = TempDir::new();
         let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), repo::real_git_runner(), hour());
-        sync.spawn();
+        sync.spawn().unwrap();
         let entry = {
             let conn = db.lock().unwrap();
             let proposal = propose(&conn, "kept", "body before the failed rewrite");
@@ -1523,7 +1642,8 @@ mod tests {
             events_root: None,
         };
         let error = crate::memory::purge::revisions_coordinated(&db, &sync, &entry.entry_id, Some(entry.revision), &scope).unwrap_err();
-        assert!(error.contains("Repita"), "{error}");
+        assert!(error.contains("repita"), "{error}");
+        assert_revision_restored(&db, &entry.entry_id, entry.revision, "falha no repositório");
         assert!(!sync.is_paused("w"), "o resume tem de correr mesmo quando a reescrita falha");
         std::fs::remove_file(&repo).unwrap();
         {
@@ -1534,5 +1654,427 @@ mod tests {
         let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(30)).unwrap();
         assert!(status.error.is_none(), "{:?}", status.error);
         assert!(notes(root.path()).contains("after the failed purge"));
+    }
+
+    /// Base em arquivo com o schema real: o `VACUUM` do purge precisa de um arquivo para a
+    /// conexão lateral.
+    fn file_fixture(path: &std::path::Path) -> DbConnection {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        crate::database::migrate(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w','Test workspace',0,0);
+             INSERT INTO missions(id,workspace_id,title,objective,cwd,created_at,updated_at) VALUES('m','w','Mission','objective','/test',0,0);",
+        )
+        .unwrap();
+        Arc::new(Mutex::new(conn))
+    }
+
+    #[test]
+    fn purge_falha_ao_atualizar_archive_e_restaura_a_revisao() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _) = approved_pair(&db, &sync);
+        let repo_dir = {
+            let conn = db.lock().unwrap();
+            let exported = repo::export_at(&conn, "w", root.path(), None).unwrap();
+            PathBuf::from(exported.path)
+        };
+        std::fs::create_dir(repo_dir.join("revisions.json")).unwrap();
+        let scope = crate::memory::purge::Scope { memory_root: root.path().to_path_buf(), database_file: None, events_root: None };
+
+        let error = crate::memory::purge::revisions_coordinated(&db, &sync, &target.entry_id, Some(target.revision), &scope).unwrap_err();
+
+        assert!(error.contains("revisão foi restaurada"), "{error}");
+        assert_revision_restored(&db, &target.entry_id, target.revision, "falha no archive");
+        assert!(repo_dir.join("revisions.json").is_dir());
+    }
+
+    #[test]
+    fn purge_falha_no_vacuum_e_restaura_a_revisao() {
+        let root = TempDir::new();
+        let database_file = root.path().join("base.db");
+        let db = file_fixture(&database_file);
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _) = approved_pair(&db, &sync);
+        let scope = crate::memory::purge::Scope { memory_root: root.path().to_path_buf(), database_file: Some(database_file.clone()), events_root: None };
+
+        let error = crate::memory::purge::revisions_coordinated_failing_at(&db, &sync, &target.entry_id, Some(target.revision), &scope, "banco").unwrap_err();
+
+        assert!(error.contains("revisão foi restaurada"), "{error}");
+        assert_revision_restored(&db, &target.entry_id, target.revision, "falha no VACUUM");
+    }
+
+    #[test]
+    fn purge_persiste_restauracao_pendente_quando_o_restore_falha() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _) = approved_pair(&db, &sync);
+        let scope = crate::memory::purge::Scope { memory_root: root.path().to_path_buf(), database_file: None, events_root: None };
+        let restore_attempts = AtomicUsize::new(0);
+
+        let error = crate::memory::purge::revisions_coordinated_failing_restore_at(
+            &db, &sync, &target.entry_id, Some(target.revision), &scope, "repositório", &restore_attempts,
+        ).unwrap_err();
+        assert_eq!(restore_attempts.load(Ordering::SeqCst), 2, "a restauração deve ser tentada duas vezes");
+
+        let pending_key = format!("memory.purge.pending_restore.{}", target.entry_id);
+        let conn = db.lock().unwrap();
+        let pending: Option<String> = conn.query_row("SELECT value FROM settings WHERE key=?1", [&pending_key], |row| row.get(0)).optional().unwrap();
+        assert!(pending.is_some(), "o conteúdo necessário para restaurar precisa ficar persistido; erro: {error}");
+        drop(conn);
+        assert!(error.contains("será refeita"), "a mensagem precisa dizer que a restauração será refeita: {error}");
+        assert_revision_absent(&db, &target.entry_id, target.revision);
+
+        {
+            let conn = db.lock().unwrap();
+            conn.execute_batch("PRAGMA query_only=ON;").unwrap();
+        }
+        let sqlite_error = crate::memory::purge::recover_pending_restores(&db).unwrap_err();
+        assert!(sqlite_error.contains("readonly") || sqlite_error.contains("read-only"), "a recuperação precisa falhar no SQLite real: {sqlite_error}");
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let observed = emitted.clone();
+        sync.set_notifier(Arc::new(move |status| observed.lock().unwrap().push(status.clone())));
+        sync.mark_recovery_failed(&sqlite_error);
+        sync.resume_workspace("w");
+        let latest = emitted.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(latest.workspace_id, "w");
+        assert_eq!(latest.phase, "failed", "retomar o workspace não pode esconder o aviso de recuperação");
+        assert_eq!(sync.status("w").phase, "failed", "a falha precisa aparecer pelo status de sync consumido pela UI");
+        assert!(!sync.inner.running.load(Ordering::SeqCst), "o sync precisa ficar parado até a restauração passar");
+        assert_eq!(sync.retry("w").phase, "failed", "uma nova falha SQLite não pode liberar o sync");
+        assert_revision_absent(&db, &target.entry_id, target.revision);
+        let conn = db.lock().unwrap();
+        let still_pending: i64 = conn.query_row("SELECT COUNT(*) FROM settings WHERE key=?1", [&pending_key], |row| row.get(0)).unwrap();
+        assert_eq!(still_pending, 1, "a falha SQLite precisa preservar a pendência durável");
+        conn.execute_batch("PRAGMA query_only=OFF;").unwrap();
+        drop(conn);
+
+        assert_ne!(sync.retry("w").phase, "failed", "o retry deve reabrir o sync depois da restauração");
+
+        assert_revision_restored(&db, &target.entry_id, target.revision, "recuperação no boot");
+        let conn = db.lock().unwrap();
+        let pending_count: i64 = conn.query_row("SELECT COUNT(*) FROM settings WHERE key=?1", [&pending_key], |row| row.get(0)).unwrap();
+        assert_eq!(pending_count, 0, "a pendência só deve ser removida depois da restauração");
+    }
+
+    #[test]
+    fn purge_guarda_restauracao_em_memoria_se_settings_recusa_gravar() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _) = approved_pair(&db, &sync);
+        let scope = crate::memory::purge::Scope { memory_root: root.path().to_path_buf(), database_file: None, events_root: None };
+        let restore_attempts = AtomicUsize::new(0);
+
+        let error = crate::memory::purge::revisions_coordinated_failing_restore_and_persist_at(
+            &db,
+            &sync,
+            &target.entry_id,
+            Some(target.revision),
+            &scope,
+            "repositório",
+            &restore_attempts,
+            &|| db.lock().unwrap().execute_batch("PRAGMA query_only=ON;").unwrap(),
+        ).unwrap_err();
+
+        assert_eq!(restore_attempts.load(Ordering::SeqCst), 2);
+        assert!(error.contains("estado parcial") && error.contains("Repita"), "a mensagem precisa explicar a recuperação pendente: {error}");
+        assert_revision_absent(&db, &target.entry_id, target.revision);
+        {
+            let conn = db.lock().unwrap();
+            let pending_count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM settings WHERE key LIKE 'memory.purge.pending_restore.%'",
+                [],
+                |row| row.get(0),
+            ).unwrap();
+            assert_eq!(pending_count, 0, "o teste precisa cobrir a falha ao gravar settings");
+            conn.execute_batch("PRAGMA query_only=OFF;").unwrap();
+        }
+
+        // A próxima operação de memória tenta tornar durável a pendência volátil e restaurá-la.
+        crate::memory::purge::recover_pending_restores(&db).unwrap();
+        assert_revision_restored(&db, &target.entry_id, target.revision, "retry da pendência em memória");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn purge_falha_ao_ler_backups_e_restaura_a_revisao() {
+        let root = TempDir::new();
+        let database_file = root.path().join("base.db");
+        let db = file_fixture(&database_file);
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _) = approved_pair(&db, &sync);
+        let original = root.path().join("backup-original");
+        std::fs::write(&original, "backup").unwrap();
+        std::os::unix::fs::symlink(&original, root.path().join("base.v1-abc.backup")).unwrap();
+        let scope = crate::memory::purge::Scope { memory_root: root.path().to_path_buf(), database_file: Some(database_file), events_root: None };
+
+        let error = crate::memory::purge::revisions_coordinated(&db, &sync, &target.entry_id, Some(target.revision), &scope).unwrap_err();
+
+        assert!(error.contains("revisão foi restaurada"), "{error}");
+        assert_revision_restored(&db, &target.entry_id, target.revision, "falha no backup");
+        assert_eq!(std::fs::read_to_string(&original).unwrap(), "backup");
+    }
+
+    /// Conjunto (entrada, revisão) das revisões na base, para comparar antes e depois do purge.
+    fn revision_set(db: &DbConnection) -> Vec<(String, i64)> {
+        let conn = db.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT entry_id, revision FROM memory_revisions ORDER BY entry_id, revision")
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    }
+
+    fn assert_revision_restored(db: &DbConnection, entry_id: &str, revision: i64, context: &str) {
+        assert!(revision_set(db).contains(&(entry_id.to_string(), revision)), "{context} deixou a revisão marcada como purgada");
+        let conn = db.lock().unwrap();
+        let audit_count: i64 = conn.query_row("SELECT COUNT(*) FROM memory_purge_audit WHERE entry_id=?1 AND revision=?2", rusqlite::params![entry_id, revision], |row| row.get(0)).unwrap();
+        assert_eq!(audit_count, 0, "{context} deixou o purge auditado como concluído");
+    }
+
+    fn assert_revision_absent(db: &DbConnection, entry_id: &str, revision: i64) {
+        assert!(!revision_set(db).contains(&(entry_id.to_string(), revision)), "a falha injetada não impediu a restauração");
+    }
+
+    /// Duas memórias aprovadas: a alvo e uma que não pode ser tocada pelo purge.
+    fn approved_pair(db: &DbConnection, sync: &RepoSync) -> (crate::memory::ProposalResult, crate::memory::ProposalResult) {
+        let conn = db.lock().unwrap();
+        let target = propose(&conn, "alvo", "PURGE_TARGET_BODY");
+        let other = propose(&conn, "outra", "PURGE_OTHER_BODY");
+        decide_and_schedule(&conn, sync, &target.entry_id, target.revision, true).unwrap();
+        decide_and_schedule(&conn, sync, &other.entry_id, other.revision, true).unwrap();
+        (target, other)
+    }
+
+    /// O purge apaga só a revisão alvo e refaz `revisions.json` sem o texto. Cada fase de I/O
+    /// (repositório, arquivo do archive, `VACUUM`) roda com o mutex do banco solto: a sonda
+    /// confere isso com `try_lock` no mesmo thread, no instante em que a fase começa.
+    #[test]
+    fn purge_nao_segura_o_mutex_no_io_e_apaga_so_o_alvo() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _other) = approved_pair(&db, &sync);
+        let sentinel = "PURGE_ARCHIVE_SENTINEL_7c1d";
+        {
+            let conn = db.lock().unwrap();
+            let exported = repo::export_at(&conn, "w", root.path(), Some((&target.entry_id, target.revision))).unwrap();
+            let repo = std::path::PathBuf::from(&exported.path);
+            std::fs::write(repo.join("revisions.json"), format!("{{\n  \"body\": \"{sentinel}\"\n}}\n")).unwrap();
+        }
+        let before = revision_set(&db);
+        let scope = crate::memory::purge::Scope {
+            memory_root: root.path().to_path_buf(),
+            database_file: None,
+            events_root: None,
+        };
+        let sonda_db = db.clone();
+        let fases = std::cell::Cell::new(0);
+        crate::memory::purge::revisions_coordinated_with(&db, &sync, &target.entry_id, Some(target.revision), &scope, &|| {
+            assert!(sonda_db.try_lock().is_ok(), "uma fase de I/O do purge rodou com o mutex do banco preso");
+            fases.set(fases.get() + 1);
+        })
+        .unwrap();
+        assert!(fases.get() >= 3, "as fases de I/O não foram todas alcançadas: {}", fases.get());
+
+        let after = revision_set(&db);
+        let apagadas: Vec<_> = before.iter().filter(|r| !after.contains(r)).cloned().collect();
+        assert_eq!(apagadas, vec![(target.entry_id.clone(), target.revision)], "o purge apagou mais do que o alvo");
+        assert_eq!(after.len(), before.len() - 1);
+
+        let repo = root.path().join(repo::workspace_repo_name("w"));
+        let archive = std::fs::read_to_string(repo.join("revisions.json")).unwrap_or_default();
+        assert!(!archive.contains(sentinel), "revisions.json ficou com o texto apagado: {archive}");
+    }
+
+    /// Com base em arquivo, o `VACUUM` roda numa conexão lateral: a sonda da fase de compactação
+    /// confere que o mutex do banco está solto, e o conjunto apagado segue sendo só o alvo.
+    #[test]
+    fn purge_compacta_numa_conexao_lateral_sem_o_mutex() {
+        let root = TempDir::new();
+        let database_file = root.path().join("base.db");
+        let db = file_fixture(&database_file);
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, other) = approved_pair(&db, &sync);
+        let before = revision_set(&db);
+        // Com o arquivo da base, a fase de backups também roda (e tem que estar com o mutex solto).
+        let scope = crate::memory::purge::Scope {
+            memory_root: root.path().to_path_buf(),
+            database_file: Some(database_file),
+            events_root: None,
+        };
+        let sonda_db = db.clone();
+        crate::memory::purge::revisions_coordinated_with(&db, &sync, &target.entry_id, Some(target.revision), &scope, &|| {
+            assert!(sonda_db.try_lock().is_ok(), "o VACUUM ou o backup rodou com o mutex do banco preso");
+        })
+        .unwrap();
+
+        let after = revision_set(&db);
+        let apagadas: Vec<_> = before.iter().filter(|r| !after.contains(r)).cloned().collect();
+        assert_eq!(apagadas, vec![(target.entry_id.clone(), target.revision)]);
+        assert!(after.contains(&(other.entry_id.clone(), other.revision)), "a outra memória foi tocada");
+    }
+
+    /// Se a memória muda entre o plano e a gravação, o purge recusa; então o NDJSON não pode
+    /// já ter sido redigido.
+    #[test]
+    fn purge_recusado_nao_redige_o_ndjson() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _other) = approved_pair(&db, &sync);
+        let events = root.path().join("events");
+        std::fs::create_dir_all(&events).unwrap();
+        let log = events.join("task.ndjson");
+        std::fs::write(&log, "{\"text\":\"PURGE_TARGET_BODY\"}\n").unwrap();
+        let bytes_before = std::fs::read(&log).unwrap();
+        {
+            let conn = db.lock().unwrap();
+            conn.execute("INSERT INTO runs (id, workspace_id, objective, cwd, created_at) VALUES ('r1', 'w', 'o', '/tmp', 0)", []).unwrap();
+            conn.execute(
+                "INSERT INTO tasks (id, run_id, title, prompt, agent_id, cwd, events_path, created_at) VALUES ('t1', 'r1', 't', 'p', 'claude-code', '/tmp', ?1, 0)",
+                [log.to_string_lossy().to_string()],
+            )
+            .unwrap();
+        }
+        let scope = crate::memory::purge::Scope {
+            memory_root: root.path().to_path_buf(),
+            database_file: None,
+            events_root: Some(events),
+        };
+        let sonda_db = db.clone();
+        let mudou = std::cell::Cell::new(false);
+        let revisao = target.revision;
+        let result = crate::memory::purge::revisions_coordinated_with(&db, &sync, &target.entry_id, None, &scope, &|| {
+            if !mudou.replace(true) {
+                let conn = sonda_db.lock().unwrap();
+                crate::memory::propose(
+                    &conn,
+                    "workspace",
+                    "w",
+                    None,
+                    &ProposalInput {
+                        scope: "workspace".into(),
+                        key: "alvo".into(),
+                        kind: "note".into(),
+                        body: "PURGE_NOVA_REVISAO".into(),
+                        priority: 0,
+                        operation: "update".into(),
+                        expected_revision: Some(revisao),
+                        source_fact_id: None,
+                        reason: None,
+                        acknowledge_secret: false,
+                    },
+                    ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None },
+                )
+                .unwrap();
+            }
+        });
+        assert!(result.is_err(), "o purge deveria recusar: a memória mudou durante o apagamento");
+        let bytes_after = std::fs::read(&log).unwrap();
+        assert_eq!(bytes_before, bytes_after, "o NDJSON mudou antes de o purge recusar");
+    }
+
+    /// Se a redação do NDJSON falha, a revisão tem que continuar no banco: o texto ainda está
+    /// lá e a tentativa seguinte consegue redigir.
+    #[cfg(unix)]
+    #[test]
+    fn purge_com_ndjson_que_falha_mantem_a_revisao_no_banco() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let (target, _other) = approved_pair(&db, &sync);
+        let events = root.path().join("events");
+        std::fs::create_dir_all(&events).unwrap();
+        let real = root.path().join("real.ndjson");
+        std::fs::write(&real, "{\"text\":\"PURGE_TARGET_BODY\"}\n").unwrap();
+        let log = events.join("task.ndjson");
+        std::os::unix::fs::symlink(&real, &log).unwrap();
+        {
+            let conn = db.lock().unwrap();
+            conn.execute("INSERT INTO runs (id, workspace_id, objective, cwd, created_at) VALUES ('r1', 'w', 'o', '/tmp', 0)", []).unwrap();
+            conn.execute(
+                "INSERT INTO tasks (id, run_id, title, prompt, agent_id, cwd, events_path, created_at) VALUES ('t1', 'r1', 't', 'p', 'claude-code', '/tmp', ?1, 0)",
+                [log.to_string_lossy().to_string()],
+            )
+            .unwrap();
+        }
+        let before = revision_set(&db);
+        let scope = crate::memory::purge::Scope {
+            memory_root: root.path().to_path_buf(),
+            database_file: None,
+            events_root: Some(events),
+        };
+        let result = crate::memory::purge::revisions_coordinated_with(&db, &sync, &target.entry_id, Some(target.revision), &scope, &|| {});
+        assert!(result.is_err(), "a redação falhou e o purge deveria recusar");
+        let after = revision_set(&db);
+        assert_eq!(before, after, "a redação do NDJSON falhou, mas a revisão saiu do banco");
+    }
+
+    /// A thread do worker não pode subir: a falha tem que aparecer no status do workspace, e não derrubar o boot.
+    #[test]
+    fn thread_que_nao_sobe_vira_falha_visivel_no_status() {
+        let sync = RepoSync::new(fixture(), std::env::temp_dir().join(format!("ade-sync-{}", uuid::Uuid::new_v4())));
+        let erro = sync.spawn_com(|_| Err(std::io::Error::other("sem recurso"))).unwrap_err();
+        assert!(erro.contains("sem recurso"), "{erro}");
+        let status = sync.status("w");
+        assert_eq!(status.phase, "failed", "{status:?}");
+        assert!(status.error.as_deref().unwrap_or_default().contains("sem recurso"), "{status:?}");
+    }
+
+    /// O `install` avisa a UI pelo mesmo evento do toast: spawn falho também emite `cc-memory-repo-sync`.
+    #[test]
+    fn spawn_falho_emite_cc_memory_repo_sync() {
+        let sync = RepoSync::new(fixture(), std::env::temp_dir().join(format!("ade-sync-{}", uuid::Uuid::new_v4())));
+        let (tx, rx) = std::sync::mpsc::channel();
+        sync.set_notifier(Arc::new(move |status: &RepoSyncStatus| {
+            let _ = tx.send(status.clone());
+        }));
+        let _ = sync.spawn_com(|_| Err(std::io::Error::other("sem recurso")));
+        let status = rx.try_recv().expect("cc-memory-repo-sync não saiu na falha do spawn");
+        assert_eq!(status.phase, "failed", "{status:?}");
+        assert!(
+            status.error.as_deref().unwrap_or_default().contains("sem recurso"),
+            "{status:?}"
+        );
+    }
+
+    /// Com o worker caído, o status mostra o erro e mantém a fila real: a pendência não some da tela.
+    #[test]
+    fn falha_do_worker_mantem_a_pendencia_real() {
+        let sync = RepoSync::new(fixture(), std::env::temp_dir().join(format!("ade-sync-{}", uuid::Uuid::new_v4())));
+        sync.enqueue("w", None);
+        sync.enqueue("w", None);
+        sync.spawn_com(|_| Err(std::io::Error::other("sem recurso"))).unwrap_err();
+        let status = sync.status("w");
+        assert_eq!(status.phase, "failed", "{status:?}");
+        assert!(status.error.as_deref().unwrap_or_default().contains("sem recurso"), "{status:?}");
+        assert_eq!(status.pending, 2, "a pendência real sumiu do status: {status:?}");
+    }
+
+    /// `retry` tenta subir o worker de novo; quando ele sobe, a falha sai do status.
+    #[test]
+    fn retry_sobe_o_worker_que_falhou() {
+        let sync = RepoSync::new(fixture(), std::env::temp_dir().join(format!("ade-sync-{}", uuid::Uuid::new_v4())));
+        sync.spawn_com(|_| Err(std::io::Error::other("sem recurso"))).unwrap_err();
+        let depois = sync.retry("w");
+        assert_ne!(depois.phase, "failed", "{depois:?}");
+        assert_ne!(sync.status("w").phase, "failed");
+
     }
 }

@@ -33,7 +33,7 @@ try{window.open=function(){return null;};}catch(x){}
 })();`;
 
 /**
- * O `srcdoc` de uma página publicada: a CSP do quadro isolado (sem rede, sem navegação, sem formulário), o tema da
+ * O `srcdoc` de uma página publicada: a CSP do quadro isolado (sem rede, sem formulário), o tema da
  * ADE e o script de links, antes do HTML do agente. As `<meta http-equiv>` e as `<base>` do HTML são tiradas, para que
  * o agente não afrouxe a CSP. Pura.
  */

@@ -6,6 +6,8 @@ import type { AgentSkillScan } from "./types";
 
 /** Quanto a varredura vale: o `/` abre muitas vezes na mesma pasta, e a varredura não precisa repetir. */
 const TTL_MS = 30_000;
+/** Teto de pastas/agentes no cache, o mesmo do cache de imagens do forge. */
+export const AGENT_SKILLS_CACHE_LIMIT = 80;
 
 interface AgentSkillsEntry {
   skills: AgentSkillScan[];
@@ -35,7 +37,18 @@ export const useAgentSkillsStore = create<AgentSkillsState>()((set, get) => ({
 
     const request = agentSkillsScan(cwd, agentId, threadId)
       .then((skills) => {
-        set((state) => ({ entries: { ...state.entries, [key]: { skills, at: Date.now() } } }));
+        set((state) => {
+          const entries = { ...state.entries, [key]: { skills, at: Date.now() } };
+          const ids = Object.keys(entries);
+          if (ids.length > AGENT_SKILLS_CACHE_LIMIT) {
+            let oldest = ids[0];
+            for (const id of ids) {
+              if (entries[id].at < entries[oldest].at) oldest = id;
+            }
+            if (oldest !== key) delete entries[oldest];
+          }
+          return { entries };
+        });
         return skills;
       })
       .finally(() => {

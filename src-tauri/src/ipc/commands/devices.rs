@@ -120,7 +120,7 @@ fn physical_inventory(
         }
         match crate::iphone::commands::mac::devices() {
             Ok(devices) => (devices, None),
-            Err(error) => (Vec::new(), Some(crate::iphone::model::device_error_help(&error))),
+            Err(error) => (Vec::new(), Some(crate::iphone::model::device_error_help(&error.to_string()))),
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -252,7 +252,7 @@ fn file_stem(name: &str) -> String {
 
 pub(super) fn device_list(_app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
-    let mine = surfaces::devices(&from);
+    let mine = surfaces::devices(&from)?;
     let (physical, iphone_unavailable) = physical_inventory(&mine);
     let online: Vec<Device> = android::devices().unwrap_or_default();
     Ok(json!({
@@ -304,7 +304,7 @@ pub(super) fn device_action(_app: &AppHandle, args: &Value, action: &str) -> Res
         return Err(format!("Um dispositivo não admite '{action}'. Admite: {}.", ACTIONS.join(", ")));
     }
     let from = caller(args)?;
-    let mine = surfaces::devices(&from);
+    let mine = surfaces::devices(&from)?;
     let (physical, _) = physical_inventory(&mine);
     let target = resolve_with_physical(&mine, &arg_str(args, "name")?, &physical)?;
     target.allows(action)?;
@@ -539,7 +539,7 @@ mod test {
 /// Resolve só nós iOS alcançáveis pelo chamador; não aceita UDID solto como autorização. O `sim act` muda o
 /// aparelho a cada passo: um aparelho do painel do chat sem a chave ligada é recusado já aqui, com o motivo.
 pub(super) fn ios_target(from: &str, name: &str) -> Result<(String, String), String> {
-    let list = surfaces::devices(from);
+    let list = surfaces::devices(from)?;
     let (physical, _) = physical_inventory(&list);
     let target = resolve_with_physical(&list, name, &physical)?;
     if target.kind() != Some("ios") { return Err("Use sim act somente em um nó iOS conectado ao seu terminal.".into()); }

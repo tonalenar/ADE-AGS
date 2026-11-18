@@ -226,7 +226,7 @@ pub fn render(conn: &Connection, workspace: &str, overrides: &[(String, i64)]) -
 }
 
 pub fn default_root() -> Result<PathBuf,String> {
-    Ok(crate::util::datadir::ags_home().ok_or("home unavailable")?.join("memory"))
+    Ok(crate::util::datadir::ags_home().ok_or("a pasta do usuário não está disponível")?.join("memory"))
 }
 
 /// Read provenance only; launching a Run must not export or mutate user files.
@@ -235,6 +235,11 @@ pub fn current_commit(conn: &Connection, workspace: &str) -> Option<String> {
     if !exists {
         return None;
     }
+    current_commit_for_workspace(workspace)
+}
+
+/// Busca o commit sem consultar o banco. O chamador deve confirmar antes se o workspace existe.
+pub fn current_commit_for_workspace(workspace: &str) -> Option<String> {
     let root = default_root().ok()?;
     let dirs = workspace_repo_dirs(&root, workspace).ok()?;
     let stable = workspace_repo_name(workspace);
@@ -247,6 +252,28 @@ pub fn current_commit(conn: &Connection, workspace: &str) -> Option<String> {
     };
     if path.is_symlink() || path.join(".git").is_symlink() || !path.join(".git").exists() { return None; }
     git(&path, &["rev-parse", "HEAD"]).ok()
+}
+
+/// Confirma o owner sob lock curto e só então faz filesystem/Git sem o mutex do banco.
+pub fn current_commit_for_db(db: &crate::database::DbConnection, workspace: &str) -> Option<String> {
+    current_commit_for_db_with(db, workspace, || current_commit_for_workspace(workspace))
+}
+
+fn current_commit_for_db_with(
+    db: &crate::database::DbConnection,
+    workspace: &str,
+    read: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    let exists = {
+        let conn = db.lock().ok()?;
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)",
+            [workspace],
+            |row| row.get::<_, bool>(0),
+        )
+        .ok()?
+    };
+    exists.then(read).flatten()
 }
 
 /// Injected by tests so a slow or failing git does not require a real binary.
@@ -306,8 +333,28 @@ pub fn run_git(path: &Path, args: &[String]) -> Result<String, String> {
 fn repo_gate(path: &Path) -> Arc<Mutex<()>> {
     static GATES: std::sync::LazyLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
         std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+    let key = gate_key(path);
     let mut gates = GATES.lock().unwrap_or_else(|err| err.into_inner());
-    gates.entry(path.to_path_buf()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+    gates.entry(key).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+}
+
+// Canonicaliza o maior prefixo que já existe e mantém o resto: o mesmo diretório tem a mesma
+// chave antes e depois de ser criado, e por link simbólico (/var → /private/var no macOS).
+fn gate_key(path: &Path) -> PathBuf {
+    let mut existing = path;
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(canonical) = std::fs::canonicalize(existing) {
+            return rest.iter().rev().fold(canonical, |acc, part: &std::ffi::OsString| acc.join(part));
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
 }
 
 /// Serializa publish e a reescrita do purge no mesmo diretório.

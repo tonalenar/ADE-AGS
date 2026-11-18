@@ -21,6 +21,14 @@ static ARCHIVED_TRANSCRIPT_INDEXER_RUNNING: AtomicBool = AtomicBool::new(false);
 static INDEXER_RUN_ID: OnceLock<String> = OnceLock::new();
 static MEMORY_INDEX: OnceLock<Result<Mutex<Connection>, String>> = OnceLock::new();
 
+struct IndexerRunningGuard<'a>(&'a AtomicBool);
+
+impl Drop for IndexerRunningGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 struct Candidate {
     history_id: String,
     workspace_id: String,
@@ -130,6 +138,7 @@ fn start_index_batch(app: AppHandle, db: DbConnection, workspace_id: String) {
     }
 
     tauri::async_runtime::spawn_blocking(move || {
+        let running_guard = IndexerRunningGuard(&ARCHIVED_TRANSCRIPT_INDEXER_RUNNING);
         let mut indexed = 0;
         let mut opencode_exports_left = MAX_OPENCODE_EXPORTS_PER_CYCLE;
         for _ in 0..MAX_BATCHES_PER_QUERY {
@@ -138,7 +147,7 @@ fn start_index_batch(app: AppHandle, db: DbConnection, workspace_id: String) {
                 _ => break,
             }
         }
-        ARCHIVED_TRANSCRIPT_INDEXER_RUNNING.store(false, Ordering::Release);
+        drop(running_guard);
         if indexed > 0 {
             let _ = app.emit("cc-archived-transcript-indexed", indexed);
         }
@@ -736,4 +745,21 @@ fn now_seconds() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs() as i64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AtomicBool, IndexerRunningGuard, Ordering};
+
+    #[test]
+    fn guarda_libera_indexador_durante_panic() {
+        let running = AtomicBool::new(true);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = IndexerRunningGuard(&running);
+            panic!("falha simulada do lote");
+        }));
+
+        assert!(result.is_err());
+        assert!(!running.load(Ordering::Acquire));
+    }
 }
