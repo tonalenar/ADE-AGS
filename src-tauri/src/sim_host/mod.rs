@@ -151,9 +151,6 @@ pub fn start() {
     #[cfg(target_os = "macos")]
     {
         STOP.store(false, Ordering::SeqCst);
-        if let Err(error) = install() {
-            eprintln!("[ade-ags] não preparei o bloqueio do Device Hub: {error}");
-        }
         spawn_watcher();
     }
 }
@@ -292,29 +289,53 @@ fn process_command(pid: i32) -> String {
     }
 }
 
+/// Intervalo entre duas varreduras do Device Hub. Por 60 s depois de ele aparecer, 2 s; depois disso, 10 s, para não
+/// varrer a lista de processos o tempo todo com ele fechado (A171). Efeito: se ele reaparecer depois de um tempo parado,
+/// pode ficar visível até 10 s antes de ser fechado. Pura.
+#[cfg(any(target_os = "macos", test))]
+fn intervalo_do_watcher(desde_o_ultimo_hit: std::time::Duration) -> std::time::Duration {
+    if desde_o_ultimo_hit < std::time::Duration::from_secs(60) {
+        std::time::Duration::from_secs(2)
+    } else {
+        std::time::Duration::from_secs(10)
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn spawn_watcher() {
     std::thread::Builder::new()
         .name("ade-device-hub".into())
         .spawn(|| {
+            // A preparação pode compilar o chamariz com `clang` (até 30 s): fica aqui, fora da abertura da janela (A275).
+            if let Err(error) = install() {
+                eprintln!("[ade-ags] não preparei o bloqueio do Device Hub: {error}");
+            }
+            // Começa como se o Device Hub tivesse acabado de aparecer: o Expo o abre logo no início do app.
+            let mut ultimo_hit = std::time::Instant::now();
             while !STOP.load(Ordering::SeqCst) {
-                dismiss_apple_device_hub();
+                if dismiss_apple_device_hub() {
+                    ultimo_hit = std::time::Instant::now();
+                }
                 keep_decoy();
-                std::thread::sleep(std::time::Duration::from_secs(2));
+                std::thread::sleep(intervalo_do_watcher(ultimo_hit.elapsed()));
             }
         })
         .ok();
 }
 
+/// Fecha o Device Hub que estiver aberto. `true` se fechou algum: o watcher volta à varredura de 2 s.
 #[cfg(target_os = "macos")]
-fn dismiss_apple_device_hub() {
+fn dismiss_apple_device_hub() -> bool {
+    let mut fechou = false;
     for pid in apple_device_hub_pids() {
         // SIGKILL, não SIGTERM: ao sair de forma limpa o Device Hub desliga os simuladores.
         let rc = unsafe { libc::kill(pid, libc::SIGKILL) };
         if rc == 0 {
             eprintln!("[ade-ags] fechei o Device Hub (pid {pid}); o simulador continua ligado");
+            fechou = true;
         }
     }
+    fechou
 }
 
 /// Consulta os processos pelo libproc do macOS, sem criar um `ps` a cada ciclo do watcher.
@@ -383,6 +404,17 @@ fn keep_decoy() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn watcher_do_device_hub_varre_de_2s_logo_depois_de_aparecer_e_relaxa_para_10s() {
+        let s = std::time::Duration::from_secs;
+        // Logo depois de aparecer (ou no início do app, quando o Expo abre o Device Hub): 2 s.
+        assert_eq!(intervalo_do_watcher(s(0)), s(2));
+        assert_eq!(intervalo_do_watcher(s(59)), s(2));
+        // Sem aparecer por 60 s: relaxa para 10 s, e o Device Hub pode ficar visível até esse tempo (A171).
+        assert_eq!(intervalo_do_watcher(s(60)), s(10));
+        assert_eq!(intervalo_do_watcher(s(3600)), s(10));
+    }
 
     #[test]
     fn reconhece_o_que_abre_o_device_hub() {

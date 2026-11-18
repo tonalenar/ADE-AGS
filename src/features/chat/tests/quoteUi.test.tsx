@@ -103,7 +103,7 @@ describe("Citar: botão flutuante pílula (T3 Code) e fechamento", () => {
           {includeUserBubble && <PersonBubble text="mensagem do usuário" itemId="msg-user-1" />}
         </div>
         <SelectionComment container={() => document.querySelector("[data-testid=timeline]")} quoteKey="conv-1" />
-        <ChatComposer placeholder="p" quoteKey="conv-1" onSubmit={() => true} />
+        <ChatComposer placeholder="p" quoteKey="conv-1" onSubmit={async () => true} />
       </>
     );
   }
@@ -232,7 +232,7 @@ describe("Citar: botão flutuante pílula (T3 Code) e fechamento", () => {
     expect(useQuoteStore.getState().byKey["conv-1"]).toHaveLength(1);
   });
 
-  it("fecha o botão ao clicar fora, ao rolar, ao limpar a seleção e com Escape", async () => {
+  it("fecha o botão ao clicar fora, ao rolar com o trecho fora da tela, ao limpar a seleção e com Escape", async () => {
     await act(async () => { root.render(<Scene />); });
 
     // Fecha ao clicar fora
@@ -241,9 +241,13 @@ describe("Citar: botão flutuante pílula (T3 Code) e fechamento", () => {
     await act(async () => { document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, isPrimary: true })); });
     expect(citeButton()).toBeNull();
 
-    // Fecha ao rolar
+    // Rolar com o trecho ainda na tela não derruba a pílula (a rolagem que o streaming faz sozinho não a tira); quando o
+    // trecho sai da tela, a rolagem a fecha.
     await selectIn("[data-chat-item-id='msg-assist-1'] p", "troca");
     expect(citeButton()).not.toBeNull();
+    await act(async () => { document.querySelector("[data-testid=timeline]")!.dispatchEvent(new Event("scroll", { bubbles: false })); });
+    expect(citeButton()).not.toBeNull();
+    await selectIn("[data-chat-item-id='msg-assist-1'] p", "troca", { left: 100, top: 5000, right: 180, bottom: 5020, width: 80, height: 20 });
     await act(async () => { document.querySelector("[data-testid=timeline]")!.dispatchEvent(new Event("scroll", { bubbles: false })); });
     expect(citeButton()).toBeNull();
 
@@ -277,7 +281,7 @@ describe("Citar: botão flutuante pílula (T3 Code) e fechamento", () => {
 describe("o composer leva as citações como chip estilo T3, com comentário opcional e remoção", () => {
   let submitted: [string, number][] = [];
   const mount = (key: string | null = "conv-1") =>
-    act(async () => { root.render(<ChatComposer placeholder="p" quoteKey={key} onSubmit={(text, atts) => { submitted.push([text, atts.length]); }} />); });
+    act(async () => { root.render(<ChatComposer placeholder="p" quoteKey={key} onSubmit={async (text, atts) => { submitted.push([text, atts.length]); return true; }} />); });
   const chips = () => [...document.querySelectorAll("ul[aria-label='chat.quote.list'] > li")];
 
   beforeEach(() => { submitted = []; });
@@ -361,7 +365,7 @@ describe("o composer leva as citações como chip estilo T3, com comentário opc
 
   it("se o envio falha, as citações ficam", async () => {
     addQuoteFor("conv-1", { text: "trecho" });
-    await act(async () => { root.render(<ChatComposer placeholder="p" quoteKey="conv-1" onSubmit={() => false} />); });
+    await act(async () => { root.render(<ChatComposer placeholder="p" quoteKey="conv-1" onSubmit={async () => false} />); });
     await act(async () => { (document.querySelector("button[type=submit]") as HTMLElement).click(); });
     expect(chips()).toHaveLength(1);
   });

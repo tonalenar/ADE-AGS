@@ -93,14 +93,21 @@ export function NativeScreen({ api, screenId, target, radius, onError, engaged =
     let coveredRect: Box | null = null;
     let coveredAt = 0;
     let domDirty = true;
-    let frame = 0;
+    let pending = 0;
+    let heartbeat = 0;
 
+    // Mede só quando algo pode ter mudado: uma mutação do DOM, uma rolagem ou o redimensionamento pedem uma medição no
+    // próximo quadro. Um batimento lento pega o que muda sem mutação (uma animação CSS). Antes, cada quadro de cada tela
+    // aberta refazia a medição (60 Hz por aparelho, mesmo parado): ver A260.
+    const HEARTBEAT_MS = 250;
     const markDirty = () => {
       domDirty = true;
+      soon();
     };
     const observer = new MutationObserver(markDirty);
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class", "hidden", "data-state"] });
     window.addEventListener("resize", markDirty);
+    document.addEventListener("scroll", soon, { capture: true, passive: true });
 
     const measure = (): SimPlace => {
       const rect = boxOf(el);
@@ -122,7 +129,7 @@ export function NativeScreen({ api, screenId, target, radius, onError, engaged =
       return { rect: place.rect, radius: Math.round(latest.current.radius * place.zoom * 10) / 10, visible: place.visibleRect, holes: place.holes };
     };
 
-    const tick = () => {
+    const sync = () => {
       if (attached) {
         const place = measure();
         if (!samePlace(sent, place)) {
@@ -130,23 +137,33 @@ export function NativeScreen({ api, screenId, target, radius, onError, engaged =
           api.place(screenId, place).catch(() => undefined);
         }
       }
-      frame = requestAnimationFrame(tick);
     };
+    // Um pedido de medição por quadro, no máximo: vários sinais no mesmo quadro viram uma medição só.
+    function soon() {
+      if (pending) return;
+      pending = requestAnimationFrame(() => {
+        pending = 0;
+        sync();
+      });
+    }
 
     sent = measure();
     api.attach(screenId, target, sent)
       .then(() => {
         if (closed) api.detach(screenId).catch(() => undefined);
         attached = true;
+        if (!closed) soon();
       })
       .catch((e) => latest.current.onError(String(e)));
-    frame = requestAnimationFrame(tick);
+    heartbeat = window.setInterval(soon, HEARTBEAT_MS);
 
     return () => {
       closed = true;
       observer.disconnect();
       window.removeEventListener("resize", markDirty);
-      cancelAnimationFrame(frame);
+      document.removeEventListener("scroll", soon, { capture: true });
+      window.clearInterval(heartbeat);
+      cancelAnimationFrame(pending);
       api.detach(screenId).catch(() => undefined);
     };
   }, [api, screenId, target, opened]);

@@ -7,6 +7,7 @@ import { useMarketplaceStore } from "@/features/marketplace/store";
 import type { RegistrySummary } from "@/features/marketplace/types";
 import { useSkillsStore } from "@/features/skills/store";
 import type { SkillSummary } from "@/features/skills/types";
+import { registryRemovalList } from "@/features/marketplace/removeRegistryState";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface RemoveRegistryDialogProps {
@@ -30,16 +31,19 @@ export function RemoveRegistryDialog({ registry, onClose }: RemoveRegistryDialog
   const loadInstalledSkills = useSkillsStore((s) => s.loadSkills);
 
   const [affected, setAffected] = useState<SkillSummary[] | null>(null);
+  const [listFailed, setListFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let stale = false;
+    setListFailed(false);
+    setAffected(null);
     registrySkills(registry.id)
       .then((rows) => { if (!stale) setAffected(rows); })
       // Si no se pueden listar, se sigue pudiendo borrar — pero con la advertencia
       // genérica, nunca dando a entender que no hay nada que perder.
-      .catch(() => { if (!stale) setAffected([]); });
+      .catch(() => { if (!stale) setListFailed(true); });
     return () => { stale = true; };
   }, [registry.id, registrySkills]);
 
@@ -58,8 +62,9 @@ export function RemoveRegistryDialog({ registry, onClose }: RemoveRegistryDialog
     }
   };
 
-  const loading = affected === null;
-  const count = affected?.length ?? 0;
+  const listing = registryRemovalList(affected, listFailed);
+  const loading = listing.status === "loading";
+  const count = listing.status === "listed" ? listing.skills.length : 0;
 
   return (
     <AppDialog
@@ -98,7 +103,11 @@ export function RemoveRegistryDialog({ registry, onClose }: RemoveRegistryDialog
             <AnimateSpin className="w-3.5 h-3.5" />
             {t("marketplace.registries.removeChecking")}
           </div>
-        ) : count === 0 ? (
+        ) : listing.status === "unknown" ? (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            {t("marketplace.registries.removeListFailed")}
+          </p>
+        ) : listing.status === "empty" ? (
           <p className="text-xs text-gray-400 dark:text-white/40">
             {t("marketplace.registries.removeNoSkills")}
           </p>
@@ -112,7 +121,7 @@ export function RemoveRegistryDialog({ registry, onClose }: RemoveRegistryDialog
               {t("marketplace.registries.removeSkillsTitle", { count })}
             </span>
             <ul className="cc-scroll flex flex-col gap-0.5 max-h-44 pr-1">
-              {affected.map((s) => (
+              {listing.skills.map((s) => (
                 <li key={s.id} className="flex items-baseline gap-2 text-xs text-red-700 dark:text-red-300">
                   <span className="truncate">{s.name}</span>
                   {/* Cuántos proyectos la usan ahora mismo: es el dato que convierte

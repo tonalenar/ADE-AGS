@@ -1378,6 +1378,8 @@ async function pilotLoop(
   };
 
   for (let step = 1; step <= limit; step++) {
+    // O `add` pendente é de UM passo: se o `act` anterior lançou antes de registrá-lo, não pode sobrar para este (A196).
+    pendingAdd = null;
     const stepStarted = Date.now();
     let page = parseSnapshot(snapshot);
     // O que não é escolha não vai ao Jev: um campo cujo nome casa com um `--fill` recebe o valor direto.

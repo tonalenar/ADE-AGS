@@ -42,8 +42,30 @@ pub enum WindowMode {
 pub fn command(program: impl AsRef<OsStr>, window: WindowMode) -> Command {
     let mut cmd = Command::new(program);
     apply_window(&mut cmd, window);
+    sinais_padrao_no_filho(&mut cmd);
     cmd
 }
+
+/// Os filhos voltam `SIGINT` e `SIGQUIT` ao padrão. Um processo herda do pai a disposição desses sinais: se quem
+/// lançou o app ignora `SIGINT` (um job em segundo plano de shell ignora), o filho ignoraria o Ctrl+C e não
+/// responderia a quem o encerra por sinal. O teste da gravação de tela pegou exatamente isso: o `sleep` do teste
+/// não morria com `SIGINT` quando a suíte rodava em segundo plano. Só `signal` roda entre o fork e o exec, e ele é
+/// seguro nesse ponto.
+#[cfg(unix)]
+fn sinais_padrao_no_filho(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: `signal` é async-signal-safe, e é a única chamada entre o fork e o exec.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::signal(libc::SIGINT, libc::SIG_DFL);
+            libc::signal(libc::SIGQUIT, libc::SIG_DFL);
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn sinais_padrao_no_filho(_cmd: &mut Command) {}
 
 /// Atalho de [`command`] com [`WindowMode::Hidden`].
 pub fn hidden_command(program: impl AsRef<OsStr>) -> Command {

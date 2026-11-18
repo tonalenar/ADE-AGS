@@ -127,10 +127,10 @@ pub(crate) fn forget_trust(db: &DbConnection) -> Result<usize, String> {
 /// O que pergunta mesmo com "sempre": tocar num controle de pagar, apagar, senha, sair, enviar…, e tocar
 /// num controle SEM texto (um ícone) que o próprio Jev não deu como claramente seguro (`jev_unsure`): sem
 /// rótulo, o julgamento dele é a única pista de que o ícone não é uma lixeira.
-pub(super) fn always_asks(action: &Action, label: Option<&str>, jev_unsure: bool) -> bool {
+pub(super) fn always_asks(action: &Action, label: Option<&str>, cue: Option<Category>, jev_unsure: bool) -> bool {
     action.operation == Operation::Click
         && match label {
-            Some(label) => sensitive_label(label),
+            Some(label) => category(label, cue).is_some(),
             None => jev_unsure,
         }
 }
@@ -190,6 +190,8 @@ pub(super) struct Frame {
     pub pick: Option<computer::Pick>,
     /// O traço que tira o alvo de baixo do teclado ou da barra, quando o toque escolhido cairia coberto (`cover`).
     pub reveal: Option<((f64, f64), (f64, f64))>,
+    /// O que a tela diz sobre o diálogo aberto (`dialog_cue`): o botão genérico do diálogo herda essa categoria.
+    pub cue: Option<Category>,
 }
 impl Drop for Frame {
     fn drop(&mut self) {
@@ -627,7 +629,7 @@ impl Surface for IosSurface {
         }
         crate::terminal::authorize_actor(self.session.as_deref(), Some(&self.from), self.client_pid)
             .map_err(|_| Failure::OutsideScope)?;
-        let allowed = crate::surfaces::ios_allows(&self.from, &self.node, &self.udid, "act");
+        let allowed = crate::surfaces::ios_allows(&self.from, &self.node, &self.udid, "act").map_err(|_| Failure::Operation)?;
         if !allowed {
             return Err(Failure::OutsideScope);
         }
@@ -650,6 +652,7 @@ impl Surface for IosSurface {
             revision: revision.clone(),
             pick: None,
             reveal: None,
+            cue: None,
         };
         self.authorize()
             .map_err(|_| "Autorização ou prazo expirou durante a captura.")?;
@@ -755,9 +758,10 @@ impl Surface for IosSurface {
         let typed = self.fills.first().map_or(0, |v| v.chars().count());
         let operation = super::desktop::describe(action, &label, typed, "Tocar");
         let path = frame.path.clone();
+        let cue = frame.cue;
         drop(frame);
         // A pessoa já disse "sempre" para este aparelho: só o que é de fato perigoso volta a perguntar.
-        if !key && !always_asks(action, named.as_deref(), jev_unsure) && trusted(&self.db, &self.udid)? {
+        if !key && !always_asks(action, named.as_deref(), cue, jev_unsure) && trusted(&self.db, &self.udid)? {
             return Ok(true);
         }
         let question =
@@ -986,10 +990,11 @@ pub(super) fn decision_for(pick: &computer::Pick, text: &str, labels: &[Label]) 
     let unnamed_click = operation == Operation::Click && !named_point(pick.point, labels);
     // O risco é do controle tocado, não da tela inteira: um "Sair" no canto da tela não torna
     // sensível rolar nem tocar em «Geral». Sem rótulos (teste, OCR vazio), vale o texto todo.
+    let cue = dialog_cue(text);
     let touched = if labels.is_empty() {
         sensitive_label(text)
     } else {
-        operation == Operation::Click && label_at(pick.point, labels).is_some_and(sensitive_label)
+        operation == Operation::Click && label_at(pick.point, labels).is_some_and(|label| category(label, cue).is_some())
     };
     if operation == Operation::Scroll && pick.operation == "reveal" {
         // Rolar o conteúdo dentro da área livre: movimento comum, sem efeito sensível.
@@ -1088,6 +1093,7 @@ impl Decider for VisualDecider {
         }
         f.pick = Some(pick);
         f.reveal = line;
+        f.cue = dialog_cue(&obs.text);
         Ok(decision)
     }
 }
@@ -1575,14 +1581,17 @@ mod flow_test {
     fn sempre_nao_cobre_tocar_em_pagar_apagar_ou_sair() {
         let click = Action { operation: Operation::Click, target: Some("screen".into()) };
         let scroll = Action { operation: Operation::Scroll, target: Some("scroll_up".into()) };
-        assert!(always_asks(&click, Some("Excluir conta"), false));
-        assert!(always_asks(&click, Some("Sair"), false));
-        assert!(!always_asks(&click, Some("Continuar como Eriston"), true));
-        assert!(!always_asks(&scroll, Some("Sair"), true));
+        assert!(always_asks(&click, Some("Excluir conta"), None, false));
+        assert!(always_asks(&click, Some("Sair"), None, false));
+        assert!(!always_asks(&click, Some("Continuar como Eriston"), None, true));
+        assert!(!always_asks(&scroll, Some("Sair"), None, true));
         // Ícone sem texto: segue o julgamento do Jev.
-        assert!(always_asks(&click, None, true));
-        assert!(!always_asks(&click, None, false));
-        assert!(!always_asks(&scroll, None, true));
+        assert!(always_asks(&click, None, None, true));
+        assert!(!always_asks(&click, None, None, false));
+        assert!(!always_asks(&scroll, None, None, true));
+        // O "sempre neste aparelho" não dispensa o OK de um diálogo de permissão.
+        assert!(always_asks(&click, Some("OK"), Some(Category::GrantPermission), false));
+        assert!(!always_asks(&click, Some("OK"), None, false));
     }
     #[test]
     fn risco_vem_do_controle_tocado_nao_de_uma_palavra_em_outro_canto_da_tela() {
@@ -1628,6 +1637,28 @@ mod flow_test {
     #[test]
     fn rotulo_do_reveal_nao_e_sensivel() {
         assert!(!sensitive_label(REVEAL_LABEL), "uma rolagem nunca pode parecer ação de risco");
+    }
+    #[test]
+    fn botao_permitir_no_mac_pede_confirmacao_mesmo_com_sensivel_no() {
+        // No Mac o alvo `screen` não tem rótulo próprio: o nome do controle vem do OCR no ponto tocado. "Permitir"
+        // pede a pessoa mesmo quando o Jev responde `sensivel: no` (`confirm: false`); "Agora não" segue comum.
+        let labels = vec![lbl("Permitir", 0.6, 0.5, 0.8, 0.55), lbl("Agora não", 0.2, 0.5, 0.4, 0.55)];
+        let text = "Permitir que o Terminal use a pasta Documentos?\nAgora não\nPermitir";
+        let click = |x: f64| computer::Pick { operation: "click".into(), probability: 0.9, goal_done: None, point: Some((x, 0.52)), confirm: false, box_confidence: None, label: None };
+        assert!(decision_for(&click(0.7), text, &labels).unwrap().requires_confirmation, "tocar em «Permitir»");
+        assert!(!decision_for(&click(0.3), text, &labels).unwrap().requires_confirmation, "tocar em «Agora não» segue comum");
+    }
+    #[test]
+    fn ok_de_dialogo_de_permissao_herda_a_categoria_do_dialogo() {
+        // O "OK" de um diálogo de permissão não diz "Permitir": a tela diz. Recusar continua livre; sem diálogo, OK é comum.
+        let labels = vec![lbl("OK", 0.7, 0.6, 0.8, 0.65), lbl("Cancelar", 0.4, 0.6, 0.6, 0.65)];
+        let at = |x: f64| computer::Pick { operation: "click".into(), probability: 0.9, goal_done: None, point: Some((x, 0.62)), confirm: false, box_confidence: None, label: None };
+        let dialogo = "“Terminal” gostaria de acessar a pasta Documentos.\nCancelar\nOK";
+        assert!(decision_for(&at(0.75), dialogo, &labels).unwrap().requires_confirmation, "OK do diálogo");
+        assert!(!decision_for(&at(0.5), dialogo, &labels).unwrap().requires_confirmation, "Cancelar segue livre");
+        assert!(!decision_for(&at(0.75), "Pedido salvo\nCancelar\nOK", &labels).unwrap().requires_confirmation, "OK sem diálogo é comum");
+        assert_eq!(dialog_cue(dialogo), Some(Category::GrantPermission));
+        assert_eq!(dialog_cue("Pedido salvo"), None);
     }
     #[test]
     fn tocar_numa_tecla_digita_sem_fill_e_sempre_pede_a_pessoa() {

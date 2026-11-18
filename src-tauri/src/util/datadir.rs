@@ -6,9 +6,27 @@
 //! seguem compartilhados de propósito (são checkouts git, não estado do app).
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 pub const DATA_DIR_ENV: &str = "ADE_AGS_DATA_DIR";
+
+/// Acrescenta uma linha datada ao arquivo `logs/<arquivo>` dentro de `dir` e devolve o caminho.
+/// Quem chama decide o que fazer com o erro: o log é auxiliar, não pode esconder a falha original.
+pub fn anexar_log_em(dir: &Path, arquivo: &str, linha: &str) -> std::io::Result<PathBuf> {
+    let logs = dir.join("logs");
+    std::fs::create_dir_all(&logs)?;
+    let caminho = logs.join(arquivo);
+    let mut saida = std::fs::OpenOptions::new().create(true).append(true).open(&caminho)?;
+    writeln!(saida, "[{}] {linha}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))?;
+    Ok(caminho)
+}
+
+/// O mesmo, na pasta de dados desta instância. Sem pasta de dados, devolve erro.
+pub fn anexar_log(arquivo: &str, linha: &str) -> std::io::Result<PathBuf> {
+    let dir = ags_home().ok_or_else(|| std::io::Error::other("a pasta de dados não está disponível"))?;
+    anexar_log_em(&dir, arquivo, linha)
+}
 
 /// Pura: só aceita caminho absoluto; relativo ou vazio é ignorado (cairia no cwd do processo).
 pub fn resolve(env: Option<OsString>, home: Option<PathBuf>) -> Option<PathBuf> {

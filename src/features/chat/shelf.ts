@@ -42,7 +42,7 @@ interface ShelfState {
   orderBySection: Record<string, string[]>;
   /** As marcadas como não lidas. */
   unread: string[];
-  /** As seções da barra recolhidas (`pinned` ou `project:<nome>`). */
+  /** As seções da barra recolhidas (`pinned` ou `project:<pasta>`). */
   collapsed: string[];
 }
 

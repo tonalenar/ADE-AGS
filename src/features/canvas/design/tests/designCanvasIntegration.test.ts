@@ -165,7 +165,7 @@ describe("Design Canvas Integration & Regression Suite (Etapa 19 QA)", () => {
       expect(message).toContain("Polir o bot");
       expect(message).toContain("Aura");
       expect(message).toContain("Trocar para cor dourada");
-      expect(message).toContain("[#aura]");
+      expect(message).toContain('[<untrusted_data source="seletor">#aura</untrusted_data>]');
     });
 
     it("ignora comentários já resolvidos na fila de envio", () => {

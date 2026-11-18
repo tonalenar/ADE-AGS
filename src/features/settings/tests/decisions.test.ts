@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { remoteHosts, parseTimeout, clampTimeout, defaultDecisionSettings, defaultModel, isDirty, isJevVersion, isLocalUrl, modelAfterProviderChange, modelOptions, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
+import { applyDecisionModelUpdate, remoteHosts, parseTimeout, clampTimeout, defaultDecisionSettings, defaultModel, isDirty, isJevVersion, isLocalUrl, modelAfterProviderChange, modelOptions, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
 
 describe("ajustes das decisões em sombra", () => {
   it("nasce desligado, em multilingual, com a Laya local e 800 ms", () => {
@@ -108,5 +108,10 @@ describe("versões do Jev", () => {
 
   it("atualizar sozinho vem ligado", () => {
     expect(defaultDecisionSettings().modelAutoUpdate).toBe(true);
+  });
+
+  it("formulário sujo não recarrega o modelo novo", () => {
+    expect(applyDecisionModelUpdate(true)).toBe("keep");
+    expect(applyDecisionModelUpdate(false)).toBe("reload");
   });
 });

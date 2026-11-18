@@ -78,7 +78,13 @@ export function installInputMarks(term: Terminal, colors: InputMarkColors): () =
       element.style.width = "100%";
     });
 
-    marks.push(decoration);
+    // A decoração e o marcador são registros separados no xterm: soltar só a decoração deixa o marcador no buffer.
+    marks.push({
+      dispose: () => {
+        decoration.dispose();
+        marker.dispose();
+      },
+    });
     if (marks.length > MAX_MARKS) drop(marks.length - MAX_MARKS);
   };
 

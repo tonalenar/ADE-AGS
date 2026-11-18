@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button, EditIcon, Tooltip, TrashIcon } from "neogestify-ui-components";
 
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 import { useAgentsStore } from "@/features/agents/store";
 import type { CustomAgent } from "@/features/agents/types";
 import { CustomAgentForm } from "@/features/agents/CustomAgentForm";
@@ -54,7 +55,7 @@ export function CustomAgentsSection() {
   const deleteCustomAgent = (id: string) => {
     if (armedAgent !== id) { setArmedAgent(id); return; }
     setArmedAgent(null);
-    removeCustomAgent(id).catch((e) => AlertaToast(t("btn.delete"), String(e), "error", 6000));
+    removeCustomAgent(id).catch((e) => AlertaToast(t("btn.delete"), uiErrorText(e), "error", 6000));
   };
 
   return (

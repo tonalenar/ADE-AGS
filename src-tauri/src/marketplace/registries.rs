@@ -4,12 +4,14 @@
 //! módulo; acá está lo que es común a todas: el CRUD, el cache y a quién delegar.
 
 use crate::database::DbConnection;
-use crate::skills::{install_skill_internal, SkillInfo, SkillOrigin};
+use crate::skills::{SkillInfo, SkillOrigin, install_skill_internal};
 use rusqlite::params;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-use super::github::{fetch_github_registry, install_from_github, normalize_github_location, parse_github_location};
+use super::github::{
+    fetch_github_registry, install_from_github, normalize_github_location, parse_github_location,
+};
 use super::local::scan_local_registry;
 use super::skillssh::{install_from_skillssh, normalize_owner_filter, refresh_skillssh};
 use crate::util::now_ts;
@@ -40,19 +42,26 @@ const REGISTRY_COLUMNS: &str =
     "id, name, source_type, location, priority, enabled, cache_json, last_fetched, cache_error";
 
 #[tauri::command]
-pub fn list_registries(db: tauri::State<DbConnection>) -> Result<Vec<RegistrySummary>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {REGISTRY_COLUMNS} FROM registries ORDER BY priority ASC, created_at ASC"
-        ))
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], row_to_summary)
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-    Ok(rows)
+pub async fn list_registries(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<RegistrySummary>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {REGISTRY_COLUMNS} FROM registries ORDER BY priority ASC, created_at ASC"
+            ))
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], row_to_summary)
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// `id` lo puede proponer el frontend: los eventos `cc-registry-progress` viajan
@@ -90,19 +99,27 @@ pub async fn add_registry(
         _ => location.trim().to_string(),
     };
 
-    let id = id.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| Uuid::new_v4().to_string());
-    {
-        let conn = db.lock().map_err(|e| e.to_string())?;
+    let id = id
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let insert_id = id.clone();
+    crate::database::blocking_db(&db, move |conn| {
         let next_priority: i32 = conn
-            .query_row("SELECT COALESCE(MAX(priority), -1) + 1 FROM registries", [], |r| r.get(0))
+            .query_row(
+                "SELECT COALESCE(MAX(priority), -1) + 1 FROM registries",
+                [],
+                |r| r.get(0),
+            )
             .map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO registries (id, name, source_type, location, priority, enabled, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)",
-            params![id, name, source_type, location, next_priority, now_ts()],
+            params![insert_id, name, source_type, location, next_priority, now_ts()],
         )
         .map_err(|e| e.to_string())?;
-    }
+        Ok(())
+    })
+    .await?;
     refresh_registry_internal(&id, &db, app).await
 }
 
@@ -114,13 +131,8 @@ pub async fn add_registry(
 /// (ver `registry_skills`) — esto nunca debe correr sin esa confirmación.
 ///
 /// Devuelve cuántas skills se borraron, para poder informarlo después de la operación.
-#[tauri::command]
-pub fn remove_registry(id: String, db: tauri::State<DbConnection>) -> Result<usize, String> {
-    // Primero las skills: cada borrado necesita leer `registry_id`, que desaparece con la
-    // fila del repo. Además retira sus symlinks de los proyectos, que es la parte que la
-    // cascada de la FK no puede hacer sola.
-    let removed = crate::skills::delete_skills_of_registry(&id, &db)?;
-
+pub(crate) fn remove_registry_now(id: String, db: &DbConnection) -> Result<usize, String> {
+    let removed = crate::skills::delete_skills_of_registry(&id, db)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM registries WHERE id = ?1", [&id])
         .map_err(|e| e.to_string())?;
@@ -128,34 +140,62 @@ pub fn remove_registry(id: String, db: tauri::State<DbConnection>) -> Result<usi
 }
 
 #[tauri::command]
-pub fn set_registry_enabled(
+pub async fn remove_registry(
     id: String,
-    enabled: bool,
-    db: tauri::State<DbConnection>,
-) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE registries SET enabled = ?1 WHERE id = ?2",
-        params![enabled as i64, id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    db: tauri::State<'_, DbConnection>,
+) -> Result<usize, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || remove_registry_now(id, &db))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn rename_registry(id: String, name: String, db: tauri::State<DbConnection>) -> Result<(), String> {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
-        return Err("O nome não pode estar vazio".to_string());
-    }
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let affected = conn
-        .execute("UPDATE registries SET name = ?1 WHERE id = ?2", params![trimmed, id])
+pub async fn set_registry_enabled(
+    id: String,
+    enabled: bool,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE registries SET enabled = ?1 WHERE id = ?2",
+            params![enabled as i64, id],
+        )
         .map_err(|e| e.to_string())?;
-    if affected == 0 {
-        return Err("Registry no encontrado".to_string());
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn rename_registry(
+    id: String,
+    name: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err("O nome não pode estar vazio".to_string());
+        }
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let affected = conn
+            .execute(
+                "UPDATE registries SET name = ?1 WHERE id = ?2",
+                params![trimmed, id],
+            )
+            .map_err(|e| e.to_string())?;
+        if affected == 0 {
+            return Err("Registry no encontrado".to_string());
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -258,14 +298,25 @@ async fn refresh_registry_internal(
 /// `cache_json` — no dispara ningún fetch: el usuario refresca explícitamente desde la UI
 /// (botón por repo, o "refrescar todos"), así el marketplace nunca bloquea su propia
 /// carga esperando a la red.
-#[tauri::command]
-pub fn list_marketplace_skills(
+pub(crate) fn list_marketplace_skills_now(
     query: Option<String>,
     category: Option<String>,
-    db: tauri::State<DbConnection>,
+    db: &DbConnection,
 ) -> Result<Vec<MarketplaceSkillEntry>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     list_cached_skills(&conn, query, category)
+}
+
+#[tauri::command]
+pub async fn list_marketplace_skills(
+    query: Option<String>,
+    category: Option<String>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<MarketplaceSkillEntry>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || list_marketplace_skills_now(query, category, &db))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// El trabajo de [`list_marketplace_skills`] sobre una conexión, para poder probarlo.
@@ -304,8 +355,12 @@ pub(super) fn list_cached_skills(
                 }
             }
             if let Some(q) = query_lower.as_ref().filter(|_| !already_searched) {
-                let haystack = format!("{} {}", entry.name, entry.description.as_deref().unwrap_or(""))
-                    .to_lowercase();
+                let haystack = format!(
+                    "{} {}",
+                    entry.name,
+                    entry.description.as_deref().unwrap_or("")
+                )
+                .to_lowercase();
                 if !haystack.contains(q.as_str()) {
                     continue;
                 }
@@ -322,20 +377,26 @@ pub async fn install_marketplace_skill(
     skill_id: String,
     db: tauri::State<'_, DbConnection>,
 ) -> Result<SkillInfo, String> {
-    let (source_type, location, registry_name, entries) = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        let (source_type, location, registry_name, cache_json): (String, String, String, Option<String>) = conn
+    let lookup_id = registry_id.clone();
+    let (source_type, location, registry_name, entries) = crate::database::blocking_db(&db, move |conn| {
+        let (source_type, location, registry_name, cache_json): (
+            String,
+            String,
+            String,
+            Option<String>,
+        ) = conn
             .query_row(
                 "SELECT source_type, location, name, cache_json FROM registries WHERE id = ?1",
-                [&registry_id],
+                [&lookup_id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .map_err(|_| "Registry no encontrado".to_string())?;
         let entries: Vec<MarketplaceSkillEntry> = cache_json
             .and_then(|j| serde_json::from_str(&j).ok())
             .unwrap_or_default();
-        (source_type, location, registry_name, entries)
-    };
+        Ok((source_type, location, registry_name, entries))
+    })
+    .await?;
 
     let entry = entries
         .into_iter()
@@ -353,7 +414,9 @@ pub async fn install_marketplace_skill(
 
     match source_type.as_str() {
         "local" => {
-            let file = PathBuf::from(&location).join(&entry.folder_path).join("SKILL.md");
+            let file = PathBuf::from(&location)
+                .join(&entry.folder_path)
+                .join("SKILL.md");
             install_skill_internal(&file.to_string_lossy(), None, Some(origin), &db)
         }
         "github" => install_from_github(&location, &entry, origin, &db).await,
@@ -407,20 +470,21 @@ pub async fn marketplace_skill_readme(
     skill_id: String,
     db: tauri::State<'_, DbConnection>,
 ) -> Result<String, String> {
-    let (source_type, location, entries) = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
+    let lookup_id = registry_id.clone();
+    let (source_type, location, entries) = crate::database::blocking_db(&db, move |conn| {
         let (source_type, location, cache_json): (String, String, Option<String>) = conn
             .query_row(
                 "SELECT source_type, location, cache_json FROM registries WHERE id = ?1",
-                [&registry_id],
+                [&lookup_id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .map_err(|_| "Registry no encontrado".to_string())?;
         let entries: Vec<MarketplaceSkillEntry> = cache_json
             .and_then(|j| serde_json::from_str(&j).ok())
             .unwrap_or_default();
-        (source_type, location, entries)
-    };
+        Ok((source_type, location, entries))
+    })
+    .await?;
 
     let entry = entries
         .into_iter()
@@ -429,8 +493,11 @@ pub async fn marketplace_skill_readme(
 
     match source_type.as_str() {
         "local" => {
-            let file = PathBuf::from(&location).join(&entry.folder_path).join("SKILL.md");
-            std::fs::read_to_string(&file).map_err(|e| format!("No se pudo leer {}: {e}", file.display()))
+            let file = PathBuf::from(&location)
+                .join(&entry.folder_path)
+                .join("SKILL.md");
+            std::fs::read_to_string(&file)
+                .map_err(|e| format!("No se pudo leer {}: {e}", file.display()))
         }
         "github" => super::github::fetch_github_skill_markdown(&location, &entry).await,
         // skills.sh no expone el archivo: bajarlo implica correr `npx skills add` en un

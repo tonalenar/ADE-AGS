@@ -50,6 +50,13 @@ describe("sendToThread: onSent e onError", () => {
   });
 });
 
+describe("sendDirect para integrante de TUI", () => {
+  it("a bolha continua pendente até o terminal confirmar a entrega (nada de enviado só por ter entrado na fila)", () => {
+    sendDirect("tab-lead", "tab-tui", "rode os testes", { key: "thread:lead", items: [] });
+    expect(pendingOf("thread:lead")).toEqual(["rode os testes"]);
+  });
+});
+
 describe("sendDirect (@menção do orquestrador)", () => {
   it("mostra a bolha pendente na conversa que a pessoa olha e a tira quando o backend aceita", async () => {
     sendDirect("tab-lead", "thread:m1", "rode os testes", { key: "thread:lead", items: [] });

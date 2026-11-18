@@ -190,13 +190,22 @@ fn slugify(text: &str) -> String {
     slug.trim_matches('-').to_string()
 }
 
+/// Procura `needle` (ASCII) em `haystack` sem diferenciar maiúsculas de minúsculas ASCII, sem criar outra string.
+/// O índice devolvido é o do texto ORIGINAL, e é o único que serve para fatiá-lo: um índice de cópia em minúsculo pode
+/// não bater (o "İ" vira dois caracteres e mais bytes).
+fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
+    haystack
+        .char_indices()
+        .map(|(index, _)| index)
+        .find(|&index| haystack.get(index..index + needle.len()).is_some_and(|found| found.eq_ignore_ascii_case(needle)))
+}
+
 fn explicit_token(corrects: Option<&str>, prompt: &str) -> Option<String> {
     if let Some(token) = corrects.map(str::trim).filter(|s| !s.is_empty()) {
         return Some(token.to_string());
     }
-    let lower = prompt.to_lowercase();
     for marker in ["corrects:", "corrects=", "fixes:", "fixes=", "corrige:", "corrigir:"] {
-        if let Some(index) = lower.find(marker) {
+        if let Some(index) = find_ascii_ci(prompt, marker) {
             let rest = prompt[index + marker.len()..].trim();
             let token: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
             if !token.is_empty() {
@@ -594,8 +603,7 @@ fn field(text: &str, name: &str) -> Option<String> {
 }
 
 fn loose_branch(text: &str) -> Option<String> {
-    let lower = text.to_lowercase();
-    let index = lower.find("branch ")?;
+    let index = find_ascii_ci(text, "branch ")?;
     let rest = text[index + "branch ".len()..].trim();
     let token: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || matches!(*c, '/' | '_' | '.' | '-')).collect();
     (!token.is_empty()).then_some(token)
@@ -899,28 +907,38 @@ pub fn max_fix_round_from_detail(detail: &str) -> Option<i64> {
 }
 
 #[tauri::command]
-pub fn run_fix_decide(
+pub async fn run_fix_decide(
     app: tauri::AppHandle,
     scope: String,
     work_key: String,
     action: String,
     task_id: Option<String>,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Value, String> {
-    let decision = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        decide(&conn, &scope, &work_key, task_id.as_deref(), &action)?
-    };
-    if let Some(run_id) = &decision.requeue_run {
-        super::scheduler::tick(&app, run_id);
-    }
-    Ok(json!({ "status": decision.status, "message": decision.message, "requeued": decision.requeue_run.is_some() }))
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let decision = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            decide(&conn, &scope, &work_key, task_id.as_deref(), &action)?
+        };
+        if let Some(run_id) = &decision.requeue_run {
+            super::scheduler::tick(&app, run_id);
+        }
+        Ok(json!({ "status": decision.status, "message": decision.message, "requeued": decision.requeue_run.is_some() }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn run_fix_list(scope: String, db: tauri::State<crate::database::DbConnection>) -> Result<Vec<FixView>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    list_scope(&conn, &scope)
+pub async fn run_fix_list(scope: String, db: tauri::State<'_, crate::database::DbConnection>) -> Result<Vec<FixView>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        list_scope(&conn, &scope)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 pub fn cli(app: &tauri::AppHandle, command: &str, args: &Value) -> Result<Value, String> {
@@ -928,7 +946,8 @@ pub fn cli(app: &tauri::AppHandle, command: &str, args: &Value) -> Result<Value,
     if command == "fix.decide" {
         let clean = |key: &str| args.get(key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty());
         let caller = crate::terminal::classify_caller(clean("session"), clean("from"), crate::ipc::current_client_pid())?;
-        if let Some(error) = crate::ipc::guard::fix_decide_error(&crate::canvas::load_boards(), &caller, arg(args, "scope")?) {
+        let boards = crate::canvas::load_boards()?;
+        if let Some(error) = crate::ipc::guard::fix_decide_error(&boards, &caller, arg(args, "scope")?) {
             return Err(error);
         }
     }
@@ -1026,6 +1045,23 @@ mod tests {
         let text = specific_failure("rodando\nthread panicked at src/login.rs:40: assertion `left == right` failed\nruído");
         assert!(text.contains("src/login.rs:40"));
         assert!(!text.contains("rodando"));
+    }
+
+    /// "İ" (U+0130) vira dois caracteres ao minúsculo (`i` + U+0307), e o texto minúsculo fica com bytes a mais. Um
+    /// índice achado nele e usado no texto original cai no meio de um caractere e o fatiamento entra em pânico. O
+    /// literal "İİ FIX: x" não casa marcador nenhum (o marcador é `fixes:`): fica como guarda de que não há pânico.
+    #[test]
+    fn prompt_com_i_turco_nao_entra_em_panico() {
+        assert_eq!(explicit_token(None, "İİ FIX: x"), None);
+        // O caso que estoura: o marcador vem depois de "İ" e o caractere seguinte é multibyte (`é`).
+        assert_eq!(explicit_token(None, "İ corrects:éabc"), None);
+        assert_eq!(explicit_token(None, "İ corrects: abc-1").as_deref(), Some("abc-1"));
+        assert_eq!(loose_branch("İ branch éabc"), None);
+        assert_eq!(loose_branch("İ branch feat/x-1").as_deref(), Some("feat/x-1"));
+        // O mesmo pela classificação do canvas, que é por onde a entrega de QA chega.
+        let hit = classify_canvas("qa", "QA", false, "İ branch feat/x-1 falhou").expect("devolução de QA");
+        assert_eq!(hit.label, "feat/x-1");
+        assert!(classify_canvas("qa", "QA", false, "İ branch éabc falhou").is_some());
     }
 
     #[test]
@@ -1249,6 +1285,31 @@ mod tests {
         assert_eq!(task.status, status::FAILED);
         assert_eq!(task.fix_status, "accepted_pending");
         assert!(decide(&conn, &scope, &task.work_key, Some(&task.id), "extra").is_err());
+    }
+
+    #[test]
+    fn gate_completo_nao_roda_git_com_o_banco_travado() {
+        let conn = db();
+        let run = open_run(&conn);
+        let task = worker(&conn, &run.id, "API de login");
+        conn.execute(
+            "UPDATE tasks SET status = 'running', full_gate = 1, session_id = 's' WHERE id = ?1",
+            [&task.id],
+        )
+        .unwrap();
+        let banco: crate::database::DbConnection = std::sync::Arc::new(std::sync::Mutex::new(conn));
+        let chamou_git = std::cell::Cell::new(false);
+        let travado_no_git = std::cell::Cell::new(false);
+        let probe = || {
+            chamou_git.set(true);
+            if banco.try_lock().is_err() {
+                travado_no_git.set(true);
+            }
+        };
+        let outcome = TaskOutcome { ok: true, result: Some("ags test affected passou".into()), ..Default::default() };
+        store::finish_task_db_with(&banco, &task.id, &outcome, &probe).unwrap();
+        assert!(chamou_git.get(), "o gate completo não foi avaliado");
+        assert!(!travado_no_git.get(), "git do gate completo rodou com o banco travado");
     }
 
     #[test]

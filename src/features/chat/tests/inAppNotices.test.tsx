@@ -15,7 +15,7 @@ vi.mock("@/shared/ui/alerts", () => ({ AlertaToast: vi.fn().mockResolvedValue({}
 vi.mock("@/features/chat/unified/selectionActions", () => ({ selectConversation: mocks.select }));
 vi.mock("@/features/settings/inAppNoticesPreference", () => ({ useInAppNotices: () => true }));
 vi.mock("@/features/chat/liveStore", () => ({ useChatLive: (select: (s: unknown) => unknown) => select({ phase: {}, question: {}, awaiting: {} }) }));
-vi.mock("@/features/chat/structured/store", () => ({ useStructured: (select: (s: unknown) => unknown) => select({ live: {} }) }));
+vi.mock("@/features/chat/structured/store", () => ({ useStructured: Object.assign((select: (s: unknown) => unknown) => select({ live: {} }), { getState: () => ({ live: {} }) }) }));
 vi.mock("@/features/chat/unified/useConversations", () => ({
   useConversations: () => [{ ref: "thread:t-1", title: "Refatorar o login" }],
   useSelectedRef: () => null,

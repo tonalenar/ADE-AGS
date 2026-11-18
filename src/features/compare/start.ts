@@ -14,6 +14,7 @@ import { getAutonomy, withAutonomy } from "@/features/missions/autonomy";
 import { withModel } from "@/features/missions/modelFlags";
 import { useTabsStore } from "@/features/tabs/store";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { showWorktreeTrustWarnings } from "@/features/missions/trustWarning";
 import { appConfirm } from "@/shared/ui/appConfirm";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { tuiMessage } from "@/features/chat/attachments/send";
@@ -49,6 +50,7 @@ export async function startComparison(input: StartInput): Promise<Comparison> {
   const attachments = input.attachments ?? [];
 
   const prepared = await comparePrepare({ cwd: input.cwd, title: input.title, picks, isolate: input.isolate });
+  showWorktreeTrustWarnings(prepared.trustWarnings);
   const cmp = prepared.comparison;
   const opened = cmp.entries.map((entry) => {
     const i = picks.findIndex((p) => p.pick === entry.pick);

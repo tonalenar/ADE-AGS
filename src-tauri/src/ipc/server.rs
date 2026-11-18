@@ -275,7 +275,8 @@ pub(super) fn handle_connection(
     // F-03: a leitura é limitada antes do token (janela pequena, prazo total) e só depois lê o resto do pedido.
     let started = std::time::Instant::now();
     let mut now_ms = || started.elapsed().as_millis() as u64;
-    let line = match intake::read_request(&mut reader, expected_token, &mut now_ms, &mut || slot.authenticated()) {
+    let mut budget = intake::InFlightBytes::empty();
+    let line = match intake::read_request(&mut reader, expected_token, &mut now_ms, &mut || slot.authenticated(), &mut budget) {
         Intake::Line(line) => line,
         Intake::Closed => return,
         Intake::Refused(message) => {

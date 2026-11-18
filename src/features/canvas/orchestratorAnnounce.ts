@@ -7,7 +7,7 @@
  * segue o canvas: qualquer mudança no time de um orquestrador o avisa, uma vez por mudança (`shouldAnnounce`).
  */
 import { useTabsStore } from "@/features/tabs/store";
-import { sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { sendAutonomous } from "@/features/terminal/safeWrite";
 
 import { forgetOrchestrator, orchestratorNotice, shouldAnnounce } from "./orchestratorNotice";
 import { useCanvasStore } from "./store";
@@ -26,7 +26,7 @@ export function announceToOrchestrators(key: string, ids: string[]): void {
     if (!tabs.some((tab) => tab.id === id)) continue;
     if (!shouldAnnounce(board, id)) continue;
     const text = orchestratorNotice(board, tabs, id);
-    if (text) sendWhenReady(id, text);
+    if (text) sendAutonomous(id, text, "peer");
   }
 }
 

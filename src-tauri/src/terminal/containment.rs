@@ -103,6 +103,12 @@ impl ProcessGroup {
         Self { imp: imp::create(id) }
     }
 
+    /// Contêiner usado por sessões ACP que nascem como líderes de um grupo Unix próprio.
+    /// Não cria cgroup no Linux: o encerramento escalado deve alcançar só o grupo Unix.
+    pub fn new_acp() -> Self {
+        Self { imp: imp::create_acp() }
+    }
+
     /// Mete al proceso recién lanzado en el grupo. Sus hijos futuros entran solos: tanto
     /// los cgroups como los Job Objects se heredan al crear un proceso.
     ///
@@ -145,6 +151,82 @@ impl Drop for ProcessGroup {
     }
 }
 
+/// Como o encerramento escalado fala com o sistema: sinalizar um grupo Unix e esperar o prazo.
+/// Em produção é `Reais`; os testes trocam por um falso, com relógio falso.
+#[cfg(unix)]
+pub(crate) trait Sinais {
+    /// `pgid` positivo; a implementação envia ao grupo todo, sem fotografar PIDs.
+    fn enviar_grupo(&self, pgid: i32, sinal: libc::c_int) -> bool;
+    fn esperar(&self, prazo: std::time::Duration);
+}
+
+#[cfg(unix)]
+pub(crate) struct Reais;
+
+#[cfg(unix)]
+impl Sinais for Reais {
+    fn enviar_grupo(&self, pgid: i32, sinal: libc::c_int) -> bool {
+        unsafe { libc::killpg(pgid, sinal) == 0 }
+    }
+    fn esperar(&self, prazo: std::time::Duration) {
+        std::thread::sleep(prazo);
+    }
+}
+
+/// O encerramento escalado de um grupo (só para sessões ACP; as abas seguem com `kill_all`, que manda SIGHUP). Em
+/// duas fases: `ProcessGroup::encerrar_escalando` manda SIGTERM ao grupo Unix agora, e `concluir` manda SIGKILL ao
+/// grupo depois do prazo. O spawn ACP cria o processo líder com `process_group(0)`. Descendentes que chamam `setsid`
+/// saem do grupo e não são alcançados. Quem chama conta o prazo numa thread de fundo.
+pub struct Escalada {
+    /// PGID positivo do processo líder; vazio no Windows.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pgid: Option<i32>,
+}
+
+impl ProcessGroup {
+    /// SIGTERM agora ao grupo Unix. Devolve o plano do SIGKILL.
+    #[cfg(unix)]
+    pub fn encerrar_escalando(&mut self) -> Escalada {
+        self.encerrar_escalando_com(&Reais)
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn encerrar_escalando_com<S: Sinais>(&mut self, sinais: &S) -> Escalada {
+        let (raiz, _cgroup) = imp::tirar_alvos(&mut self.imp);
+        let pgid = raiz.and_then(|pid| i32::try_from(pid).ok()).filter(|pgid| *pgid > 0);
+        if let Some(pgid) = pgid {
+            sinais.enviar_grupo(pgid, libc::SIGTERM);
+        }
+        Escalada { pgid }
+    }
+
+    /// No Windows o job já é o encerramento imediato: não há sinal intermediário.
+    #[cfg(not(unix))]
+    pub fn encerrar_escalando(&mut self) -> Escalada {
+        self.kill_all();
+        Escalada { pgid: None }
+    }
+}
+
+impl Escalada {
+    /// Depois do prazo. Retorna `true` se o SIGKILL encontrou membros no grupo.
+    #[cfg(unix)]
+    pub fn concluir(self, prazo: std::time::Duration) -> bool {
+        self.concluir_com(&Reais, prazo)
+    }
+
+    #[cfg(not(unix))]
+    pub fn concluir(self, _prazo: std::time::Duration) -> bool {
+        false
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn concluir_com<S: Sinais>(self, sinais: &S, prazo: std::time::Duration) -> bool {
+        sinais.esperar(prazo);
+        self.pgid.is_some_and(|pgid| sinais.enviar_grupo(pgid, libc::SIGKILL))
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────
 // Linux — cgroup v2
 // ─────────────────────────────────────────────────────────────────────────────────────
@@ -179,6 +261,11 @@ pub(crate) mod imp {
         Group { dir, leader: None }
     }
 
+    /// Sessões ACP usam `killpg`; não criam um cgroup que conteria processos com `setsid`.
+    pub fn create_acp() -> Group {
+        Group { dir: None, leader: None }
+    }
+
     pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
         let Some(pid) = child.pid() else { return };
         g.leader = Some(pid);
@@ -197,6 +284,11 @@ pub(crate) mod imp {
     #[cfg(test)]
     pub fn is_escape_proof(g: &Group) -> bool {
         g.dir.is_some()
+    }
+
+    /// Tira o líder e o cgroup do grupo, para o encerramento escalado (ver `Escalada`).
+    pub fn tirar_alvos(g: &mut Group) -> (Option<u32>, Option<PathBuf>) {
+        (g.leader.take(), g.dir.take())
     }
 
     pub fn kill_all(g: &mut Group) {
@@ -263,6 +355,10 @@ pub(crate) mod imp {
         Group { leader: None }
     }
 
+    pub fn create_acp() -> Group {
+        create(0)
+    }
+
     pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
         g.leader = child.pid();
     }
@@ -271,6 +367,11 @@ pub(crate) mod imp {
     /// Nunca: acá el único mecanismo es el recorrido por `ppid`, que es best-effort.
     pub fn is_escape_proof(_g: &Group) -> bool {
         false
+    }
+
+    /// Tira o líder do grupo, para o encerramento escalado (ver `Escalada`). No macOS não há cgroup.
+    pub fn tirar_alvos(g: &mut Group) -> (Option<u32>, Option<std::path::PathBuf>) {
+        (g.leader.take(), None)
     }
 
     pub fn kill_all(g: &mut Group) {
@@ -289,7 +390,7 @@ pub(crate) mod imp {
 pub(crate) mod unix_tree {
     /// `(pid, ppid)` de todos los procesos del sistema. Se usa `ps` y no `/proc` porque
     /// este camino existe sobre todo para macOS, que no tiene `/proc`.
-    fn snapshot() -> Vec<(u32, u32)> {
+    pub(crate) fn snapshot() -> Vec<(u32, u32)> {
         let out = match crate::util::spawn::hidden_command("ps").args(["-eo", "pid=,ppid="]).output() {
             Ok(o) => o,
             Err(_) => return Vec::new(),
@@ -344,7 +445,8 @@ pub(crate) mod unix_tree {
 #[cfg(windows)]
 pub(crate) mod imp {
     use std::os::windows::io::RawHandle;
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use std::time::Duration;
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject, TerminateJobObject,
         JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -353,6 +455,10 @@ pub(crate) mod imp {
 
     pub struct Group {
         job: HANDLE,
+        /// O pid do filho, para o plano B (`taskkill /T`) quando o Job Object não ficou com ele.
+        pid: Option<u32>,
+        /// `true` só se o `AssignProcessToJobObject` deu certo. Sem isso, `TerminateJobObject` não alcança nada.
+        atribuido: bool,
     }
 
     // El handle del job es propiedad exclusiva de esta struct y solo se toca detrás del
@@ -377,35 +483,65 @@ pub(crate) mod imp {
                 );
             }
         }
-        Group { job }
+        Group { job, pid: None, atribuido: false }
+    }
+
+    pub fn create_acp() -> Group {
+        create(0)
     }
 
     pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
+        g.pid = child.pid();
         if g.job.is_null() {
+            eprintln!("[containment] sem Job Object: o encerramento do processo vai pelo taskkill /T");
             return;
         }
         // Se usa el handle que ya tiene `portable-pty` en vez de reabrir por pid: evita la
         // carrera de que ese pid haya sido reutilizado, que en Windows pasa seguido.
-        let Some(handle) = child.raw_handle() else { return };
-        unsafe {
-            AssignProcessToJobObject(g.job, handle as RawHandle as HANDLE);
+        let Some(handle) = child.raw_handle() else {
+            eprintln!("[containment] o processo não expôs o handle: o encerramento vai pelo taskkill /T");
+            return;
+        };
+        // El retorno antes se ignoraba: sin el proceso en el job, `TerminateJobObject` no mataba nada y la
+        // descendencia quedaba viva. Ahora el error queda registrado y el encerramento cae al taskkill.
+        let ok = unsafe { AssignProcessToJobObject(g.job, handle as RawHandle as HANDLE) };
+        if ok != 0 {
+            g.atribuido = true;
+        } else {
+            let erro = unsafe { GetLastError() };
+            eprintln!("[containment] AssignProcessToJobObject falhou (erro {erro}): o encerramento vai pelo taskkill /T");
         }
     }
 
     #[cfg(test)]
     pub fn is_escape_proof(g: &Group) -> bool {
-        !g.job.is_null()
+        g.atribuido
     }
 
     pub fn kill_all(g: &mut Group) {
-        if g.job.is_null() {
-            return;
+        if !g.job.is_null() {
+            unsafe {
+                TerminateJobObject(g.job, 1);
+                CloseHandle(g.job);
+            }
+            g.job = std::ptr::null_mut();
         }
-        unsafe {
-            TerminateJobObject(g.job, 1);
-            CloseHandle(g.job);
+        // Sem o processo no job, o TerminateJobObject não alcançou nada: a árvore sai pelo pid.
+        if !g.atribuido {
+            if let Some(pid) = g.pid.take() {
+                matar_arvore_por_pid(pid);
+            }
         }
-        g.job = std::ptr::null_mut();
+    }
+
+    /// `taskkill /T /F` mata o processo e os filhos que ainda estão ligados a ele. É o plano B quando o Job Object não
+    /// ficou com o processo. Com prazo, pelo helper de processos do app.
+    fn matar_arvore_por_pid(pid: u32) {
+        let mut cmd = crate::util::spawn::hidden_command("taskkill");
+        cmd.args(["/T", "/F", "/PID", &pid.to_string()]);
+        if let Err(erro) = crate::util::spawn::output(&mut cmd, Duration::from_secs(5)) {
+            eprintln!("[containment] taskkill /T do pid {pid} falhou: {erro}");
+        }
     }
 
     #[cfg(test)]

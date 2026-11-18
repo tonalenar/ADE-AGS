@@ -94,17 +94,17 @@ fn working(member: &str) -> bool {
 
 /// Os integrantes do time de quem chama, se ele é orquestrador: o time do modo chat, senão a equipe
 /// do canvas (coroa).
-fn team_members(app: &AppHandle, from: &str) -> Vec<Member> {
-    let Some(db) = db(app) else { return Vec::new() };
+fn team_members(app: &AppHandle, from: &str) -> Result<Vec<Member>, String> {
+    let Some(db) = db(app) else { return Ok(Vec::new()) };
     let (ids, queued) = {
-        let Ok(conn) = db.lock() else { return Vec::new() };
+        let Ok(conn) = db.lock() else { return Ok(Vec::new()) };
         let chat = crate::chat_team::api::team_of(&conn, from).ok().flatten().filter(|v| v.team.orchestrator == from);
         let ids: Vec<(String, String)> = match chat {
             Some(view) => view.members.iter().map(|m| (m.member.clone(), m.label.clone())).collect(),
             None => {
-                let boards = crate::canvas::load_boards();
+                let boards = crate::canvas::load_boards()?;
                 if !crate::canvas::is_orchestrator(&boards, from) {
-                    return Vec::new();
+                    return Ok(Vec::new());
                 }
                 crate::canvas::team_of(&boards, from).into_iter().filter(|id| id != from).map(|id| (id.clone(), id)).collect()
             }
@@ -112,17 +112,17 @@ fn team_members(app: &AppHandle, from: &str) -> Vec<Member> {
         let queued = crate::peer_queue::store::pending_counts(&conn).unwrap_or_default();
         (ids, queued)
     };
-    let book = crate::squads::recruit::load_book();
+    let book = crate::squads::recruit::load_book().unwrap_or_default();
     let now = crate::util::now_ts();
     let names: Vec<(String, String)> = super::peers::open_tabs(app).unwrap_or_default().into_iter().map(|t| (t.id, t.name)).collect();
-    ids.into_iter()
+    Ok(ids.into_iter()
         .map(|(id, label)| {
             let fresh = book.get(&id).is_some_and(|r| now - r.at < PROVISIONING_SECS);
             let waiting = queued.iter().any(|(to, n)| to == &id && *n > 0);
             let name = names.iter().find(|(t, _)| t == &id).map(|(_, n)| n.clone()).unwrap_or(label);
             Member { working: working(&id), provisioning: fresh || waiting, name }
         })
-        .collect()
+        .collect())
 }
 
 /// Bloquea hasta que llega algo que cumpla el filtro, o hasta `--timeout` segundos. Volta na hora
@@ -137,8 +137,11 @@ pub(super) fn events_wait(app: &AppHandle, args: &Value) -> Result<Value, String
         if ready.events.is_empty() {
             let idle = if filter.run_id.is_some() || filter.mission_id.is_some() {
                 run_idle(app, &filter)
+            } else if let Some(from) = arg_str_opt(args, "from") {
+                let members = team_members(app, &from)?;
+                idle_team(&members)
             } else {
-                arg_str_opt(args, "from").and_then(|from| idle_team(&team_members(app, &from)))
+                None
             };
             if let Some(reason) = idle {
                 let mut out = json!(ready);

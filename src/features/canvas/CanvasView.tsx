@@ -19,7 +19,8 @@ import { openNewAgentWizard, requestCloseItem } from "@/features/tabs/tabActions
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import type { BrowserView } from "@/features/tabs/viewTabs";
 import type { Tab } from "@/features/tabs/types";
-import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { screenOf } from "@/features/terminal/terminalRegistry";
+import { sendAutonomous } from "@/features/terminal/safeWrite";
 import { announceToOrchestrators } from "./orchestratorAnnounce";
 import { portalConnectedNotice } from "./portalNotice";
 
@@ -84,7 +85,7 @@ import { cleanPreviewLines } from "./previewText";
 function announcePortal(key: string, a: string, b: string): void {
   const board = useCanvasStore.getState().boards[key];
   const notice = board ? portalConnectedNotice(board, a, b) : null;
-  if (notice) sendWhenReady(notice.agent, notice.text);
+  if (notice) sendAutonomous(notice.agent, notice.text, "peer");
 }
 
 interface AgentNodeData extends Record<string, unknown> {
@@ -411,7 +412,7 @@ function CanvasInner() {
           if (!key) return;
           // O agente lê a nova função; os orquestradores ligados a ele recebem o aviso atualizado.
           void applyTabRole(id, choice).then((briefing) => {
-            if (briefing) sendWhenReady(id, briefing);
+            if (briefing) sendAutonomous(id, briefing, "peer");
             announceToOrchestrators(key, useCanvasStore.getState().boards[key]?.orchestrators ?? []);
           });
         },

@@ -482,11 +482,13 @@ export function NewConversation({ projects, folder, onFolder }: {
       if (viaProtocol) {
         // No Claude o Plano é um modo de permissão: a conversa nasce nele e sai pelo pedido do agente.
         const sent = threadMessage(launchPrompt, attachments);
-        await startThread({
+        // Só abre a conversa se o backend aceitar a primeira mensagem; recusada, o texto fica na caixa com o motivo.
+        const threadId = await startThread({
           agentId: agent.id, cwd, workspaceId, title: conversationTitle(launchPrompt) ?? project.name,
           model: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.model : null, effort: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.effort : null, access: launchPlan ? "plan" : access,
           accountId: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.accountId : null,
-        }, sent.text, sent.images, background, fastModeSupported(agent.id, fastSurface) && prefs.fastMode);
+        }, sent.text, sent.images, background, fastModeSupported(agent.id, fastSurface) && prefs.fastMode, (message) => setError(t("chat.new.failed", { error: message })));
+        if (threadId === null) return false;
         update({ cwd: project.cwd, agentId: agent.id });
         return true;
       }

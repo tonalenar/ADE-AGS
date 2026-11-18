@@ -8,6 +8,7 @@ import { ExternalIcon } from "@/app/icons";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { FORGE_KINDS, ForgeIcon, TOKEN_SCOPES, forgeLabel, tokenPageUrl } from "./forgeMeta";
+import { createCancellableTimeout } from "./cancellableTimeout";
 import { forgeAddToken, forgeDeviceCancel, forgeDevicePoll, forgeDeviceStart, forgeOauthAvailable, forgeOauthClient, forgeOauthSetClient, type OauthClient } from "./ipc";
 import { useForgeStore } from "./store";
 import type { DeviceStart, ForgeKind, GitAccount } from "./types";
@@ -77,6 +78,10 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
   const [appOpen, setAppOpen] = useState(false);
   const [appDraft, setAppDraft] = useState("");
   const flowRef = useRef<string | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof createCancellableTimeout> | null>(null);
+  pollTimerRef.current ??= createCancellableTimeout();
+  const pollTimer = pollTimerRef.current;
+  const mountedRef = useRef(true);
 
   useEffect(() => { if (kinds.length === 0) load().catch(console.error); }, [kinds.length, load]);
   // Cambiar de tipo propone su host por defecto (el de un genérico queda vacío).
@@ -107,9 +112,15 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
   }, [oauth, kind]);
 
   // Cerrar a mitad del login no deja un flujo esperando en el backend.
-  useEffect(() => () => {
-    if (flowRef.current) forgeDeviceCancel(flowRef.current).catch(() => {});
-  }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      pollTimer.clear();
+      if (flowRef.current) forgeDeviceCancel(flowRef.current).catch(() => {});
+      flowRef.current = null;
+    };
+  }, [pollTimer]);
 
   const finish = async (account: GitAccount) => {
     flowRef.current = null;
@@ -135,6 +146,7 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
   };
 
   const cancelBrowser = () => {
+    pollTimer.clear();
     if (flowRef.current) forgeDeviceCancel(flowRef.current).catch(() => {});
     flowRef.current = null;
     setDevice(null);
@@ -143,25 +155,28 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
   };
 
   const poll = (flowId: string, interval: number) => {
-    window.setTimeout(async () => {
-      if (flowRef.current !== flowId) return;
-      try {
-        const r = await forgeDevicePoll(flowId);
-        if (r.status === "pending") poll(flowId, r.interval);
-        else if (r.status === "done") await finish(r.account);
-        else {
+    pollTimer.schedule(interval * 1000, () => {
+      void (async () => {
+        if (!mountedRef.current) return;
+        if (flowRef.current !== flowId) return;
+        try {
+          const r = await forgeDevicePoll(flowId);
+          if (r.status === "pending") poll(flowId, r.interval);
+          else if (r.status === "done") await finish(r.account);
+          else {
+            flowRef.current = null;
+            setDevice(null);
+            setBusy(false);
+            setError(t(r.status === "expired" ? "forge.add.expired" : "forge.add.denied"));
+          }
+        } catch (e) {
           flowRef.current = null;
           setDevice(null);
           setBusy(false);
-          setError(t(r.status === "expired" ? "forge.add.expired" : "forge.add.denied"));
+          setError(String(e));
         }
-      } catch (e) {
-        flowRef.current = null;
-        setDevice(null);
-        setBusy(false);
-        setError(String(e));
-      }
-    }, interval * 1000);
+      })();
+    });
   };
 
   const addToken = async () => {

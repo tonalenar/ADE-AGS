@@ -62,6 +62,11 @@ describe("NoticeRow", () => {
     await render(<NoticeRow item={notice("algoNovo", "aviso novo")} />);
     expect(host.querySelector('[role="status"]')!.textContent).toBe("aviso novo");
   });
+
+  it("a resposta cortada pelo limite de tokens tem a frase do catálogo, mesmo sem texto", async () => {
+    await render(<NoticeRow item={notice("responseTruncated", "")} />);
+    expect(host.querySelector('[role="status"]')!.textContent).toContain("chat.timeline.notice.responseTruncated");
+  });
 });
 
 describe("NoticeRow do pool de contas", () => {

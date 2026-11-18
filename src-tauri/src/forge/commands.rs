@@ -58,7 +58,9 @@ pub fn forge_oauth_available(kind: ForgeKind, host: String) -> bool {
 
 #[tauri::command]
 pub async fn forge_accounts(app: AppHandle) -> Result<Vec<GitAccount>, String> {
-    store::list_with_storage(&app)
+    tauri::async_runtime::spawn_blocking(move || store::list_with_storage(&app))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 async fn save_account(
@@ -82,7 +84,9 @@ async fn save_account(
         created_at: now_ts(),
         storage: None,
     };
-    account.id = store::upsert(&db(app)?.lock().unwrap(), &account)?;
+    let conn = db(app)?;
+    let row = account.clone();
+    account.id = crate::database::blocking_db(&conn, move |conn| store::upsert(conn, &row)).await?;
     let dir = data_dir(app)?;
     let id = account.id.clone();
     account.storage = Some(blocking(move || secret::save(&dir, &id, &secret)).await??);
@@ -159,18 +163,24 @@ pub async fn forge_add_token(
 /// existiendo hasta que se revoque allá (la UI lo dice).
 #[tauri::command]
 pub async fn forge_remove_account(app: AppHandle, id: String) -> Result<(), String> {
-    store::delete(&db(&app)?.lock().unwrap(), &id)?;
+    let conn = db(&app)?;
+    let delete_id = id.clone();
+    crate::database::blocking_db(&conn, move |conn| store::delete(conn, &delete_id)).await?;
     let dir = data_dir(&app)?;
     blocking(move || secret::delete(&dir, &id)).await
 }
 
-fn account(app: &AppHandle, id: &str) -> Result<GitAccount, ForgeError> {
-    store::get(&db(app)?.lock().unwrap(), id).ok_or_else(|| ForgeError::Api("Esa cuenta ya no existe".into()))
+async fn account(app: &AppHandle, id: &str) -> Result<GitAccount, ForgeError> {
+    let conn = db(app)?;
+    let id = id.to_string();
+    crate::database::blocking_db(&conn, move |conn| Ok(store::get(conn, &id)))
+        .await?
+        .ok_or_else(|| ForgeError::Api("Esa cuenta ya no existe".into()))
 }
 
 #[tauri::command]
 pub async fn forge_repos(app: AppHandle, account_id: String) -> Result<Vec<ForgeRepo>, ForgeError> {
-    let account = account(&app, &account_id)?;
+    let account = account(&app, &account_id).await?;
     let token = super::credentials::token(&app, &account).await?;
     Api::new(account.kind, &account.host, &token)?.repos().await
 }
@@ -248,7 +258,8 @@ pub async fn forge_repo(app: AppHandle, cwd: String) -> Result<Option<RepoTarget
 
 #[tauri::command]
 pub async fn forge_set_repo_account(app: AppHandle, root: String, account_id: String) -> Result<(), String> {
-    store::set_repo_choice(&db(&app)?.lock().unwrap(), &root, &account_id)
+    let conn = db(&app)?;
+    crate::database::blocking_db(&conn, move |conn| store::set_repo_choice(conn, &root, &account_id)).await
 }
 
 pub(super) async fn repo_api(app: &AppHandle, cwd: &str) -> Result<(RepoTarget, Api), ForgeError> {

@@ -1,73 +1,175 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@tauri-apps/api/core", () => import("@/test/invokeMock").then((m) => m.tauriCoreMock()));
+// A store fala com o IPC de regras, com a resposta de cada fonte de pedido e com o aviso do sistema. Os
+// módulos pesados (terminal, canvas, conversa) ficam de fora: o teste só cobra a regra de "sair da tela".
+const mocks = vi.hoisted(() => ({
+  rules: vi.fn(),
+  ruleAdd: vi.fn(),
+  ruleUpdate: vi.fn(),
+  ruleRemove: vi.fn(),
+  alerta: vi.fn(() => Promise.resolve({})),
+  answerRequest: vi.fn(),
+  answerTerminalPrompt: vi.fn(),
+  decideApproval: vi.fn(),
+}));
 
-import { invokeMock, useInvokeMock } from "@/test/invokeMock";
-import { autoAllowRule, type PendingAsk } from "@/features/chat/permissions/permissionModel";
-import { alwaysAllow, answerAsk, loadRules, usePermissions } from "@/features/chat/permissions/permissionsStore";
-import { useStructured } from "@/features/chat/structured/store";
+vi.mock("@/features/chat/permissions/ipc", () => ({
+  chatPermissionRules: mocks.rules,
+  chatPermissionRuleAdd: mocks.ruleAdd,
+  chatPermissionRuleUpdate: mocks.ruleUpdate,
+  chatPermissionRuleRemove: mocks.ruleRemove,
+  ruleOf: (row: unknown) => row,
+}));
+vi.mock("@/shared/ui/alerts", () => ({ AlertaToast: mocks.alerta }));
+vi.mock("@/features/canvas/useTerminalPrompts", () => ({ answerTerminalPrompt: mocks.answerTerminalPrompt }));
+vi.mock("@/features/runs/store", () => ({ useRunsStore: { getState: () => ({ decideApproval: mocks.decideApproval }) } }));
+vi.mock("@/i18n", () => ({ default: { t: (key: string) => key } }));
+vi.mock("@/features/tabs/store", () => ({ useTabsStore: () => [] }));
+vi.mock("@/features/chat/chatActions", () => ({ sendToConversation: vi.fn() }));
+vi.mock("@/features/chat/ipc", () => ({ chatPermissionNotify: vi.fn(() => Promise.resolve()) }));
+vi.mock("@/features/chat/liveStore", () => ({ useChatLive: () => undefined }));
+vi.mock("@/features/chat/shelf", () => ({ unsnoozeConversation: vi.fn() }));
+vi.mock("@/features/chat/structured/store", () => ({
+  answerRequest: mocks.answerRequest,
+  sendToThread: vi.fn(),
+  useStructured: () => [],
+  hydrateThread: vi.fn(),
+}));
+vi.mock("@/features/chat/team/teamPermissions", () => ({ teamVerdictForAsk: () => null }));
+vi.mock("@/features/chat/team/teamStore", () => ({ useTeamStore: { getState: () => ({ teams: [] }) } }));
 
-useInvokeMock();
+import { usePermissions, answerAsk, loadRules, removeRule, updateRule } from "@/features/chat/permissions/permissionsStore";
+import type { PendingAsk } from "@/features/chat/permissions/permissionModel";
 
-const threadAsk: PendingAsk = {
-  id: "thread:q",
-  ref: { source: "thread", threadId: "th", requestId: "q" },
-  agentId: "codex",
-  agentLabel: "Codex",
-  conversation: "thread:th",
-  where: "Chat",
-  kind: "command",
-  detail: "bun add zod",
-  files: [],
-  network: false,
-  cwd: "/repo",
-  risk: "medium",
-  canSession: true,
-  atMs: 0,
+const rule = { id: "r1", kind: "command" as const, pattern: "bun *", agentId: null, createdAt: 1 };
+
+const base: Omit<PendingAsk, "id" | "ref"> = {
+  agentId: "claude-code", agentLabel: "Claude Code", conversation: "thread:th", where: "Chat", kind: "command",
+  detail: "bun install", files: [], network: false, cwd: "/Users/ton/Projects/app", risk: "medium", canSession: true, atMs: 0,
+};
+const threadAsk: PendingAsk = { ...base, id: "thread:q", ref: { source: "thread", threadId: "th", requestId: "q" } };
+const tuiAsk: PendingAsk = { ...base, id: "tui:t1:s1", conversation: "t1", ref: { source: "tui", tabId: "t1", signature: "s1" } };
+const fleetAsk: PendingAsk = { ...base, id: "fleet:a1", conversation: null, ref: { source: "fleet", approvalId: "a1" } };
+
+const tuiPrompt = {
+  kind: "command" as const,
+  title: "Do you want to proceed?",
+  detail: "bun install",
+  signature: "s1",
+  choices: [{ id: "allow" as const, label: "Yes", keys: "1" }, { id: "deny" as const, label: "No", keys: "\u001b" }],
 };
 
-const highAsk: PendingAsk = { ...threadAsk, id: "thread:push", ref: { source: "thread", threadId: "th", requestId: "p" }, detail: "git push origin x", risk: "high" };
-
 beforeEach(() => {
-  usePermissions.setState({ rules: [], rulesLoaded: false, inboxOpen: false, filter: "all", selected: "thread:q", tui: [], answered: {} });
-  useStructured.setState({ live: { th: { requests: [{ id: "q" }, { id: "p" }] } } } as never);
+  vi.clearAllMocks();
+  mocks.alerta.mockImplementation(() => Promise.resolve({}));
+  usePermissions.setState({ rules: [rule], rulesLoaded: true, answered: {}, tui: [], selected: null });
 });
 
-describe("o store real de permissão", () => {
-  it("allow e deny mandam o threadId e o requestId ao backend e fecham o cartão", async () => {
-    invokeMock.on("chat_request_answer", true);
-    answerAsk(threadAsk, "allow");
-    expect(invokeMock.calls("chat_request_answer")).toEqual([{ requestId: "q", choice: "allow" }]);
-    expect(usePermissions.getState().answered["thread:q"]).toBe(true);
-    expect(usePermissions.getState().selected).toBeNull();
-    expect(useStructured.getState().live.th?.requests.some((r) => r.id === "q")).toBe(false);
+describe("regras «Sempre permitir»", () => {
+  it("remover_regra_com_ipc_falho_mantem_regra", async () => {
+    mocks.ruleRemove.mockRejectedValue(new Error("banco ocupado"));
+    mocks.rules.mockResolvedValue([{ ...rule }]);
 
-    answerAsk({ ...threadAsk, id: "thread:d", ref: { source: "thread", threadId: "th", requestId: "d" } }, "deny");
-    const answers = invokeMock.calls("chat_request_answer") as Array<{ requestId: string; choice: string }>;
-    expect(answers[answers.length - 1]).toEqual({ requestId: "d", choice: "deny" });
+    await removeRule("r1");
+
+    // A regra continua gravada: a tela não pode mostrar que ela sumiu, e a pessoa é avisada.
+    expect(usePermissions.getState().rules.map((r) => r.id)).toEqual(["r1"]);
+    expect(mocks.alerta).toHaveBeenCalledTimes(1);
   });
 
-  it("Responder… nega e manda o texto ao fio", async () => {
-    invokeMock.on("chat_request_answer", true);
-    invokeMock.on("chat_thread_send", true);
-    answerAsk(threadAsk, "deny", "use o pnpm");
-    expect(invokeMock.calls("chat_request_answer")).toEqual([{ requestId: "q", choice: "deny" }]);
-    expect(invokeMock.calls("chat_thread_send")[0]).toMatchObject({ threadId: "th", text: "use o pnpm" });
+  it("remover_regra_confirmada_sai_da_tela", async () => {
+    mocks.ruleRemove.mockResolvedValue(true);
+    mocks.rules.mockResolvedValue([]);
+
+    await removeRule("r1");
+
+    expect(usePermissions.getState().rules).toEqual([]);
+    expect(mocks.alerta).not.toHaveBeenCalled();
   });
 
-  it("Sempre permitir grava a regra e permite; risco alto não entra no auto-allow", async () => {
-    invokeMock.on("chat_permission_rules", [{ id: "r1", kind: "command", pattern: "bun add *", agentId: "codex", role: null, teamId: null, createdAt: 1 }]);
-    invokeMock.on("chat_request_answer", true);
-    invokeMock.on("chat_permission_rule_add", () => {
-      return { id: "r1", kind: "command", pattern: "bun add *", agentId: "codex", role: null, teamId: null, createdAt: 1 };
-    });
-    alwaysAllow(threadAsk, "bun add *");
-    expect(invokeMock.calls("chat_permission_rule_add").length).toBeGreaterThan(0);
+  it("editar_regra_com_ipc_falho_mantem_o_padrao_salvo", async () => {
+    mocks.ruleUpdate.mockRejectedValue(new Error("banco ocupado"));
+    mocks.rules.mockResolvedValue([{ ...rule }]);
+
+    await updateRule("r1", { pattern: "*" });
+
+    // O padrão que decide os pedidos é o que está gravado, não o rascunho que a pessoa digitou.
+    expect(usePermissions.getState().rules[0]?.pattern).toBe("bun *");
+    expect(mocks.alerta).toHaveBeenCalledTimes(1);
+  });
+
+  it("erro_ao_ler_regras_nao_zera_a_lista", async () => {
+    usePermissions.setState({ rulesLoaded: false });
+    mocks.rules.mockRejectedValue(new Error("ipc"));
+
     await loadRules();
-    const rules = usePermissions.getState().rules;
-    expect(rules).toEqual([expect.objectContaining({ pattern: "bun add *", agentId: "codex" })]);
-    expect(autoAllowRule(rules, threadAsk)?.pattern).toBe("bun add *");
-    expect(autoAllowRule(rules, highAsk)).toBeNull();
-    expect(invokeMock.calls("chat_request_answer")).toEqual([{ requestId: "q", choice: "allow" }]);
+
+    expect(usePermissions.getState().rules).toEqual([rule]);
+    expect(usePermissions.getState().rulesLoaded).toBe(false);
+    expect(mocks.alerta).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("resposta a pedidos", () => {
+  it("responder_pedido_com_falha_mantem_pedido", async () => {
+    mocks.answerRequest.mockResolvedValue(false);
+
+    await answerAsk(threadAsk, "allow");
+
+    // Só some da caixa quando o agente confirma o recebimento; falhou, o pedido segue pendente e a pessoa vê o aviso.
+    expect(usePermissions.getState().answered[threadAsk.id]).toBeUndefined();
+    expect(mocks.alerta).toHaveBeenCalledTimes(1);
+  });
+
+  it("responder_pedido_confirmado_sai_da_caixa", async () => {
+    mocks.answerRequest.mockResolvedValue(true);
+
+    await answerAsk(threadAsk, "allow");
+
+    expect(usePermissions.getState().answered[threadAsk.id]).toBe(true);
+    expect(mocks.alerta).not.toHaveBeenCalled();
+  });
+
+  it("tecla_nao_enviada_ao_terminal_mantem_pedido_de_tui", async () => {
+    usePermissions.setState({ tui: [{ tabId: "t1", who: "Claude", prompt: tuiPrompt, atMs: 0 }] });
+    mocks.answerTerminalPrompt.mockReturnValue(false);
+
+    await answerAsk(tuiAsk, "allow");
+
+    expect(usePermissions.getState().answered[tuiAsk.id]).toBeUndefined();
+    expect(mocks.alerta).toHaveBeenCalledTimes(1);
+  });
+
+  it("decisao_da_frota_recusada_mantem_pedido", async () => {
+    mocks.decideApproval.mockRejectedValue(new Error("fora do ar"));
+
+    await answerAsk(fleetAsk, "allow");
+
+    expect(usePermissions.getState().answered[fleetAsk.id]).toBeUndefined();
+    expect(mocks.alerta).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("IPC que devolve false é falha (rodada 1)", () => {
+  // O backend devolve `false` quando a regra não existe (chat_team/store.rs). Isso não é sucesso: a tela não muda.
+  it("remover_regra_com_ipc_retornando_false_mantem_regra", async () => {
+    mocks.ruleRemove.mockResolvedValue(false);
+    mocks.rules.mockResolvedValue([{ ...rule }]);
+
+    await removeRule("r1");
+
+    expect(usePermissions.getState().rules.map((r) => r.id)).toEqual(["r1"]);
+    expect(mocks.alerta).toHaveBeenCalledTimes(1);
+    expect(mocks.rules).toHaveBeenCalled();
+  });
+
+  it("editar_regra_com_ipc_retornando_false_mantem_padrao", async () => {
+    mocks.ruleUpdate.mockResolvedValue(false);
+    mocks.rules.mockResolvedValue([{ ...rule }]);
+
+    await updateRule("r1", { pattern: "*" });
+
+    expect(usePermissions.getState().rules[0]?.pattern).toBe("bun *");
+    expect(mocks.alerta).toHaveBeenCalledTimes(1);
   });
 });

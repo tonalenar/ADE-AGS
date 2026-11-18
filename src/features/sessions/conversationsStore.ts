@@ -1,6 +1,9 @@
 import { create } from "zustand";
 
 import { comparablePath } from "@/features/tabs/viewTabs";
+import { createGeneration } from "@/shared/generation";
+
+const loadGen = createGeneration();
 
 import type { ConversationRow } from "./conversationModel";
 import { listConversations } from "./ipc.projectConversations";
@@ -26,13 +29,17 @@ export const useConversationsStore = create<ConversationsState>((set) => ({
   loading: false,
   error: null,
   load: async (workspaceId) => {
+    const gen = loadGen.next();
     set({ loading: true, error: null });
     try {
-      set({ rows: await listConversations(workspaceId) });
+      const rows = await listConversations(workspaceId);
+      if (!loadGen.isCurrent(gen)) return;
+      set({ rows });
     } catch (e) {
+      if (!loadGen.isCurrent(gen)) return;
       set({ error: String(e) });
     } finally {
-      set({ loading: false });
+      if (loadGen.isCurrent(gen)) set({ loading: false });
     }
   },
   upsert: (row) => set((s) => ({ rows: s.rows.some((r) => r.id === row.id) ? s.rows.map((r) => (r.id === row.id ? row : r)) : [row, ...s.rows] })),

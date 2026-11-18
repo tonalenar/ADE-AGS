@@ -7,6 +7,7 @@ O Vigia supervisiona as equipes em segundo plano, sem terminal próprio, e custa
 ## Regras (não podem quebrar)
 - **Nasce desligado.** Quando desligado, roda **só** a detecção de "equipe entregou", que gera um aviso do sistema. Não escreve no chat nem em terminal algum.
 - **Nunca escreve num terminal que está trabalhando**, e manda uma cutucada por vez.
+- **Pergunta de aprovação conta como ocupado**: a cutucada é conferida antes de colar e antes do Enter (`safeWrite.ts`). Bloqueada, não conta como cutucada e a pessoa é avisada.
 - **Só registra no chat depois que a cutucada foi colada de fato** (callback `onSent`).
 - "Entregou" e "parei de insistir" saem **uma vez só**. O contador de lembretes zera **só** com uma tarefa nova do Orquestrador; um "ok" não zera.
 - `taskAt` (tarefa recebida) só conta quando vem **do Orquestrador**.
@@ -174,7 +175,7 @@ Só com o Vigia ligado, para as abas Claude Code e Codex da equipe (o canal estr
 - **Custo**: no máximo uma chamada headless por missão em voo, e cada aba é reconsultada só a cada ≥ 4 min. Nenhum processo fica vivo depois.
 
 ## Cutucada (`pokeAllowed`, `poke`)
-- Nunca com o agente `isWorking`.
+- Nunca com o agente `isWorking`, nem com um menu de permissão aberto: `pokeBusy` soma `isWaitingForUser`, que reconhece também o menu do Codex no fim da tela (ver `stalled.ts`). Colar Enter ali aprovaria ou negaria pela pessoa.
 - A primeira passa. As seguintes só passam se o agente mandou uma mensagem peer depois da cutucada anterior, ou se já se passaram 10 min.
 - O envio é por `sendWhenReady` (`terminalRegistry.ts`):
   - espera a TUI ficar viva e quieta (2,5 s de silêncio, desistindo em 45 s);
