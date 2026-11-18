@@ -21,7 +21,7 @@ fn renomear_so_caixa_em_volume_sensivel_nao_sobrescreve() {
         return;
     }
 
-    let result = super::ops::explorer_rename(from.to_string_lossy().into_owned(), "README.md".into());
+    let result = crate::explorer::ops::rename(from.to_string_lossy().into_owned(), "README.md".into());
     assert!(result.is_err(), "renomear não pode substituir o arquivo de destino");
     assert_eq!(std::fs::read(&from).unwrap(), b"origem");
     assert_eq!(std::fs::read(&to).unwrap(), b"destino");
@@ -47,7 +47,7 @@ fn renomear_so_caixa_em_volume_insensivel_continua_funcionando() {
         return;
     }
 
-    let renamed = super::ops::explorer_rename(from.to_string_lossy().into_owned(), "A.md".into()).unwrap();
+    let renamed = crate::explorer::ops::rename(from.to_string_lossy().into_owned(), "A.md".into()).unwrap();
 
     assert!(renamed.ends_with("A.md"));
     assert_eq!(std::fs::read_to_string(&to).unwrap(), "conteúdo");
@@ -532,7 +532,7 @@ mod ops {
         let src = d.path().join("origem");
         let dst = d.path().join("destino");
         fs::write(&src, "origem").unwrap();
-        let result = super::ops::copy_into_free_name(&src, "destino", d.path(), |_, to| {
+        let result = crate::explorer::ops::copy_into_free_name(&src, "destino", d.path(), |_, to| {
             fs::write(to, "arquivo preexistente")?;
             Err(std::io::Error::other("falha simulada após concorrência"))
         });
@@ -551,7 +551,7 @@ mod ops {
         fs::write(src.join("z.txt"), "segundo").unwrap();
         let dst = d.path().join("destino");
 
-        let result = super::ops::copy_tree_with(&src, &dst, &mut |path| {
+        let result = crate::explorer::ops::copy_tree_with(&src, &dst, &mut |path| {
             if path.file_name().is_some_and(|name| name == "z.txt") {
                 return Err(std::io::Error::other("falha simulada"));
             }
