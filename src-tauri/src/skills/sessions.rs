@@ -145,7 +145,7 @@ pub async fn restore_session_skills(
         }
         match status.installed_skill_id {
             Some(skill_id) => {
-                let _ = attach_skill(
+                if attach_skill(
                     skill_id,
                     workspace_id.clone(),
                     "tab".to_string(),
@@ -153,7 +153,11 @@ pub async fn restore_session_skills(
                     None,
                     db.clone(),
                 )
-                .await;
+                .await
+                .is_err()
+                {
+                    still_missing.push(status.name);
+                }
             }
             None => unreachable!(),
         }

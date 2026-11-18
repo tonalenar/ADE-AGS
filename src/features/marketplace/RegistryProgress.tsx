@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { AnimateSpin, CheckIcon, Progress } from "neogestify-ui-components";
 import type { RegistryProgress } from "@/features/marketplace/types";
+import { registryProgressWarning } from "@/features/marketplace/progress";
 
 /**
  * Último evento `cc-registry-progress` de este registry, o `null` si todavía no llegó
@@ -41,6 +42,7 @@ export function RegistryProgressBar({ progress, compact = false }: RegistryProgr
   const total = progress?.total ?? null;
   const pct = total && total > 0 ? Math.round(((progress?.current ?? 0) / total) * 100) : null;
   const done = phase === "done";
+  const warning = registryProgressWarning(progress);
 
   return (
     <div className={`flex flex-col ${compact ? "gap-1" : "gap-2"}`}>
@@ -67,9 +69,14 @@ export function RegistryProgressBar({ progress, compact = false }: RegistryProgr
         indeterminate={pct === null && !done}
       />
 
-      {progress?.detail && !compact && (
+      {progress?.detail && phase !== "done" && !compact && (
         <p className="text-[11px] font-mono text-gray-400 dark:text-white/35 truncate">
           {progress.detail}
+        </p>
+      )}
+      {warning && (
+        <p className="text-[11px] text-amber-700 dark:text-amber-300" role="status">
+          {t("marketplace.add.partialWarning", { detail: warning })}
         </p>
       )}
     </div>

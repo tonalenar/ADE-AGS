@@ -5,7 +5,7 @@
 
 use crate::database::DbConnection;
 use crate::skills::{SkillInfo, SkillOrigin, install_skill_internal};
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -40,6 +40,26 @@ fn row_to_summary(row: &rusqlite::Row) -> rusqlite::Result<RegistrySummary> {
 
 const REGISTRY_COLUMNS: &str =
     "id, name, source_type, location, priority, enabled, cache_json, last_fetched, cache_error";
+
+pub(super) fn summary_error(error: Option<&str>, warning: Option<&str>) -> Option<String> {
+    error.or(warning).map(str::to_string)
+}
+
+pub(super) fn cache_success(
+    conn: &Connection,
+    id: &str,
+    entries: &[MarketplaceSkillEntry],
+    warning: Option<&str>,
+    fetched_at: i64,
+) -> Result<(), String> {
+    let json = serde_json::to_string(entries).unwrap_or_else(|_| "[]".to_string());
+    conn.execute(
+        "UPDATE registries SET cache_json = ?1, cache_error = ?2, last_fetched = ?3 WHERE id = ?4",
+        params![json, warning, fetched_at, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
 
 #[tauri::command]
 pub async fn list_registries(
@@ -235,14 +255,17 @@ async fn refresh_registry_internal(
         .map_err(|e| e.to_string())?
     };
 
-    let result: Result<Vec<MarketplaceSkillEntry>, String> = match source_type.as_str() {
-        "local" => scan_local_registry(id, &name, &location, &progress),
-        "github" => fetch_github_registry(id, &name, &location, &progress).await,
+    let (result, warning): (Result<Vec<MarketplaceSkillEntry>, String>, Option<String>) = match source_type.as_str() {
+        "local" => (scan_local_registry(id, &name, &location, &progress), None),
+        "github" => match fetch_github_registry(id, &name, &location, &progress).await {
+            Ok((entries, warning)) => (Ok(entries), warning),
+            Err(error) => (Err(error), None),
+        },
         "skillssh" => {
             progress.phase("connecting");
-            refresh_skillssh(db, id).await
+            (refresh_skillssh(db, id).await, None)
         }
-        other => Err(format!("Tipo de registry desconocido: {other}")),
+        other => (Err(format!("Tipo de registry desconocido: {other}")), None),
     };
 
     progress.phase("saving");
@@ -252,12 +275,7 @@ async fn refresh_registry_internal(
         let conn = db.lock().map_err(|e| e.to_string())?;
         match &result {
             Ok(entries) => {
-                let json = serde_json::to_string(entries).unwrap_or_else(|_| "[]".to_string());
-                conn.execute(
-                    "UPDATE registries SET cache_json = ?1, cache_error = NULL, last_fetched = ?2 WHERE id = ?3",
-                    params![json, now, id],
-                )
-                .map_err(|e| e.to_string())?;
+                cache_success(&conn, id, entries, warning.as_deref(), now)?;
                 // Con el cache fresco se puede intentar vincular las skills instaladas que
                 // todavía no saben de qué entrada salieron (ver `link_orphan_installs`).
                 crate::skills::link_orphan_installs(&conn, id);
@@ -276,7 +294,7 @@ async fn refresh_registry_internal(
     match &result {
         Ok(entries) => {
             let n = entries.len() as u32;
-            progress.emit("done", n, Some(n), None);
+            progress.done(n, warning.clone());
         }
         Err(e) => progress.emit("error", 0, None, Some(e.clone())),
     }
@@ -290,7 +308,7 @@ async fn refresh_registry_internal(
         enabled,
         last_fetched: Some(now),
         skill_count,
-        error: result.err(),
+        error: summary_error(result.as_ref().err().map(String::as_str), warning.as_deref()),
     })
 }
 

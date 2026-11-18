@@ -168,7 +168,7 @@ pub fn prepare_in(registry: &Path, base: &Path, cwd: &Path, title: &str, picks: 
             .collect();
         setups = picks.iter().map(|p| Setup { pick: p.pick.clone(), prelaunch: None, environment: String::new() }).collect();
     }
-    let mut all = read_registry(registry);
+    let mut all = read_registry(registry)?;
     all.push(comparison.clone());
     write_registry(registry, &all)?;
     Ok(Prepared { comparison, setups, trust_warnings: Vec::new() })
@@ -182,7 +182,7 @@ pub struct TabLink {
 }
 
 fn update<T>(registry: &Path, id: &str, f: impl FnOnce(&mut Comparison) -> Result<T, String>) -> Result<T, String> {
-    let mut all = read_registry(registry);
+    let mut all = read_registry(registry)?;
     let cmp = all.iter_mut().find(|c| c.id == id).ok_or("Essa comparação já não existe.")?;
     let out = f(cmp)?;
     write_registry(registry, &all)?;
@@ -214,7 +214,7 @@ pub fn keep_in(registry: &Path, id: &str, pick: &str) -> Result<Comparison, Stri
 }
 
 fn find(registry: &Path, id: &str) -> Result<Comparison, String> {
-    read_registry(registry).into_iter().find(|c| c.id == id).ok_or_else(|| "Essa comparação já não existe.".into())
+    read_registry(registry)?.into_iter().find(|c| c.id == id).ok_or_else(|| "Essa comparação já não existe.".into())
 }
 
 pub fn status_in(registry: &Path, id: &str) -> Result<Vec<EntryStatus>, String> {
@@ -259,7 +259,7 @@ pub fn remove_in(registry: &Path, base: &Path, id: &str, picks: &[String], disca
     let mut closed = false;
     if !dry_run {
         let removed: Vec<&str> = entries.iter().filter(|e| e.removed).map(|e| e.pick.as_str()).collect();
-        let mut all = read_registry(registry);
+        let mut all = read_registry(registry)?;
         if let Some(c) = all.iter_mut().find(|c| c.id == id) {
             c.entries.retain(|e| !removed.contains(&e.pick.as_str()));
             closed = c.entries.is_empty();
@@ -286,7 +286,7 @@ pub fn finish_in(registry: &Path, base: &Path, id: &str, commit_pending: bool, d
         FinishReport { pick: String::new(), removed: !dry_run, ..Default::default() }
     };
     if !dry_run && report.removed {
-        let mut all = read_registry(registry);
+        let mut all = read_registry(registry)?;
         all.retain(|c| c.id != id);
         write_registry(registry, &all)?;
     }
@@ -345,7 +345,7 @@ pub async fn compare_attach(id: String, tabs: Vec<TabLink>) -> Result<Comparison
 /// Sem o `LOCK`: o registro é gravado por troca atômica (`rename`), então a leitura nunca vê meio arquivo.
 #[tauri::command]
 pub async fn compare_list() -> Result<Vec<Comparison>, String> {
-    blocking(move || Ok(read_registry(&registry_path()?))).await
+    blocking(move || read_registry(&registry_path()?)).await
 }
 
 #[tauri::command]

@@ -196,7 +196,7 @@ pub async fn upsert_custom_agent(
             // contrario de lo que hace la carpeta de skills (es relativa al cwd de cada tab).
             let skills_dir = blank_to_none(skills_dir);
             if let Some(dir) = &skills_dir {
-                if std::path::Path::new(dir).is_absolute() || dir.starts_with("~") {
+                if !skills_dir_custom_ok(dir) {
                     return Err(
                         "La carpeta de skills es relativa al proyecto (ej. .agents/skills), no absoluta"
                             .to_string(),
@@ -283,6 +283,13 @@ pub async fn import_legacy_custom_agents(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn skills_dir_custom_ok(dir: &str) -> bool {
+    let path = std::path::Path::new(dir);
+    !path.is_absolute()
+        && !dir.starts_with('~')
+        && !path.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::CurDir))
 }
 
 #[derive(Deserialize)]

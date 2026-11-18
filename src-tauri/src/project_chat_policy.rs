@@ -28,7 +28,11 @@ pub(crate) fn normalize_cwd(cwd: &str) -> Result<String, String> {
     if cwd.trim().is_empty() || cwd.len() > MAX_PROJECT_PATH || cwd.contains('\0') {
         return Err("A pasta do projeto está inválida".into());
     }
-    let path = cwd.replace('\\', "/");
+    let mut path = cwd.replace('\\', "/");
+    #[cfg(windows)]
+    {
+        path = path.to_ascii_lowercase();
+    }
     let absolute = path.starts_with('/')
         || (path.as_bytes().get(1) == Some(&b':')
             && path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic));
@@ -250,4 +254,20 @@ pub async fn chat_project_agent_policy_clear(
     tauri::async_runtime::spawn_blocking(move || chat_project_agent_policy_clear_now(&db, cwd))
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_cwd;
+
+    #[test]
+    fn normaliza_barra_e_caixa_no_windows() {
+        let unix = normalize_cwd("/Users/Ana/App").unwrap();
+        assert_eq!(unix, "/Users/Ana/App");
+        let win = normalize_cwd("C:\\Users\\Ana\\App").unwrap();
+        assert!(win.contains("C:"), "{win}");
+        assert!(!win.contains('\\'), "{win}");
+        #[cfg(windows)]
+        assert_eq!(win, "c:/users/ana/app");
+    }
 }

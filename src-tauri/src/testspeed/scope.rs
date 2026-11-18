@@ -12,7 +12,11 @@ use std::path::Path;
 /// teste novo passar a ler outro arquivo de fora da sua pasta, ele tem que entrar aqui.
 pub fn suite_reads(suite: &str, path: &str) -> bool {
     // Relatórios e documentação não mudam o que um teste vê (mesma regra da identidade da árvore).
-    if path.starts_with("docs/") || path.ends_with(".md") {
+    if path.starts_with("docs/") {
+        return false;
+    }
+    // Markdown de docs não entra; SKILL.md e skills/*.md são lidos por testes Rust.
+    if path.ends_with(".md") && !path.starts_with("skills/") {
         return false;
     }
     match suite {
@@ -103,7 +107,8 @@ mod tests {
         assert!(suite_reads("rust", "src/features/orchestrator/cliBridge.ts"));
         assert!(suite_reads("rust", "src/features/runs/tests/fixtures/handoff-v1.json"));
         assert!(suite_reads("rust", "src/features/terminal/tests/fixtures/replay/codex-laco.json"));
-        assert!(!suite_reads("rust", "skills/git-helper/SKILL.md"), "markdown nunca entra");
+        assert!(suite_reads("rust", "skills/git-helper/SKILL.md"), "SKILL.md entra na suíte Rust");
+        assert!(!suite_reads("rust", "README.md"));
         assert!(suite_reads("rust", "skills/git-helper/run.mjs"));
         assert!(!suite_reads("rust", "src/features/missions/vigia.ts"));
         // ...e o frontend lê estes do Rust.

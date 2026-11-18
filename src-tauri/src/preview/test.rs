@@ -1683,3 +1683,10 @@ async fn el_proxy_marca_el_desafio_anti_robot_y_lo_quita_con_la_pagina_normal() 
     client().get(format!("{}/", target.proxy_origin)).send().await.unwrap();
     assert_eq!(challenge_in_progress(&origin), None);
 }
+
+#[test]
+fn corpo_encaminhado_tem_teto() {
+    assert_eq!(super::proxy::MAX_FORWARD_BODY, 8 * 1024 * 1024);
+    let src = include_str!("proxy.rs");
+    assert!(src.contains("Limited::new(req.into_body(), MAX_FORWARD_BODY)"));
+}

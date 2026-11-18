@@ -87,6 +87,10 @@ pub(super) struct SkillFrontmatter {
     pub(super) license: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) homepage: Option<String>,
+    /// Campos que o struct não conhece: a reescrita do SKILL.md não pode apagá-los.
+    #[serde(flatten)]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub(super) extra: HashMap<String, serde_yaml::Value>,
 }
 
 /// Campos de metadata "sugeridos" que faltan en el frontmatter parseado — el frontend
@@ -160,6 +164,7 @@ impl From<SkillFrontmatterInput> for SkillFrontmatter {
             author: i.author,
             license: i.license,
             homepage: i.homepage,
+            extra: HashMap::new(),
         }
     }
 }

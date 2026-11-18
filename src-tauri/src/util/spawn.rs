@@ -577,6 +577,17 @@ fn redact_arg(arg: &str) -> String {
             return format!("{}***", &arg[..index + marker.len()]);
         }
     }
+    if let Some(index) = lower.find("authorization:") {
+        return format!("{}Authorization:***", &arg[..index]);
+    }
+    if let Some(scheme_at) = lower.find("://") {
+        if let Some(at) = arg[scheme_at + 3..].find('@') {
+            let userinfo_end = scheme_at + 3 + at;
+            if arg[..userinfo_end].contains(':') {
+                return format!("{}***{}", &arg[..scheme_at + 3], &arg[userinfo_end..]);
+            }
+        }
+    }
     if arg.starts_with("sk-")
         || arg.starts_with("ghp_")
         || arg.starts_with("github_pat_")
@@ -738,6 +749,27 @@ mod tests {
         assert!(!argv.contains("hunter2"), "{argv}");
         assert!(argv.contains("***"), "{argv}");
         assert!(!argv.contains(&"x".repeat(40)), "{argv}");
+        let cred = redact_argv(
+            [
+                OsStr::new("https://user:token@github.com/org/repo.git"),
+                OsStr::new("Authorization: Bearer abc"),
+            ]
+            .into_iter(),
+        );
+        assert!(cred.contains("https://***@github.com/org/repo.git"), "{cred}");
+        assert!(!cred.contains("token@"), "{cred}");
+        assert!(cred.contains("Authorization:***"), "{cred}");
+        assert!(!cred.contains("Bearer abc"), "{cred}");
+        let header = redact_argv(
+            [
+                OsStr::new("--header=Authorization: Bearer abc"),
+                OsStr::new("AUTHORIZATION: tok"),
+            ]
+            .into_iter(),
+        );
+        assert!(header.contains("Authorization:***"), "{header}");
+        assert!(!header.contains("Bearer abc"), "{header}");
+        assert!(!header.contains("tok"), "{header}");
     }
 
     /// No CI Linux não dá para inspecionar a flag do `CreateProcess`. O contrato fica no fonte:

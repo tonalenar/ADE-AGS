@@ -26,9 +26,34 @@ struct GhTreeEntry {
     kind: String,
 }
 
+const HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+pub(super) const MAX_RAW_BYTES: usize = 2 * 1024 * 1024;
+
+pub(super) fn extend_limited(body: &mut Vec<u8>, chunk: &[u8], max: usize, label: &str) -> Result<(), String> {
+    if body.len().saturating_add(chunk.len()) > max {
+        return Err(format!("{label} excedeu o limite de 2 MiB"));
+    }
+    body.extend_from_slice(chunk);
+    Ok(())
+}
+
+/// `Ok(None)` = tudo leu; `Ok(Some(aviso))` = parcial; `Err` = nada chegou.
+pub(super) fn skill_scan_errors(fetched: usize, errors: &[String]) -> Result<Option<String>, String> {
+    if errors.is_empty() {
+        return Ok(None);
+    }
+    let msg = errors.join("; ");
+    if fetched == 0 {
+        Err(msg)
+    } else {
+        Ok(Some(format!("{fetched} skills lidas; falhas: {msg}")))
+    }
+}
+
 fn gh_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent("ADE-AGS-App")
+        .timeout(HTTP_TIMEOUT)
         .build()
         .map_err(|e| e.to_string())
 }
@@ -147,7 +172,16 @@ async fn fetch_raw_github(
     if !resp.status().is_success() {
         return Err(format!("Não foi possível baixar {path} ({})", resp.status()));
     }
-    resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+    read_limited(resp, path).await
+}
+
+async fn read_limited(resp: reqwest::Response, label: &str) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    let mut resp = resp;
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+        extend_limited(&mut body, &chunk, MAX_RAW_BYTES, label)?;
+    }
+    Ok(body)
 }
 
 pub(super) async fn fetch_github_registry(
@@ -155,7 +189,7 @@ pub(super) async fn fetch_github_registry(
     registry_name: &str,
     location: &str,
     progress: &ProgressReporter,
-) -> Result<Vec<MarketplaceSkillEntry>, String> {
+) -> Result<(Vec<MarketplaceSkillEntry>, Option<String>), String> {
     let (owner, repo, branch_opt, subpath) = parse_github_location(location)?;
     let client = gh_client()?;
 
@@ -171,7 +205,8 @@ pub(super) async fn fetch_github_registry(
             resp.status()
         ));
     }
-    let tree: GhTreeResponse = resp.json().await.map_err(|e| e.to_string())?;
+    let tree_bytes = read_limited(resp, "árvore do repositório").await?;
+    let tree: GhTreeResponse = serde_json::from_slice(&tree_bytes).map_err(|e| e.to_string())?;
 
     let prefix = subpath.unwrap_or_default();
     let scoped: Vec<&GhTreeEntry> = tree
@@ -221,7 +256,7 @@ pub(super) async fn fetch_github_registry(
                 installs: None,
             });
         }
-        return Ok(out);
+        return Ok((out, None));
     }
 
     // Sin manifest: cada SKILL.md del árbol (bajo el subpath, si hay uno) define una
@@ -237,33 +272,39 @@ pub(super) async fn fetch_github_registry(
     // sale de acá es el que le da sentido a la barra.
     let total = skill_md_paths.len() as u32;
     let mut out = Vec::new();
+    let mut errors = Vec::new();
     for (i, skill_md) in skill_md_paths.into_iter().enumerate() {
         progress.emit("scanning", i as u32, Some(total), Some(skill_md.clone()));
         let Some((folder, _)) = skill_md.rsplit_once('/') else { continue }; // SKILL.md en la raíz, sin carpeta propia: se ignora
-        let Ok(raw) = fetch_raw_github(&client, &owner, &repo, &branch, &skill_md).await else { continue };
-        let content = String::from_utf8_lossy(&raw);
-        let meta = scan_frontmatter_for_marketplace(&content);
-        let folder_name = folder.rsplit('/').next().unwrap_or(folder).to_string();
-        let files: Vec<String> = scoped
-            .iter()
-            .map(|e| e.path.clone())
-            .filter(|p| p.starts_with(&format!("{folder}/")))
-            .collect();
-        out.push(MarketplaceSkillEntry {
-            id: folder_name.clone(),
-            registry_id: registry_id.to_string(),
-            registry_name: registry_name.to_string(),
-            name: meta.name.unwrap_or(folder_name),
-            author: meta.author,
-            description: meta.description,
-            categories: meta.categories,
-            compatible_agents: meta.compatible_agents,
-            folder_path: folder.to_string(),
-            files,
-            installs: None,
-        });
+        match fetch_raw_github(&client, &owner, &repo, &branch, &skill_md).await {
+            Ok(raw) => {
+                let content = String::from_utf8_lossy(&raw);
+                let meta = scan_frontmatter_for_marketplace(&content);
+                let folder_name = folder.rsplit('/').next().unwrap_or(folder).to_string();
+                let files: Vec<String> = scoped
+                    .iter()
+                    .map(|e| e.path.clone())
+                    .filter(|p| p.starts_with(&format!("{folder}/")))
+                    .collect();
+                out.push(MarketplaceSkillEntry {
+                    id: folder_name.clone(),
+                    registry_id: registry_id.to_string(),
+                    registry_name: registry_name.to_string(),
+                    name: meta.name.unwrap_or(folder_name),
+                    author: meta.author,
+                    description: meta.description,
+                    categories: meta.categories,
+                    compatible_agents: meta.compatible_agents,
+                    folder_path: folder.to_string(),
+                    files,
+                    installs: None,
+                });
+            }
+            Err(e) => errors.push(format!("{skill_md}: {e}")),
+        }
     }
-    Ok(out)
+    let warning = skill_scan_errors(out.len(), &errors)?;
+    Ok((out, warning))
 }
 
 /// Descarga todos los archivos de una skill remota a una carpeta temporal (preservando

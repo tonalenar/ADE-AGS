@@ -860,6 +860,7 @@
   "marketplace.add.phase.saving": "Guardando…",
   "marketplace.add.phase.done": "Listo",
   "marketplace.add.phase.error": "No se pudo resolver el repositorio",
+  "marketplace.add.partialWarning": "No se pudieron cargar algunas skills: {{detail}}",
   "settings.prelaunch": "Pre-lanzamiento",
   "settings.prelaunch.desc": "Comandos que se ejecutan antes de arrancar un agente, para dejarlo en el entorno correcto.",
   "settings.prelaunch.hint": "Acá solo se guardan. Cuáles usar, y en qué orden, se elige al abrir cada tab en Opciones avanzadas.",

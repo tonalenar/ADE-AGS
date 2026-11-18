@@ -130,7 +130,7 @@ pub(super) fn render(raw: &str) -> String {
                     continue;
                 }
                 let nums = params(&body);
-                let first = nums.first().copied().unwrap_or(0);
+                let first = nums.first().copied().unwrap_or(0).min(10_000);
                 let steps = first.max(1);
 
                 match final_byte {

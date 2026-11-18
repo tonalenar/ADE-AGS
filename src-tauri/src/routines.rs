@@ -95,7 +95,9 @@ pub fn parse_duration(raw: &str) -> Result<i64, String> {
         "d" => 86_400,
         _ => return Err(format!("'{raw}' não é uma duração: use 30m, 2h ou 1d.")),
     };
-    n.checked_mul(mult).filter(|s| *s > 0).ok_or_else(|| format!("'{raw}' não é uma duração válida."))
+    n.checked_mul(mult)
+        .filter(|s| *s > 0 && *s <= 10 * 365 * 86_400)
+        .ok_or_else(|| format!("'{raw}' não é uma duração válida."))
 }
 
 /// `09:00`, `9:30`, `18` → (hora, minuto).
@@ -366,13 +368,18 @@ fn file_path() -> Result<PathBuf, String> {
     Ok(dir.join("routines.json"))
 }
 
-fn read_file() -> Vec<Routine> {
-    let Ok(path) = file_path() else { return Vec::new() };
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<RoutinesFile>(&raw).ok())
-        .map(|f| f.routines)
-        .unwrap_or_default()
+fn read_file() -> Result<Vec<Routine>, String> {
+    read_file_at(&file_path()?)
+}
+
+pub(crate) fn read_file_at(path: &PathBuf) -> Result<Vec<Routine>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => serde_json::from_str::<RoutinesFile>(&raw)
+            .map(|f| f.routines)
+            .map_err(|e| format!("O arquivo de rotinas está ilegível e não foi regravado: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn write_file(routines: &[Routine]) -> Result<(), String> {
@@ -385,13 +392,13 @@ fn write_file(routines: &[Routine]) -> Result<(), String> {
 
 pub fn all() -> Vec<Routine> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    read_file()
+    read_file().unwrap_or_default()
 }
 
 /// Lê, aplica `change` e guarda, tudo sob o mesmo cadeado. Devolve o que `change` devolva.
 pub fn update<T>(change: impl FnOnce(&mut Vec<Routine>) -> Result<T, String>) -> Result<T, String> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut routines = read_file();
+    let mut routines = read_file()?;
     let out = change(&mut routines)?;
     write_file(&routines)?;
     Ok(out)

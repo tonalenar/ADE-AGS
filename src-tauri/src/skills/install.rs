@@ -351,6 +351,39 @@ fn adoptable_orphan(
     }
 }
 
+pub(crate) fn replace_skill_dir(source: &Path, dest: &Path) -> Result<(), String> {
+    let parent = dest.parent().ok_or_else(|| "A pasta da skill não tem pai".to_string())?;
+    let staging = parent.join(format!(
+        ".{}-staging-{}",
+        dest.file_name().and_then(|n| n.to_str()).unwrap_or("skill"),
+        Uuid::new_v4().simple()
+    ));
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging).map_err(|e| e.to_string())?;
+    }
+    copy_dir_recursive(source, &staging).map_err(|e| e.to_string())?;
+    let backup = parent.join(format!(
+        ".{}-backup-{}",
+        dest.file_name().and_then(|n| n.to_str()).unwrap_or("skill"),
+        Uuid::new_v4().simple()
+    ));
+    if dest.exists() {
+        std::fs::rename(dest, &backup).map_err(|e| {
+            let _ = std::fs::remove_dir_all(&staging);
+            e.to_string()
+        })?;
+    }
+    if let Err(e) = std::fs::rename(&staging, dest) {
+        if backup.exists() {
+            let _ = std::fs::rename(&backup, dest);
+        }
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(e.to_string());
+    }
+    let _ = std::fs::remove_dir_all(&backup);
+    Ok(())
+}
+
 pub(crate) fn update_installed(
     skill_id: &str,
     dest: &str,
@@ -367,11 +400,10 @@ pub(crate) fn update_installed(
         None => parsed_meta,
     };
 
-    // Se reemplaza la carpeta entera: los archivos que la versión nueva ya no trae no
-    // pueden sobrevivir, o lo instalado dejaría de ser igual a lo que ofrece el repo.
+    // Copia numa pasta irmã e só então troca: apagar o destino antes da cópia
+    // deixava a skill instalada pela metade se a cópia falhasse.
     let dest_path = Path::new(dest);
-    let _ = std::fs::remove_dir_all(dest_path);
-    copy_dir_recursive(&source, dest_path).map_err(|e| e.to_string())?;
+    replace_skill_dir(&source, dest_path)?;
 
     let name = meta
         .name

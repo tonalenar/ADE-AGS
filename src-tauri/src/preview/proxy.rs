@@ -60,6 +60,8 @@ use super::site::{
 static PICKER: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new(String::new()));
 
 type Body = BoxBody<Bytes, std::io::Error>;
+/// Teto do corpo encaminhado ao servidor de desenvolvimento (POST/PUT de upload).
+pub(super) const MAX_FORWARD_BODY: usize = 8 * 1024 * 1024;
 
 /// Un proxy levantado: dónde atiende y lo que lleva anotado.
 #[derive(Clone)]
@@ -595,7 +597,10 @@ async fn forward(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Respons
     let request_type = req.headers().get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).map(str::to_string);
     let (headers, mut shown, cookie_header) = upstream_request_headers(&req, ctx);
 
-    let (body, body_error) = match req.into_body().collect().await {
+    let (body, body_error) = match http_body_util::Limited::new(req.into_body(), MAX_FORWARD_BODY)
+        .collect()
+        .await
+    {
         Ok(collected) => (collected.to_bytes(), None),
         Err(e) => (Bytes::new(), Some(e)),
     };

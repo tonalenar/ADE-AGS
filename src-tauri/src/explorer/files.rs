@@ -104,8 +104,7 @@ fn image_mime(path: &Path) -> Option<&'static str> {
     IMAGES.iter().find(|(e, _)| *e == ext).map(|(_, mime)| *mime)
 }
 
-#[tauri::command]
-pub fn explorer_read_file(path: String) -> Result<FileContent, String> {
+pub(crate) fn read_file(path: String) -> Result<FileContent, String> {
     let file = Path::new(&path);
     let meta = std::fs::metadata(file).map_err(|e| format!("no se pudo leer {path}: {e}"))?;
     if meta.is_dir() {
@@ -142,9 +141,13 @@ pub fn explorer_read_file(path: String) -> Result<FileContent, String> {
     }
 }
 
-/// `None` = ya no existe (lo borró un agente con la tab abierta).
 #[tauri::command]
-pub fn explorer_file_stat(path: String) -> Result<Option<FileStat>, String> {
+pub async fn explorer_read_file(path: String) -> Result<FileContent, String> {
+    super::off_ui(move || read_file(path)).await
+}
+
+/// `None` = ya no existe (lo borró un agente con la tab abierta).
+pub(crate) fn file_stat(path: String) -> Result<Option<FileStat>, String> {
     match std::fs::metadata(&path) {
         Ok(meta) => Ok(Some(FileStat { mtime: mtime_ms(&meta), size: meta.len(), version: version_token(&meta) })),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -162,7 +165,11 @@ pub fn explorer_file_stat(path: String) -> Result<Option<FileStat>, String> {
 /// - `Some(token)`: o arquivo precisa ter esse token. Se sumiu, é conflito: recriar é outra
 ///   decisão, que o front pede com `ABSENT`.
 #[tauri::command]
-pub fn explorer_write_file(
+pub async fn explorer_file_stat(path: String) -> Result<Option<FileStat>, String> {
+    super::off_ui(move || file_stat(path)).await
+}
+
+pub(crate) fn write_file(
     path: String,
     content: String,
     expected_version: Option<String>,
@@ -199,6 +206,15 @@ pub fn explorer_write_file(
 
     let meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
     Ok(WriteOutcome::Saved { mtime: mtime_ms(&meta), version: version_token(&meta) })
+}
+
+#[tauri::command]
+pub async fn explorer_write_file(
+    path: String,
+    content: String,
+    expected_version: Option<String>,
+) -> Result<WriteOutcome, String> {
+    super::off_ui(move || write_file(path, content, expected_version)).await
 }
 
 /// Cria o arquivo no mesmo syscall que confere que o nome está livre. Se a escrita falhar

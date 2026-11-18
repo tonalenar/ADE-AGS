@@ -78,3 +78,19 @@ pub(crate) fn rename_in_content(content: &str, name: &str) -> String {
     meta.name = Some(name.to_string());
     render_skill_md(&meta, &body)
 }
+
+#[cfg(test)]
+mod extra_fields {
+    use super::*;
+
+    #[test]
+    fn reescrita_preserva_campos_desconhecidos() {
+        let raw = "---\nname: demo\nallowed-tools: Bash\nmetadata:\n  foo: bar\n---\ncorpo\n";
+        let (meta, body) = split_frontmatter(raw);
+        assert_eq!(body, "corpo");
+        let out = render_skill_md(&meta, &body);
+        assert!(out.contains("allowed-tools: Bash") || out.contains("allowed-tools:Bash"), "{out}");
+        assert!(out.contains("foo"), "{out}");
+        assert!(out.contains("corpo"), "{out}");
+    }
+}

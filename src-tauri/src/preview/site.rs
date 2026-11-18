@@ -797,9 +797,19 @@ fn now_secs() -> i64 {
 /// sesiones iniciadas adentro.
 fn write_private(file: &Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
+    static WRITE: Mutex<()> = Mutex::new(());
+    let _guard = WRITE.lock().map_err(|e| e.to_string())?;
     let dir = file.parent().ok_or("el archivo no tiene carpeta")?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let tmp = file.with_extension("enc.tmp");
+    let tmp = dir.join(format!(
+        ".{}.{}.{}.enc.tmp",
+        file.file_name().and_then(|n| n.to_str()).unwrap_or("state"),
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -833,5 +843,37 @@ mod profile_tests {
         assert_ne!(default, first);
         assert_ne!(first, second);
         assert_ne!(second, private);
+    }
+
+    #[test]
+    fn gravacao_cifrada_usa_temporario_unico() {
+        let dir = std::env::temp_dir().join(format!("ags-site-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("state.enc");
+        let b = dir.join("other.enc");
+        super::write_private(&a, b"one").unwrap();
+        super::write_private(&b, b"two").unwrap();
+        assert_eq!(std::fs::read(&a).unwrap(), b"one");
+        assert_eq!(std::fs::read(&b).unwrap(), b"two");
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        let dest = dir.join("same.enc");
+        let a = std::thread::spawn({
+            let dest = dest.clone();
+            move || super::write_private(&dest, b"aaaaaaaa")
+        });
+        let b = std::thread::spawn({
+            let dest = dest.clone();
+            move || super::write_private(&dest, b"bbbbbbbb")
+        });
+        a.join().unwrap().unwrap();
+        b.join().unwrap().unwrap();
+        let got = std::fs::read(&dest).unwrap();
+        assert!(got == b"aaaaaaaa" || got == b"bbbbbbbb", "{got:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -25,6 +25,57 @@ fn account(id: &str, host: &str, login: &str) -> GitAccount {
 }
 
 #[test]
+fn tag_de_release_recusa_drive_e_dois_pontos() {
+    assert!(super::tools::release_tag_ok("v1.2.3"));
+    assert!(!super::tools::release_tag_ok("C:arquivo"));
+    assert!(!super::tools::release_tag_ok("/etc/passwd"));
+    assert!(!super::tools::release_tag_ok("a/b"));
+    assert!(!super::tools::release_tag_ok("-x"));
+}
+
+#[test]
+fn save_account_grava_segredo_antes_da_conta() {
+    let src = include_str!("commands.rs");
+    let secret = src.find("secret::save").expect("secret::save");
+    let upsert = src.find("store::upsert").expect("store::upsert");
+    assert!(secret < upsert);
+}
+
+#[test]
+fn merge_ff_only_recusa_historico_divergente() {
+    let dir = std::env::temp_dir().join(format!("cc-forge-ff-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let root = dir.to_string_lossy().into_owned();
+    let git = |args: &[&str]| crate::scm::run_local(&root, args).unwrap();
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.name", "Teste"]);
+    git(&["config", "user.email", "teste@example.invalid"]);
+    std::fs::write(dir.join("base"), "base").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "base"]);
+    git(&["branch", "incoming"]);
+    std::fs::write(dir.join("main"), "main").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "main"]);
+    git(&["switch", "incoming"]);
+    std::fs::write(dir.join("incoming"), "incoming").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "incoming"]);
+    git(&["switch", "main"]);
+    let head = git(&["rev-parse", "HEAD"]);
+    assert!(super::commands::merge_ff_only(&root, "incoming").is_err());
+    assert_eq!(git(&["rev-parse", "HEAD"]), head);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn imagem_tem_teto_no_stream() {
+    let mut body = vec![0; super::api::IMAGE_MAX_BYTES];
+    assert!(super::api::append_image_chunk(&mut body, &[1]).is_err());
+    assert_eq!(body.len(), super::api::IMAGE_MAX_BYTES);
+}
+
+#[test]
 fn el_host_se_normaliza_como_lo_escribiria_cualquiera() {
     assert_eq!(normalize_host("https://GitHub.com/").unwrap(), "github.com");
     assert_eq!(normalize_host(" git.empresa.com:8443 ").unwrap(), "git.empresa.com:8443");

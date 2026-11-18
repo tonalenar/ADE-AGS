@@ -180,10 +180,13 @@ pub struct AgentUpdateResult {
 /// Extract CLI prefixes while preserving semver prerelease/build suffixes.
 pub fn version_cmp(current: &str, latest: &str) -> Option<Ordering> {
     fn parse(s: &str) -> Option<([u64; 3], Vec<String>)> {
-        let re = regex::Regex::new(
-            r"(?:^|\s|v)(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?(?:$|\s)",
-        )
-        .ok()?;
+        lazy_static::lazy_static! {
+            static ref RE: regex::Regex = regex::Regex::new(
+                r"(?:^|\s|v)(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?(?:$|\s)",
+            )
+            .expect("regex de versão");
+        }
+        let re = &*RE;
         let c = re.captures(s)?;
         if (1..=3).any(|i| c[i].len() > 1 && c[i].starts_with('0')) {
             return None;

@@ -51,13 +51,18 @@ fn file_path() -> Result<PathBuf, String> {
     Ok(dir.join("canvas-roles.json"))
 }
 
-fn read_custom() -> Vec<Role> {
-    let Ok(path) = file_path() else { return Vec::new() };
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<RolesFile>(&raw).ok())
-        .map(|f| f.roles)
-        .unwrap_or_default()
+fn read_custom() -> Result<Vec<Role>, String> {
+    read_custom_at(&file_path()?)
+}
+
+pub(crate) fn read_custom_at(path: &PathBuf) -> Result<Vec<Role>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => serde_json::from_str::<RolesFile>(&raw)
+            .map(|f| f.roles)
+            .map_err(|e| format!("O arquivo de papéis está ilegível e não foi regravado: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn write_custom(roles: &[Role]) -> Result<(), String> {
@@ -78,7 +83,7 @@ fn builtin() -> Vec<Role> {
 /// O catálogo e depois os do usuário.
 pub fn all() -> Vec<Role> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    combine(read_custom())
+    combine(read_custom().unwrap_or_default())
 }
 
 fn combine(custom: Vec<Role>) -> Vec<Role> {
@@ -184,7 +189,7 @@ pub fn with_edited(
 /// Cria e guarda um papel do usuário.
 pub fn create(label: &str, instructions: &str) -> Result<Role, String> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let custom = read_custom();
+    let custom = read_custom()?;
     let (next, role) = with_created(&combine(custom), label, instructions)?;
     write_custom(&only_custom(&next))?;
     Ok(role)
@@ -193,7 +198,7 @@ pub fn create(label: &str, instructions: &str) -> Result<Role, String> {
 /// Edita e guarda um papel do usuário.
 pub fn edit(wanted: &str, label: Option<&str>, instructions: Option<&str>) -> Result<Role, String> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let (next, role) = with_edited(&combine(read_custom()), wanted, label, instructions)?;
+    let (next, role) = with_edited(&combine(read_custom()?), wanted, label, instructions)?;
     write_custom(&only_custom(&next))?;
     Ok(role)
 }

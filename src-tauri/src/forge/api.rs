@@ -15,6 +15,16 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+pub(super) const IMAGE_MAX_BYTES: usize = 20 * 1024 * 1024;
+
+pub(super) fn append_image_chunk(body: &mut Vec<u8>, chunk: &[u8]) -> Result<(), ForgeError> {
+    if body.len().saturating_add(chunk.len()) > IMAGE_MAX_BYTES {
+        return Err(ForgeError::Api("la imagen es demasiado grande".into()));
+    }
+    body.extend_from_slice(chunk);
+    Ok(())
+}
+
 use super::provider::{ForgeError, ForgeKind};
 
 #[derive(Debug, Clone, Serialize)]
@@ -522,7 +532,6 @@ impl Api {
     /// imagen de cualquier otro lado se pide sin credenciales, y reqwest las saca solo al
     /// redirigir a otro host (los adjuntos de GitHub terminan en S3).
     pub async fn image(&self, url: &str) -> Result<String, ForgeError> {
-        const MAX: usize = 20 * 1024 * 1024;
         let parsed = reqwest::Url::parse(url).map_err(|e| ForgeError::Api(format!("URL inválida: {e}")))?;
         if !matches!(parsed.scheme(), "https" | "http") {
             return Err(ForgeError::Api("solo imágenes http(s)".into()));
@@ -530,9 +539,12 @@ impl Api {
         let host = parsed.host_str().unwrap_or_default().to_string();
         let api_host = reqwest::Url::parse(&self.base).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
         let web_host = api_host.strip_prefix("api.").unwrap_or(&api_host).to_string();
-        let own = host == api_host
-            || host == web_host
-            || (self.kind == ForgeKind::Github && host.ends_with(".githubusercontent.com"));
+        let own = image_sends_bearer(
+            parsed.scheme(),
+            host == api_host
+                || host == web_host
+                || (self.kind == ForgeKind::Github && host.ends_with(".githubusercontent.com")),
+        );
 
         let fetch = |auth: bool| {
             let mut req = self.http.get(parsed.clone());
@@ -563,12 +575,12 @@ impl Api {
         if !mime.starts_with("image/") {
             return Err(ForgeError::Api(format!("no es una imagen ({mime})")));
         }
-        let bytes = res.bytes().await.map_err(|e| ForgeError::Api(format!("no se pudo bajar la imagen: {e}")))?;
-        if bytes.len() > MAX {
-            return Err(ForgeError::Api("la imagen es demasiado grande".into()));
+        let mut body = Vec::new();
+        while let Some(chunk) = res.chunk().await.map_err(|e| ForgeError::Api(format!("no se pudo bajar la imagen: {e}")))? {
+            append_image_chunk(&mut body, &chunk)?;
         }
         use base64::Engine;
-        Ok(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes)))
+        Ok(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&body)))
     }
 
     async fn get(&self, path: &str) -> Result<Value, ForgeError> {
@@ -1662,4 +1674,21 @@ fn encode_path(path: &str) -> String {
 
 fn encode_repo_path(repo: &str) -> String {
     encode_path(repo)
+}
+
+/// Credencial só viaja em HTTPS do host da forja.
+pub(crate) fn image_sends_bearer(scheme: &str, own_host: bool) -> bool {
+    own_host && scheme == "https"
+}
+
+#[cfg(test)]
+mod image_auth_tests {
+    use super::image_sends_bearer;
+
+    #[test]
+    fn http_do_host_da_forja_nao_leva_bearer() {
+        assert!(!image_sends_bearer("http", true));
+        assert!(image_sends_bearer("https", true));
+        assert!(!image_sends_bearer("https", false));
+    }
 }

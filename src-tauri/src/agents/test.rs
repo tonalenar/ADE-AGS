@@ -311,3 +311,11 @@ fn solo_antigravity_agrega_flags_al_terminal_interactivo() {
             .all(|a| a.launch_args.is_empty())
     );
 }
+
+#[test]
+fn skills_dir_custom_recusa_ponto_e_parent() {
+    assert!(crate::agents::skills_dir_custom_ok(".agents/skills"));
+    assert!(!crate::agents::skills_dir_custom_ok("."));
+    assert!(!crate::agents::skills_dir_custom_ok(".."));
+    assert!(!crate::agents::skills_dir_custom_ok("../x"));
+}

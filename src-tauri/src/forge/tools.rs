@@ -21,6 +21,21 @@ fn scm_message(e: crate::scm::ScmError) -> String {
 
 /// Cuánto diff se le devuelve a un agente de una vez: más que esto se come su contexto.
 const MAX_PATCH_CHARS: usize = 60_000;
+
+/// El tag arma `.github/releases/<tag>.md`: nada de `..`, `/`, `\`, `:`, drive (`C:arquivo`) ni absoluto.
+pub(crate) fn release_tag_ok(tag: &str) -> bool {
+    if tag.is_empty() || tag.starts_with('-') || tag.contains("..") {
+        return false;
+    }
+    if tag.contains(['\\', '/', ':']) || tag.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let path = std::path::Path::new(tag);
+    if path.is_absolute() {
+        return false;
+    }
+    true
+}
 use super::credentials::{api_for, target, token};
 use super::provider::ForgeError;
 use super::store::{self, db};
@@ -509,9 +524,7 @@ async fn call(app: &AppHandle, cwd: &str, name: &str, args: &Value) -> Result<St
                 }
                 "git_release_create" => {
                     let tag = arg_str(args, "tag").ok_or("missing `tag`")?.to_string();
-                    // El tag arma la ruta del archivo de notas: nada de `..` ni separadores de
-                    // Windows, y nada que git lea como opción.
-                    if tag.starts_with('-') || tag.contains("..") || tag.contains('\\') || tag.chars().any(char::is_whitespace) {
+                    if !release_tag_ok(&tag) {
                         return Err("invalid tag".into());
                     }
                     // Las notas que el repo ya tiene escritas para ese tag, si no vienen otras.

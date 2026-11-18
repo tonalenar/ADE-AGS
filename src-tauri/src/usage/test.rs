@@ -96,6 +96,17 @@ fn parsea_el_timestamp_de_un_transcript_real() {
 }
 
 #[test]
+fn captura_de_usage_preserva_utf8_partido_entre_chunks() {
+    let bytes = "sessão: ação".as_bytes();
+    let corte = bytes.iter().position(|b| *b == 0xC3).unwrap() + 1;
+    let mut raw = Vec::new();
+    for chunk in [&bytes[..corte], &bytes[corte..]] {
+        raw.extend_from_slice(chunk);
+    }
+    assert_eq!(super::live::capture_text(&raw), "sessão: ação");
+}
+
+#[test]
 fn el_epoch_es_el_epoch() {
     assert_eq!(parse_ts("1970-01-01T00:00:00.000Z"), Some(0));
 }
@@ -735,4 +746,10 @@ fn un_transcript_se_lee_solo_en_lo_que_crecio() {
     assert_eq!(rewritten.records.iter().map(|r| r.output).collect::<Vec<_>>(), vec![1]);
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn csi_com_parametro_enorme_nao_explode() {
+    let out = super::screen::render("\u{1b}[999999999Bhi");
+    assert!(out.contains("hi"), "{out}");
 }

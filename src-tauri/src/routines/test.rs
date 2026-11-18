@@ -34,9 +34,22 @@ fn le_duraciones_y_rechaza_lo_que_no_lo_es() {
     assert_eq!(parse_duration("2h").unwrap(), 7200);
     assert_eq!(parse_duration(" 1D ").unwrap(), 86_400);
     assert_eq!(parse_duration("90s").unwrap(), 90);
-    for bad in ["", "m", "10", "10x", "-5m", "0m", "1.5h"] {
+    for bad in ["", "m", "10", "10x", "-5m", "0m", "1.5h", "9223372036854775807s"] {
         assert!(parse_duration(bad).is_err(), "{bad}");
     }
+}
+
+#[test]
+fn rotina_ilegivel_nao_e_regravada() {
+    let dir = std::env::temp_dir().join(format!("ags-routines-bad-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("routines.json");
+    std::fs::write(&path, "{").unwrap();
+    let original = std::fs::read(&path).unwrap();
+    let err = super::read_file_at(&path).unwrap_err();
+    assert!(err.contains("ilegível"), "{err}");
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

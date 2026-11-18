@@ -21,7 +21,7 @@ fn renomear_so_caixa_em_volume_sensivel_nao_sobrescreve() {
         return;
     }
 
-    let result = super::ops::explorer_rename(from.to_string_lossy().into_owned(), "README.md".into());
+    let result = crate::explorer::ops::rename(from.to_string_lossy().into_owned(), "README.md".into());
     assert!(result.is_err(), "renomear não pode substituir o arquivo de destino");
     assert_eq!(std::fs::read(&from).unwrap(), b"origem");
     assert_eq!(std::fs::read(&to).unwrap(), b"destino");
@@ -47,7 +47,7 @@ fn renomear_so_caixa_em_volume_insensivel_continua_funcionando() {
         return;
     }
 
-    let renamed = super::ops::explorer_rename(from.to_string_lossy().into_owned(), "A.md".into()).unwrap();
+    let renamed = crate::explorer::ops::rename(from.to_string_lossy().into_owned(), "A.md".into()).unwrap();
 
     assert!(renamed.ends_with("A.md"));
     assert_eq!(std::fs::read_to_string(&to).unwrap(), "conteúdo");
@@ -354,7 +354,7 @@ fn una_linea_enorme_se_recorta_alrededor_de_la_coincidencia() {
 
 // ── Tabs de archivo ──────────────────────────────────────────────
 
-use super::files::{explorer_read_file, explorer_write_file, FileContent, WriteOutcome, ABSENT};
+use super::files::{read_file as explorer_read_file, write_file as explorer_write_file, FileContent, WriteOutcome, ABSENT};
 
 #[test]
 fn guardar_no_pisa_lo_que_otro_escribio_despues_de_abrir() {
@@ -431,7 +431,7 @@ fn o_token_de_versao_muda_com_o_conteudo_e_nao_com_a_leitura() {
         panic!("salvo")
     };
     assert_ne!(a, c);
-    assert_eq!(super::files::explorer_file_stat(path).unwrap().unwrap().version, c);
+    assert_eq!(super::files::file_stat(path).unwrap().unwrap().version, c);
     std::fs::remove_dir_all(dir).ok();
 }
 
@@ -464,7 +464,10 @@ fn un_binario_no_se_abre_como_texto() {
 mod ops {
     use std::fs;
 
-    use super::super::ops::*;
+    use super::super::ops::{
+        copy as explorer_copy, create_dir as explorer_create_dir, create_file as explorer_create_file, free_name,
+        move_path as explorer_move, rename as explorer_rename,
+    };
 
     /// Una carpeta propia por test, que se borra al soltarla.
     struct Tmp(std::path::PathBuf);
@@ -529,7 +532,7 @@ mod ops {
         let src = d.path().join("origem");
         let dst = d.path().join("destino");
         fs::write(&src, "origem").unwrap();
-        let result = super::ops::copy_into_free_name(&src, "destino", d.path(), |_, to| {
+        let result = crate::explorer::ops::copy_into_free_name(&src, "destino", d.path(), |_, to| {
             fs::write(to, "arquivo preexistente")?;
             Err(std::io::Error::other("falha simulada após concorrência"))
         });
@@ -548,7 +551,7 @@ mod ops {
         fs::write(src.join("z.txt"), "segundo").unwrap();
         let dst = d.path().join("destino");
 
-        let result = super::ops::copy_tree_with(&src, &dst, &mut |path| {
+        let result = crate::explorer::ops::copy_tree_with(&src, &dst, &mut |path| {
             if path.file_name().is_some_and(|name| name == "z.txt") {
                 return Err(std::io::Error::other("falha simulada"));
             }
@@ -590,4 +593,11 @@ mod ops {
         let renamed = explorer_rename(f, "z.md".into()).unwrap();
         assert!(renamed.ends_with("z.md") && std::path::Path::new(&renamed).is_file());
     }
+}
+
+#[tokio::test]
+async fn trabalho_de_arquivo_roda_fora_da_thread_chamadora() {
+    let caller = std::thread::current().id();
+    let worker = super::off_ui(|| Ok(std::thread::current().id())).await.unwrap();
+    assert_ne!(worker, caller);
 }

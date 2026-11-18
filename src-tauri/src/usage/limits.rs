@@ -67,9 +67,16 @@ pub fn parse_windows(rate: &serde_json::Value, now: i64) -> Vec<PlanWindow> {
 fn codex(root: &Path, account: Option<String>) -> PlanLimits {
     let mut list = vec![];
     files(&root.join("sessions"), &mut list);
-    list.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+    let mut dated: Vec<_> = list
+        .into_iter()
+        .map(|p| {
+            let modified = std::fs::metadata(&p).and_then(|m| m.modified()).ok();
+            (modified, p)
+        })
+        .collect();
+    dated.sort_by_key(|(t, _)| *t);
     let mut latest: Option<(i64, serde_json::Value)> = None;
-    for path in list.into_iter().rev().take(32) {
+    for (_, path) in dated.into_iter().rev().take(32) {
         let Ok(f) = std::fs::File::open(path) else {
             continue;
         };
