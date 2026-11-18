@@ -4,8 +4,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AlertaToast } from "@/shared/ui/alerts";
+import "@/features/chat/unified/selectionActions";
 
-import { abrirConversaDoAviso, InAppNotices } from "../InAppNotices";
+import * as inAppNotices from "../InAppNotices";
 
 const mocks = vi.hoisted(() => ({ select: vi.fn() }));
 
@@ -45,18 +46,22 @@ afterEach(async () => {
 
 describe("o aviso no app de conversa que terminou, falhou ou pede algo", () => {
   it("traz o botão 'Abrir conversa' (a chave que já existe) para a conversa do evento", async () => {
-    await act(async () => { root.render(<InAppNotices />); });
+    await act(async () => { root.render(<inAppNotices.InAppNotices />); });
     expect(AlertaToast).toHaveBeenCalledTimes(1);
     const [title, , icon, , , action] = vi.mocked(AlertaToast).mock.calls[0]!;
     expect(title).toBe("Refatorar o login");
     expect(icon).toBe("success");
     expect(action?.label).toBe("chat.inbox.open");
+    let resolveSelected!: () => void;
+    const selected = new Promise<void>((resolve) => { resolveSelected = resolve; });
+    mocks.select.mockImplementation(() => { resolveSelected(); });
     action?.onClick();
-    await vi.waitFor(() => expect(mocks.select).toHaveBeenCalledWith("thread:t-1"));
+    await selected;
+    expect(mocks.select).toHaveBeenCalledWith("thread:t-1");
   });
 
   it("abrir a conversa leva à conversa indicada, e só a ela", async () => {
-    await abrirConversaDoAviso("tab-codex");
+    await inAppNotices.abrirConversaDoAviso("tab-codex");
     expect(mocks.select).toHaveBeenCalledTimes(1);
     expect(mocks.select).toHaveBeenCalledWith("tab-codex");
   });

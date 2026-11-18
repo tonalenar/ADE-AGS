@@ -33,7 +33,7 @@ beforeEach(() => {
   document.body.appendChild(host);
   root = createRoot(host);
 });
-afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); });
+afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); vi.restoreAllMocks(); });
 
 const mount = () => act(async () => { root.render(<MemoryRouter initialEntries={["/settings"]}><Where /><AppSessionsSidebar groups={GROUPS} width={272} /></MemoryRouter>); });
 
@@ -46,12 +46,12 @@ describe("a barra de sessões nas Abas e no Canvas", () => {
     expect(host.querySelector("[aria-label='chat.sidebar.new']")).not.toBeNull();
   });
 
-  it("mantém as missões no alto e o pet embaixo, e ", async () => {
+  it("mantém as missões no alto e o pet embaixo, e mostra a conversa da missão", async () => {
     await mount();
     expect(host.querySelector("[data-testid=missoes]")).not.toBeNull();
     expect(host.querySelector("[data-testid=pet]")).not.toBeNull();
-    // Antes o filtro `missionOf` escondia o terminal da missão; agora o grupo "Missão X" é mostrado, sem remontar terminal.
     expect(host.textContent).toContain("Da missão");
+    expect(host.querySelector("[data-testid=missoes]")!.compareDocumentPosition(host.querySelector("[data-testid=pet]")!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("abrir uma conversa ativa a aba e leva à tela do workspace", async () => {
