@@ -238,3 +238,27 @@ describe("diagnóstico do silêncio e a interface atrasada", () => {
     expect(uiBehindUntil(undefined, undefined, 5000, false, 5000)).toBeUndefined();
   });
 });
+
+// O menu de aprovação do Codex: o cursor › na opção 1 e a opção de recusar com (esc). Mesmo texto que o agente
+// pode imprimir, então o detector só aceita o menu no FIM da tela (rodada 1 do PR11).
+const CODEX_MENU = [
+  "$ git status",
+  "",
+  "  Would you like to run the following command?",
+  "",
+  "  $ git status --short",
+  "",
+  "› 1. Yes, proceed (y)",
+  "  2. Yes, and don't ask again for commands that start with `git status` (p)",
+  "  3. No, and tell Codex what to do differently (esc)",
+];
+
+describe("isWaitingForUser: menu do Codex (rodada 1)", () => {
+  it("menu_do_codex_no_fim_da_tela_e_espera_do_usuario", () => {
+    expect(isWaitingForUser(CODEX_MENU)).toBe(true);
+  });
+
+  it("marcas_do_menu_impressas_no_meio_da_saida_nao_contam", () => {
+    expect(isWaitingForUser([...CODEX_MENU, "$ bun test", "ok 12 testes"])).toBe(false);
+  });
+});

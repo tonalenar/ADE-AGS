@@ -20,7 +20,7 @@ import { prematureClosing } from "./vigiaClosing";
 import { LOOP_DONE, loopStep, loopStuck, type LoopWatch } from "./vigiaLoop";
 import { contextDue, contextNudge, contextPressure, contextStuck, REPEAT_DONE, repeatKey, repeatStuck } from "./vigiaSignals";
 import { vigiaToast } from "./vigiaToast";
-import { isFinalReport, memberFinished, pokeAllowed } from "./vigiaPoke";
+import { isFinalReport, memberFinished, pokeAllowed, pokeBusy } from "./vigiaPoke";
 import { repeatAfterEach } from "./repeatAfterEach";
 import { vigiaActive } from "./vigiaSwitch";
 import { automationPausedFor, notePausedTeam } from "./automation";
@@ -284,9 +284,13 @@ const lastErrorReport = new Map<string, number>();
 /** Quando o Vigia escreveu pela última vez no terminal de cada aba (uma cutucada por vez). */
 const pokes = new Map<string, number>();
 
-/** O destino está trabalhando agora? A tela, somada ao transcript (Claude Code/Codex) quando há canal. */
+/**
+ * O destino está ocupado agora? A tela (trabalhando ou um menu de permissão aberto), somada ao transcript
+ * (Claude Code/Codex) quando há canal. Ver `pokeBusy`.
+ */
 function busyNow(tabId: string): boolean {
-  return workingWith(tabId, isWorking(screenOf(tabId)?.lines ?? []));
+  const lines = screenOf(tabId)?.lines ?? [];
+  return pokeBusy(lines, workingWith(tabId, isWorking(lines)));
 }
 
 /** Pode escrever no terminal desta aba agora? Ver `pokeAllowed`. O interruptor vem primeiro (falha fechada). */
