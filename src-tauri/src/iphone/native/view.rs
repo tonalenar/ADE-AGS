@@ -379,6 +379,22 @@ pub struct Presenter {
     capture: Mutex<HashMap<u64, f64>>,
 }
 
+fn latest<T: Clone>(held: &Mutex<VecDeque<(T, u64)>>) -> Option<(T, u64)> {
+    held.lock().ok()?.back().cloned()
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn copia_quadro_antes_de_liberar_mutex_held() {
+        let held = Mutex::new(VecDeque::from([(7usize, 9u64)]));
+        assert_eq!(latest(&held), Some((7, 9)));
+        assert!(held.try_lock().is_ok(), "a cópia não pode reter o mutex");
+    }
+}
+
 #[derive(Default)]
 struct Pacing {
     timestamps: HashMap<u64, u32>,
@@ -542,9 +558,8 @@ impl Presenter {
     /// a foto dos agentes. `None` = ainda não há quadro.
     pub fn snapshot(&self) -> Option<(Vec<u8>, usize, usize)> {
         const READ_ONLY: u32 = 1;
-        let held = self.held.lock().ok()?;
-        let (buffer, arrived_ns) = held.back()?;
-        if !self.capture_fence.trusts(*arrived_ns) {
+        let (buffer, arrived_ns) = latest(&self.held)?;
+        if !self.capture_fence.trusts(arrived_ns) {
             return None;
         }
         let surface = buffer.surface() as *const c_void;

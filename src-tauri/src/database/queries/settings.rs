@@ -11,13 +11,15 @@ use crate::database::DbConnection;
 /// módulos backend (ej. `skills::resolve_skills_dir`) sin pasar por la capa de invoke.
 pub fn get_setting(db: &DbConnection, key: &str) -> Result<Option<String>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
-    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0))
-        .optional()
-        .map_err(|e| e.to_string())
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+        row.get(0)
+    })
+    .optional()
+    .map_err(|e| e.to_string())
 }
 
-/// Escribe/actualiza una key de `settings`. Ver `get_setting` sobre por qué no es
-/// directamente un `#[tauri::command]`.
+/// Escribe/actualiza una key de `settings`. Ver `get_setting` sobre por qué esto
+/// no se expone como comando Tauri.
 pub fn set_setting(db: &DbConnection, key: &str, value: &str) -> Result<(), String> {
     // Durante un upgrade la UI está en el splash, pero el idioma se escribe igual al
     // arrancar. Esperar evita grabar contra el schema viejo o en medio del VACUUM.
@@ -33,11 +35,18 @@ pub fn set_setting(db: &DbConnection, key: &str, value: &str) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub fn db_get_setting(key: String, db: tauri::State<DbConnection>) -> Result<Option<String>, String> {
+pub fn db_get_setting(
+    key: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Option<String>, String> {
     get_setting(&db, &key)
 }
 
 #[tauri::command]
-pub fn db_set_setting(key: String, value: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+pub fn db_set_setting(
+    key: String,
+    value: String,
+    db: tauri::State<DbConnection>,
+) -> Result<(), String> {
     set_setting(&db, &key, &value)
 }

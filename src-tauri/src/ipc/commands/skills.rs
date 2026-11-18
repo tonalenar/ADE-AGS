@@ -1,6 +1,6 @@
 //! Comandos de skills: las instaladas, el marketplace y la instalación.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tauri::AppHandle;
 
 use super::shared::db;
@@ -15,7 +15,7 @@ use crate::ipc::protocol::{arg_str, arg_str_opt};
 pub(super) fn skill_list(app: &AppHandle) -> Result<Value, String> {
     let db = db(app)?;
 
-    let rows = crate::skills::list_skills(db.clone())?;
+    let rows = crate::skills::list_skills_now(&db)?;
     let installed_names: std::collections::HashSet<String> =
         rows.iter().map(|s| s.skill.name.to_lowercase()).collect();
 
@@ -35,7 +35,7 @@ pub(super) fn skill_list(app: &AppHandle) -> Result<Value, String> {
 
     // Lo ya instalado se saca de "available": repetirlo sería devolver dos veces la misma
     // skill con distinta forma, y la lista de repos es la más larga de las dos.
-    let available: Vec<Value> = crate::marketplace::list_marketplace_skills(None, None, db)?
+    let available: Vec<Value> = crate::marketplace::list_marketplace_skills_now(None, None, &db)?
         .iter()
         .filter(|e| !installed_names.contains(&e.name.to_lowercase()))
         .map(|e| json!({ "name": e.name, "description": e.description, "registry": e.registry_name }))
@@ -64,8 +64,8 @@ pub(super) fn skill_search(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let query = arg_str(args, "query")?;
     let db = db(app)?;
 
-    let matches = |db: tauri::State<'_, crate::database::DbConnection>| {
-        crate::marketplace::list_marketplace_skills(Some(query.clone()), None, db)
+    let matches = |db: &crate::database::DbConnection| {
+        crate::marketplace::list_marketplace_skills_now(Some(query.clone()), None, db)
     };
 
     // El directorio se consulta SIEMPRE, igual que en el Marketplace: buscar tiene que
@@ -81,7 +81,7 @@ pub(super) fn skill_search(app: &AppHandle, args: &Value) -> Result<Value, Strin
         Err(e) => remote_error = Some(e),
     }
 
-    let found: Vec<Value> = matches(db.clone())?
+    let found: Vec<Value> = matches(&db)?
         .iter()
         .map(|e| {
             json!({
@@ -110,11 +110,14 @@ pub(super) fn skill_install(app: &AppHandle, args: &Value) -> Result<Value, Stri
     // homónimas pueden ser de autores distintos y hacer cosas distintas, así que instalar
     // "la del repo mejor rankeado" le deja al usuario una skill que no pidió.
     let find = || -> Result<Option<crate::marketplace::MarketplaceSkillEntry>, String> {
-        let all = crate::marketplace::list_marketplace_skills(None, None, db.clone())?;
+        let all = crate::marketplace::list_marketplace_skills_now(None, None, &db)?;
         if let Some(exacta) = all.iter().find(|e| e.id.to_lowercase() == wanted) {
             return Ok(Some(exacta.clone()));
         }
-        let por_nombre: Vec<_> = all.iter().filter(|e| e.name.to_lowercase() == wanted).collect();
+        let por_nombre: Vec<_> = all
+            .iter()
+            .filter(|e| e.name.to_lowercase() == wanted)
+            .collect();
         match por_nombre.as_slice() {
             [] => Ok(None),
             [una] => Ok(Some((*una).clone())),
@@ -148,7 +151,7 @@ pub(super) fn skill_install(app: &AppHandle, args: &Value) -> Result<Value, Stri
             // El nombre puede venir de la lista `installed` de `ags skills`, donde no
             // hay nada que instalar. Decir "no se encontró en los repos" ahí sería
             // desconcertante: la skill existe, ya la tiene.
-            let already = crate::skills::list_skills(db.clone())
+            let already = crate::skills::list_skills_now(&db)
                 .map(|rows| rows.iter().any(|s| s.skill.name.to_lowercase() == wanted))
                 .unwrap_or(false);
             if already {
@@ -160,12 +163,14 @@ pub(super) fn skill_install(app: &AppHandle, args: &Value) -> Result<Value, Stri
 
     let registry_id = entry.registry_id.clone();
     let skill_id = entry.id.clone();
-    let installed = blocking_runtime()?
-        .block_on(crate::marketplace::install_marketplace_skill(registry_id, skill_id, db))?;
+    let installed = blocking_runtime()?.block_on(crate::marketplace::install_marketplace_skill(
+        registry_id,
+        skill_id,
+        db,
+    ))?;
 
     Ok(json!({ "installed": installed }))
 }
-
 
 /// El SKILL.md de una skill instalada, para poder leerla desde la terminal.
 ///
@@ -175,7 +180,7 @@ pub(super) fn skill_show(app: &AppHandle, args: &Value) -> Result<Value, String>
     let wanted = arg_str(args, "skill")?;
     let db = db(app)?;
     let skill = resolve_installed(&db, &wanted)?;
-    let detail = crate::skills::get_skill_detail(skill.id.clone(), db)?;
+    let detail = crate::skills::get_skill_detail_now(skill.id.clone(), &db)?;
 
     Ok(json!({
         "id": detail.skill.id,
@@ -236,17 +241,19 @@ pub(super) fn skill_edit(app: &AppHandle, args: &Value) -> Result<Value, String>
 
     if is_local && !force_copy {
         // Es del usuario: se guarda encima, como cualquier archivo propio.
-        let current = crate::skills::get_skill_detail(skill.id.clone(), db.clone())?.content;
+        let current = crate::skills::get_skill_detail_now(skill.id.clone(), &db)?.content;
         let content = content.unwrap_or(current);
         let content = match &new_name {
             Some(n) => crate::skills::rename_in_content(&content, n),
             None => content,
         };
-        crate::skills::update_skill_content(skill.id.clone(), content, db)?;
-        return Ok(json!({ "saved": { "id": skill.id, "name": new_name.unwrap_or(skill.name), "copied": false } }));
+        crate::skills::update_skill_content_now(skill.id.clone(), content, &db)?;
+        return Ok(
+            json!({ "saved": { "id": skill.id, "name": new_name.unwrap_or(skill.name), "copied": false } }),
+        );
     }
 
-    let copy = crate::skills::fork_skill(skill.id, new_name, content, db)?;
+    let copy = crate::skills::fork_skill_now(skill.id, new_name, content, &db)?;
     Ok(json!({
         "saved": { "id": copy.id, "name": copy.name, "copied": true },
         // Se dice explícitamente por qué hay una skill nueva: quien automatiza tiene que
@@ -261,7 +268,7 @@ fn resolve_installed(
     db: &tauri::State<'_, crate::database::DbConnection>,
     wanted: &str,
 ) -> Result<crate::skills::SkillInfo, String> {
-    let rows = crate::skills::list_skills((*db).clone())?;
+    let rows = crate::skills::list_skills_now(db)?;
     let installed: Vec<super::tabs::InstalledSkill> = rows
         .iter()
         .map(|s| super::tabs::InstalledSkill {
@@ -286,6 +293,10 @@ fn resolve_installed(
 fn list_arg(args: &Value, key: &str) -> Vec<String> {
     args.get(key)
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default()
 }

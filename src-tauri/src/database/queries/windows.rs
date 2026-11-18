@@ -3,15 +3,13 @@
 use rusqlite::OptionalExtension;
 use uuid::Uuid;
 
-use crate::util::now_ts;
-use crate::database::models::{
-    row_to_tab, row_to_window, RestoredWindowState, WindowStatePayload,
-};
 use crate::database::DbConnection;
+use crate::database::models::{RestoredWindowState, WindowStatePayload, row_to_tab, row_to_window};
+use crate::util::now_ts;
 
 use std::collections::HashMap;
 
-use super::sessions::{archive_tab_row, resolve_for_archive, ResolvedSession};
+use super::sessions::{ResolvedSession, archive_tab_row, resolve_for_archive};
 
 /// Guarda el estado de la ventana (posición, tamaño, tabs) y archiva las tabs que
 /// desaparecieron del payload.
@@ -41,7 +39,10 @@ pub async fn db_save_window_state(
 /// calcularla con el lock tomado y usa esta tabla solo como cache. Una tab que llegue sin
 /// resolver se archiva con lo que ya tenía guardado, que es exactamente el comportamiento
 /// anterior a esta feature.
-fn resolve_closing_tabs(state: &WindowStatePayload, db: &DbConnection) -> HashMap<String, ResolvedSession> {
+fn resolve_closing_tabs(
+    state: &WindowStatePayload,
+    db: &DbConnection,
+) -> HashMap<String, ResolvedSession> {
     if !state.authoritative {
         return HashMap::new();
     }
@@ -49,7 +50,9 @@ fn resolve_closing_tabs(state: &WindowStatePayload, db: &DbConnection) -> HashMa
         state.tabs.iter().map(|t| t.id.as_str()).collect();
 
     let closing: Vec<String> = {
-        let Ok(conn) = db.lock() else { return HashMap::new() };
+        let Ok(conn) = db.lock() else {
+            return HashMap::new();
+        };
         let Ok(mut stmt) = conn.prepare(
             "SELECT t.id FROM tabs t JOIN windows w ON w.id = t.window_id WHERE w.label = ?1",
         ) else {
@@ -58,13 +61,18 @@ fn resolve_closing_tabs(state: &WindowStatePayload, db: &DbConnection) -> HashMa
         let Ok(rows) = stmt.query_map([&state.label], |r| r.get::<_, String>(0)) else {
             return HashMap::new();
         };
-        rows.filter_map(|r| r.ok()).filter(|id| !incoming.contains(id.as_str())).collect()
+        rows.filter_map(|r| r.ok())
+            .filter(|id| !incoming.contains(id.as_str()))
+            .collect()
     };
 
-    closing.into_iter().map(|id| {
-        let resolved = resolve_for_archive(db, &id);
-        (id, resolved)
-    }).collect()
+    closing
+        .into_iter()
+        .map(|id| {
+            let resolved = resolve_for_archive(db, &id);
+            (id, resolved)
+        })
+        .collect()
 }
 
 /// Genérica sobre el runtime para poder ejercitarla con el runtime de prueba de Tauri: es
@@ -99,7 +107,8 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     let conn = db.lock().map_err(|e| e.to_string())?;
     // Una sola transacción: un commit (un fsync) por guardado y no uno por fila, y un
     // guardado que falla a la mitad no deja la ventana con la mitad de sus tabs.
-    let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+    let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
     let now = now_ts();
 
     conn.execute(
@@ -141,7 +150,11 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     .map_err(|e| e.to_string())?;
 
     let window_id: String = conn
-        .query_row("SELECT id FROM windows WHERE label = ?1", [&state.label], |r| r.get(0))
+        .query_row(
+            "SELECT id FROM windows WHERE label = ?1",
+            [&state.label],
+            |r| r.get(0),
+        )
         .map_err(|e| e.to_string())?;
 
     // Tabs que estaban guardadas en esta ventana y ya no vienen en el payload nuevo =
@@ -160,7 +173,11 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     // Lo que ven las OTRAS vistas (el Home, la lista de workspaces): qué tabs hay y cómo se
     // llaman. Mover la ventana o refrescar el scrollback no les cambia nada.
     let visible_change = state.authoritative && existing.len() != state.tabs.len()
-        || state.tabs.iter().any(|t| !existing.iter().any(|(id, title)| id == &t.id && title.as_deref() == Some(t.title.as_str())));
+        || state.tabs.iter().any(|t| {
+            !existing
+                .iter()
+                .any(|(id, title)| id == &t.id && title.as_deref() == Some(t.title.as_str()))
+        });
     let incoming_ids: std::collections::HashSet<&str> =
         state.tabs.iter().map(|t| t.id.as_str()).collect();
 
@@ -170,13 +187,19 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     // Solo una ventana que sabe lo que tiene puede afirmar que una tab se cerró: ver
     // `WindowStatePayload::authoritative`.
     let closed_ids: Vec<&String> = if state.authoritative {
-        existing_ids.iter().filter(|id| !incoming_ids.contains(id.as_str())).collect()
+        existing_ids
+            .iter()
+            .filter(|id| !incoming_ids.contains(id.as_str()))
+            .collect()
     } else {
         Vec::new()
     };
     crate::usage::capture_mission_tabs(&conn, &boards)?;
     for closed_id in closed_ids {
-        let resolved = resolved.get(closed_id.as_str()).cloned().unwrap_or_default();
+        let resolved = resolved
+            .get(closed_id.as_str())
+            .cloned()
+            .unwrap_or_default();
         archive_tab_row(&conn, closed_id, &state.workspace_id, &resolved, &boards)?;
         if let Ok(pair) = conn.query_row(
             "SELECT cwd, agent_id FROM tabs WHERE id = ?1",
@@ -185,8 +208,13 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
         ) {
             orphaned_dirs.push(pair);
         }
-        conn.execute("UPDATE mission_usage_tabs SET closed_at=?1 WHERE tab_id=?2 AND closed_at IS NULL", rusqlite::params![now,closed_id]).map_err(|e|e.to_string())?;
-        conn.execute("DELETE FROM tabs WHERE id = ?1", [closed_id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE mission_usage_tabs SET closed_at=?1 WHERE tab_id=?2 AND closed_at IS NULL",
+            rusqlite::params![now, closed_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM tabs WHERE id = ?1", [closed_id])
+            .map_err(|e| e.to_string())?;
     }
 
     // Upsert por id en vez de borrar todas las tabs de la ventana y reinsertarlas: con
@@ -239,7 +267,9 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
 
     crate::usage::capture_mission_tabs(&conn, &boards)?;
     tx.commit().map_err(|e| e.to_string())?;
-    crate::skills::reconcile_link_dirs(&conn, &orphaned_dirs);
+    // O disco (symlinks das skills) só mexe depois de soltar o mutex do banco.
+    drop(conn);
+    crate::skills::reconcile_link_dirs_db(db, &orphaned_dirs);
 
     // El conteo o los títulos de las tabs de este workspace cambiaron (tab agregada,
     // cerrada, renombrada): se notifica a todas las ventanas (ej. el Home de otra ventana)
@@ -252,31 +282,32 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     Ok(())
 }
 
-#[tauri::command]
-pub fn db_load_window_state(
+pub(crate) fn db_load_window_state_now(
     label: String,
-    db: tauri::State<DbConnection>,
+    db: &crate::database::DbConnection,
 ) -> Result<Option<RestoredWindowState>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
 
     let window = conn
-        .query_row(
-            "SELECT id, label, workspace_id, pos_x, pos_y, width, height, monitor, is_open, last_active
-             FROM windows WHERE label = ?1",
-            [&label],
-            row_to_window,
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
+            .query_row(
+                "SELECT id, label, workspace_id, pos_x, pos_y, width, height, monitor, is_open, last_active
+                 FROM windows WHERE label = ?1",
+                [&label],
+                row_to_window,
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
 
-    let Some(window) = window else { return Ok(None) };
+    let Some(window) = window else {
+        return Ok(None);
+    };
 
     let mut stmt = conn
-        .prepare(
-            "SELECT id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, account_id, prelaunch, opened_at, created_at, last_active
-             FROM tabs WHERE window_id = ?1 ORDER BY tab_order ASC",
-        )
-        .map_err(|e| e.to_string())?;
+            .prepare(
+                "SELECT id, window_id, title, title_is_custom, agent_id, agent_label, command, cwd, tab_order, session_id, scrollback, history_id, account_id, prelaunch, opened_at, created_at, last_active
+                 FROM tabs WHERE window_id = ?1 ORDER BY tab_order ASC",
+            )
+            .map_err(|e| e.to_string())?;
 
     let tabs = stmt
         .query_map([&window.id], row_to_tab)
@@ -287,18 +318,33 @@ pub fn db_load_window_state(
     Ok(Some(RestoredWindowState { window, tabs }))
 }
 
+#[tauri::command]
+pub async fn db_load_window_state(
+    label: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Option<RestoredWindowState>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db_load_window_state_now(label, &db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Marca una ventana como cerrada (is_open = 0) sin borrar su fila. Es el comportamiento
 /// por defecto de CUALQUIER cierre nativo, incluidos los cierres EN BLOQUE (cerrar todo un
 /// workspace, cambiar de workspace cerrando las anteriores, salida completa de la app) —
 /// en esos casos se quiere preservar todo para la próxima restauración. El cierre de UNA
 /// sola ventana mientras el resto del workspace sigue vivo pasa por
 /// `forget_or_close_single_window` en cambio (ver más abajo), no por acá.
-#[tauri::command]
-pub fn db_mark_window_closed(label: String, db: tauri::State<DbConnection>) -> Result<(), String> {
+pub(crate) fn db_mark_window_closed_now(
+    label: String,
+    db: &crate::database::DbConnection,
+) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
 
     let window_id: Option<String> = conn
-        .query_row("SELECT id FROM windows WHERE label = ?1", [&label], |r| r.get(0))
+        .query_row("SELECT id FROM windows WHERE label = ?1", [&label], |r| {
+            r.get(0)
+        })
         .optional()
         .map_err(|e| e.to_string())?;
 
@@ -308,12 +354,25 @@ pub fn db_mark_window_closed(label: String, db: tauri::State<DbConnection>) -> R
     // Las tabs siguen guardadas (la ventana es restaurable) pero ya no están corriendo:
     // sus symlinks de skills salen del proyecto para no filtrarse al próximo workspace
     // que abra esa misma carpeta. Se recrean al restaurar, vía `reconcile_tab_skills`.
-    if let Some(window_id) = window_id {
-        let dirs = crate::skills::link_dirs_of_window(&conn, &window_id);
-        crate::skills::reconcile_link_dirs(&conn, &dirs);
-    }
+    let dirs = match window_id {
+        Some(window_id) => crate::skills::link_dirs_of_window(&conn, &window_id),
+        None => Vec::new(),
+    };
+    drop(conn);
+    crate::skills::reconcile_link_dirs_db(&db, &dirs);
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn db_mark_window_closed(
+    label: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db_mark_window_closed_now(label, &db))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Se usa cuando el usuario cierra explícitamente UNA sola ventana (no un cierre en
@@ -329,7 +388,10 @@ pub fn db_mark_window_closed(label: String, db: tauri::State<DbConnection>) -> R
 /// (todavía quedan otras ventanas del mismo workspace) o si el label no existía. Es
 /// informativo: cerrar una ventana nunca abre otra en su lugar (ver
 /// `close_and_forget_window`).
-pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<Option<String>, String> {
+pub fn forget_or_close_single_window(
+    db: &DbConnection,
+    label: &str,
+) -> Result<Option<String>, String> {
     // Antes del lock: si esta ventana pierde sus tabs, hay que resolverles la sesión, y eso
     // lee disco y puede lanzar procesos (ver `ResolvedSession`).
     let resolved = resolve_tabs_of_window(db, label);
@@ -346,7 +408,9 @@ pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<O
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let Some((window_id, workspace_id)) = row else { return Ok(None) };
+    let Some((window_id, workspace_id)) = row else {
+        return Ok(None);
+    };
 
     // Los directorios de skills de sus tabs se anotan antes de tocar nada: en ambas ramas
     // (borrar la ventana o marcarla cerrada) esas tabs dejan de estar vivas y sus
@@ -380,12 +444,14 @@ pub fn forget_or_close_single_window(db: &DbConnection, label: &str) -> Result<O
 
         conn.execute("DELETE FROM windows WHERE id = ?1", [&window_id])
             .map_err(|e| e.to_string())?;
-        crate::skills::reconcile_link_dirs(&conn, &affected_dirs);
+        drop(conn);
+        crate::skills::reconcile_link_dirs_db(db, &affected_dirs);
         Ok(None)
     } else {
         conn.execute("UPDATE windows SET is_open = 0 WHERE id = ?1", [&window_id])
             .map_err(|e| e.to_string())?;
-        crate::skills::reconcile_link_dirs(&conn, &affected_dirs);
+        drop(conn);
+        crate::skills::reconcile_link_dirs_db(db, &affected_dirs);
         Ok(Some(workspace_id))
     }
 }
@@ -431,7 +497,11 @@ pub fn create_blank_window_row(db: &DbConnection, workspace_id: &str) -> Result<
 /// la ventana nativa actual — el label es único a nivel de proceso, así que hay que
 /// reasignarle uno libre antes de crear la ventana nueva, y el frontend de esa ventana
 /// nueva carga su estado justamente buscando por su propio label nativo.
-pub fn rename_window_label(db: &DbConnection, window_id: &str, new_label: &str) -> Result<(), String> {
+pub fn rename_window_label(
+    db: &DbConnection,
+    window_id: &str,
+    new_label: &str,
+) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE windows SET label = ?1 WHERE id = ?2",
@@ -445,14 +515,20 @@ pub fn rename_window_label(db: &DbConnection, window_id: &str, new_label: &str) 
 /// que se quedaron sin tabs (el usuario las cerró todas sin cerrar la ventana).
 pub fn count_tabs_for_window(db: &DbConnection, window_id: &str) -> Result<i64, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
-    conn.query_row("SELECT COUNT(*) FROM tabs WHERE window_id = ?1", [window_id], |row| row.get(0))
-        .map_err(|e| e.to_string())
+    conn.query_row(
+        "SELECT COUNT(*) FROM tabs WHERE window_id = ?1",
+        [window_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Igual que `resolve_closing_tabs`, para los cierres que se llevan una ventana entera.
 fn resolve_tabs_of_window(db: &DbConnection, label: &str) -> HashMap<String, ResolvedSession> {
     let ids: Vec<String> = {
-        let Ok(conn) = db.lock() else { return HashMap::new() };
+        let Ok(conn) = db.lock() else {
+            return HashMap::new();
+        };
         let Ok(mut stmt) = conn.prepare(
             "SELECT t.id FROM tabs t JOIN windows w ON w.id = t.window_id WHERE w.label = ?1",
         ) else {
@@ -463,10 +539,12 @@ fn resolve_tabs_of_window(db: &DbConnection, label: &str) -> HashMap<String, Res
         };
         rows.filter_map(|r| r.ok()).collect()
     };
-    ids.into_iter().map(|id| {
-        let resolved = resolve_for_archive(db, &id);
-        (id, resolved)
-    }).collect()
+    ids.into_iter()
+        .map(|id| {
+            let resolved = resolve_for_archive(db, &id);
+            (id, resolved)
+        })
+        .collect()
 }
 
 /// Borra las filas de ventana cerradas que no guardan ninguna tab.

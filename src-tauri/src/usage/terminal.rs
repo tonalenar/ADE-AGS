@@ -33,6 +33,27 @@ pub struct MissionTabTokens {
     pub estimate: Option<CostEstimate>,
 }
 
+type UsageTabRow = (
+    String, String, String, String, String, Option<String>, Option<String>, i64, Option<i64>, String,
+);
+type UsageLedgerRow = (
+    String, String, String, String, Option<String>, Option<i64>, Option<i64>, Option<f64>, Option<String>,
+);
+
+struct MissionUsageTabSnapshot {
+    row: UsageTabRow,
+    isolated: bool,
+    profile: Option<PathBuf>,
+    custom: bool,
+    custom_sessions_dir: Option<PathBuf>,
+}
+
+struct MissionUsageSnapshot {
+    mission: super::mission::MissionSnapshot,
+    tabs: Vec<MissionUsageTabSnapshot>,
+    ledger: Vec<UsageLedgerRow>,
+}
+
 pub(crate) fn path_key(path: &str) -> String {
     // Windows paths must compare identically even in Linux CI; Unix remains case sensitive.
     let normalized = path.replace('\\', "/").trim_end_matches('/').to_string();
@@ -202,15 +223,49 @@ fn codex_records(path: &Path, cwd: &str) -> Vec<(UsageRecord, Option<String>)> {
     out
 }
 
+#[cfg(test)]
 pub fn mission_tokens_for_conn(
     conn: &Connection,
     mission_id: &str,
 ) -> Result<MissionTokens, String> {
-    let mission = mission_snapshot(conn, mission_id)?;
     let boards = crate::canvas::load_boards()?;
-    capture_mission_tabs(conn, &boards)?;
+    let snapshot = mission_usage_snapshot(conn, mission_id, &boards)?;
+    mission_tokens_from_snapshot(mission_id, snapshot)
+}
+
+/// I/O de transcripts ocorre depois que o snapshot SQL foi copiado e o mutex foi solto.
+pub fn mission_tokens_for_db(
+    db: &crate::database::DbConnection,
+    mission_id: &str,
+) -> Result<MissionTokens, String> {
+    mission_tokens_for_db_with(db, mission_id, || {})
+}
+
+/// Como `mission_tokens_for_db`. `antes_do_io` roda no instante em que o mutex já foi solto
+/// e a leitura dos transcripts está para começar: o teste usa para provar isso.
+pub(crate) fn mission_tokens_for_db_with(
+    db: &crate::database::DbConnection,
+    mission_id: &str,
+    antes_do_io: impl FnOnce(),
+) -> Result<MissionTokens, String> {
+    let boards = crate::canvas::load_boards()?;
+    let snapshot = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        mission_usage_snapshot(&conn, mission_id, &boards)?
+    };
+    antes_do_io();
+    mission_tokens_from_snapshot(mission_id, snapshot)
+}
+
+fn mission_usage_snapshot(
+    conn: &Connection,
+    mission_id: &str,
+    boards: &crate::canvas::Boards,
+) -> Result<MissionUsageSnapshot, String> {
+    let mission = mission_snapshot(conn, mission_id)?;
+    capture_mission_tabs(conn, boards)?;
     let mut stmt = conn.prepare("SELECT tab_id,agent_id,label,kind,cwd,session_id,account_id,opened_at,closed_at,session_ids FROM mission_usage_tabs WHERE mission_id=?1 ORDER BY opened_at,tab_id").map_err(|e|e.to_string())?;
-    let rows = stmt
+    let rows: Vec<UsageTabRow> = stmt
         .query_map([mission_id], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -228,9 +283,76 @@ pub fn mission_tokens_for_conn(
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
+    // Chaves de cwd das abas da missão, guardadas antes de `rows` ser consumido abaixo.
+    let cwd_keys: Vec<String> = rows.iter().map(|candidate| path_key(&candidate.4)).collect();
+    let mut tabs = Vec::with_capacity(rows.len());
+    for row in rows {
+        let (id, agent, _, _, cwd, _, account, _, _, _) = &row;
+        // Cwd fallback is allowed only for a proven worktree and no competing terminal.
+        let isolated = conn
+            .query_row(
+                "SELECT COUNT(*) FROM mission_team_workspaces WHERE mission_id=?1 AND cwd=?2",
+                rusqlite::params![mission_id, cwd],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            == 1
+            && cwd_keys
+                .iter()
+                .filter(|key| key.as_str() == path_key(cwd))
+                .count()
+                == 1
+            && conn
+                .query_row(
+                    "SELECT COUNT(*) FROM tabs WHERE cwd=?1 AND id<>?2",
+                    rusqlite::params![cwd, id],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(1)
+                == 0;
+        let profile = account
+            .as_deref()
+            .and_then(|account_id| crate::accounts::dir_for_conn(conn, account_id))
+            .map(PathBuf::from);
+        let custom = crate::agents::find(conn, agent);
+        tabs.push(MissionUsageTabSnapshot {
+            row,
+            isolated,
+            profile,
+            custom: custom.is_some(),
+            custom_sessions_dir: custom.and_then(|agent| agent.resolved_sessions_dir()),
+        });
+    }
+    let mut stmt=conn.prepare("SELECT t.id,t.agent_id,t.title,t.cwd,t.session_id,t.tokens_in,t.tokens_out,t.cost_usd,t.model FROM tasks t JOIN runs r ON r.id=t.run_id WHERE r.mission_id=?1 ORDER BY t.id").map_err(|e|e.to_string())?;
+    let ledger = stmt
+        .query_map([mission_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, Option<i64>>(5)?,
+                r.get::<_, Option<i64>>(6)?,
+                r.get::<_, Option<f64>>(7)?,
+                r.get::<_, Option<String>>(8)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    Ok(MissionUsageSnapshot { mission, tabs, ledger })
+}
+
+fn mission_tokens_from_snapshot(
+    mission_id: &str,
+    snapshot: MissionUsageSnapshot,
+) -> Result<MissionTokens, String> {
+    let MissionUsageSnapshot { mission, tabs, ledger } = snapshot;
     let mut groups: BTreeMap<String, Vec<MissionTabTokens>> = BTreeMap::new();
     let mut owned_records = HashSet::new();
-    for (id, agent, label, kind, cwd, session, account, opened, closed, sessions) in &rows {
+    for tab_snapshot in &tabs {
+        let (id, agent, label, kind, cwd, session, _, opened, closed, sessions) = &tab_snapshot.row;
         let mut tab = MissionTabTokens {
             tab_id: id.clone(),
             agent_id: agent.clone(),
@@ -253,35 +375,10 @@ pub fn mission_tokens_for_conn(
             .unwrap_or_else(crate::util::now_ts)
             .min(closed.unwrap_or(i64::MAX));
         let sessions: Vec<String> = serde_json::from_str(sessions).unwrap_or_default();
-        // Cwd fallback is allowed only for a proven worktree and no competing terminal.
-        let isolated = conn
-            .query_row(
-                "SELECT COUNT(*) FROM mission_team_workspaces WHERE mission_id=?1 AND cwd=?2",
-                rusqlite::params![mission_id, cwd],
-                |r| r.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-            == 1
-            && rows
-                .iter()
-                .filter(|r| path_key(&r.4) == path_key(cwd))
-                .count()
-                == 1
-            && conn
-                .query_row(
-                    "SELECT COUNT(*) FROM tabs WHERE cwd=?1 AND id<>?2",
-                    rusqlite::params![cwd, id],
-                    |r| r.get::<_, i64>(0),
-                )
-                .unwrap_or(1)
-                == 0;
+        let isolated = tab_snapshot.isolated;
         if start.is_some() && (session.is_some() || isolated) {
             let home = dirs::home_dir().unwrap_or_default();
-            let profile = account
-                .as_deref()
-                .and_then(|a| crate::accounts::dir_for_conn(conn, a))
-                .map(PathBuf::from);
-            let custom = crate::agents::find(conn, agent);
+            let profile = tab_snapshot.profile.clone();
             let roots = if agent == "claude-code" {
                 vec![profile.unwrap_or_else(|| home.join(".claude"))]
             } else if agent == "codex" {
@@ -296,9 +393,9 @@ pub fn mission_tokens_for_conn(
                 });
                 vec![data.join("opencode/opencode.db")]
             } else {
-                custom
-                    .as_ref()
-                    .and_then(|c| c.resolved_sessions_dir())
+                tab_snapshot
+                    .custom_sessions_dir
+                    .clone()
                     .into_iter()
                     .collect()
             };
@@ -322,7 +419,7 @@ pub fn mission_tokens_for_conn(
                     codex_records(&file, cwd)
                 } else {
                     let records = read_transcript_priced(&file, cwd);
-                    if records.is_empty() && custom.is_some() {
+                    if records.is_empty() && tab_snapshot.custom {
                         codex_records(&file, cwd)
                     } else {
                         records
@@ -379,25 +476,7 @@ pub fn mission_tokens_for_conn(
         groups.entry(agent.clone()).or_default().push(tab);
     }
     // Headless ledger rows are already task/session scoped. Never also read their transcripts.
-    let mut stmt=conn.prepare("SELECT t.id,t.agent_id,t.title,t.cwd,t.session_id,t.tokens_in,t.tokens_out,t.cost_usd,t.model FROM tasks t JOIN runs r ON r.id=t.run_id WHERE r.mission_id=?1 ORDER BY t.id").map_err(|e|e.to_string())?;
-    let ledger = stmt
-        .query_map([mission_id], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, Option<String>>(4)?,
-                r.get::<_, Option<i64>>(5)?,
-                r.get::<_, Option<i64>>(6)?,
-                r.get::<_, Option<f64>>(7)?,
-                r.get::<_, Option<String>>(8)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-    for row in ledger {
-        let (id, agent, label, cwd, session, input, output, cost, model) =
-            row.map_err(|e| e.to_string())?;
+    for (id, agent, label, cwd, session, input, output, cost, model) in ledger {
         // A task reopened as a terminal is a single session, not a second bill.
         if let Some(tab) = groups.get_mut(&agent).and_then(|tabs| {
             tabs.iter_mut()
@@ -537,6 +616,25 @@ mod tests {
         );
         crate::canvas::Boards::from([("main|/repo#m:m".into(), b)])
     }
+    #[test]
+    fn tokens_da_missao_leem_transcripts_sem_o_mutex_do_banco() {
+        // A sonda roda quando o snapshot já saiu do banco e a leitura do disco vai começar.
+        // Na mesma thread, try_lock só funciona se o mutex estiver solto: sem tempo, sem espera.
+        let db: crate::database::DbConnection = std::sync::Arc::new(std::sync::Mutex::new(db()));
+        {
+            let c = db.lock().unwrap();
+            add_tab(&c, "custom", "unknown", "/repo", Some("s"));
+        }
+        let probe = db.clone();
+        let mut io_iniciado = false;
+        let result = mission_tokens_for_db_with(&db, "m", || {
+            assert!(probe.try_lock().is_ok(), "transcripts lidos com o banco preso");
+            io_iniciado = true;
+        });
+        assert!(result.is_ok());
+        assert!(io_iniciado, "a fase de I/O não foi alcançada");
+    }
+
     #[test]
     fn closed_tabs_keep_identity_and_unknown_usage_is_null() {
         let c = db();

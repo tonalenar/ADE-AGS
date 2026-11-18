@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, HashSet};
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
+use crate::database::DbConnection;
+
 use super::active;
 use super::timings::{self, Span};
 use crate::util::now_ts;
@@ -68,6 +70,29 @@ struct Measurement {
     wall_ms: Option<i64>,
     cost_estimate: Option<f64>,
     agents: usize,
+}
+
+/// Eficiência lida numa conexão lateral de leitura. O mutex do banco do app só é tomado para
+/// descobrir o arquivo da base: as consultas (até 31 missões com seus spans) rodam fora dele.
+pub fn get_db(db: &DbConnection, mission_id: &str) -> Result<MissionEfficiency, String> {
+    get_db_with(db, mission_id, || {})
+}
+
+/// Como `get_db`. `antes_da_leitura` roda com o mutex já solto, quando a leitura lateral vai
+/// começar: os testes usam essa sonda para provar que o mutex está livre.
+pub(crate) fn get_db_with(
+    db: &DbConnection,
+    mission_id: &str,
+    antes_da_leitura: impl FnOnce(),
+) -> Result<MissionEfficiency, String> {
+    let path = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::memory::purge::main_database_file(&conn)
+            .ok_or("a base do app não tem arquivo para a leitura lateral")?
+    };
+    antes_da_leitura();
+    let side = crate::database::open_side_connection_at(&path).map_err(|e| e.to_string())?;
+    get(&side, mission_id)
 }
 
 /// Calcula as métricas de uma missão e compara com até 30 missões concluídas recentes do

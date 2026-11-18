@@ -1050,13 +1050,20 @@ pub(super) fn render(entry: &SessionHistoryEntry, workspace: Option<&str>, trans
 /// Genera el markdown de una sesión archivada. Se expone aparte de `export_session_markdown`
 /// para poder previsualizarlo sin escribir a disco.
 #[tauri::command]
-pub fn session_markdown(
+pub async fn session_markdown(
     history_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<String, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || session_markdown_sync(&history_id, &db))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn session_markdown_sync(history_id: &str, db: &DbConnection) -> Result<String, String> {
     let (entry, workspace) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let entry = crate::database::session_history_entry(&conn, &history_id)?
+        let entry = crate::database::session_history_entry(&conn, history_id)?
             .ok_or_else(|| "Esta sesión ya no está en el historial".to_string())?;
         let workspace = crate::database::workspace_name(&conn, &entry.workspace_id);
         (entry, workspace)
@@ -1088,7 +1095,7 @@ pub fn session_markdown(
             .map(|id| opencode_transcript(id, profile.as_deref()))
             .unwrap_or_default()
     } else {
-        super::title::session_file_for(
+        super::title::session_file_for_db(
             &entry.agent_id,
             &entry.cwd,
             entry.session_id.as_deref(),
@@ -1103,11 +1110,16 @@ pub fn session_markdown(
 }
 
 #[tauri::command]
-pub fn export_session_markdown(
+pub async fn export_session_markdown(
     history_id: String,
     dest_path: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
-    let markdown = session_markdown(history_id, db)?;
-    std::fs::write(&dest_path, markdown).map_err(|e| e.to_string())
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let markdown = session_markdown_sync(&history_id, &db)?;
+        std::fs::write(&dest_path, markdown).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }

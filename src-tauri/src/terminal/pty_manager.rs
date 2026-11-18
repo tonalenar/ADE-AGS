@@ -1129,7 +1129,9 @@ fn criar_pty(args: PtyCreateArgs, app: AppHandle) -> Result<u32, String> {
     {
         let db = app.try_state::<crate::database::DbConnection>()
             .ok_or("Não foi possível conferir a política local deste projeto.")?;
-        let conn = db.lock().map_err(|error| error.to_string())?;
+        let policy_agent = agent_id.to_string();
+        let policy_cwd = cwd.clone();
+        let conn = db.inner().lock().map_err(|error| error.to_string())?;
         if let Some(tab_id) = tab_id.as_deref() {
             let stored: Option<(String, String)> = conn
                 .query_row(
@@ -1140,12 +1142,12 @@ fn criar_pty(args: PtyCreateArgs, app: AppHandle) -> Result<u32, String> {
                 .optional()
                 .map_err(|error| error.to_string())?;
             if let Some((stored_agent_id, _stored_cwd)) = stored
-                && stored_agent_id != agent_id
+                && stored_agent_id != policy_agent
             {
                 return Err("O provedor da aba mudou antes de o terminal iniciar. Tente novamente.".into());
             }
         }
-        crate::project_chat_policy::ensure_agent_enabled(&conn, &cwd, agent_id)?;
+        crate::project_chat_policy::ensure_agent_enabled(&conn, &policy_cwd, &policy_agent)?;
     }
     if extra_args.len() > 8 || extra_args.iter().any(|arg| arg.len() > 8_192) {
         return Err("Overrides de sessão excedem o limite permitido.".into());

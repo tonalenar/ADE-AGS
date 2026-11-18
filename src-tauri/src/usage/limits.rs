@@ -109,44 +109,34 @@ fn codex(root: &Path, account: Option<String>) -> PlanLimits {
     }
 }
 
-pub fn for_conn(conn: &rusqlite::Connection) -> Result<Vec<PlanLimits>, String> {
+fn account_roots(conn: &rusqlite::Connection) -> Result<Vec<(String, String, String)>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id,agent_id,dir FROM agent_accounts WHERE agent_id IN ('claude-code','codex')")
+        .map_err(|e| e.to_string())?;
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())
+}
+
+fn limits_for_db(
+    db: &crate::database::DbConnection,
+    mut scan: impl FnMut(&Path, Option<String>) -> PlanLimits,
+) -> Result<Vec<PlanLimits>, String> {
+    let accounts = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        account_roots(&conn)?
+    };
     let home = dirs::home_dir().ok_or("Home indisponível")?;
     let mut out = vec![
-        PlanLimits {
-            provider: "claude".into(),
-            account_id: None,
-            measured: false,
-            windows: vec![],
-            observed_at: None,
-        },
-        codex(&home.join(".codex"), None),
+        PlanLimits { provider: "claude".into(), account_id: None, measured: false, windows: vec![], observed_at: None },
+        scan(&home.join(".codex"), None),
     ];
-    let mut stmt = conn
-        .prepare(
-            "SELECT id,agent_id,dir FROM agent_accounts WHERE agent_id IN ('claude-code','codex')",
-        )
-        .map_err(|e| e.to_string())?;
-    for row in stmt
-        .query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?
-    {
-        let (id, agent, dir) = row.map_err(|e| e.to_string())?;
+    for (id, agent, dir) in accounts {
         out.push(if agent == "codex" {
-            codex(Path::new(&dir), Some(id))
+            scan(Path::new(&dir), Some(id))
         } else {
-            PlanLimits {
-                provider: "claude".into(),
-                account_id: Some(id),
-                measured: false,
-                windows: vec![],
-                observed_at: None,
-            }
+            PlanLimits { provider: "claude".into(), account_id: Some(id), measured: false, windows: vec![], observed_at: None }
         });
     }
     Ok(out)
@@ -158,31 +148,62 @@ pub async fn plan_limits(
     db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Vec<PlanLimits>, String> {
     let db = db.inner().clone();
-    tauri::async_runtime::spawn_blocking(move|| {
+    tauri::async_runtime::spawn_blocking(move || {
+        // A leitura dos transcripts e do canvas acontece sem o mutex do banco.
+        let limits = limits_for_db(&db, codex)?;
         let boards = crate::canvas::load_boards()?;
-        let c=db.lock().map_err(|e|e.to_string())?;
-        super::capture_mission_tabs(&c, &boards)?;
-        let limits=for_conn(&c)?;
-        for limit in &limits {
-            let agent=if limit.provider=="codex" {"codex"} else {"claude-code"};
-            for window in limit.windows.iter().filter(|w|w.used_pct.is_some_and(|p|p>=80.0)) {
-                let mut stmt=c.prepare("SELECT DISTINCT u.mission_id FROM mission_usage_tabs u JOIN missions m ON m.id=u.mission_id JOIN tabs t ON t.id=u.tab_id WHERE u.agent_id=?1 AND u.account_id IS ?2 AND m.status NOT IN ('done','cancelled','failed')").map_err(|e|e.to_string())?;
-                for row in stmt.query_map(rusqlite::params![agent,limit.account_id],|r|r.get::<_,String>(0)).map_err(|e|e.to_string())? {
-                    let mission=row.map_err(|e|e.to_string())?;
-                    let key=format!("mission.plan.warning.{mission}.{agent}.{:?}.{}.{:?}",limit.account_id,window.label,window.resets_at);
-                    if c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES (?1,'1')",[key]).map_err(|e|e.to_string())?>0 {
-                        super::warn_lead(&app,&mission,&format!("[AGS] {agent}: janela {} a {:.0}% do limite do plano (conta {:?}).",window.label,window.used_pct.unwrap_or(0.0),limit.account_id));
+        let warnings = {
+            let c = db.lock().map_err(|e| e.to_string())?;
+            super::capture_mission_tabs(&c, &boards)?;
+            let mut warnings = Vec::new();
+            for limit in &limits {
+                let agent = if limit.provider == "codex" { "codex" } else { "claude-code" };
+                for window in limit.windows.iter().filter(|w| w.used_pct.is_some_and(|p| p >= 80.0)) {
+                    let mut stmt = c.prepare(
+                        "SELECT DISTINCT u.mission_id FROM mission_usage_tabs u JOIN missions m ON m.id=u.mission_id JOIN tabs t ON t.id=u.tab_id WHERE u.agent_id=?1 AND u.account_id IS ?2 AND m.status NOT IN ('done','cancelled','failed')"
+                    ).map_err(|e| e.to_string())?;
+                    for row in stmt.query_map(rusqlite::params![agent, limit.account_id], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())? {
+                        let mission = row.map_err(|e| e.to_string())?;
+                        let key = format!("mission.plan.warning.{mission}.{agent}.{:?}.{}.{:?}", limit.account_id, window.label, window.resets_at);
+                        if c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES (?1,'1')", [key]).map_err(|e| e.to_string())? > 0 {
+                            warnings.push((mission, format!("[AGS] {agent}: janela {} a {:.0}% do limite do plano (conta {:?}).", window.label, window.used_pct.unwrap_or(0.0), limit.account_id)));
+                        }
                     }
                 }
             }
+            warnings
+        };
+        for (mission, message) in warnings {
+            super::warn_lead(&app, &mission, &message);
         }
         Ok(limits)
-    }).await.map_err(|e|e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn varre_transcripts_sem_segurar_o_banco() {
+        let db = Arc::new(Mutex::new(crate::database::test_db()));
+        let limits = limits_for_db(&db, |root, account| {
+            assert!(db.try_lock().is_ok(), "a varredura não pode segurar o banco");
+            PlanLimits {
+                provider: if root.ends_with(".codex") { "codex" } else { "claude" }.into(),
+                account_id: account,
+                measured: false,
+                windows: vec![],
+                observed_at: None,
+            }
+        })
+        .unwrap();
+        assert_eq!(limits.len(), 2);
+    }
+
     #[test]
     fn structured_limits_expire_and_invalid_values_are_unknown() {
         let v = serde_json::json!({"primary":{"used_percent":80,"window_minutes":300,"resets_at":200},"secondary":{"used_percent":95,"window_minutes":10080,"resets_at":300}});

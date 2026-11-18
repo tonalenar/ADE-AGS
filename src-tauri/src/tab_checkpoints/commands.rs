@@ -81,9 +81,16 @@ pub fn tab_checkpoint_auto(app: AppHandle, tab_id: String, cwd: String, message:
 }
 
 /// "Marcar ponto": cria mesmo com os pontos automáticos desligados; sem mudanças, devolve o último.
-#[tauri::command(async)]
-pub fn tab_checkpoint_create(app: AppHandle, tab_id: String, cwd: String, label: Option<String>) -> Result<Capture, String> {
-    let db = db_of(&app)?;
+#[tauri::command]
+pub async fn tab_checkpoint_create(app: AppHandle, tab_id: String, cwd: String, label: Option<String>) -> Result<Capture, String> {
+    tauri::async_runtime::spawn_blocking(move || tab_checkpoint_create_now(&app, tab_id, cwd, label))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Corpo síncrono do comando `tab_checkpoint_create`: roda numa thread de bloqueio, nunca no runtime async.
+fn tab_checkpoint_create_now(app: &AppHandle, tab_id: String, cwd: String, label: Option<String>) -> Result<Capture, String> {
+    let db = db_of(app)?;
     let label = label.unwrap_or_default();
     let label = label.trim();
     let req = Request {
@@ -96,7 +103,7 @@ pub fn tab_checkpoint_create(app: AppHandle, tab_id: String, cwd: String, label:
     };
     let out = service::capture(&db, &req)?;
     if matches!(out, Capture::Created { .. }) {
-        notify(&app, &tab_id);
+        notify(app, &tab_id);
     }
     Ok(out)
 }
@@ -106,9 +113,16 @@ pub fn tab_checkpoints_list(app: AppHandle, tab_id: String) -> Result<Vec<TabChe
     service::list(&db_of(&app)?, &tab_id)
 }
 
-#[tauri::command(async)]
-pub fn tab_checkpoint_diff(app: AppHandle, id: String) -> Result<DiffView, String> {
-    service::diff_since(&db_of(&app)?, &id)
+#[tauri::command]
+pub async fn tab_checkpoint_diff(app: AppHandle, id: String) -> Result<DiffView, String> {
+    tauri::async_runtime::spawn_blocking(move || tab_checkpoint_diff_now(&app, id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Corpo síncrono do comando `tab_checkpoint_diff`: roda numa thread de bloqueio, nunca no runtime async.
+fn tab_checkpoint_diff_now(app: &AppHandle, id: String) -> Result<DiffView, String> {
+    service::diff_since(&db_of(app)?, &id)
 }
 
 /// As tarefas da frota rodando agora e a pasta de cada uma.
@@ -121,28 +135,49 @@ fn running_tasks(db: &DbConnection) -> Vec<(String, String)> {
 }
 
 /// "Voltar até aqui". Com outra aba ou tarefa na mesma pasta e sem `force`, só devolve quem é.
-#[tauri::command(async)]
-pub fn tab_checkpoint_restore(app: AppHandle, id: String, force: bool) -> Result<Restore, String> {
-    let db = db_of(&app)?;
+#[tauri::command]
+pub async fn tab_checkpoint_restore(app: AppHandle, id: String, force: bool) -> Result<Restore, String> {
+    tauri::async_runtime::spawn_blocking(move || tab_checkpoint_restore_now(&app, id, force))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Corpo síncrono do comando `tab_checkpoint_restore`: roda numa thread de bloqueio, nunca no runtime async.
+fn tab_checkpoint_restore_now(app: &AppHandle, id: String, force: bool) -> Result<Restore, String> {
+    let db = db_of(app)?;
     let tasks = running_tasks(&db);
     let out = service::restore(&db, &id, force, &crate::terminal::live_tab_dirs(), &tasks)?;
     if let Some(safety) = &out.safety {
-        notify(&app, &safety.tab_id);
+        notify(app, &safety.tab_id);
     }
     Ok(out)
 }
 
 /// Apaga todos os pontos de uma aba.
-#[tauri::command(async)]
-pub fn tab_checkpoints_delete(app: AppHandle, tab_id: String) -> Result<usize, String> {
-    let n = service::remove_tab(&db_of(&app)?, &tab_id)?;
-    notify(&app, &tab_id);
+#[tauri::command]
+pub async fn tab_checkpoints_delete(app: AppHandle, tab_id: String) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || tab_checkpoints_delete_now(&app, tab_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Corpo síncrono do comando `tab_checkpoints_delete`: roda numa thread de bloqueio, nunca no runtime async.
+fn tab_checkpoints_delete_now(app: &AppHandle, tab_id: String) -> Result<usize, String> {
+    let n = service::remove_tab(&db_of(app)?, &tab_id)?;
+    notify(app, &tab_id);
     Ok(n)
 }
 
 /// Limpa os pontos das abas fechadas de vez.
-#[tauri::command(async)]
-pub fn tab_checkpoints_prune(app: AppHandle) -> Result<usize, String> {
+#[tauri::command]
+pub async fn tab_checkpoints_prune(app: AppHandle) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || tab_checkpoints_prune_now(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Corpo síncrono do comando `tab_checkpoints_prune`: roda numa thread de bloqueio, nunca no runtime async.
+fn tab_checkpoints_prune_now(app: &AppHandle) -> Result<usize, String> {
     let alive: Vec<String> = crate::terminal::live_tab_dirs().into_iter().map(|(tab, _)| tab).collect();
-    service::prune(&db_of(&app)?, &alive, crate::util::now_ts_ms())
+    service::prune(&db_of(app)?, &alive, crate::util::now_ts_ms())
 }

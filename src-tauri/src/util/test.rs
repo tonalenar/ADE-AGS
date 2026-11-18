@@ -284,6 +284,7 @@ mod launch {
     use super::temp_dir;
 
     /// Los argumentos que un prompt real puede traer y que `cmd.exe` interpretaría.
+    #[cfg(windows)]
     pub(super) fn hostile_args() -> Vec<String> {
         [
             "linha 1\nlinha 2\n\n\"aspas\"",

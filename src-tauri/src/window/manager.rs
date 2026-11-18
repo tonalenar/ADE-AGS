@@ -126,12 +126,12 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
     // que hubiera dejado otro workspace en esas mismas carpetas. Cada tab lo re-verifica
     // igual antes de lanzar su proceso (`reconcile_tab_skills`), pero hacerlo acá es lo
     // que permite que el health check post-apertura no vea todo como "missing".
-    {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        for w in rows.iter() {
-            let dirs = crate::skills::link_dirs_of_window(&conn, &w.id);
-            crate::skills::reconcile_link_dirs(&conn, &dirs);
-        }
+    for w in rows.iter() {
+        let dirs = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            crate::skills::link_dirs_of_window(&conn, &w.id)
+        };
+        crate::skills::reconcile_link_dirs_db(&db, &dirs);
     }
 
     Ok(criadas)
@@ -207,7 +207,7 @@ pub async fn open_workspace(
     // cayó, las filas quedan en `is_open = 1` sin ninguna ventana real detrás, y confiar en
     // la columna haría que "abrir workspace" no hiciera nada visible.
     let already_live =
-        database::db_get_workspace_windows(workspace_id.clone(), app.state::<DbConnection>())?;
+        database::db_get_workspace_windows_now(workspace_id.clone(), app.state::<DbConnection>().inner())?;
     let live_window = already_live
         .iter()
         .find_map(|row| app.get_webview_window(&row.label));
@@ -241,6 +241,15 @@ pub async fn open_workspace(
         }
     }
 
+    // Si el workspace no tenía filas (0 ventanas guardadas) o todas sus filas eran
+    // filas vacías que `restore_windows` se saltó, no quedó ninguna ventana viva
+    // para este workspace pese a haberlo "abierto" — se le abre una en blanco en vez de
+    // dejar al usuario sin nada visible.
+    let live_now = database::db_get_workspace_windows_now(workspace_id.clone(), app.state::<DbConnection>().inner())?;
+    if live_now.is_empty() {
+        spawn_blank_window(&app, &db, &workspace_id)?;
+    }
+
     let _ = app.emit("cc-workspace-changed", ());
     Ok(())
 }
@@ -256,7 +265,7 @@ pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String
     let default_id = database::DEFAULT_WORKSPACE_ID;
 
     let open_rows =
-        database::db_get_workspace_windows(default_id.to_string(), app.state::<DbConnection>())?;
+        database::db_get_workspace_windows_now(default_id.to_string(), app.state::<DbConnection>().inner())?;
     for w in &open_rows {
         if let Some(win) = app.get_webview_window(&w.label) {
             let _ = super::close_guard::close_now(&win);

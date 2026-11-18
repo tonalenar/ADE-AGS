@@ -171,6 +171,17 @@ pub fn create_run_with_memory_snapshot(
     conn: &Connection, workspace_id: &str, mission_id: Option<&str>, objective: &str,
     cwd: &str, max_parallel: i64, budget_usd: Option<f64>,
 ) -> Result<Run, String> {
+    let repository_commit = crate::memory::repo::current_commit(conn, workspace_id);
+    create_run_with_memory_snapshot_and_commit(
+        conn, workspace_id, mission_id, objective, cwd, max_parallel, budget_usd, repository_commit,
+    )
+}
+
+/// Cria um Run usando provenance calculada antes da transação que grava o snapshot.
+pub fn create_run_with_memory_snapshot_and_commit(
+    conn: &Connection, workspace_id: &str, mission_id: Option<&str>, objective: &str,
+    cwd: &str, max_parallel: i64, budget_usd: Option<f64>, repository_commit: Option<String>,
+) -> Result<Run, String> {
     // A standalone SAVEPOINT starts a deferred transaction. Reserve the writer
     // before reading memory; caller-owned transactions retain their own lifetime.
     let transaction = if conn.is_autocommit() {
@@ -182,7 +193,7 @@ pub fn create_run_with_memory_snapshot(
         conn.execute("INSERT INTO runs(id,workspace_id,mission_id,objective,cwd,status,max_parallel,budget_usd,created_at)
             VALUES(?1,?2,?3,?4,?5,'running',?6,?7,?8)",
             rusqlite::params![id,workspace_id,mission_id,objective,cwd,max_parallel,budget_usd,now_ts()]).map_err(|e| e.to_string())?;
-        crate::memory::snapshot_run(conn, &id, workspace_id, mission_id)?;
+        crate::memory::snapshot_run_with_commit(conn, &id, workspace_id, mission_id, repository_commit)?;
         run_by_id(conn, &id)?.ok_or_else(|| "Run was not saved".to_string())
     })();
     match result {
@@ -634,17 +645,6 @@ pub fn update_run_limits(
         .map_err(|e| e.to_string())?;
     }
     Ok(())
-}
-
-/// Cancela una tarea que todavía esperaba turno.
-pub fn cancel_one_pending(conn: &Connection, task_id: &str) -> Result<bool, String> {
-    let n = conn
-        .execute(
-            "UPDATE tasks SET status = ?1, ended_at = ?2 WHERE id = ?3 AND status = ?4",
-            rusqlite::params![status::CANCELLED, now_ts(), task_id, status::PENDING],
-        )
-        .map_err(|e| e.to_string())?;
-    Ok(n > 0)
 }
 
 pub fn set_run_objective(conn: &Connection, run_id: &str, objective: &str) -> Result<(), String> {
@@ -1165,7 +1165,9 @@ pub fn fact_body_chunk(
 
 // ── Cerrar ──────────────────────────────────────────────────────
 
-/// La tarea corre en un worktree: su `cwd` pasa a ser el de adentro.
+/// La tarea corre en un worktree: su `cwd` pasa a ser el de adentro. Só para teste; a isolação
+/// de produção grava com `set_worktree_if_status`.
+#[cfg(test)]
 pub fn set_worktree(
     conn: &Connection,
     task_id: &str,
@@ -1179,6 +1181,25 @@ pub fn set_worktree(
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Só grava se a tarefa segue no estado esperado e ainda não tem worktree: duas isolações
+/// concorrentes não sobrescrevem uma à outra (a que chega depois recebe `false`).
+pub fn set_worktree_if_status(
+    conn: &Connection,
+    task_id: &str,
+    expected_status: &str,
+    cwd: &str,
+    root: &str,
+    branch: &str,
+) -> Result<bool, String> {
+    let changed = conn
+        .execute(
+            "UPDATE tasks SET cwd = ?1, worktree_path = ?2, branch = ?3 WHERE id = ?4 AND status = ?5 AND worktree_path IS NULL",
+            rusqlite::params![cwd, root, branch, task_id, expected_status],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(changed == 1)
 }
 
 /// `(carpeta del proyecto, cwd de la tarea, raíz del worktree)`, si corre en uno.
@@ -1368,14 +1389,34 @@ pub(crate) fn take_recoverable_logs() -> Vec<String> {
 
 /// Grava o fim. Se a escrita falha, o erro fica no log e a tarefa aberta passa a
 /// `failed` com essa mensagem, em vez de seguir `running` sem rastro.
+/// Só para teste: em produção o gate completo tem que sair do lock (ver `persist_finish_db`).
+#[cfg(test)]
 pub fn persist_finish(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> TaskOutcome {
-    match finish_task(conn, task_id, outcome) {
+    persist_finish_inner(conn, task_id, outcome, None)
+}
+
+pub fn persist_finish_with_gate(
+    conn: &Connection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+    cache_green: bool,
+) -> TaskOutcome {
+    persist_finish_inner(conn, task_id, outcome, Some(cache_green))
+}
+
+fn persist_finish_inner(
+    conn: &Connection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+    cache_green: Option<bool>,
+) -> TaskOutcome {
+    match finish_task_with_gate(conn, task_id, outcome, cache_green, &|| {}) {
         Ok(()) => outcome.clone(),
         Err(error) => {
             let message = format!("erro recuperável ao gravar o fim da tarefa {task_id}: {error}");
             log_recoverable(&message);
             let failed = TaskOutcome::failed(message);
-            if let Err(again) = finish_task(conn, task_id, &failed) {
+            if let Err(again) = finish_task_with_gate(conn, task_id, &failed, cache_green, &|| {}) {
                 log_recoverable(&format!(
                     "erro recuperável ao gravar o fim da tarefa {task_id}: a tarefa segue aberta ({again})"
                 ));
@@ -1393,18 +1434,55 @@ pub fn persist_finish(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -
 /// tarea que falla AL LANZARSE (un binario que no está, una cuenta borrada) nunca llegó a
 /// correr, y sin eso se quedaría en `ready` para siempre.
 pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> Result<(), String> {
+    finish_task_with_gate(conn, task_id, outcome, None, &|| {})
+}
+
+/// Grava o fim da tarefa a partir do banco. Quem chama não pode ter o lock: o gate completo
+/// (git) é avaliado antes de travar.
+pub fn finish_task_db(db: &DbConnection, task_id: &str, outcome: &TaskOutcome) -> Result<(), String> {
+    finish_task_db_with(db, task_id, outcome, &|| {})
+}
+
+/// Como `persist_finish`, a partir do banco: o gate completo sai do lock.
+pub fn persist_finish_db(db: &DbConnection, task_id: &str, outcome: &TaskOutcome) -> TaskOutcome {
+    let cache_green = full_gate_cache_green_for_outcome(db, task_id, outcome).unwrap_or(false);
+    let Ok(conn) = db.lock() else {
+        eprintln!("[harness] erro recuperável ao gravar o fim da tarefa {task_id}: o banco não pôde ser travado");
+        return outcome.clone();
+    };
+    persist_finish_with_gate(&conn, task_id, outcome, cache_green)
+}
+
+pub(crate) fn finish_task_db_with(
+    db: &DbConnection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+    antes_do_io: &dyn Fn(),
+) -> Result<(), String> {
+    let cache_green = full_gate_cache_green_for_outcome_with(db, task_id, outcome, antes_do_io)?;
+    let conn = db.lock().map_err(|error| error.to_string())?;
+    finish_task_with_gate(&conn, task_id, outcome, Some(cache_green), antes_do_io)
+}
+
+fn finish_task_with_gate(
+    conn: &Connection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+    cache_green: Option<bool>,
+    antes_do_io: &dyn Fn(),
+) -> Result<(), String> {
     // Central finalization also covers IPC/runtime callers; no model-text heuristics.
     let mut outcome = outcome.clone();
     if outcome.ok {
         if let Some(task) = task_by_id(conn, task_id)? {
             // O verde já registrado no cache para esta árvore também é evidência (sem repetir a suíte).
-            let green_in_cache = || {
-                let dir = task.worktree_path.as_deref().unwrap_or(task.cwd.as_str());
-                crate::testspeed::run::full_gate_green(conn, std::path::Path::new(dir))
-            };
             if task.full_gate
                 && !super::fixrounds::full_gate_satisfied(outcome.result.as_deref().unwrap_or(""), task.structured_handoff.as_ref())
-                && !green_in_cache()
+                && !cache_green.unwrap_or_else(|| {
+                    antes_do_io();
+                    let dir = task.worktree_path.as_deref().unwrap_or(task.cwd.as_str());
+                    crate::testspeed::run::full_gate_green(conn, std::path::Path::new(dir))
+                })
             {
                 outcome.ok = false;
                 outcome.error = Some(super::fixrounds::MISSING_GATE.into());
@@ -1470,6 +1548,42 @@ pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> R
         .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+pub fn full_gate_cache_green_for_outcome(
+    db: &DbConnection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+) -> Result<bool, String> {
+    full_gate_cache_green_for_outcome_with(db, task_id, outcome, &|| {})
+}
+
+// `antes_do_io` roda logo antes do git do gate, com o banco solto.
+fn full_gate_cache_green_for_outcome_with(
+    db: &DbConnection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+    antes_do_io: &dyn Fn(),
+) -> Result<bool, String> {
+    if !outcome.ok {
+        return Ok(false);
+    }
+    let task = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        task_by_id(&conn, task_id)?
+    };
+    let Some(task) = task else { return Ok(false) };
+    if !task.full_gate
+        || super::fixrounds::full_gate_satisfied(
+            outcome.result.as_deref().unwrap_or(""),
+            task.structured_handoff.as_ref(),
+        )
+    {
+        return Ok(false);
+    }
+    let dir = task.worktree_path.as_deref().unwrap_or(task.cwd.as_str());
+    antes_do_io();
+    Ok(crate::testspeed::run::full_gate_green_db(db, std::path::Path::new(dir)))
 }
 
 /// Reconcilia tarefas deixadas pelo encerramento do app em uma única transação.

@@ -256,27 +256,33 @@ struct Row {
     state_hash: String,
 }
 
-pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
+pub struct ShadowSnapshot {
+    rows: Vec<Row>,
+    human: BTreeMap<(String, String), String>,
+}
+
+pub fn snapshot(conn: &Connection) -> Result<ShadowSnapshot, String> {
     migrate(conn).map_err(|error| error.to_string())?;
     let mut stmt = conn
         .prepare("SELECT point, heuristic, provider_decision, latency_ms, error, state_hash, provider FROM decision_shadow_log ORDER BY ts ASC, id ASC")
         .map_err(|error| error.to_string())?;
     let rows = stmt
-        .query_map([], |row| {
-            Ok(Row {
-                point: row.get(0)?,
-                heuristic: row.get(1)?,
-                provider_decision: row.get(2)?,
-                latency_ms: row.get(3)?,
-                error: row.get(4)?,
-                state_hash: row.get(5)?,
-                provider: row.get(6)?,
-            })
-        })
+        .query_map([], |row| Ok(Row {
+            point: row.get(0)?, heuristic: row.get(1)?, provider_decision: row.get(2)?,
+            latency_ms: row.get(3)?, error: row.get(4)?, state_hash: row.get(5)?, provider: row.get(6)?,
+        }))
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
+    Ok(ShadowSnapshot { rows, human: human_decisions(conn)? })
+}
 
+pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
+    report_from_snapshot(snapshot(conn)?)
+}
+
+pub fn report_from_snapshot(snapshot: ShadowSnapshot) -> Result<ShadowReport, String> {
+    let ShadowSnapshot { rows, human } = snapshot;
     let mut by_point: BTreeMap<(&str, &str), Vec<&Row>> = BTreeMap::new();
     for row in &rows {
         by_point
@@ -289,7 +295,7 @@ pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
         .map(|((point, provider), mine)| point_report(point, provider, &mine))
         .collect();
     let comparisons = comparisons(&rows);
-    let judged = judged(&rows, &human_decisions(conn)?);
+    let judged = judged(&rows, &human);
 
     let mut disagreements = Vec::new();
     for row in rows.iter().rev() {
@@ -545,6 +551,15 @@ fn comparisons(rows: &[Row]) -> Vec<Comparison> {
 
 pub fn export_csv(conn: &Connection) -> Result<String, String> {
     let report = report(conn)?;
+    export_csv_from_report(&report)
+}
+
+pub fn export_csv_from_snapshot(snapshot: ShadowSnapshot) -> Result<String, String> {
+    let report = report_from_snapshot(snapshot)?;
+    export_csv_from_report(&report)
+}
+
+fn export_csv_from_report(report: &ShadowReport) -> Result<String, String> {
     let mut csv = String::from(
         "tipo,ponto,provedor,total,concordancia,p50_ms,p95_ms,taxa_erro,taxa_timeout,comparadas,amostra_pequena\n",
     );

@@ -102,4 +102,11 @@ describe("RepoSyncNotice", () => {
     await act(async () => { listener({ payload: { ...failed, workspaceId: "other", phase: "failed", error: "ignored" } }); });
     expect(container.textContent).not.toContain("ignored");
   });
+
+  it("mostra falha global de recuperação recebida no boot", async () => {
+    await render();
+    const listener = sync.listen.mock.calls.find(([event]) => event === "cc-memory-repo-sync")?.[1] as (event: { payload: RepoSyncStatus }) => void;
+    await act(async () => { listener({ payload: { ...failed, workspaceId: "*", error: "recuperação pendente falhou" } }); });
+    expect(container.querySelector("[role='alert']")?.textContent).toContain("recuperação pendente falhou");
+  });
 });

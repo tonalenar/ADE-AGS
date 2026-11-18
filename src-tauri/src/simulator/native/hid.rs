@@ -195,15 +195,37 @@ fn clients() -> &'static Mutex<HashMap<String, Arc<Hid>>> {
     CLIENTS.get_or_init(Default::default)
 }
 
+fn get_or_create<T>(
+    clients: &Mutex<HashMap<String, Arc<T>>>,
+    udid: &str,
+    create: impl FnOnce() -> Result<T, String>,
+) -> Result<Arc<T>, String> {
+    if let Some(value) = clients.lock().map_err(|e| e.to_string())?.get(udid).cloned() {
+        return Ok(value);
+    }
+    let created = Arc::new(create()?);
+    let mut clients = clients.lock().map_err(|e| e.to_string())?;
+    Ok(clients.entry(udid.to_string()).or_insert(created).clone())
+}
+
 /// O cliente de HID do aparelho (criado na primeira vez).
 pub fn for_device(udid: &str, device: &Shared) -> Result<Arc<Hid>, String> {
-    let mut map = clients().lock().map_err(|e| e.to_string())?;
-    if let Some(hid) = map.get(udid) {
-        return Ok(hid.clone());
+    get_or_create(clients(), udid, || Hid::new(device))
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn abre_cliente_sem_segurar_o_mutex_global() {
+        let clients = Mutex::new(HashMap::<String, Arc<usize>>::new());
+        let result = get_or_create(&clients, "device", || {
+            assert!(clients.try_lock().is_ok(), "a abertura não pode segurar o mutex");
+            Ok(7)
+        });
+        assert_eq!(*result.unwrap(), 7);
     }
-    let hid = Arc::new(Hid::new(device)?);
-    map.insert(udid.to_string(), hid.clone());
-    Ok(hid)
 }
 
 /// Esquece o cliente (o aparelho desligou: o próximo boot precisa de outro).

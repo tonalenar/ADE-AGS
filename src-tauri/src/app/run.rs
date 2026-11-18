@@ -837,7 +837,7 @@ pub fn run() {
                     return;
                 }
                 if let Some(db) = window.app_handle().try_state::<DbConnection>() {
-                    let _ = crate::database::db_mark_window_closed(label, db);
+                    let _ = crate::database::db_mark_window_closed_now(label, db.inner());
                 }
                 // Cualquier cierre de ventana cambia el conteo de ventanas/tabs de algún
                 // workspace — se notifica a TODAS las ventanas (ej. el Home de otra

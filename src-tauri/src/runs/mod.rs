@@ -15,22 +15,26 @@ pub(crate) use adapters::codex_fast_service_tier;
 mod agents;
 mod antigravity;
 mod broker;
+pub mod checkpoints;
 mod context;
 pub(crate) mod execution_log;
-mod harness;
+#[cfg(test)]
+mod execution_log_test;
 pub(crate) mod failure;
 pub(crate) mod fixrounds;
 pub(crate) mod handoff;
+mod harness;
 pub(crate) mod ledger;
 pub(crate) mod model_discovery;
 pub(crate) mod oneshot;
+#[cfg(test)]
+mod opencode_models_test;
 pub mod orchestration;
 mod plan;
 pub(crate) mod policy;
-pub(crate) mod quota;
 pub(crate) mod pool_failover;
+pub(crate) mod quota;
 pub(crate) mod roster;
-pub mod checkpoints;
 pub(crate) mod routing;
 mod rules;
 pub mod sandbox;
@@ -39,14 +43,13 @@ pub(crate) mod store;
 pub(crate) mod supervisor;
 #[cfg(test)]
 mod test;
-#[cfg(test)]
-mod opencode_models_test;
-#[cfg(test)]
-mod execution_log_test;
 pub(crate) mod types;
 
 /// Delega a validação do schema ao adapter headless, que conhece as restrições da própria CLI.
-pub(crate) fn validate_result_schema_for_agent(agent_id: &str, schema: &serde_json::Value) -> Result<(), String> {
+pub(crate) fn validate_result_schema_for_agent(
+    agent_id: &str,
+    schema: &serde_json::Value,
+) -> Result<(), String> {
     if let Some(adapter) = agents::adapter_for(agent_id) {
         return adapter.validate_result_schema(schema);
     }
@@ -58,12 +61,12 @@ pub(crate) use adapters::{Codex, Gemini, Kimi, OpenCode};
 pub(crate) use agents::{ClaudeCode, HeadlessAgent};
 pub(crate) use antigravity::Antigravity;
 pub(crate) use context::delegated_prompt;
-pub(crate) use routing::Complexity;
-pub use store::sweep_orphans;
-pub use types::{Fact, Run, Task};
 pub use harness::HarnessExecutionGraph;
 #[cfg(test)]
 pub(crate) use harness::thread_execution_graph;
+pub(crate) use routing::Complexity;
+pub use store::sweep_orphans;
+pub use types::{Fact, Run, Task};
 
 use std::time::Duration;
 
@@ -81,18 +84,38 @@ fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
 
 /// Las tarjetas de un workspace, más recientes primero.
 #[tauri::command]
-pub fn run_list_tasks(
+pub async fn run_list_tasks(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<Task>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_list_tasks_now(&db, workspace_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_list_tasks_now(
+    db: &DbConnection,
+    workspace_id: String,
 ) -> Result<Vec<Task>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list_tasks(&conn, &workspace_id)
 }
 
 #[tauri::command]
-pub fn run_list_runs(
+pub async fn run_list_runs(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<Run>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_list_runs_now(&db, workspace_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_list_runs_now(
+    db: &DbConnection,
+    workspace_id: String,
 ) -> Result<Vec<Run>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list_runs(&conn, &workspace_id)
@@ -102,10 +125,21 @@ pub fn run_list_runs(
 /// `cursor` da resposta anterior), os eventos voltam só como delta; sem ele, ou com um cursor que o banco
 /// não reconhece, voltam inteiros com `reset`. Os nós voltam sempre atuais.
 #[tauri::command]
-pub fn run_list_harness_graph(
+pub async fn run_list_harness_graph(
     thread_id: String,
     after_cursor: Option<i64>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<HarnessExecutionGraph, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_list_harness_graph_now(&db, thread_id, after_cursor))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_list_harness_graph_now(
+    db: &DbConnection,
+    thread_id: String,
+    after_cursor: Option<i64>,
 ) -> Result<HarnessExecutionGraph, String> {
     let conn = db.lock().map_err(|error| error.to_string())?;
     harness::thread_execution_graph_since(&conn, &thread_id, after_cursor)
@@ -115,9 +149,19 @@ pub fn run_list_harness_graph(
 /// Os frames brutos continuam no JSONL; esta resposta aplica o adapter do provider e limita
 /// o histórico para manter a leitura do painel pequena e previsível.
 #[tauri::command]
-pub fn run_read_attempt_events(
+pub async fn run_read_attempt_events(
     attempt_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<types::AgentEvent>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_read_attempt_events_now(&db, attempt_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_read_attempt_events_now(
+    db: &DbConnection,
+    attempt_id: String,
 ) -> Result<Vec<types::AgentEvent>, String> {
     use std::collections::VecDeque;
     use std::io::{Read, Seek, SeekFrom};
@@ -153,10 +197,12 @@ pub fn run_read_attempt_events(
     let length = file.metadata().map_err(|error| error.to_string())?.len();
     let offset = length.saturating_sub(MAX_BYTES);
     if offset > 0 {
-        file.seek(SeekFrom::Start(offset)).map_err(|error| error.to_string())?;
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|error| error.to_string())?;
     }
     let mut bytes = Vec::with_capacity(length.saturating_sub(offset) as usize);
-    file.read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    file.read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
     if offset > 0 {
         if let Some(newline) = bytes.iter().position(|byte| *byte == b'\n') {
             bytes.drain(..=newline);
@@ -215,6 +261,27 @@ pub async fn run_start_task(
     let db = db_of(&app)?;
     let request = route_request(agent_id, model, complexity, account_id, auto_account);
     let assignment = assign(&db, request).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        run_start_task_now(&app, &db, assignment, workspace_id, cwd, title, prompt, complexity, budget_usd, isolate)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// Tudo o que é síncrono no lançamento (banco, git do worktree, supervisor) roda fora do runtime async.
+#[allow(clippy::too_many_arguments)]
+fn run_start_task_now(
+    app: &AppHandle,
+    db: &DbConnection,
+    assignment: routing::Assignment,
+    workspace_id: String,
+    cwd: String,
+    title: String,
+    prompt: String,
+    complexity: Option<routing::Complexity>,
+    budget_usd: Option<f64>,
+    isolate: bool,
+) -> Result<Task, String> {
     let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
 
     // O guard de atualização é de leitura e não atravessa um `.await` (não é `Send`): cada trecho síncrono o toma por
@@ -222,7 +289,9 @@ pub async fn run_start_task(
     let mut task = {
         let _update_guard = crate::agents::updates::activity_guard()?;
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
+        let tx =
+            rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| e.to_string())?;
         let run = store::create_run(&tx, &workspace_id, &title, &cwd)?;
         let task = store::create_task(
             &tx,
@@ -244,7 +313,7 @@ pub async fn run_start_task(
             },
         )?;
         pool_failover::record_task_pool(&tx, &task.id, assignment.pool_origin.as_ref())?;
-        tx.commit().map_err(|e|e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
         task
     };
 
@@ -253,34 +322,36 @@ pub async fn run_start_task(
     // no está, una cuenta borrada, una carpeta que no es un repo) es justo lo que hay que
     // mostrar.
     let fail = |task_id: &str, e: String| -> Result<Task, String> {
-        let conn = db.lock().map_err(|err| err.to_string())?;
-        store::finish_task(&conn, task_id, &types::TaskOutcome::failed(e.clone()))?;
+        store::finish_task_db(&db, task_id, &types::TaskOutcome::failed(e.clone()))?;
         Err(e)
     };
 
     if isolate {
         // O `git worktree add` pode levar dezenas de segundos num checkout grande: não roda no worker async.
-        let (db_iso, task_iso) = (db.clone(), task.clone());
-        let isolated = tauri::async_runtime::spawn_blocking(move || {
-            let _update_guard = crate::agents::updates::activity_guard()?;
-            worktrees_base().and_then(|base| isolate_task(&base, &db_iso, &task_iso))
-        })
-        .await
-        .map_err(|error| error.to_string())
-        .and_then(|result| result);
+        let isolated = match crate::agents::updates::activity_guard() {
+            Ok(_update_guard) => worktrees_base().and_then(|base| isolate_task(&base, db, &task)),
+            Err(error) => Err(error),
+        };
         match isolated {
             Ok(isolated) => task = isolated,
             Err(e) => return fail(&task.id, e),
         }
     }
 
-    // O guard do lançamento, tomado de novo depois do `.await` acima.
+    // A tarefa já existe: se a atividade do agente passou a ser bloqueada enquanto o worktree era preparado,
+    // ela precisa terminar como falha visível no histórico.
     let _update_guard = match crate::agents::updates::activity_guard() {
         Ok(guard) => guard,
         Err(e) => return fail(&task.id, e),
     };
-    let memory ={let conn=db.lock().map_err(|e|e.to_string())?; crate::memory::snapshot_context_for_run(&conn,&task.run_id)?};
-    let extras=supervisor::LaunchExtras {prompt:Some(format!("{}{memory}",task.prompt)), ..Default::default()};
+    let memory = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::memory::snapshot_context_for_run(&conn, &task.run_id)?
+    };
+    let extras = supervisor::LaunchExtras {
+        prompt: Some(format!("{}{memory}", task.prompt)),
+        ..Default::default()
+    };
     if let Err(e) = supervisor::start(&app, task.clone(), extras) {
         return fail(&task.id, e);
     }
@@ -400,11 +471,14 @@ pub(crate) fn start_orchestration(
     }
     let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
     let max_parallel = spec.max_parallel.clamp(1, 6);
+    let repository_commit = crate::memory::repo::current_commit_for_db(db, spec.workspace_id);
 
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
-        let run = store::create_run_with_memory_snapshot(
+        let tx =
+            rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| e.to_string())?;
+        let run = store::create_run_with_memory_snapshot_and_commit(
             &tx,
             spec.workspace_id,
             spec.mission_id,
@@ -412,8 +486,9 @@ pub(crate) fn start_orchestration(
             spec.cwd,
             max_parallel,
             spec.budget_usd,
+            repository_commit,
         )?;
-if let Some(squad) = spec.squad {
+        if let Some(squad) = spec.squad {
             store::set_run_squad_snapshot(&tx, &run.id, squad)?;
         }
         let title: String = match spec.title {
@@ -456,8 +531,8 @@ if let Some(squad) = spec.squad {
     };
 
     if let Err(e) = launch(&task) {
+        store::finish_task_db(&db, &task.id, &types::TaskOutcome::failed(e.clone()))?;
         let conn = db.lock().map_err(|err| err.to_string())?;
-        store::finish_task(&conn, &task.id, &types::TaskOutcome::failed(e.clone()))?;
         store::refresh_run_status(&conn, &task.run_id)?;
         return Err(e);
     }
@@ -503,7 +578,9 @@ pub(crate) fn launch_lead(app: &AppHandle, task: &Task) -> Result<(), String> {
 pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> bool {
     let task_id = task.id.clone();
     let launched = (|| -> Result<(), String> {
-        if task.role.as_deref()==Some(types::role::DREAMER) {return launch_memory_dream(app,&task);}
+        if task.role.as_deref() == Some(types::role::DREAMER) {
+            return launch_memory_dream(app, &task);
+        }
         let (run, deps, facts) = {
             let conn = db.lock().map_err(|e| e.to_string())?;
             let run = store::run_by_id(&conn, &task.run_id)?.ok_or("o run não existe mais")?;
@@ -577,13 +654,7 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
     match launched {
         Ok(()) => true,
         Err(e) => {
-            if let Ok(conn) = db.lock() {
-                store::persist_finish(&conn, &task_id, &types::TaskOutcome::failed(e));
-            } else {
-                eprintln!(
-                    "[harness] erro recuperável ao gravar o fim da tarefa {task_id}: o banco não pôde ser travado"
-                );
-            }
+            store::persist_finish_db(&db, &task_id, &types::TaskOutcome::failed(e));
             supervisor::notify_changed(app, &task_id);
             false
         }
@@ -644,7 +715,14 @@ pub(crate) fn cancel_run_with(
 
 /// Lo que se dejaron escrito los agentes de un run.
 #[tauri::command]
-pub fn run_list_facts(run_id: String, db: tauri::State<DbConnection>) -> Result<Vec<Fact>, String> {
+pub async fn run_list_facts(run_id: String, db: tauri::State<'_, DbConnection>) -> Result<Vec<Fact>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_list_facts_now(&db, run_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_list_facts_now(db: &DbConnection, run_id: String) -> Result<Vec<Fact>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::facts_of_run(&conn, &run_id)
 }
@@ -654,7 +732,9 @@ pub fn run_list_facts(run_id: String, db: tauri::State<DbConnection>) -> Result<
 /// terminal de emergencia queda afuera por no tenerlo.
 pub(crate) fn ensure_headless(agent_id: &str) -> Result<(), String> {
     // Desktop participants have a durable, assisted execution transport, not a CLI.
-    if agent_id == crate::desktop_apps::GEMINI_DESKTOP { return Ok(()); }
+    if agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+        return Ok(());
+    }
     if let Some(error) = crate::harness::matrix::unsupported_capability_error(
         agent_id,
         crate::harness::capability::Surface::Fleet,
@@ -673,7 +753,9 @@ pub(crate) fn ensure_headless(agent_id: &str) -> Result<(), String> {
 }
 
 pub(crate) fn ensure_orchestration(agent_id: &str) -> Result<(), String> {
-    if agent_id == crate::desktop_apps::GEMINI_DESKTOP { return Ok(()); }
+    if agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+        return Ok(());
+    }
     ensure_headless(agent_id)?;
     let adapter = crate::agents::adapter_for(agent_id).ok_or("provider unavailable")?;
     if !adapter.capabilities().orchestration {
@@ -744,13 +826,21 @@ pub(crate) fn route_now(
 ) -> Result<routing::Assignment, String> {
     let roster = roster::snapshot(db, false)?;
     let tiers = routing::load_tiers(db);
-    routing::route(&roster, &tiers, &routing::resolve_pool(db, request)?, crate::util::now_ts())
+    routing::route(
+        &roster,
+        &tiers,
+        &routing::resolve_pool(db, request)?,
+        crate::util::now_ts(),
+    )
 }
 
 /// Lo que usó cada cuenta en los últimos `days` días (intentos, tokens, costo reportado), con
 /// sus límites y lo que corre ahora. Ver `ledger`.
 #[tauri::command]
-pub async fn account_usage_summary(app: AppHandle, days: u32) -> Result<Vec<ledger::AccountUsage>, String> {
+pub async fn account_usage_summary(
+    app: AppHandle,
+    days: u32,
+) -> Result<Vec<ledger::AccountUsage>, String> {
     let db = db_of(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let now = crate::util::now_ts();
@@ -763,14 +853,30 @@ pub async fn account_usage_summary(app: AppHandle, days: u32) -> Result<Vec<ledg
 
 /// Los límites de una cuenta (`account_key` como en `quota::account_key`).
 #[tauri::command]
-pub fn account_limits_get(app: AppHandle, account_key: String) -> Result<ledger::AccountLimits, String> {
+pub async fn account_limits_get(
+    app: AppHandle,
+    account_key: String,
+) -> Result<ledger::AccountLimits, String> {
+    tauri::async_runtime::spawn_blocking(move || account_limits_get_now(&app, account_key))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn account_limits_get_now(
+    app: &AppHandle,
+    account_key: String,
+) -> Result<ledger::AccountLimits, String> {
     let db = db_of(&app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     Ok(ledger::load_limits(&conn, &account_key))
 }
 
 #[tauri::command]
-pub fn account_limits_set(app: AppHandle, account_key: String, limits: ledger::AccountLimits) -> Result<(), String> {
+pub fn account_limits_set(
+    app: AppHandle,
+    account_key: String,
+    limits: ledger::AccountLimits,
+) -> Result<(), String> {
     let db = db_of(&app)?;
     ledger::save_limits(&db, &account_key, &limits)
 }
@@ -850,10 +956,7 @@ pub fn run_set_tiers(
             return Err(format!("'{}' não é um agente conhecido", bad.agent_id));
         }
         if entries.iter().any(|e| e.model.trim().is_empty()) {
-            return Err(format!(
-                "a faixa {} tem um modelo sem nome",
-                c.as_str()
-            ));
+            return Err(format!("a faixa {} tem um modelo sem nome", c.as_str()));
         }
     }
     routing::save_tiers(&db, &tiers)?;
@@ -901,27 +1004,56 @@ pub(crate) fn isolate_task_from(
     task: &Task,
     start: &str,
 ) -> Result<Task, String> {
-    let project = std::path::Path::new(&task.cwd);
-    let wt = worktrees::create_from(base, project, &task.title, start)?;
+    isolate_task_from_with(base, db, task, start, &|| {})
+}
 
-    let conn = db.lock().map_err(|e| e.to_string())?;
+// `antes_do_io` roda logo antes da gravação do worktree, com o banco solto (os testes usam
+// para simular a outra isolação que chega primeiro).
+pub(crate) fn isolate_task_from_with(
+    base: &std::path::Path,
+    db: &DbConnection,
+    task: &Task,
+    start: &str,
+    antes_do_io: &dyn Fn(),
+) -> Result<Task, String> {
+    let project = std::path::Path::new(&task.cwd);
+    let skills_dir = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::skills::skills_dir_from_conn(&conn)?
+    };
+    let wt = worktrees::create_from(base, project, &task.title, start)?;
+    let project_links = crate::skills::links_dir_for(&task.cwd, &task.agent_id);
+    let task_links = crate::skills::links_dir_for(&wt.task_cwd.to_string_lossy(), &task.agent_id);
     // Las skills que el usuario ve en el proyecto, también adentro. Best-effort: sin la
-    // carpeta global configurada, o sin skills, el agente arranca igual.
-    if let (Ok(skills_dir), Some(project_links), Some(task_links)) = (
-        crate::skills::skills_dir_from_conn(&conn),
-        crate::skills::links_dir_for(&task.cwd, &task.agent_id),
-        crate::skills::links_dir_for(&wt.task_cwd.to_string_lossy(), &task.agent_id),
-    ) {
+    // carpeta global configurada, o sin skills, el agente arranca igual. El link va sin lock.
+    if let (Some(project_links), Some(task_links)) = (&project_links, &task_links) {
         worktrees::link_skills(&project_links, &task_links, &skills_dir);
     }
 
-    store::set_worktree(
-        &conn,
-        &task.id,
-        &wt.task_cwd.to_string_lossy(),
-        &wt.root.to_string_lossy(),
-        &wt.branch,
-    )?;
+    antes_do_io();
+    let persisted = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::set_worktree_if_status(
+            &conn,
+            &task.id,
+            &task.status,
+            &wt.task_cwd.to_string_lossy(),
+            &wt.root.to_string_lossy(),
+            &wt.branch,
+        )?
+    };
+    if !persisted {
+        let links = task_links.as_deref().unwrap_or_else(|| std::path::Path::new(""));
+        let cleanup = worktrees::remove_with_branch(project, &wt, links, &skills_dir, true);
+        return Err(match cleanup {
+            Ok(_) => "a tarefa mudou de estado durante a criação do worktree".into(),
+            Err(error) => format!(
+                "a tarefa mudou de estado durante a criação do worktree; não foi possível remover {}: {error}",
+                wt.root.display()
+            ),
+        });
+    }
+    let conn = db.lock().map_err(|e| e.to_string())?;
     store::task_by_id(&conn, &task.id)?.ok_or_else(|| "a tarefa se perdeu ao ser isolada".into())
 }
 
@@ -938,7 +1070,13 @@ pub struct DiscardedWorktree {
 /// Nunca con la tarea viva: sería sacarle la carpeta a un agente que está trabajando.
 /// Se niega también si hay cambios sin commitear (ver `worktrees::remove`).
 #[tauri::command]
-pub fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<DiscardedWorktree, String> {
+pub async fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<DiscardedWorktree, String> {
+    tauri::async_runtime::spawn_blocking(move || run_discard_worktree_now(&app, task_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_discard_worktree_now(app: &AppHandle, task_id: String) -> Result<DiscardedWorktree, String> {
     let db = db_of(&app)?;
     let (task, project_cwd, skills_dir) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -1032,8 +1170,15 @@ pub async fn reroute(
 ) -> Result<(Task, routing::Assignment), String> {
     let db = db_of(app)?;
     let assignment = assign(&db, request).await?;
-    let out = reroute_to(app, task_id, assignment, reason)?;
-    scheduler::tick(app, &out.0.run_id);
+    let (worker_app, worker_task, worker_reason) = (app.clone(), task_id.to_string(), reason.to_string());
+    let out = tauri::async_runtime::spawn_blocking(move || reroute_to(&worker_app, &worker_task, assignment, &worker_reason))
+        .await
+        .map_err(|e| e.to_string())??;
+    let tick_app = app.clone();
+    let run_id = out.0.run_id.clone();
+    tauri::async_runtime::spawn_blocking(move || scheduler::tick(&tick_app, &run_id))
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(out)
 }
 
@@ -1085,7 +1230,9 @@ pub fn reroute_to(
         if let Some(blocked) = fixrounds::block_reroute(&conn, &current)? {
             return Err(blocked);
         }
-        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+        let tx =
+            rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| e.to_string())?;
         let moved = store::reroute_task(
             &tx,
             task_id,
@@ -1135,13 +1282,14 @@ pub async fn run_reroute_task(
     account_id: Option<String>,
     reason: Option<String>,
 ) -> Result<Task, String> {
-    let complexity = {
-        let db = db_of(&app)?;
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        store::task_by_id(&conn, &task_id)?
+    let db = db_of(&app)?;
+    let lookup_id = task_id.clone();
+    let complexity = crate::database::blocking_db(&db, move |conn| {
+        Ok(store::task_by_id(conn, &lookup_id)?
             .and_then(|t| t.complexity)
-            .and_then(|c| routing::Complexity::parse(&c))
-    };
+            .and_then(|c| routing::Complexity::parse(&c)))
+    })
+    .await?;
     let request = routing::RouteRequest {
         agent_id,
         model: model.filter(|m| !m.trim().is_empty()),
@@ -1163,7 +1311,13 @@ pub async fn run_reroute_task(
 /// Si todavía corre, la para (ver `supervisor::hand_off`). Si ya terminó, no toca nada:
 /// reabrir una conversación cerrada es solo reanudarla.
 #[tauri::command]
-pub fn run_hand_off_task(app: AppHandle, task_id: String) -> Result<Task, String> {
+pub async fn run_hand_off_task(app: AppHandle, task_id: String) -> Result<Task, String> {
+    tauri::async_runtime::spawn_blocking(move || run_hand_off_task_now(&app, task_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_hand_off_task_now(app: &AppHandle, task_id: String) -> Result<Task, String> {
     let db = db_of(&app)?;
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -1246,7 +1400,12 @@ pub fn run_decide_approval(
 
 /// O núcleo de `run_decide_approval`, sem o `AppHandle`. **Privado de propósito**: nada fora
 /// de `runs` (o IPC, o MCP) consegue chamá-lo, nem o `broker`, que também é privado.
-fn decide_from_screen(db: &DbConnection, approval_id: &str, allow: bool, remember: bool) -> Result<bool, String> {
+fn decide_from_screen(
+    db: &DbConnection,
+    approval_id: &str,
+    allow: bool,
+    remember: bool,
+) -> Result<bool, String> {
     let Some(pending) = broker::get(approval_id) else {
         return Ok(false);
     };
@@ -1288,22 +1447,42 @@ fn remember_rule(
 
 /// Las reglas de una carpeta, en el orden en que se evalúan.
 #[tauri::command]
-pub fn run_list_rules(
+pub async fn run_list_rules(
     cwd: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<store::RuleRow>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_list_rules_now(&db, cwd))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_list_rules_now(db: &DbConnection, cwd: String) -> Result<Vec<store::RuleRow>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list_rules(&conn, &cwd)
 }
 
 /// Agrega una regla escrita a mano, y resuelve con ella lo que estuviera esperando.
 #[tauri::command]
-pub fn run_add_rule(
+pub async fn run_add_rule(
     app: AppHandle,
     cwd: String,
     pattern: String,
     allow: bool,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<store::RuleRow, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_add_rule_now(&app, &db, cwd, pattern, allow))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_add_rule_now(
+    app: &AppHandle,
+    db: &DbConnection,
+    cwd: String,
+    pattern: String,
+    allow: bool,
 ) -> Result<store::RuleRow, String> {
     if !rules::is_valid_pattern(&pattern) {
         return Err(format!(
@@ -1321,7 +1500,14 @@ pub fn run_add_rule(
 }
 
 #[tauri::command]
-pub fn run_delete_rule(id: String, db: tauri::State<DbConnection>) -> Result<bool, String> {
+pub async fn run_delete_rule(id: String, db: tauri::State<'_, DbConnection>) -> Result<bool, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_delete_rule_now(&db, id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_delete_rule_now(db: &DbConnection, id: String) -> Result<bool, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::delete_rule(&conn, &id)
 }
@@ -1359,12 +1545,15 @@ pub async fn start_memory_dream(
         return Err("Sonhar requer Claude Code com ferramentas de escrita bloqueadas.".into());
     }
     let _guard = crate::agents::updates::activity_guard()?;
+    let repository_commit = crate::memory::repo::current_commit_for_db(db, workspace);
     let (task, dream_id) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+        let tx =
+            rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| e.to_string())?;
         let input = crate::memory::dream::validate_start(&tx, workspace)?;
         let cwd:String=tx.query_row("SELECT cwd FROM runs WHERE workspace_id=?1 AND cwd<>'' ORDER BY created_at DESC LIMIT 1",[workspace],|r|r.get(0)).map_err(|_|"Workspace sem pasta no histórico.".to_string())?;
-        let run = store::create_run_with_memory_snapshot(
+        let run = store::create_run_with_memory_snapshot_and_commit(
             &tx,
             workspace,
             None,
@@ -1372,6 +1561,7 @@ pub async fn start_memory_dream(
             &cwd,
             1,
             None,
+            repository_commit,
         )?;
         // O histórico é dado não confiável: vai no envelope único (`memory::dream::prompt_for`), não em marcadores soltos.
         let prompt = crate::memory::dream::prompt_for(&input);
@@ -1403,8 +1593,8 @@ pub async fn start_memory_dream(
         (task, id)
     };
     if let Err(e) = launch_memory_dream(app, &task) {
+        store::finish_task_db(&db, &task.id, &types::TaskOutcome::failed(e.clone()))?;
         let conn = db.lock().map_err(|e| e.to_string())?;
-        store::finish_task(&conn, &task.id, &types::TaskOutcome::failed(e.clone()))?;
         store::refresh_run_status(&conn, &task.run_id)?;
         crate::memory::notify_changed(app);
         return Err(e);
@@ -1416,8 +1606,10 @@ pub async fn start_memory_dream(
     })
 }
 
-fn launch_memory_dream(app:&AppHandle,task:&Task)->Result<(),String> {
- if task.agent_id!="claude-code" {return Err("Sonhar requer Claude Code com ferramentas de escrita bloqueadas.".into());}
+fn launch_memory_dream(app: &AppHandle, task: &Task) -> Result<(), String> {
+    if task.agent_id != "claude-code" {
+        return Err("Sonhar requer Claude Code com ferramentas de escrita bloqueadas.".into());
+    }
     let extras = supervisor::LaunchExtras {
         prompt: Some(task.prompt.clone()),
         system_prompt: Some(crate::memory::dream::SYSTEM_PROMPT.into()),
@@ -1435,5 +1627,5 @@ fn launch_memory_dream(app:&AppHandle,task:&Task)->Result<(),String> {
         .map(|n| crate::ipc::mcp::orchestration_tool_name(n))
         .collect(),
     };
-    supervisor::start(app,task.clone(),extras)
+    supervisor::start(app, task.clone(), extras)
 }

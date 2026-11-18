@@ -54,6 +54,21 @@ pub fn db_boot_status() -> DbBootStatus {
 /// admite escrituras concurrentes, así que el `Mutex` es el que serializa el acceso.
 pub type DbConnection = Arc<Mutex<Connection>>;
 
+/// Roda `work` com a conexão travada numa thread de bloqueio, fora do runtime async.
+pub(crate) async fn blocking_db<T, F>(db: &DbConnection, work: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
+{
+    let db = db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        work(&conn)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Falha de boot que o app mostra ao usuário antes de sair (ver `app::fatal`). O texto é PT-BR
 /// porque é o que aparece na caixa de aviso.
 #[derive(Debug)]
@@ -113,7 +128,12 @@ fn db_path_in(dir: Option<PathBuf>) -> Result<PathBuf, BootError> {
 /// conexão global (`DbConnection`) o `Mutex` ficava preso durante tudo isso e o resto do app
 /// (autosave, IPC, Vigia) parava. Em WAL as duas convivem; `busy_timeout` cobre as escritas.
 pub(crate) fn open_side_connection() -> Result<Connection, BootError> {
-    let conn = Connection::open(db_path()?)?;
+    open_side_connection_at(&db_path()?).map_err(BootError::from)
+}
+
+/// Como `open_side_connection`, para um arquivo de base dado. Os testes usam uma base temporária.
+pub(crate) fn open_side_connection_at(path: &std::path::Path) -> SqlResult<Connection> {
+    let conn = Connection::open(path)?;
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;
          PRAGMA busy_timeout = 30000;",

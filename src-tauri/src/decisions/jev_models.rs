@@ -29,7 +29,9 @@ pub const UPDATED_EVENT: &str = "decisions-model-updated";
 pub fn version(model: &str) -> Option<(u32, u32, u32)> {
     let rest = model.trim().strip_prefix("jev-")?;
     let mut parts = rest.split('.').map(|part| part.parse::<u32>().ok());
-    let (Some(Some(a)), Some(Some(b)), Some(Some(c)), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else {
+    let (Some(Some(a)), Some(Some(b)), Some(Some(c)), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
         return None;
     };
     Some((a, b, c))
@@ -37,7 +39,11 @@ pub fn version(model: &str) -> Option<(u32, u32, u32)> {
 
 /// A versão mais nova entre os candidatos. Pura.
 pub fn newest<'a>(candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
-    candidates.into_iter().filter_map(|name| version(name).map(|v| (v, name))).max_by_key(|(v, _)| *v).map(|(_, name)| name)
+    candidates
+        .into_iter()
+        .filter_map(|name| version(name).map(|v| (v, name)))
+        .max_by_key(|(v, _)| *v)
+        .map(|(_, name)| name)
 }
 
 /// Para qual versão o modelo fixado deve ir, se houver uma mais nova. Um apelido nunca muda (o Jev já resolve).
@@ -60,7 +66,11 @@ pub fn parse_models(body: &Value) -> Vec<String> {
         .flatten()
         .filter_map(|item| {
             item.as_str()
-                .or_else(|| ["id", "name", "model"].iter().find_map(|key| item.get(key).and_then(Value::as_str)))
+                .or_else(|| {
+                    ["id", "name", "model"]
+                        .iter()
+                        .find_map(|key| item.get(key).and_then(Value::as_str))
+                })
                 .map(str::trim)
                 .filter(|name| name.starts_with("jev-"))
                 .map(str::to_string)
@@ -105,7 +115,13 @@ fn latest_version(settings: &config::Settings, key: &str) -> Option<String> {
     let mut probe = settings.clone();
     probe.model = "jev-latest".into();
     probe.timeout_ms = probe.timeout_ms.max(5_000);
-    let answered = super::http::execute(&probe, Some(key), &super::protocol::ping_request("jev-latest")).ok()?.model;
+    let answered = super::http::execute(
+        &probe,
+        Some(key),
+        &super::protocol::ping_request("jev-latest"),
+    )
+    .ok()?
+    .model;
     version(&answered).map(|_| answered)
 }
 
@@ -121,7 +137,9 @@ fn accepts(settings: &config::Settings, key: &str, model: &str) -> bool {
 /// que existir (até 5 saltos). Pura, com `exists` como a pergunta ao Jev.
 pub fn probe_next(from: &str, mut exists: impl FnMut(&str) -> bool) -> Vec<String> {
     let mut found = Vec::new();
-    let Some(mut at) = version(from) else { return found };
+    let Some(mut at) = version(from) else {
+        return found;
+    };
     for _ in 0..5 {
         let (a, b, c) = at;
         let next = [(a, b + 1, 0), (a, b, c + 1), (a + 1, 0, 0)]
@@ -156,7 +174,8 @@ pub fn refresh(db: &DbConnection) -> Option<String> {
             let conn = db.lock().ok()?;
             candidates(&conn)
         };
-        let start = newest(known.iter().chain(names.iter()).map(String::as_str)).map(str::to_string);
+        let start =
+            newest(known.iter().chain(names.iter()).map(String::as_str)).map(str::to_string);
         if let Some(start) = start {
             names.extend(probe_next(&start, |model| accepts(&settings, &key, model)));
         }
@@ -164,7 +183,11 @@ pub fn refresh(db: &DbConnection) -> Option<String> {
         names.dedup();
         if !names.is_empty() {
             let conn = db.lock().ok()?;
-            let _ = config::store_text(&conn, KEY_SEEN, &serde_json::to_string(&names).unwrap_or_default());
+            let _ = config::store_text(
+                &conn,
+                KEY_SEEN,
+                &serde_json::to_string(&names).unwrap_or_default(),
+            );
         }
     }
     let conn = db.lock().ok()?;
@@ -176,24 +199,39 @@ pub fn refresh(db: &DbConnection) -> Option<String> {
 
 /// Ao abrir o app e depois uma vez por dia. Fora da thread principal: a consulta vai à rede.
 pub fn start(app: AppHandle) {
-    std::thread::spawn(move || loop {
-        if let Some(db) = app.try_state::<DbConnection>() {
-            if let Some(model) = refresh(db.inner()) {
-                eprintln!("[decisions] modelo do Jev atualizado sozinho para {model}");
-                let _ = app.emit(UPDATED_EVENT, &model);
+    std::thread::spawn(move || {
+        loop {
+            if let Some(db) = app.try_state::<DbConnection>() {
+                if let Some(model) = refresh(db.inner()) {
+                    eprintln!("[decisions] modelo do Jev atualizado sozinho para {model}");
+                    let _ = app.emit(UPDATED_EVENT, &model);
+                }
             }
+            std::thread::sleep(EVERY);
         }
-        std::thread::sleep(EVERY);
     });
 }
 
 /// Os modelos que o seletor oferece para o Jev: os apelidos e as versões conhecidas, a mais nova primeiro.
 #[tauri::command]
-pub fn decision_jev_models(db: tauri::State<DbConnection>) -> Result<Vec<String>, String> {
-    let conn = db.lock().map_err(|error| error.to_string())?;
-    let mut versions: Vec<String> = candidates(&conn).into_iter().filter(|name| version(name).is_some()).collect();
-    versions.sort_by_key(|name| std::cmp::Reverse(version(name)));
-    Ok(["jev-latest".to_string(), "jev-preview".to_string()].into_iter().chain(versions).collect())
+pub async fn decision_jev_models(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<String>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        let mut versions: Vec<String> = candidates(&conn)
+            .into_iter()
+            .filter(|name| version(name).is_some())
+            .collect();
+        versions.sort_by_key(|name| std::cmp::Reverse(version(name)));
+        Ok(["jev-latest".to_string(), "jev-preview".to_string()]
+            .into_iter()
+            .chain(versions)
+            .collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -212,10 +250,19 @@ mod tests {
 
     #[test]
     fn a_versao_fixada_sobe_para_a_mais_nova_e_apelido_fica() {
-        assert_eq!(upgrade_for("jev-1.13.0", &["jev-1.13.0", "jev-1.14.0"]), Some("jev-1.14.0".into()));
+        assert_eq!(
+            upgrade_for("jev-1.13.0", &["jev-1.13.0", "jev-1.14.0"]),
+            Some("jev-1.14.0".into())
+        );
         // 1.10 > 1.9: a comparação é numérica, não de texto.
-        assert_eq!(upgrade_for("jev-1.9.0", &["jev-1.10.0"]), Some("jev-1.10.0".into()));
-        assert_eq!(upgrade_for("jev-1.14.0", &["jev-1.13.0", "jev-1.14.0"]), None);
+        assert_eq!(
+            upgrade_for("jev-1.9.0", &["jev-1.10.0"]),
+            Some("jev-1.10.0".into())
+        );
+        assert_eq!(
+            upgrade_for("jev-1.14.0", &["jev-1.13.0", "jev-1.14.0"]),
+            None
+        );
         assert_eq!(upgrade_for("jev-latest", &["jev-1.14.0"]), None);
     }
 
@@ -230,16 +277,33 @@ mod tests {
         assert_eq!(found, vec!["jev-1.15.0", "jev-1.15.1", "jev-2.0.0"]);
         // Sem nada novo: três perguntas e para.
         let mut count = 0;
-        assert!(probe_next("jev-1.14.0", |_| { count += 1; false }).is_empty());
+        assert!(
+            probe_next("jev-1.14.0", |_| {
+                count += 1;
+                false
+            })
+            .is_empty()
+        );
         assert_eq!(count, 3);
         assert!(probe_next("jev-latest", |_| true).is_empty());
     }
 
     #[test]
     fn le_os_formatos_comuns_de_lista_de_modelos() {
-        assert_eq!(parse_models(&json!({"data": [{"id": "jev-1.14.0"}, {"id": "jev-latest"}, {"id": "gpt-x"}]})), vec!["jev-1.14.0", "jev-latest"]);
-        assert_eq!(parse_models(&json!({"models": ["jev-1.13.0", "jev-1.14.0"]})), vec!["jev-1.13.0", "jev-1.14.0"]);
-        assert_eq!(parse_models(&json!([{"name": "jev-preview"}])), vec!["jev-preview"]);
+        assert_eq!(
+            parse_models(
+                &json!({"data": [{"id": "jev-1.14.0"}, {"id": "jev-latest"}, {"id": "gpt-x"}]})
+            ),
+            vec!["jev-1.14.0", "jev-latest"]
+        );
+        assert_eq!(
+            parse_models(&json!({"models": ["jev-1.13.0", "jev-1.14.0"]})),
+            vec!["jev-1.13.0", "jev-1.14.0"]
+        );
+        assert_eq!(
+            parse_models(&json!([{"name": "jev-preview"}])),
+            vec!["jev-preview"]
+        );
         assert!(parse_models(&json!({"detail": "erro"})).is_empty());
     }
 }
@@ -253,7 +317,8 @@ mod load_tests {
 
     fn db(model: &str, auto: Option<&str>) -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);").unwrap();
+        conn.execute_batch("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+            .unwrap();
         config::store_text(&conn, config::KEY_PROVIDER, "jev").unwrap();
         config::store_text(&conn, config::KEY_MODEL, model).unwrap();
         if let Some(auto) = auto {
@@ -267,7 +332,10 @@ mod load_tests {
         // Nunca gravado = ligado: a 1.13 fixada passa para a mais nova que o app conhece.
         let conn = db("jev-1.13.0", None);
         assert_eq!(config::load(&conn).unwrap().model, NEWEST_KNOWN);
-        assert_eq!(config::stored_text(&conn, config::KEY_MODEL).as_deref(), Some(NEWEST_KNOWN));
+        assert_eq!(
+            config::stored_text(&conn, config::KEY_MODEL).as_deref(),
+            Some(NEWEST_KNOWN)
+        );
         // Uma versão que o Jev listou e o app ainda não conhecia também vale (e não volta para jev-latest).
         config::store_text(&conn, KEY_SEEN, r#"["jev-1.13.0","jev-1.15.2"]"#).unwrap();
         assert_eq!(config::load(&conn).unwrap().model, "jev-1.15.2");
@@ -275,7 +343,15 @@ mod load_tests {
 
     #[test]
     fn desligado_ou_apelido_nao_mudam() {
-        assert_eq!(config::load(&db("jev-1.13.0", Some("false"))).unwrap().model, "jev-1.13.0");
-        assert_eq!(config::load(&db("jev-latest", None)).unwrap().model, "jev-latest");
+        assert_eq!(
+            config::load(&db("jev-1.13.0", Some("false")))
+                .unwrap()
+                .model,
+            "jev-1.13.0"
+        );
+        assert_eq!(
+            config::load(&db("jev-latest", None)).unwrap().model,
+            "jev-latest"
+        );
     }
 }

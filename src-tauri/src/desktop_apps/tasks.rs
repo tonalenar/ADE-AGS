@@ -47,9 +47,20 @@ pub(crate) fn read(db: &rusqlite::Connection, id: &str) -> Result<Consult, Strin
     let mut consult = db.query_row("SELECT id,cwd,prompt,status,response,error,created_at,updated_at FROM gemini_desktop_consults WHERE id=?1", [id], |r| {
         Ok(Consult { id: r.get(0)?, cwd: r.get(1)?, prompt: r.get(2)?, status: r.get(3)?, response: r.get(4)?, error: r.get(5)?, created_at: r.get(6)?, updated_at: r.get(7)?, run_task_id: None, role: None })
     }).map_err(|e| e.to_string())?;
-    consult.run_task_id = db.query_row("SELECT task_id FROM gemini_desktop_run_tasks WHERE consult_id=?1", [id], |r|r.get(0)).optional().map_err(|e|e.to_string())?;
+    consult.run_task_id = db
+        .query_row(
+            "SELECT task_id FROM gemini_desktop_run_tasks WHERE consult_id=?1",
+            [id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
     if let Some(task) = &consult.run_task_id {
-        consult.role = db.query_row("SELECT role FROM tasks WHERE id=?1", [task], |r|r.get(0)).optional().map_err(|e|e.to_string())?.flatten();
+        consult.role = db
+            .query_row("SELECT role FROM tasks WHERE id=?1", [task], |r| r.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?
+            .flatten();
     }
     Ok(consult)
 }
@@ -102,8 +113,10 @@ pub(crate) fn dispatch(app: &tauri::AppHandle, op: &str, args: &Value) -> Result
                 "gemini-desktop-consult-created",
                 json!({ "cwd": requested_cwd, "id": id }),
             );
-            Ok(json!({ "task": task, "mode": if super::status().attached { "automatic" } else { "queued" },
-                "message": if super::status().attached { "Queued for automatic delivery through the connected Gemini Desktop session." } else { "Queued. Connect Gemini Desktop in an ADE panel to send this consultation through the signed-in app." } }))
+            Ok(
+                json!({ "task": task, "mode": if super::status().attached { "automatic" } else { "queued" },
+                "message": if super::status().attached { "Queued for automatic delivery through the connected Gemini Desktop session." } else { "Queued. Connect Gemini Desktop in an ADE panel to send this consultation through the signed-in app." } }),
+            )
         }
         "result" => {
             let id = args
@@ -124,9 +137,17 @@ pub(crate) fn dispatch(app: &tauri::AppHandle, op: &str, args: &Value) -> Result
 }
 
 #[cfg(windows)]
-fn execute_sync(app: tauri::AppHandle, view_id: String, cwd: String, id: String) -> Result<Consult, String> {
+fn execute_sync(
+    app: tauri::AppHandle,
+    view_id: String,
+    cwd: String,
+    id: String,
+) -> Result<Consult, String> {
     static EXECUTION: OnceLock<Mutex<()>> = OnceLock::new();
-    let _slot = EXECUTION.get_or_init(|| Mutex::new(())).lock().map_err(|e| e.to_string())?;
+    let _slot = EXECUTION
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|e| e.to_string())?;
     let hwnd = super::native::automation_window(&view_id)?;
     let (prompt, role) = {
         let db = app.state::<DbConnection>();
@@ -137,8 +158,10 @@ fn execute_sync(app: tauri::AppHandle, view_id: String, cwd: String, id: String)
         if consult.cwd != workspace_key(&cwd) {
             return Err("Consult belongs to a different workspace".into());
         }
-        if matches!(consult.status.as_str(), "completed" | "failed" | "cancelled")
-            || (consult.status == "working" && consult.response.is_some())
+        if matches!(
+            consult.status.as_str(),
+            "completed" | "failed" | "cancelled"
+        ) || (consult.status == "working" && consult.response.is_some())
         {
             return Ok(consult);
         }
@@ -151,17 +174,17 @@ fn execute_sync(app: tauri::AppHandle, view_id: String, cwd: String, id: String)
     let _ = app.emit("gemini-desktop-tasks-changed", ());
 
     let marker = format!("ADE_GEMINI_DONE_{}", uuid::Uuid::new_v4().simple());
-    let outcome = super::accessibility::submit_and_wait(
-        hwnd,
-        &prompt,
-        &marker,
-        Duration::from_secs(600),
-    );
+    let outcome =
+        super::accessibility::submit_and_wait(hwnd, &prompt, &marker, Duration::from_secs(600));
     match outcome {
         Ok(response) if role.as_deref() == Some("lead") => {
             let db = app.state::<DbConnection>();
             let conn = db.lock().map_err(|e| e.to_string())?;
-            let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+            let tx = rusqlite::Transaction::new_unchecked(
+                &conn,
+                rusqlite::TransactionBehavior::Immediate,
+            )
+            .map_err(|e| e.to_string())?;
             super::participant::validate_completion(&tx, &id, "working")?;
             update_record(&tx, &cwd, &id, "working", Some(response), None)?;
             tx.commit().map_err(|e| e.to_string())?;
@@ -189,8 +212,11 @@ fn finish_automated(
     schema(&conn)?;
     super::participant::sync_cancelled(&conn)?;
     let existing = read(&conn, id)?;
-    if existing.status == "cancelled" { return Ok(existing); }
-    let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
+    if existing.status == "cancelled" {
+        return Ok(existing);
+    }
+    let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
     super::participant::validate_completion(&tx, id, status)?;
     update_record(&tx, cwd, id, status, response.clone(), error.clone())?;
     let finished = super::participant::finish(&tx, id, status, response, error)?;
@@ -227,15 +253,25 @@ pub async fn gemini_desktop_execute(
 }
 
 #[tauri::command]
-pub fn gemini_desktop_consult_create(app: tauri::AppHandle, cwd: String, prompt: String) -> Result<Value,String> {
-    dispatch(&app,"consult",&json!({"cwd":cwd,"prompt":prompt}))
+pub async fn gemini_desktop_consult_create(
+    app: tauri::AppHandle,
+    cwd: String,
+    prompt: String,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        dispatch(&app, "consult", &json!({"cwd":cwd,"prompt":prompt}))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn gemini_desktop_tasks(
+pub async fn gemini_desktop_tasks(
     cwd: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<Consult>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
     let conn = db.lock().map_err(|e| e.to_string())?;
     schema(&conn)?;
     super::participant::sync_cancelled(&conn)?;
@@ -253,6 +289,9 @@ pub fn gemini_desktop_tasks(
             })
         })
         .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn validate_update(
@@ -278,29 +317,36 @@ fn validate_update(
 }
 
 #[tauri::command]
-pub fn gemini_desktop_task_update(
+pub async fn gemini_desktop_task_update(
     app: tauri::AppHandle,
     cwd: String,
     id: String,
     status: String,
     response: Option<String>,
     error: Option<String>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    schema(&conn)?;
-    let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
-    super::participant::validate_completion(&tx, &id, &status)?;
-    update_record(&tx, &cwd, &id, &status, response.clone(), error.clone())?;
-    let finished = super::participant::finish(&tx, &id, &status, response, error)?;
-    tx.commit().map_err(|e|e.to_string())?;
-    drop(conn);
-    if let Some(task) = finished {
-        crate::runs::supervisor::notify_changed(&app,&task);
-        crate::runs::scheduler::on_task_finished(&app,&task);
-    }
-    let _ = app.emit("gemini-desktop-tasks-changed", ());
-    Ok(())
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        schema(&conn)?;
+        let tx =
+            rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| e.to_string())?;
+        super::participant::validate_completion(&tx, &id, &status)?;
+        update_record(&tx, &cwd, &id, &status, response.clone(), error.clone())?;
+        let finished = super::participant::finish(&tx, &id, &status, response, error)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        drop(conn);
+        if let Some(task) = finished {
+            crate::runs::supervisor::notify_changed(&app, &task);
+            crate::runs::scheduler::on_task_finished(&app, &task);
+        }
+        let _ = app.emit("gemini-desktop-tasks-changed", ());
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn retry_record(conn: &rusqlite::Connection, cwd: &str, id: &str) -> Result<(), String> {
@@ -325,19 +371,24 @@ fn retry_record(conn: &rusqlite::Connection, cwd: &str, id: &str) -> Result<(), 
 }
 
 #[tauri::command]
-pub fn gemini_desktop_task_retry(
+pub async fn gemini_desktop_task_retry(
     app: tauri::AppHandle,
     cwd: String,
     id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    schema(&conn)?;
-    super::participant::sync_cancelled(&conn)?;
-    retry_record(&conn, &cwd, &id)?;
-    drop(conn);
-    let _ = app.emit("gemini-desktop-tasks-changed", ());
-    Ok(())
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        schema(&conn)?;
+        super::participant::sync_cancelled(&conn)?;
+        retry_record(&conn, &cwd, &id)?;
+        drop(conn);
+        let _ = app.emit("gemini-desktop-tasks-changed", ());
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn update_record(
@@ -371,7 +422,8 @@ mod tests {
     }
     #[test]
     fn handoff_is_durable_and_does_not_conflate_workspaces() {
-        let path = std::env::temp_dir().join(format!("ade-gemini-consults-{}.db", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("ade-gemini-consults-{}.db", uuid::Uuid::new_v4()));
         let db = rusqlite::Connection::open(&path).unwrap();
         schema(&db).unwrap();
         schema(&db).unwrap();

@@ -206,7 +206,38 @@ fn service_for(data_dir: &Path) -> String {
 /// el proxy de su propia pestaña y los pedidos que le hacen otras páginas (su API, llamada
 /// desde el front). Con dos instancias, cada una guardaba su versión en el mismo archivo y
 /// la última en escribir se llevaba la sesión de la otra.
-static SITES: LazyLock<Mutex<HashMap<String, Arc<Site>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static SITES: LazyLock<Mutex<HashMap<String, Arc<OnceLock<Arc<Site>>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn site_or_insert<T>(
+    sites: &Mutex<HashMap<String, Arc<OnceLock<Arc<T>>>>>,
+    identity: &str,
+    create: impl FnOnce() -> Arc<T>,
+) -> Arc<T> {
+    let slot = {
+        let mut sites = sites.lock().unwrap_or_else(|error| error.into_inner());
+        sites
+            .entry(identity.to_string())
+            .or_insert_with(|| Arc::new(OnceLock::new()))
+            .clone()
+    };
+    slot.get_or_init(create).clone()
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn abre_site_sem_segurar_o_mutex_global() {
+        let sites = Mutex::new(HashMap::<String, Arc<OnceLock<Arc<usize>>>>::new());
+        let site = site_or_insert(&sites, "origin", || {
+            assert!(sites.try_lock().is_ok(), "a abertura não pode segurar o mutex");
+            Arc::new(7)
+        });
+        assert_eq!(*site, 7);
+    }
+}
 
 /// El sitio de `origin` dentro de un perfil del navegador, abriéndolo (y empezando a guardarlo) la
 /// primera vez. Tiene que llamarse desde el runtime de tokio: el guardado corre ahí.
@@ -215,17 +246,14 @@ static SITES: LazyLock<Mutex<HashMap<String, Arc<Site>>>> = LazyLock::new(|| Mut
 pub(crate) fn site_for_profile(origin: &str, profile_id: &str) -> Arc<Site> {
     let private = profile_id == "incognito";
     let identity = profile_storage_identity(origin, profile_id);
-    let mut sites = SITES.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(site) = sites.get(&identity) {
-        return site.clone();
-    }
-    // La clave solo se pide al keyring cuando hay carpeta de estado (en la app): los tests nunca la piden.
-    let dir = if private { None } else { state_dir() };
-    let key = dir.as_ref().and_then(|_| os_state_key().ok());
-    let site = Site::open(&identity, dir.as_deref(), key);
-    site.spawn_saver();
-    sites.insert(identity, site.clone());
-    site
+    site_or_insert(&SITES, &identity, || {
+        // A leitura, a decifra e o acesso ao keyring acontecem sem o mutex global.
+        let dir = if private { None } else { state_dir() };
+        let key = dir.as_ref().and_then(|_| os_state_key().ok());
+        let site = Site::open(&identity, dir.as_deref(), key);
+        site.spawn_saver();
+        site
+    })
 }
 
 /// Os cookies importados ficam no frasco cifrado do perfil ADE. A vista Chromium os recebe
@@ -266,7 +294,10 @@ fn profile_storage_identity(origin: &str, profile_id: &str) -> String {
 /// Los sitios abiertos, con su origen: al cerrar la app se guardan los que tengan cambios.
 pub(crate) fn open_sites() -> Vec<(String, Arc<Site>)> {
     let sites = SITES.lock().unwrap_or_else(|e| e.into_inner());
-    sites.iter().map(|(o, s)| (o.clone(), s.clone())).collect()
+    sites
+        .iter()
+        .filter_map(|(origin, slot)| slot.get().map(|site| (origin.clone(), site.clone())))
+        .collect()
 }
 
 /// Lo que el runtime de la página le pide al proxy (ver `proxy::site_request`).
@@ -623,15 +654,18 @@ impl Site {
 
     /// Lo que hay que escribir, si cambió algo desde la última vez.
     fn pending_bytes(&self) -> Option<Vec<u8>> {
-        self.with(|inner| {
-            if !std::mem::take(&mut inner.dirty) {
-                return None;
-            }
-            let now = now_secs();
-            inner.saved.cookies.retain(|c| alive(c, now));
-            serde_json::to_vec(&inner.saved).ok()
-        })
-        .flatten()
+        // Só o clone sai com o lock; a serialização (até ~24 MB em JSON) roda fora dele.
+        let saved = self
+            .with(|inner| {
+                if !std::mem::take(&mut inner.dirty) {
+                    return None;
+                }
+                let now = now_secs();
+                inner.saved.cookies.retain(|c| alive(c, now));
+                Some(inner.saved.clone())
+            })
+            .flatten()?;
+        serde_json::to_vec(&saved).ok()
     }
 
     /// Si hay cambios que todavía no llegaron al archivo (el guardador espera un momento

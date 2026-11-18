@@ -11,12 +11,16 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 use uuid::Uuid;
 
-use crate::database::{db_mark_window_closed, DbConnection};
+use crate::database::{DbConnection, db_mark_window_closed};
 
-use super::authoring::{create_skill, fork_skill, SkillDraft};
-use super::bundled::{decide, ensure_one, ensure_one_when, Action, Provisioned, BUNDLED};
+use super::authoring::{SkillDraft, create_skill, fork_skill};
+use super::bundled::{Action, BUNDLED, Provisioned, decide, ensure_one, ensure_one_when};
 use super::files::{scan_skill_file, slug_from_source_path};
 use super::*;
+
+fn wait<T>(fut: impl std::future::Future<Output = T>) -> T {
+    tauri::async_runtime::block_on(fut)
+}
 
 fn temp_dir(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("cc-skills-test-{}-{}", label, Uuid::new_v4()));
@@ -160,14 +164,14 @@ fn same_named_skills_from_two_registries_coexist() {
 
     // Y attacheadas juntas conviven de verdad, cada symlink a su copia.
     for skill in [&a, &b] {
-        attach_skill(
+        wait(attach_skill(
             skill.id.clone(),
             workspace_id.clone(),
             "tab".to_string(),
             Some(tab_id.clone()),
             None,
             state.clone(),
-        )
+        ))
         .expect("attach");
     }
     let links = links_dir_for(&tab_cwd.to_string_lossy(), "claude-code").unwrap();
@@ -218,14 +222,14 @@ fn una_tab_con_varias_skills_las_monta_a_todas() {
 
     let skills = install_n_skills(&state, 4);
     for s in &skills {
-        attach_skill(
+        wait(attach_skill(
             s.id.clone(),
             workspace_id.clone(),
             "tab".to_string(),
             Some(tab_id.clone()),
             None,
             state.clone(),
-        )
+        ))
         .expect("attach");
     }
 
@@ -236,7 +240,7 @@ fn una_tab_con_varias_skills_las_monta_a_todas() {
     );
 
     // Y lo que corre justo antes de lanzar el agente no puede desmontarlas.
-    reconcile_tab_skills(tab_id.clone(), state.clone()).expect("reconcile");
+    wait(reconcile_tab_skills(tab_id.clone(), state.clone())).expect("reconcile");
     assert_eq!(
         linked_slugs(&tab_cwd).len(),
         4,
@@ -259,14 +263,14 @@ fn una_ventana_que_vuelve_a_abrirse_recupera_las_skills_de_sus_tabs() {
 
     let skills = install_n_skills(&state, 3);
     for s in &skills {
-        attach_skill(
+        wait(attach_skill(
             s.id.clone(),
             workspace_id.clone(),
             "tab".to_string(),
             Some(tab_id.clone()),
             None,
             state.clone(),
-        )
+        ))
         .expect("attach");
     }
     assert_eq!(linked_slugs(&tab_cwd).len(), 3);
@@ -287,7 +291,7 @@ fn una_ventana_que_vuelve_a_abrirse_recupera_las_skills_de_sus_tabs() {
         let conn = state.lock().unwrap();
         conn.execute("UPDATE windows SET is_open = 1", []).unwrap();
     }
-    reconcile_tab_skills(tab_id, state.clone()).expect("reconcile");
+    wait(reconcile_tab_skills(tab_id, state.clone())).expect("reconcile");
     assert_eq!(
         linked_slugs(&tab_cwd),
         vec!["skill-0", "skill-1", "skill-2"],
@@ -308,14 +312,14 @@ fn reanudar_una_sesion_recupera_sus_skills() {
 
     let skills = install_n_skills(&state, 3);
     for s in &skills {
-        attach_skill(
+        wait(attach_skill(
             s.id.clone(),
             workspace_id.clone(),
             "tab".to_string(),
             Some(tab_id.clone()),
             None,
             state.clone(),
-        )
+        ))
         .expect("attach");
     }
     assert_eq!(linked_slugs(&tab_cwd).len(), 3);
@@ -358,12 +362,12 @@ fn reanudar_una_sesion_recupera_sus_skills() {
         .unwrap();
     }
 
-    let missing = restore_session_skills(
+    let missing = wait(restore_session_skills(
         history_id,
         workspace_id.clone(),
         nueva_tab.clone(),
         state.clone(),
-    )
+    ))
     .expect("restore_session_skills");
     assert!(missing.is_empty(), "las 3 siguen instaladas: {missing:?}");
 
@@ -374,7 +378,7 @@ fn reanudar_una_sesion_recupera_sus_skills() {
     );
 
     // Y el reconcile previo al lanzamiento del agente tampoco puede quitarlas.
-    reconcile_tab_skills(nueva_tab, state.clone()).expect("reconcile");
+    wait(reconcile_tab_skills(nueva_tab, state.clone())).expect("reconcile");
     assert_eq!(
         linked_slugs(&tab_cwd).len(),
         3,
@@ -440,19 +444,19 @@ fn full_lifecycle_install_attach_edit_detach_delete() {
     );
 
     // 2) list_skills: aparece, sin usage todavía.
-    let listed = list_skills(state.clone()).unwrap();
+    let listed = wait(list_skills(state.clone())).unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].used_by.len(), 0);
 
     // 3) attach_skill (scope='tab'): debe crear un symlink REAL en el cwd de la tab.
-    attach_skill(
+    wait(attach_skill(
         info.id.clone(),
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id.clone()),
         None,
         state.clone(),
-    )
+    ))
     .expect("attach_skill debería funcionar");
 
     let expected_link = links_dir_for(&tab_cwd.to_string_lossy(), "claude-code")
@@ -462,32 +466,39 @@ fn full_lifecycle_install_attach_edit_detach_delete() {
         std::fs::symlink_metadata(&expected_link).is_ok(),
         "el montaje debe existir en disco"
     );
-    assert!(super::is_mount(&expected_link), "symlink o junction, no una copia");
+    assert!(
+        super::is_mount(&expected_link),
+        "symlink o junction, no una copia"
+    );
     let target = std::fs::read_link(&expected_link).unwrap();
     assert!(
         super::same_path(&target, Path::new(&info.source_path)),
         "el montaje debe apuntar a la copia global: {target:?}"
     );
     // Escrito después de montar: si fuera una copia, este archivo no aparecería.
-    std::fs::write(Path::new(&info.source_path).join("marca-de-origen.txt"), "vivo").unwrap();
+    std::fs::write(
+        Path::new(&info.source_path).join("marca-de-origen.txt"),
+        "vivo",
+    )
+    .unwrap();
     assert_eq!(
         std::fs::read_to_string(expected_link.join("marca-de-origen.txt")).unwrap(),
         "vivo"
     );
 
     // Idempotencia: attachear de nuevo no debe fallar ni duplicar el link.
-    attach_skill(
+    wait(attach_skill(
         info.id.clone(),
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id.clone()),
         None,
         state.clone(),
-    )
+    ))
     .expect("attach_skill debe ser idempotente");
 
     // 4) used_by ahora refleja el attachment.
-    let listed = list_skills(state.clone()).unwrap();
+    let listed = wait(list_skills(state.clone())).unwrap();
     assert_eq!(listed[0].used_by.len(), 1);
     assert_eq!(listed[0].used_by[0].workspace_id, workspace_id);
     assert_eq!(
@@ -496,18 +507,28 @@ fn full_lifecycle_install_attach_edit_detach_delete() {
     );
 
     // 5) health check: todo sano.
-    let health = check_symlinks_health(workspace_id.clone(), state.clone()).unwrap();
+    let health = wait(check_symlinks_health(workspace_id.clone(), state.clone())).unwrap();
     assert!(
         health.is_empty(),
         "no debería haber problemas de symlink recién attacheado"
     );
 
     // 6) edit: update_skill_content reescribe SKILL.md y re-parsea metadata (version bump).
-    let detail = get_skill_detail(info.id.clone(), state.clone()).unwrap();
+    let detail = wait(get_skill_detail(info.id.clone(), state.clone())).unwrap();
     assert!(detail.content.contains("git-commit-helper"));
     let new_content = detail.content.replace("version: 1.2.0", "version: 1.3.0");
-    update_skill_content(info.id.clone(), new_content, state.clone()).unwrap();
-    let detail = get_skill_detail(info.id.clone(), state.clone()).unwrap();
+    wait(update_skill_content(
+        info.id.clone(),
+        new_content,
+        state.clone(),
+    ))
+    .unwrap();
+    let skill_md = Path::new(&info.source_path).join("SKILL.md");
+    assert!(
+        skill_md.exists() && !info.source_path.contains('\0'),
+        "gravação atômica deixa SKILL.md no lugar"
+    );
+    let detail = wait(get_skill_detail(info.id.clone(), state.clone())).unwrap();
     assert_eq!(
         detail.skill.version, "1.3.0",
         "la versión debe reflejar el nuevo frontmatter"
@@ -515,49 +536,85 @@ fn full_lifecycle_install_attach_edit_detach_delete() {
 
     // 7) simular un symlink roto borrándolo a mano por fuera de la app.
     super::remove_mount(&expected_link).unwrap();
-    let health = check_symlinks_health(workspace_id.clone(), state.clone()).unwrap();
+    let health = wait(check_symlinks_health(workspace_id.clone(), state.clone())).unwrap();
     assert_eq!(health.len(), 1);
     assert_eq!(health[0].issue, "missing");
 
     // Reparar: volver a attachear debe recrear el symlink.
-    attach_skill(
+    wait(attach_skill(
         info.id.clone(),
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id.clone()),
         None,
         state.clone(),
-    )
+    ))
     .unwrap();
     assert!(std::fs::symlink_metadata(&expected_link).is_ok());
-    let health = check_symlinks_health(workspace_id.clone(), state.clone()).unwrap();
+    let health = wait(check_symlinks_health(workspace_id.clone(), state.clone())).unwrap();
     assert!(health.is_empty());
 
     // 8) detach_skill: el symlink debe desaparecer y el attachment también.
-    detach_skill(
+    wait(detach_skill(
         info.id.clone(),
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id.clone()),
         None,
         state.clone(),
-    )
+    ))
     .unwrap();
     assert!(
         std::fs::symlink_metadata(&expected_link).is_err(),
         "el symlink debe haberse removido"
     );
-    let listed = list_skills(state.clone()).unwrap();
+    let listed = wait(list_skills(state.clone())).unwrap();
     assert_eq!(listed[0].used_by.len(), 0);
 
     // 9) delete_skill: borra la fila y la copia global del disco.
     delete_skill(info.id.clone(), state.clone()).unwrap();
-    let listed = list_skills(state.clone()).unwrap();
+    let listed = wait(list_skills(state.clone())).unwrap();
     assert!(listed.is_empty());
     assert!(
         !Path::new(&info.source_path).exists(),
         "la copia global debe haberse borrado"
     );
+}
+
+#[test]
+fn editar_skill_grava_sem_segurar_o_banco() {
+    let (db, _workspace_id, _tab_id, _tab_cwd, _skills_dir) = setup();
+    let app = tauri::test::mock_app();
+    app.manage(db.clone());
+    let state = app.state::<DbConnection>();
+    let source = temp_dir("source-atomic");
+    write_source_skill(&source);
+    let info = install_skill(
+        source.join("SKILL.md").to_string_lossy().to_string(),
+        None,
+        state.clone(),
+    )
+    .expect("install_skill");
+    let detail = wait(get_skill_detail(info.id.clone(), state.clone())).unwrap();
+    let new_content = detail.content.replace("version: 1.2.0", "version: 1.4.0");
+    let db_for_probe = db.clone();
+    let preso = std::sync::atomic::AtomicBool::new(false);
+    update_skill_content_now_with(info.id.clone(), new_content, &db, &|| {
+        preso.store(
+            db_for_probe.try_lock().is_err(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+    })
+    .unwrap();
+    assert!(
+        !preso.load(std::sync::atomic::Ordering::SeqCst),
+        "a escrita de SKILL.md rodou com o mutex do banco preso"
+    );
+    let path = Path::new(&info.source_path).join("SKILL.md");
+    assert!(path.exists());
+    assert!(!Path::new(&info.source_path).join("SKILL.md.tmp").exists());
+    let body = std::fs::read_to_string(path).unwrap();
+    assert!(body.contains("version: 1.4.0"));
 }
 
 /// Dos workspaces distintos trabajando sobre LA MISMA carpeta no deben verse las
@@ -619,14 +676,14 @@ fn skills_do_not_leak_between_workspaces_sharing_a_folder() {
         .join(slug_from_source_path(&skill_b.source_path));
 
     // Workspace A (abierto) attachea su skill a nivel workspace.
-    attach_skill(
+    wait(attach_skill(
         skill_a.id.clone(),
         ws_a.clone(),
         "workspace".to_string(),
         None,
         None,
         state.clone(),
-    )
+    ))
     .unwrap();
     assert!(
         link_a.symlink_metadata().is_ok(),
@@ -635,14 +692,14 @@ fn skills_do_not_leak_between_workspaces_sharing_a_folder() {
 
     // Attachear la skill de B mientras su ventana está cerrada no toca la carpeta:
     // las skills se materializan cuando el workspace está abierto, no antes.
-    attach_skill(
+    wait(attach_skill(
         skill_b.id.clone(),
         "ws-b".to_string(),
         "tab".to_string(),
         Some("tab-b".to_string()),
         None,
         state.clone(),
-    )
+    ))
     .unwrap();
     assert!(
         link_b.symlink_metadata().is_err(),
@@ -650,7 +707,7 @@ fn skills_do_not_leak_between_workspaces_sharing_a_folder() {
     );
 
     // Se cierra A y se abre B — el cambio de workspace que reportaba el bug.
-    db_mark_window_closed("win".to_string(), state.clone()).unwrap();
+    wait(db_mark_window_closed("win".to_string(), state.clone())).unwrap();
     assert!(
         link_a.symlink_metadata().is_err(),
         "al cerrar A su skill debe salir de la carpeta"
@@ -661,7 +718,7 @@ fn skills_do_not_leak_between_workspaces_sharing_a_folder() {
         conn.execute("UPDATE windows SET is_open = 1 WHERE id = 'win-b'", [])
             .unwrap();
     }
-    reconcile_tab_skills("tab-b".to_string(), state.clone()).unwrap();
+    wait(reconcile_tab_skills("tab-b".to_string(), state.clone())).unwrap();
 
     assert!(
         link_b.symlink_metadata().is_ok(),
@@ -680,7 +737,7 @@ fn skills_do_not_leak_between_workspaces_sharing_a_folder() {
         conn.execute("UPDATE windows SET is_open = 1 WHERE label = 'win'", [])
             .unwrap();
     }
-    reconcile_tab_skills(tab_a, state.clone()).unwrap();
+    wait(reconcile_tab_skills(tab_a, state.clone())).unwrap();
     assert!(link_a.symlink_metadata().is_ok());
     assert!(link_b.symlink_metadata().is_err());
 }
@@ -715,16 +772,16 @@ fn reconcile_leaves_user_owned_entries_alone() {
         state.clone(),
     )
     .unwrap();
-    attach_skill(
+    wait(attach_skill(
         info.id.clone(),
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id.clone()),
         None,
         state.clone(),
-    )
+    ))
     .unwrap();
-    reconcile_tab_skills(tab_id.clone(), state.clone()).unwrap();
+    wait(reconcile_tab_skills(tab_id.clone(), state.clone())).unwrap();
 
     assert!(
         own.join("SKILL.md").exists(),
@@ -736,14 +793,14 @@ fn reconcile_leaves_user_owned_entries_alone() {
     );
 
     // Detachear se lleva SOLO la gestionada por ADE AGS.
-    detach_skill(
+    wait(detach_skill(
         info.id.clone(),
         workspace_id,
         "tab".to_string(),
         Some(tab_id),
         None,
         state.clone(),
-    )
+    ))
     .unwrap();
     let managed = links_dir_for(&tab_cwd.to_string_lossy(), "claude-code")
         .unwrap()
@@ -811,14 +868,14 @@ fn custom_agents_get_skills_in_their_declared_folder() {
     }
 
     // Attach a nivel workspace: aplica a las dos tabs.
-    attach_skill(
+    wait(attach_skill(
         info.id.clone(),
         workspace_id.clone(),
         "workspace".to_string(),
         None,
         None,
         state.clone(),
-    )
+    ))
     .unwrap();
 
     let slug = slug_from_source_path(&info.source_path);
@@ -839,14 +896,14 @@ fn custom_agents_get_skills_in_their_declared_folder() {
     );
 
     // Y el ciclo completo también funciona: detachear se lleva el symlink.
-    detach_skill(
+    wait(detach_skill(
         info.id.clone(),
         workspace_id,
         "workspace".to_string(),
         None,
         None,
         state.clone(),
-    )
+    ))
     .unwrap();
     assert!(custom_link.symlink_metadata().is_err());
 }
@@ -911,7 +968,7 @@ fn archived_session_skills_are_checked_and_restored() {
     }
 
     // Con las dos instaladas no falta nada.
-    let statuses = check_session_skills("hist-1".to_string(), state.clone()).unwrap();
+    let statuses = wait(check_session_skills("hist-1".to_string(), state.clone())).unwrap();
     assert_eq!(statuses.len(), 2);
     assert!(
         statuses.iter().all(|s| !s.is_missing()),
@@ -920,7 +977,7 @@ fn archived_session_skills_are_checked_and_restored() {
 
     // Se desinstala una: ahora la app tiene que saber cuál falta y de dónde bajarla.
     delete_skill(gone.id.clone(), state.clone()).unwrap();
-    let statuses = check_session_skills("hist-1".to_string(), state.clone()).unwrap();
+    let statuses = wait(check_session_skills("hist-1".to_string(), state.clone())).unwrap();
     let missing: Vec<&SessionSkillStatus> = statuses.iter().filter(|s| s.is_missing()).collect();
     assert_eq!(missing.len(), 1);
     assert_eq!(missing[0].name, "la-que-falta");
@@ -934,8 +991,13 @@ fn archived_session_skills_are_checked_and_restored() {
     );
 
     // Restaurar sobre la tab: se reattachea la que está y se reporta la que no.
-    let still_missing =
-        restore_session_skills("hist-1".to_string(), workspace_id, tab_id, state.clone()).unwrap();
+    let still_missing = wait(restore_session_skills(
+        "hist-1".to_string(),
+        workspace_id,
+        tab_id,
+        state.clone(),
+    ))
+    .unwrap();
     assert_eq!(still_missing, vec!["la-que-falta".to_string()]);
 
     let kept_link = links_dir_for(&tab_cwd.to_string_lossy(), "claude-code")
@@ -974,7 +1036,11 @@ fn legacy_archived_skill_names_still_resolve() {
         ).unwrap();
     }
 
-    let statuses = check_session_skills("hist-legacy".to_string(), state.clone()).unwrap();
+    let statuses = wait(check_session_skills(
+        "hist-legacy".to_string(),
+        state.clone(),
+    ))
+    .unwrap();
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].name, "git-commit-helper");
     assert_eq!(
@@ -1188,9 +1254,11 @@ fn the_provisioning_lifecycle() {
         dest.starts_with(&store),
         "tiene que quedar dentro del store configurado"
     );
-    assert!(std::fs::read_to_string(dest.join("SKILL.md"))
-        .unwrap()
-        .contains("Cuerpo v1.0.0"));
+    assert!(
+        std::fs::read_to_string(dest.join("SKILL.md"))
+            .unwrap()
+            .contains("Cuerpo v1.0.0")
+    );
 
     // 2. Arranques siguientes: no se duplica ni se reescribe.
     ensure_one(&db, "mi-skill", &source).unwrap();
@@ -1245,10 +1313,18 @@ fn com_terminal_aberto_a_atualizacao_espera_a_proxima_abertura() {
     let source = fake_skill("1.0.0");
     let (db, _store) = bundled_db();
     ensure_one_when(&db, "mi-skill", &source, true).unwrap();
-    assert_eq!(installed_rows(&db)[0].1, "1.0.0", "instalar não troca nada sob ninguém: segue");
+    assert_eq!(
+        installed_rows(&db)[0].1,
+        "1.0.0",
+        "instalar não troca nada sob ninguém: segue"
+    );
     write_version(&source, "2.0.0");
     ensure_one_when(&db, "mi-skill", &source, true).unwrap();
-    assert_eq!(installed_rows(&db)[0].1, "1.0.0", "com terminal aberto, espera");
+    assert_eq!(
+        installed_rows(&db)[0].1,
+        "1.0.0",
+        "com terminal aberto, espera"
+    );
     ensure_one_when(&db, "mi-skill", &source, false).unwrap();
     assert_eq!(installed_rows(&db)[0].1, "2.0.0");
 }
@@ -1313,9 +1389,16 @@ fn upstream_of(skill: &str) -> String {
     let mut body = skill.to_string();
     if let (Some(start), Some(end)) = (skill.find(BEGIN), skill.find(END)) {
         let tail = &skill[end + END.len()..];
-        body = format!("{}{}", &skill[..start], tail.strip_prefix("\n\n").unwrap_or(tail));
+        body = format!(
+            "{}{}",
+            &skill[..start],
+            tail.strip_prefix("\n\n").unwrap_or(tail)
+        );
     }
-    body.split('\n').filter(|l| !l.trim_end().ends_with("# ade-ags")).collect::<Vec<_>>().join("\n")
+    body.split('\n')
+        .filter(|l| !l.trim_end().ends_with("# ade-ags"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// As skills de terceiros que viajam com a app são as do upstream, byte a byte, na tag e no commit do lock (fora o
@@ -1325,7 +1408,9 @@ fn upstream_of(skill: &str) -> String {
 fn as_skills_de_terceiros_conferem_com_o_hash_do_upstream_e_a_versao_do_lock() {
     use sha2::{Digest, Sha256};
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../skills");
-    let lock: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join("vendor.lock.json")).unwrap()).unwrap();
+    let lock: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("vendor.lock.json")).unwrap())
+            .unwrap();
     let skills = lock["skills"].as_object().unwrap();
     let mut names: Vec<&str> = skills.keys().map(String::as_str).collect();
     names.sort_unstable();
@@ -1333,18 +1418,43 @@ fn as_skills_de_terceiros_conferem_com_o_hash_do_upstream_e_a_versao_do_lock() {
     want.sort_unstable();
     assert_eq!(names, want, "o lock e a lista de terceiros andam juntos");
     for (name, entry) in skills {
-        assert!(BUNDLED.contains(&name.as_str()), "{name} precisa estar em BUNDLED");
-        assert_eq!(entry["commit"].as_str().unwrap().len(), 40, "{name}: commit completo");
+        assert!(
+            BUNDLED.contains(&name.as_str()),
+            "{name} precisa estar em BUNDLED"
+        );
+        assert_eq!(
+            entry["commit"].as_str().unwrap().len(),
+            40,
+            "{name}: commit completo"
+        );
         let version = entry["version"].as_str().unwrap();
         for (dest, file) in entry["files"].as_object().unwrap() {
-            let raw = std::fs::read_to_string(root.join(name).join(dest)).unwrap_or_else(|_| panic!("falta {name}/{dest}"));
-            let content = if dest == "SKILL.md" { upstream_of(&raw) } else { raw.clone() };
+            let raw = std::fs::read_to_string(root.join(name).join(dest))
+                .unwrap_or_else(|_| panic!("falta {name}/{dest}"));
+            let content = if dest == "SKILL.md" {
+                upstream_of(&raw)
+            } else {
+                raw.clone()
+            };
             let hash = format!("{:x}", Sha256::digest(content.as_bytes()));
-            assert_eq!(hash, file["sha256"].as_str().unwrap(), "{name}/{dest} não confere com {}@{}", entry["repo"], entry["tag"]);
+            assert_eq!(
+                hash,
+                file["sha256"].as_str().unwrap(),
+                "{name}/{dest} não confere com {}@{}",
+                entry["repo"],
+                entry["tag"]
+            );
             if dest == "SKILL.md" {
                 let (meta, _) = scan_skill_file(&root.join(name).join(dest)).unwrap();
-                assert_eq!(meta.version.as_deref(), Some(version), "{name}: frontmatter × lock");
-                assert!(raw.contains("## In ADE AGS: read this first"), "{name}: sem o bloco da ADE AGS");
+                assert_eq!(
+                    meta.version.as_deref(),
+                    Some(version),
+                    "{name}: frontmatter × lock"
+                );
+                assert!(
+                    raw.contains("## In ADE AGS: read this first"),
+                    "{name}: sem o bloco da ADE AGS"
+                );
             }
         }
     }
@@ -1360,15 +1470,47 @@ fn ativa_em_todos_os_agentes_monta_sem_anexar_e_desligar_tira_de_todas_as_pastas
     let skills = install_n_skills(&state, 2);
     assert!(linked_slugs(&tab_cwd).is_empty());
 
-    set_skill_always_on(skills[1].id.clone(), true, state.clone()).unwrap();
-    assert_eq!(linked_slugs(&tab_cwd), vec!["skill-1"], "ligar monta na hora em toda aba aberta");
-    assert_eq!(list_always_on_skills(state.clone()).unwrap(), vec![skills[1].id.clone()]);
-    reconcile_tab_skills(tab_id.clone(), state.clone()).unwrap();
-    assert_eq!(linked_slugs(&tab_cwd), vec!["skill-1"], "a reconciliação da aba mantém");
+    wait(set_skill_always_on(
+        skills[1].id.clone(),
+        true,
+        state.clone(),
+    ))
+    .unwrap();
+    assert_eq!(
+        linked_slugs(&tab_cwd),
+        vec!["skill-1"],
+        "ligar monta na hora em toda aba aberta"
+    );
+    assert_eq!(
+        wait(list_always_on_skills(state.clone())).unwrap(),
+        vec![skills[1].id.clone()]
+    );
+    wait(reconcile_tab_skills(tab_id.clone(), state.clone())).unwrap();
+    assert_eq!(
+        linked_slugs(&tab_cwd),
+        vec!["skill-1"],
+        "a reconciliação da aba mantém"
+    );
 
-    set_skill_always_on(skills[1].id.clone(), false, state.clone()).unwrap();
-    assert!(linked_slugs(&tab_cwd).is_empty(), "desligar tira de todas as pastas");
-    assert!(set_skill_always_on("nao-existe".into(), true, state.clone()).is_err(), "só skill instalada");
+    wait(set_skill_always_on(
+        skills[1].id.clone(),
+        false,
+        state.clone(),
+    ))
+    .unwrap();
+    assert!(
+        linked_slugs(&tab_cwd).is_empty(),
+        "desligar tira de todas as pastas"
+    );
+    assert!(
+        wait(set_skill_always_on(
+            "nao-existe".into(),
+            true,
+            state.clone()
+        ))
+        .is_err(),
+        "só skill instalada"
+    );
 }
 
 #[test]
@@ -1385,35 +1527,70 @@ fn skills_sempre_ativas_chegam_a_conversa_de_protocolo_sem_aba_tui() {
             "INSERT INTO chat_thread (id, agent_id, cwd, title, state, created_at, updated_at)
              VALUES ('thread-protocol', 'claude-code', ?1, 'Teste', 'active', 0, 0)",
             [cwd.to_string_lossy().as_ref()],
-        ).unwrap();
+        )
+        .unwrap();
     }
 
-    set_skill_always_on(skills[1].id.clone(), true, state.clone()).unwrap();
-    assert_eq!(linked_slugs(&cwd), vec!["skill-1"], "a conversa ativa recebe a skill sempre ligada");
+    wait(set_skill_always_on(
+        skills[1].id.clone(),
+        true,
+        state.clone(),
+    ))
+    .unwrap();
     assert_eq!(
-        super::always::skills_for(&state.lock().unwrap(), &cwd.to_string_lossy(), "claude-code")
-            .into_iter().map(|s| s.id).collect::<Vec<_>>(),
+        linked_slugs(&cwd),
+        vec!["skill-1"],
+        "a conversa ativa recebe a skill sempre ligada"
+    );
+    assert_eq!(
+        super::always::skills_for(
+            &state.lock().unwrap(),
+            &cwd.to_string_lossy(),
+            "claude-code"
+        )
+        .into_iter()
+        .map(|s| s.id)
+        .collect::<Vec<_>>(),
         vec![skills[1].id.clone()],
     );
 
     {
         let conn = state.lock().unwrap();
-        conn.execute("UPDATE chat_thread SET state = 'settled' WHERE id = 'thread-protocol'", []).unwrap();
+        conn.execute(
+            "UPDATE chat_thread SET state = 'settled' WHERE id = 'thread-protocol'",
+            [],
+        )
+        .unwrap();
         crate::skills::reconcile_link_dir(&conn, &cwd.to_string_lossy(), "claude-code").unwrap();
     }
-    assert!(linked_slugs(&cwd).is_empty(), "concluir a conversa remove a skill da pasta sem outras abas ativas");
+    assert!(
+        linked_slugs(&cwd).is_empty(),
+        "concluir a conversa remove a skill da pasta sem outras abas ativas"
+    );
 }
 
 /// As de computer use que vêm com a app nascem ligadas; desligadas pela pessoa, uma atualização não liga de novo.
 #[test]
 fn skill_de_computer_use_nasce_ligada_e_a_atualizacao_respeita_o_desligar() {
     let (db, _store) = bundled_db();
-    let dir = std::env::temp_dir().join(format!("cc-bundled-src-{}", uuid::Uuid::new_v4())).join("jev-sim-use");
+    let dir = std::env::temp_dir()
+        .join(format!("cc-bundled-src-{}", uuid::Uuid::new_v4()))
+        .join("jev-sim-use");
     std::fs::create_dir_all(&dir).unwrap();
-    let write = |v: &str| std::fs::write(dir.join("SKILL.md"), format!("---\nname: jev-sim-use\ndescription: d\nversion: \"{v}\"\n---\ncorpo {v}\n")).unwrap();
+    let write = |v: &str| {
+        std::fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: jev-sim-use\ndescription: d\nversion: \"{v}\"\n---\ncorpo {v}\n"),
+        )
+        .unwrap()
+    };
     write("0.4.2+ade.1");
     ensure_one(&db, "jev-sim-use", &dir).unwrap();
-    let id: String = db.lock().unwrap().query_row("SELECT id FROM skills", [], |r| r.get(0)).unwrap();
+    let id: String = db
+        .lock()
+        .unwrap()
+        .query_row("SELECT id FROM skills", [], |r| r.get(0))
+        .unwrap();
     let on = || super::always::ids(&db.lock().unwrap());
     assert_eq!(on(), vec![id.clone()]);
 
@@ -1464,7 +1641,10 @@ fn dos_homonimas_de_repos_distintos_conviven_con_su_origen_registrado() {
     .expect("instalar la segunda");
 
     assert_ne!(a.id, b.id, "son dos skills distintas");
-    assert_eq!(a.origin_skill_id.as_deref(), Some("document-skills/testing"));
+    assert_eq!(
+        a.origin_skill_id.as_deref(),
+        Some("document-skills/testing")
+    );
     assert_eq!(b.origin_skill_id.as_deref(), Some("midudev/skills/testing"));
     assert_eq!(count_skills(&state), 2, "ninguna pisó a la otra");
 }
@@ -1493,14 +1673,14 @@ fn reinstalar_la_misma_entrada_actualiza_en_vez_de_duplicar() {
         &state,
     )
     .expect("instalar");
-    attach_skill(
+    wait(attach_skill(
         primera.id.clone(),
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id),
         None,
         state.clone(),
-    )
+    ))
     .expect("attach");
 
     write_named_skill(&src, "testing", "version dos");
@@ -1512,7 +1692,10 @@ fn reinstalar_la_misma_entrada_actualiza_en_vez_de_duplicar() {
     )
     .expect("reinstalar");
 
-    assert_eq!(segunda.id, primera.id, "conserva el id: los attachments cuelgan de él");
+    assert_eq!(
+        segunda.id, primera.id,
+        "conserva el id: los attachments cuelgan de él"
+    );
     assert_eq!(count_skills(&state), 1, "no quedó una segunda copia");
     assert_eq!(
         count(&state, "SELECT COUNT(*) FROM project_skills"),
@@ -1521,7 +1704,10 @@ fn reinstalar_la_misma_entrada_actualiza_en_vez_de_duplicar() {
     );
     let contenido =
         std::fs::read_to_string(Path::new(&segunda.source_path).join("SKILL.md")).unwrap();
-    assert!(contenido.contains("version dos"), "quedó el contenido nuevo: {contenido}");
+    assert!(
+        contenido.contains("version dos"),
+        "quedó el contenido nuevo: {contenido}"
+    );
 }
 
 /// Deja una fila como las de antes de que existiera `origin_skill_id`: sabe de qué
@@ -1529,7 +1715,10 @@ fn reinstalar_la_misma_entrada_actualiza_en_vez_de_duplicar() {
 fn forget_origin(db: &DbConnection, skill_id: &str) {
     db.lock()
         .unwrap()
-        .execute("UPDATE skills SET origin_skill_id = NULL WHERE id = ?1", [skill_id])
+        .execute(
+            "UPDATE skills SET origin_skill_id = NULL WHERE id = ?1",
+            [skill_id],
+        )
         .unwrap();
 }
 
@@ -1558,14 +1747,14 @@ fn instalar_algo_que_ya_estaba_desde_antes_adopta_la_fila_vieja() {
         &state,
     )
     .expect("instalar");
-    attach_skill(
+    wait(attach_skill(
         vieja.id.clone(),
         workspace_id.clone(),
         "tab".to_string(),
         Some(tab_id),
         None,
         state.clone(),
-    )
+    ))
     .expect("attach");
     forget_origin(&state, &vieja.id);
 
@@ -1578,7 +1767,10 @@ fn instalar_algo_que_ya_estaba_desde_antes_adopta_la_fila_vieja() {
     .expect("instalar de nuevo");
 
     assert_eq!(count_skills(&state), 1, "no quedó una segunda copia");
-    assert_eq!(otra_vez.id, vieja.id, "conserva el id: los attachments cuelgan de él");
+    assert_eq!(
+        otra_vez.id, vieja.id,
+        "conserva el id: los attachments cuelgan de él"
+    );
     assert_eq!(
         otra_vez.origin_skill_id.as_deref(),
         Some("quien/repo/testing"),
@@ -1606,14 +1798,22 @@ fn con_dos_viejas_homonimas_no_se_adopta_ninguna() {
     let una = install_skill_internal(
         &src.join("SKILL.md").to_string_lossy(),
         None,
-        Some(SkillOrigin { registry_id: "reg-a", registry_name: "skills.sh", skill_id: "a/testing" }),
+        Some(SkillOrigin {
+            registry_id: "reg-a",
+            registry_name: "skills.sh",
+            skill_id: "a/testing",
+        }),
         &state,
     )
     .expect("instalar la primera");
     let otra = install_skill_internal(
         &src.join("SKILL.md").to_string_lossy(),
         None,
-        Some(SkillOrigin { registry_id: "reg-a", registry_name: "skills.sh", skill_id: "b/testing" }),
+        Some(SkillOrigin {
+            registry_id: "reg-a",
+            registry_name: "skills.sh",
+            skill_id: "b/testing",
+        }),
         &state,
     )
     .expect("instalar la segunda");
@@ -1623,12 +1823,20 @@ fn con_dos_viejas_homonimas_no_se_adopta_ninguna() {
     install_skill_internal(
         &src.join("SKILL.md").to_string_lossy(),
         None,
-        Some(SkillOrigin { registry_id: "reg-a", registry_name: "skills.sh", skill_id: "c/testing" }),
+        Some(SkillOrigin {
+            registry_id: "reg-a",
+            registry_name: "skills.sh",
+            skill_id: "c/testing",
+        }),
         &state,
     )
     .expect("instalar la tercera");
 
-    assert_eq!(count_skills(&state), 3, "se instala una nueva en vez de pisar a ciegas");
+    assert_eq!(
+        count_skills(&state),
+        3,
+        "se instala una nueva en vez de pisar a ciegas"
+    );
 }
 
 // ── Vincular lo instalado con la entrada de la que salió ─────────
@@ -1676,7 +1884,11 @@ fn una_instalacion_vieja_se_vincula_con_su_entrada() {
     let vieja = install_skill_internal(
         &src.join("SKILL.md").to_string_lossy(),
         None,
-        Some(SkillOrigin { registry_id: "reg-a", registry_name: "skills.sh", skill_id: "quien/repo/testing" }),
+        Some(SkillOrigin {
+            registry_id: "reg-a",
+            registry_name: "skills.sh",
+            skill_id: "quien/repo/testing",
+        }),
         &state,
     )
     .expect("instalar");
@@ -1687,7 +1899,11 @@ fn una_instalacion_vieja_se_vincula_con_su_entrada() {
     let origen: Option<String> = state
         .lock()
         .unwrap()
-        .query_row("SELECT origin_skill_id FROM skills WHERE id = ?1", [&vieja.id], |r| r.get(0))
+        .query_row(
+            "SELECT origin_skill_id FROM skills WHERE id = ?1",
+            [&vieja.id],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(origen.as_deref(), Some("quien/repo/testing"));
 }
@@ -1708,7 +1924,11 @@ fn no_se_vincula_una_entrada_que_ya_tiene_dueño() {
     install_skill_internal(
         &src.join("SKILL.md").to_string_lossy(),
         None,
-        Some(SkillOrigin { registry_id: "reg-a", registry_name: "skills.sh", skill_id: "quien/repo/testing" }),
+        Some(SkillOrigin {
+            registry_id: "reg-a",
+            registry_name: "skills.sh",
+            skill_id: "quien/repo/testing",
+        }),
         &state,
     )
     .expect("instalar la que reclama la entrada");
@@ -1730,9 +1950,16 @@ fn no_se_vincula_una_entrada_que_ya_tiene_dueño() {
     let origen: Option<String> = state
         .lock()
         .unwrap()
-        .query_row("SELECT origin_skill_id FROM skills WHERE id = 'vieja'", [], |r| r.get(0))
+        .query_row(
+            "SELECT origin_skill_id FROM skills WHERE id = 'vieja'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
-    assert_eq!(origen, None, "la vieja se queda sin vincular, no comparte dueño");
+    assert_eq!(
+        origen, None,
+        "la vieja se queda sin vincular, no comparte dueño"
+    );
 }
 
 fn count(db: &DbConnection, sql: &str) -> i64 {
@@ -1779,7 +2006,10 @@ fn el_constructor_crea_una_skill_de_origen_local() {
     .expect("crear");
 
     assert_eq!(creada.name, "mi-skill");
-    assert_eq!(creada.registry_id, None, "es del usuario, no de ningún repo");
+    assert_eq!(
+        creada.registry_id, None,
+        "es del usuario, no de ningún repo"
+    );
     assert_eq!(creada.origin_skill_id, None);
     assert_eq!(creada.author.as_deref(), Some("luis"));
     assert!(
@@ -1789,7 +2019,10 @@ fn el_constructor_crea_una_skill_de_origen_local() {
     );
 
     let md = std::fs::read_to_string(Path::new(&creada.source_path).join("SKILL.md")).unwrap();
-    assert!(md.starts_with("---\n"), "el frontmatter tiene que estar armado: {md}");
+    assert!(
+        md.starts_with("---\n"),
+        "el frontmatter tiene que estar armado: {md}"
+    );
     assert!(md.contains("name: mi-skill"));
     assert!(md.contains("Hacé esto."), "el cuerpo se conserva");
 }
@@ -1845,18 +2078,24 @@ fn editar_una_skill_de_repo_deja_la_original_intacta() {
     )
     .expect("instalar");
 
-    let copia = fork_skill(
+    let copia = wait(fork_skill(
         original.id.clone(),
         None,
         Some("---\nname: testing\n---\nmis cambios\n".into()),
         state.clone(),
-    )
+    ))
     .expect("forkear");
 
     assert_ne!(copia.id, original.id);
     assert_eq!(copia.registry_id, None, "la copia es del usuario");
-    assert_eq!(copia.name, "testing-local", "sin nombre elegido, sufijo automático");
-    assert_ne!(copia.source_path, original.source_path, "carpetas distintas");
+    assert_eq!(
+        copia.name, "testing-local",
+        "sin nombre elegido, sufijo automático"
+    );
+    assert_ne!(
+        copia.source_path, original.source_path,
+        "carpetas distintas"
+    );
 
     let en_la_copia =
         std::fs::read_to_string(Path::new(&copia.source_path).join("SKILL.md")).unwrap();
@@ -1868,7 +2107,10 @@ fn editar_una_skill_de_repo_deja_la_original_intacta() {
         en_la_original.contains("la del repositorio") && !en_la_original.contains("mis cambios"),
         "la del repo no se tocó: {en_la_original}"
     );
-    assert!(skills_dir.join("local").is_dir(), "la copia vive en el bucket local");
+    assert!(
+        skills_dir.join("local").is_dir(),
+        "la copia vive en el bucket local"
+    );
 }
 
 /// Con un nombre elegido, manda ese — y queda escrito en el frontmatter, no solo en la
@@ -1885,12 +2127,20 @@ fn la_copia_puede_llevar_el_nombre_que_elija_el_usuario() {
         install_skill_internal(&src.join("SKILL.md").to_string_lossy(), None, None, &state)
             .expect("instalar");
 
-    let copia = fork_skill(original.id, Some("testing-de-luis".into()), None, state)
-        .expect("forkear");
+    let copia = wait(fork_skill(
+        original.id,
+        Some("testing-de-luis".into()),
+        None,
+        state,
+    ))
+    .expect("forkear");
 
     assert_eq!(copia.name, "testing-de-luis");
     let md = std::fs::read_to_string(Path::new(&copia.source_path).join("SKILL.md")).unwrap();
-    assert!(md.contains("name: testing-de-luis"), "el nombre va DENTRO del archivo: {md}");
+    assert!(
+        md.contains("name: testing-de-luis"),
+        "el nombre va DENTRO del archivo: {md}"
+    );
 }
 
 /// v9: una skill de scope='workspace' aplica a UNA carpeta, no a todas las que estén
@@ -1928,36 +2178,44 @@ fn una_skill_de_workspace_solo_toca_su_carpeta() {
     let slug = slug_from_source_path(&skill.source_path);
 
     let link_in = |cwd: &PathBuf| {
-        links_dir_for(&cwd.to_string_lossy(), "claude-code").unwrap().join(&slug)
+        links_dir_for(&cwd.to_string_lossy(), "claude-code")
+            .unwrap()
+            .join(&slug)
     };
 
-    attach_skill(
+    wait(attach_skill(
         skill.id.clone(),
         workspace_id.clone(),
         "workspace".to_string(),
         None,
         Some(cwd_a.to_string_lossy().to_string()),
         state.clone(),
-    )
+    ))
     .unwrap();
 
-    assert!(link_in(&cwd_a).symlink_metadata().is_ok(), "la carpeta elegida sí la lleva");
+    assert!(
+        link_in(&cwd_a).symlink_metadata().is_ok(),
+        "la carpeta elegida sí la lleva"
+    );
     assert!(
         link_in(&cwd_b).symlink_metadata().is_err(),
         "la otra carpeta del mismo workspace NO debe recibirla"
     );
 
     // Y sacarla deja la carpeta como estaba.
-    detach_skill(
+    wait(detach_skill(
         skill.id.clone(),
         workspace_id.clone(),
         "workspace".to_string(),
         None,
         Some(cwd_a.to_string_lossy().to_string()),
         state.clone(),
-    )
+    ))
     .unwrap();
-    assert!(link_in(&cwd_a).symlink_metadata().is_err(), "detach debe quitar el symlink");
+    assert!(
+        link_in(&cwd_a).symlink_metadata().is_err(),
+        "detach debe quitar el symlink"
+    );
 }
 
 /// Las filas de antes de la v9 quedaron con `cwd = ''`, que significaba "todas las
@@ -1991,19 +2249,24 @@ fn una_fila_vieja_sin_carpeta_sigue_valiendo_para_todas() {
     let slug = slug_from_source_path(&skill.source_path);
 
     // `None` es exactamente lo que guardaban las versiones anteriores.
-    attach_skill(
+    wait(attach_skill(
         skill.id.clone(),
         workspace_id.clone(),
         "workspace".to_string(),
         None,
         None,
         state.clone(),
-    )
+    ))
     .unwrap();
 
     for cwd in [&cwd_a, &cwd_b] {
-        let link = links_dir_for(&cwd.to_string_lossy(), "claude-code").unwrap().join(&slug);
-        assert!(link.symlink_metadata().is_ok(), "{cwd:?} debería conservar la skill");
+        let link = links_dir_for(&cwd.to_string_lossy(), "claude-code")
+            .unwrap()
+            .join(&slug);
+        assert!(
+            link.symlink_metadata().is_ok(),
+            "{cwd:?} debería conservar la skill"
+        );
     }
 }
 
@@ -2029,14 +2292,14 @@ fn attachear_dos_veces_no_duplica_la_fila() {
     .unwrap();
 
     for _ in 0..3 {
-        attach_skill(
+        wait(attach_skill(
             skill.id.clone(),
             workspace_id.clone(),
             "workspace".to_string(),
             None,
             Some(cwd_a.to_string_lossy().to_string()),
             state.clone(),
-        )
+        ))
         .unwrap();
     }
 
@@ -2048,5 +2311,29 @@ fn attachear_dos_veces_no_duplica_la_fila() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(filas, 1, "tres attach del mismo alcance dejaron {filas} filas");
+    assert_eq!(
+        filas, 1,
+        "tres attach del mismo alcance dejaron {filas} filas"
+    );
+}
+
+/// Reconciliar skills toca el disco (symlinks, `remove_dir`). Eso no puede pasar con el
+/// mutex del banco preso: la sonda confirma el mutex libre en cada plan que se aplica.
+#[test]
+fn reconciliar_skills_no_segura_el_banco_al_tocar_el_disco() {
+    let db: DbConnection = std::sync::Arc::new(std::sync::Mutex::new(crate::database::test_db()));
+    let probe = db.clone();
+    let mut planes = 0;
+    super::links::reconcile_link_dirs_with(
+        &db,
+        &[("/ruta-que-no-existe/proyecto".into(), "claude-code".into())],
+        |_plan| {
+            assert!(
+                probe.try_lock().is_ok(),
+                "el disco se tocó con el banco preso"
+            );
+            planes += 1;
+        },
+    );
+    assert_eq!(planes, 1, "el plan de la tab no se aplicó");
 }
