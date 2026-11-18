@@ -799,13 +799,15 @@ pub fn redeliver_now(
 }
 
 #[tauri::command]
-pub fn mission_cancel(app: AppHandle, mission_id: String) -> Result<Mission, String> {
-    let db = db_of(&app)?;
-    let result = cancel(&db, &mission_id, |run_id| {
-        crate::runs::cancel_run(&app, run_id)
-    });
-    notify(&app, &mission_id);
-    result
+pub async fn mission_cancel(app: AppHandle, mission_id: String) -> Result<Mission, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = db_of(&app)?;
+        let result = cancel(&db, &mission_id, |run_id| crate::runs::cancel_run(&app, run_id));
+        notify(&app, &mission_id);
+        result
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 // ── Cronómetro ──────────────────────────────────────────────────────

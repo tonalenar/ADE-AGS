@@ -377,12 +377,18 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
             // `task_cancel` pode marcar a tarefa enquanto o processo ainda está sendo criado.
             // Não deixe esse processo sobreviver a uma tarefa que já saiu de `ready`.
             crate::terminal::release_task_process(&task.id);
-            group.kill_all();
+            let _ = runtime.inner().spawn_blocking(move || {
+                let mut group = group;
+                group.kill_all();
+            });
             return Ok(());
         }
         Err(error) => {
             crate::terminal::release_task_process(&task.id);
-            group.kill_all();
+            let _ = runtime.inner().spawn_blocking(move || {
+                let mut group = group;
+                group.kill_all();
+            });
             return Err(error);
         }
     }
@@ -399,15 +405,21 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         Ok(true) => {}
         Ok(false) => {
             crate::terminal::release_task_process(&task.id);
-            if let Some(mut group) = live().remove(&task.id) {
-                group.kill_all();
+            if let Some(group) = live().remove(&task.id) {
+                let _ = runtime.inner().spawn_blocking(move || {
+                    let mut group = group;
+                    group.kill_all();
+                });
             }
             return Ok(());
         }
         Err(error) => {
             crate::terminal::release_task_process(&task.id);
-            if let Some(mut group) = live().remove(&task.id) {
-                group.kill_all();
+            if let Some(group) = live().remove(&task.id) {
+                let _ = runtime.inner().spawn_blocking(move || {
+                    let mut group = group;
+                    group.kill_all();
+                });
             }
             return Err(error);
         }
@@ -512,9 +524,16 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
             outcome.error = Some(tail(&stderr_text, 400));
         }
 
-        // Sacarlo del registro corre el `Drop` del grupo, que barre lo que el agente
-        // hubiera dejado atrás (un `cargo test` a medias, un server levantado).
-        live().remove(&task_id);
+        // Um agente pode deixar subprocessos rodando mesmo depois de sair; a limpeza é
+        // suspensa no pool de bloqueio, sem segurar o mutex do registry nem o worker Tokio.
+        let completed_group = { live().remove(&task_id) };
+        if let Some(group) = completed_group {
+            let _ = tokio::task::spawn_blocking(move || {
+                let mut group = group;
+                group.kill_all();
+            })
+            .await;
+        }
         crate::terminal::release_task_process(&task_id);
         // Un pedido de permiso sin proceso que lo espere no lo va a contestar nadie:
         // dejarlo en la cola lo mostraría en la consola para siempre.
@@ -612,13 +631,18 @@ pub fn cancel_many(app: &AppHandle, task_ids: &[String]) -> Result<Vec<String>, 
         (cancelled, run_ids)
     };
 
+    let mut groups = Vec::new();
     for task_id in &cancelled {
         super::broker::drop_task(task_id);
-        if let Some(mut group) = live().remove(task_id) {
-            group.kill_all();
+        if let Some(group) = live().remove(task_id) {
+            groups.push(group);
         }
         emit_changed(app, task_id);
     }
+    crate::terminal::containment::kill_groups(
+        &mut groups,
+        std::time::Duration::from_secs(2),
+    );
     for run_id in run_ids {
         super::scheduler::tick(app, &run_id);
     }

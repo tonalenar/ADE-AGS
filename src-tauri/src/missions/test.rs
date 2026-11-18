@@ -1034,14 +1034,16 @@ fn cancelar_una_mision_que_corre_cancela_su_run() {
     let m = cancel(&db, &id, |run_id| {
         assert_eq!(run_id, lead.run_id);
         // Lo que hace `supervisor::cancel` con la fila: marcarla antes de matar el proceso.
-        crate::runs::cancel_run_with(&db, run_id, |task_id| {
-            parados.borrow_mut().push(task_id.to_string());
-            let conn = db.lock().unwrap();
-            conn.execute(
-                "UPDATE tasks SET status = 'cancelled' WHERE id = ?1",
-                [task_id],
-            )
-            .unwrap();
+        crate::runs::cancel_run_with(&db, run_id, |task_ids| {
+            for task_id in task_ids {
+                parados.borrow_mut().push(task_id.to_string());
+                let conn = db.lock().unwrap();
+                conn.execute(
+                    "UPDATE tasks SET status = 'cancelled' WHERE id = ?1",
+                    [task_id],
+                )
+                .unwrap();
+            }
             Ok(())
         })
         .map(|_| ())

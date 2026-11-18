@@ -61,6 +61,7 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 
 ## Processo e qualidade (pontos 23–25 da análise do deepseek-harness)
 
+- **Encerramento de terminais:** Unix envia HUP/TERM, espera até 2 s compartilhados e revarre a árvore antes do SIGKILL; o sinal final exige identidade validada e tem até 150 ms de reap. Os chamadores de UI e async movem a espera para o pool de bloqueio. Linux usa cgroup v2/pidfd quando disponíveis; Windows encerra pelo Job Object. Validado localmente em macOS; Linux/cgroup e Windows não foram exercitados nesta execução. Arquitetura em [ARCHITECTURE.md](./ARCHITECTURE.md#pty-e-terminal).
 - **Postmortems numerados** em [postmortem/](./postmortem/README.md): 0001 Vigia segundos × ms (A1), 0002 HMR derrubando PTYs, 0003 sessão `opencode_stream` (A2), 0004 avisos repetidos do Vigia.
 - **Fingerprint** SHA-256 do schema SQLite e do protocolo IPC, com registro de reconhecimento obrigatório no CI: [FINGERPRINT.md](../decisoes/FINGERPRINT.md).
 - **Bench de complexidade** com gate por razão e orçamento calibrado (`digest`, transcript do canal, scrollback do PTY): [bench/COMPLEXIDADE.md](./bench/COMPLEXIDADE.md). Achou e corrigiu um O(n²) no `digest` (13,26× → 1,22×).

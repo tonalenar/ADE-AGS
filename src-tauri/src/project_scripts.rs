@@ -22,8 +22,16 @@ const RUN_FINISHED_EVENT: &str = "cc-project-script-finished";
 const MAX_RUN_OUTPUT_BYTES: usize = 256 * 1024;
 
 struct RunningProjectScript {
-    group: Mutex<crate::terminal::containment::ProcessGroup>,
+    group: Mutex<Option<crate::terminal::containment::ProcessGroup>>,
     cancelled: AtomicBool,
+}
+
+async fn stop_project_group(
+    group: Option<crate::terminal::containment::ProcessGroup>,
+) -> Result<(), String> {
+    let Some(group) = group else { return Ok(()) };
+    crate::terminal::containment::kill_groups_async(vec![group], std::time::Duration::from_secs(2)).await;
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -308,20 +316,24 @@ pub async fn chat_project_script_run_start(
         .take()
         .ok_or("A saída de erro da ação ficou indisponível")?;
     let control = RunningProjectScriptRef(Arc::new(RunningProjectScript {
-        group: Mutex::new(group),
+        group: Mutex::new(Some(group)),
         cancelled: AtomicBool::new(false),
     }));
-    {
+    let duplicate = {
         let mut runs = running_scripts()
             .lock()
             .map_err(|_| "O registro de ações está indisponível".to_string())?;
         if runs.contains_key(&run_id) {
-            if let Ok(mut group) = control.0.group.lock() {
-                group.kill_all();
-            }
-            return Err("Esta ação já está em execução".into());
+            true
+        } else {
+            runs.insert(run_id.clone(), control.clone());
+            false
         }
-        runs.insert(run_id.clone(), control.clone());
+    };
+    if duplicate {
+        let group = control.0.group.lock().unwrap_or_else(|error| error.into_inner()).take();
+        stop_project_group(group).await?;
+        return Err("Esta ação já está em execução".into());
     }
 
     let output_budget = Arc::new(AtomicUsize::new(0));
@@ -342,9 +354,8 @@ pub async fn chat_project_script_run_start(
     async_runtime::spawn(async move {
         let status = child.wait().await;
         // Um hook é one-shot: não deixamos filhos em background sem um identificador ou cancelamento.
-        if let Ok(mut group) = control.0.group.lock() {
-            group.kill_all();
-        }
+        let group = control.0.group.lock().unwrap_or_else(|error| error.into_inner()).take();
+        let _ = stop_project_group(group).await;
         let readers_drained = tokio::time::timeout(std::time::Duration::from_millis(750), async {
             let _ = (&mut stdout_task).await;
             let _ = (&mut stderr_task).await;
@@ -384,7 +395,7 @@ pub async fn chat_project_script_run_start(
 
 /// Cancela só o grupo de processos da ação identificada, nunca o PTY de uma conversa.
 #[tauri::command]
-pub fn chat_project_script_run_cancel(run_id: String) -> Result<(), String> {
+pub async fn chat_project_script_run_cancel(run_id: String) -> Result<(), String> {
     let run = running_scripts()
         .lock()
         .map_err(|_| "O registro de ações está indisponível".to_string())?
@@ -392,12 +403,8 @@ pub fn chat_project_script_run_cancel(run_id: String) -> Result<(), String> {
         .cloned()
         .ok_or("Esta ação já terminou")?;
     run.0.cancelled.store(true, Ordering::SeqCst);
-    run.0
-        .group
-        .lock()
-        .map_err(|_| "O cancelamento da ação foi interrompido".to_string())?
-        .kill_all();
-    Ok(())
+    let group = run.0.group.lock().unwrap_or_else(|error| error.into_inner()).take();
+    stop_project_group(group).await
 }
 
 /// Lê o comando somente quando a pessoa pede para editar ou executar a ação.
