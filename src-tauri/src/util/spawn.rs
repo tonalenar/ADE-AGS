@@ -142,6 +142,22 @@ fn output_with_stdout_limit_inner(
     max_stdout_bytes: usize,
     keep_truncated: bool,
 ) -> io::Result<(Output, bool)> {
+    output_with_stdout_limit_inner_with_stderr_wait(
+        cmd,
+        timeout,
+        max_stdout_bytes,
+        keep_truncated,
+        None,
+    )
+}
+
+fn output_with_stdout_limit_inner_with_stderr_wait(
+    cmd: &mut Command,
+    timeout: Duration,
+    max_stdout_bytes: usize,
+    keep_truncated: bool,
+    stderr_wait: Option<Duration>,
+) -> io::Result<(Output, bool)> {
     apply_window(cmd, WindowMode::Hidden);
     prepare_session(cmd);
     let started = Instant::now();
@@ -284,7 +300,7 @@ fn output_with_stdout_limit_inner(
         ));
     }
     if stderr_done_rx
-        .recv_timeout(timeout.saturating_sub(started.elapsed()))
+        .recv_timeout(stderr_wait.unwrap_or_else(|| timeout.saturating_sub(started.elapsed())))
         .is_err()
     {
         // O processo principal já terminou, mas um descendente pode manter o pipe herdado.
@@ -723,8 +739,6 @@ mod tests {
     fn stderr_aberto_por_descendente_nao_prende_o_retorno_apos_o_prazo() {
         use std::ffi::CString;
         use std::os::unix::ffi::OsStrExt;
-        use std::sync::mpsc;
-
         let fifo = std::env::temp_dir().join(format!("ags-stderr-{}.fifo", uuid::Uuid::new_v4()));
         let c_path = CString::new(fifo.as_os_str().as_bytes()).unwrap();
         // SAFETY: o caminho é um CString válido e o FIFO é exclusivo deste teste.
@@ -738,25 +752,19 @@ mod tests {
         let script = "( read _ < \"$1\"; printf 'descendente\\n' >&2 ) >/dev/null & printf 'principal\\n' >&2; exit 0";
         let mut cmd = hidden_command("sh");
         cmd.args(["-c", script, "sh", fifo.to_str().unwrap()]);
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let result = output_with_stdout_limit(&mut cmd, Duration::from_millis(100), 256);
-            let _ = tx.send(result);
-        });
-
-        let returned_before_cleanup = rx.recv_timeout(Duration::from_millis(200));
-        let returned_early = returned_before_cleanup.is_ok();
-        // Libera o processo descendente para que o teste também limpe a versão defeituosa.
+        let (out, _) = output_with_stdout_limit_inner_with_stderr_wait(
+            &mut cmd,
+            Duration::from_secs(5),
+            256,
+            false,
+            Some(Duration::ZERO),
+        )
+        .unwrap();
+        // Libera o descendente caso a leitura ainda esteja aberta durante a limpeza.
         use std::io::Write;
         let _ = keep_fifo_open.write_all(b"liberar\n");
-        let result = match returned_before_cleanup {
-            Ok(result) => result,
-            Err(_) => rx.recv_timeout(Duration::from_secs(2)).expect("a coleta de stderr precisa terminar"),
-        };
         let _ = std::fs::remove_file(fifo);
 
-        assert!(returned_early, "a coleta excedeu o prazo injetado");
-        let out = result.unwrap();
         assert!(out.status.success());
         assert!(String::from_utf8_lossy(&out.stderr).contains("principal"));
     }
