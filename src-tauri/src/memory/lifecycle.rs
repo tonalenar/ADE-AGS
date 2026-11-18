@@ -1,5 +1,6 @@
 //! Explicit user lifecycle actions; never reachable from Fleet write tools.
 use super::{ProposalActor, ProposalInput, ProposalResult};
+use std::collections::HashMap;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::{Value, json};
 
@@ -59,7 +60,34 @@ struct ArchivePrep {
 /// Corpos aprovados entram no arquivo. Rejeitadas e pendentes ficam só com metadados e
 /// `content_hash`. O snapshot é lido na hora da escrita, nunca de um prepare anterior ao git:
 /// um purge no meio não pode regravar o texto que acabou de sair.
+#[cfg(test)]
 fn prepare_archive(conn: &Connection, workspace: &str) -> Result<ArchivePrep, String> {
+    let missions = {
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT mission_id FROM memory_entries WHERE workspace_id=?1 AND mission_id IS NOT NULL")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([workspace], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| e.to_string())?
+    };
+    let repo_keys = missions
+        .into_iter()
+        .map(|mission| {
+            let key = super::repo_scope::mission_repo_key(conn, &mission);
+            (mission, key)
+        })
+        .collect();
+    prepare_archive_with_repo_keys(conn, workspace, &repo_keys)
+}
+
+fn prepare_archive_with_repo_keys(
+    conn: &Connection,
+    workspace: &str,
+    repo_keys: &HashMap<String, Option<String>>,
+) -> Result<ArchivePrep, String> {
     let mut stmt = conn
         .prepare("SELECT id,mission_id FROM memory_entries WHERE workspace_id=?1 ORDER BY id")
         .map_err(|e| e.to_string())?;
@@ -72,7 +100,19 @@ fn prepare_archive(conn: &Connection, workspace: &str) -> Result<ArchivePrep, St
         .map_err(|e| e.to_string())?;
     let details = ids
         .iter()
-        .map(|(id, mission)| super::detail_for_owner(conn, id, workspace, mission.as_deref()))
+        .map(|(id, mission)| {
+            let repo_key = mission
+                .as_ref()
+                .and_then(|mission| repo_keys.get(mission))
+                .and_then(Option::as_deref);
+            super::detail_for_owner_with_repo(
+                conn,
+                id,
+                workspace,
+                mission.as_deref(),
+                repo_key,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let mut archive = conn.prepare("SELECT metadata_json,content_hash,compacted_at FROM memory_compacted_revisions c JOIN memory_entries e ON e.id=c.entry_id WHERE e.workspace_id=?1 ORDER BY c.entry_id,c.revision").map_err(|e| e.to_string())?;
     let archived = archive.query_map([workspace], |r| Ok(json!({"metadata":r.get::<_,String>(0)?,"contentHash":r.get::<_,String>(1)?,"compactedAt":r.get::<_,i64>(2)?}))).map_err(|e| e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?;
@@ -138,9 +178,10 @@ pub fn export_detached(
 ) -> Result<Value, String> {
     let projection = sync.export_now(workspace)?;
     let path = std::path::PathBuf::from(&projection.path);
+    let repo_keys = super::repo_scope::mission_repo_keys_unlocked(db, workspace)?;
     let prepared: Result<ArchivePrep, String> = super::repo::with_repo_gate(&path, || {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let prepared = prepare_archive(&conn, workspace)?;
+        let prepared = prepare_archive_with_repo_keys(&conn, workspace, &repo_keys)?;
         drop(conn);
         write_archive(&path, &prepared.body)?;
         Ok(prepared)
@@ -177,9 +218,10 @@ pub(crate) fn refresh_revision_archive_db(
     if !dir.join("revisions.json").exists() {
         return Ok(());
     }
+    let repo_keys = super::repo_scope::mission_repo_keys_unlocked(db, workspace)?;
     let prepared = {
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-        prepare_archive(&conn, workspace)?
+        prepare_archive_with_repo_keys(&conn, workspace, &repo_keys)?
     };
     antes_da_escrita();
     write_archive(dir, &prepared.body)

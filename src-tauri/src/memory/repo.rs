@@ -38,11 +38,25 @@ impl<'a> IntoIterator for &'a Projection {
 
 /// Approved-only virtual view of the projection. Reading never imports manual edits,
 /// follows symlinks or opens arbitrary files in the user's repository.
+#[cfg(test)]
 pub fn approved_open(conn: &Connection, workspace: &str, mission: Option<&str>, path: &str) -> Result<String, String> {
+    let repo = mission.and_then(|id| super::repo_scope::mission_repo_key(conn, id));
+    approved_open_with_repo(conn, workspace, mission, repo.as_deref(), mission.is_some() && repo.is_none(), path)
+}
+
+/// Abre a memória aprovada usando a chave derivada antes de adquirir o mutex do banco.
+pub fn approved_open_with_repo(
+    conn: &Connection,
+    workspace: &str,
+    mission: Option<&str>,
+    repo: Option<&str>,
+    fail_closed: bool,
+    path: &str,
+) -> Result<String, String> {
     if path.contains('\\') || path.contains("..") || path.starts_with('/') || path.contains(':') {
         return Err("invalid memory path".into());
     }
-    let docs = super::search::load_docs(conn, workspace, mission)?;
+    let docs = super::search::load_docs_with_repo(conn, workspace, mission, repo, fail_closed)?;
     // Uma ENTRADA pelo id (o `entryId` da busca) ou pela chave: o corpo inteiro, sem o corte de
     // 600 caracteres da busca. Antes só se abriam páginas, e uma página de mais de 32 KiB
     // mandava "abrir por entrada", algo que a CLI não oferecia.

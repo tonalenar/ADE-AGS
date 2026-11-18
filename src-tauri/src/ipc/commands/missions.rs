@@ -255,7 +255,7 @@ fn memory_mission_in_boards(
 }
 
 pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    use crate::memory::agent::{AgentProposal, author_of, propose_for_mission};
+    use crate::memory::agent::{AgentProposal, author_of, propose_for_mission_with_repo};
 
     // Numa missão, a proposta é da missão; numa conversa de projeto (sem missão) vale para o projeto.
     let caller_tab = authenticated_tab(args)?;
@@ -287,10 +287,16 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
     let author = author_of(&name);
 
     let db = db(app)?;
+    let repository_key = match mission.as_deref() {
+        Some(mission_id) => {
+            crate::memory::repo_scope::mission_repo_key_unlocked(&db, Some(mission_id))?
+        }
+        None => None,
+    };
     let result = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         match &mission {
-            Some(mission) => propose_for_mission(
+            Some(mission) => propose_for_mission_with_repo(
                 &conn,
                 &AgentProposal {
                     mission_id: mission,
@@ -302,6 +308,7 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
                     author,
                     author_name: &name,
                 },
+                repository_key.as_deref(),
             )?,
             None => {
                 let (workspace, _) = workspace_for_caller(&conn, &caller_tab)?;
@@ -435,9 +442,24 @@ pub(super) fn memory_repo_read(
     };
     let tab = authenticated_tab(args)?;
     let db = db(app)?;
+    let (workspace, mission) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        workspace_for_caller(&conn, &tab)?
+    };
+    let repo_key = crate::memory::repo_scope::mission_repo_key_unlocked(&db, mission.as_deref())?;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let (workspace, mission) = workspace_for_caller(&conn, &tab)?;
-    let text = crate::memory::repo::approved_open(&conn, &workspace, mission.as_deref(), &path)?;
+    let current_owner = workspace_for_caller(&conn, &tab)?;
+    if current_owner != (workspace.clone(), mission.clone()) {
+        return Err("o contexto da aba mudou durante a leitura da memória".into());
+    }
+    let text = crate::memory::repo::approved_open_with_repo(
+        &conn,
+        &workspace,
+        mission.as_deref(),
+        repo_key.as_deref(),
+        mission.is_some() && repo_key.is_none(),
+        &path,
+    )?;
     let read_keys: Vec<String> = if index {
         Vec::new()
     } else {
@@ -585,29 +607,37 @@ pub(super) fn memory_history(app: &AppHandle, args: &Value) -> Result<Value, Str
     }
 
     let db = db(app)?;
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let mission = crate::missions::store::get(&conn, &mission_id)?
-        .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
-    let entry_id: String = match scope.as_str() {
-        "workspace" => conn.query_row(
-            "SELECT id FROM memory_entries WHERE workspace_id=?1 AND scope='workspace' AND key=?2",
-            params![mission.workspace_id.as_str(), key.as_str()],
-            |row| row.get(0),
-        ),
-        "mission" => conn.query_row(
-            "SELECT id FROM memory_entries WHERE workspace_id=?1 AND mission_id=?2 AND scope='mission' AND key=?3",
-            params![mission.workspace_id.as_str(), mission.id.as_str(), key.as_str()],
-            |row| row.get(0),
-        ),
-        _ => unreachable!(),
-    }
-    .map_err(|_| format!("no {scope} memory entry with key {key}"))?;
-    let history = crate::memory::history::history_for_entry(
-        &conn,
-        &mission.workspace_id,
-        Some(&mission.id),
-        &entry_id,
-    )?;
+    let (workspace_id, mission_cwd, entry_id) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mission = crate::missions::store::get(&conn, &mission_id)?
+            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
+        let entry_id: String = match scope.as_str() {
+            "workspace" => conn.query_row(
+                "SELECT id FROM memory_entries WHERE workspace_id=?1 AND scope='workspace' AND key=?2",
+                params![mission.workspace_id.as_str(), key.as_str()],
+                |row| row.get(0),
+            ),
+            "mission" => conn.query_row(
+                "SELECT id FROM memory_entries WHERE workspace_id=?1 AND mission_id=?2 AND scope='mission' AND key=?3",
+                params![mission.workspace_id.as_str(), mission.id.as_str(), key.as_str()],
+                |row| row.get(0),
+            ),
+            _ => unreachable!(),
+        }
+        .map_err(|_| format!("no {scope} memory entry with key {key}"))?;
+        (mission.workspace_id, mission.cwd, entry_id)
+    };
+    let repository_key = crate::memory::repo_scope::repo_key(std::path::Path::new(&mission_cwd));
+    let history = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::memory::history::history_for_entry(
+            &conn,
+            &workspace_id,
+            Some(&mission_id),
+            &entry_id,
+            repository_key,
+        )?
+    };
     Ok(json!({ "entryId": entry_id, "scope": scope, "key": key, "history": history }))
 }
 

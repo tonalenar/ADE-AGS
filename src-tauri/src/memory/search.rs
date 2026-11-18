@@ -220,6 +220,7 @@ fn snippet_of(body: &str) -> (String, bool) {
 /// As memórias ativas e aprovadas que a missão enxerga: as do workspace e as da própria missão. Numa
 /// missão, só as do repositório dela e as sem repositório (ver `repo_scope`): a missão de um repo Node
 /// não recebe as regras de cargo e Tauri do ADE-AGS.
+#[cfg(test)]
 pub fn load_docs(conn: &Connection, workspace_id: &str, mission_id: Option<&str>) -> Result<Vec<Doc>, String> {
     let repo = mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m));
     load_docs_with_repo(conn, workspace_id, mission_id, repo.as_deref(), mission_id.is_some() && repo.is_none())
@@ -254,6 +255,7 @@ pub fn load_docs_with_repo(
 
 /// Load the memory versions that were valid at one Unix timestamp. Unlike `load_docs`, this
 /// includes entries that have since been deleted because their earlier intervals may apply.
+#[cfg(test)]
 pub fn load_docs_at(conn:&Connection,workspace_id:&str,mission_id:Option<&str>,at:i64)->Result<Vec<Doc>,String> {
     let repo = mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m));
     load_docs_at_with_repo(conn, workspace_id, mission_id, repo.as_deref(), mission_id.is_some() && repo.is_none(), at)
@@ -327,6 +329,7 @@ pub(crate) fn legacy_load_docs_at(
 }
 
 /// A busca completa. A pergunta é validada (vazia ou enorme não faz sentido).
+#[cfg(test)]
 pub fn search(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, query: &str, limit: usize) -> Result<Vec<Hit>, String> {
     let repo = mission_id.and_then(|mission| super::repo_scope::mission_repo_key(conn, mission));
     search_with_repo(conn, workspace_id, mission_id, repo.as_deref(), mission_id.is_some() && repo.is_none(), query, limit)
@@ -353,6 +356,7 @@ pub fn search_with_repo(
 
 /// Search only the memory versions valid at one Unix timestamp. `search` remains the
 /// unchanged current-state mode used when callers do not supply `--at`.
+#[cfg(test)]
 pub fn search_at(
     conn: &Connection,
     workspace_id: &str,

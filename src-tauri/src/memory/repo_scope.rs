@@ -103,6 +103,7 @@ pub fn mission_cwd(conn: &Connection, mission_id: &str) -> Option<String> {
 }
 
 /// A chave do repositório de uma missão (pela pasta dela). Lê o `.git` com o `conn` já aberto.
+#[cfg(test)]
 pub fn mission_repo_key(conn: &Connection, mission_id: &str) -> Option<String> {
     repo_key(Path::new(&mission_cwd(conn, mission_id)?))
 }
@@ -119,6 +120,7 @@ fn task_repo_cwd(conn: &Connection, task_id: &str) -> Result<String, String> {
 }
 
 /// Resolve a tarefa quando o chamador já tem a conexão aberta.
+#[cfg(test)]
 pub fn task_repo_key(conn: &Connection, task_id: &str) -> Result<Option<String>, String> {
     Ok(repo_key(Path::new(&task_repo_cwd(conn, task_id)?)))
 }
@@ -214,14 +216,43 @@ pub fn mission_repo_key_unlocked(db: &DbConnection, mission_id: Option<&str>) ->
     Ok(cwd.as_deref().and_then(|c| repo_key(Path::new(c))))
 }
 
+/// Resolve as chaves das missões do workspace sem manter o mutex durante a leitura do `.git`.
+pub fn mission_repo_keys_unlocked(
+    db: &DbConnection,
+    workspace_id: &str,
+) -> Result<std::collections::HashMap<String, Option<String>>, String> {
+    let missions = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id,cwd FROM missions WHERE workspace_id=?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([workspace_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+        rows
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?
+    };
+    Ok(missions
+        .into_iter()
+        .map(|(id, cwd)| (id, repo_key(Path::new(&cwd))))
+        .collect())
+}
+
 /// Marca uma memória recém-criada por uma missão com o repositório dela. Correção de uma memória
 /// existente não muda a chave (uma memória sem chave, de antes, continua valendo em todos).
-pub fn tag_new_entry(conn: &Connection, entry_id: &str, mission_id: &str) -> Result<(), String> {
+pub fn tag_new_entry(
+    conn: &Connection,
+    entry_id: &str,
+    mission_id: &str,
+    key: Option<&str>,
+) -> Result<(), String> {
     // A origem: o dream cita a missão como fonte (antes as revisões de missão não tinham nenhuma e o
     // dream terminava com «falta de evidência citável»).
     conn.execute("UPDATE memory_entries SET source_mission = ?1 WHERE id = ?2 AND source_mission IS NULL", params![mission_id, entry_id])
         .map_err(|e| e.to_string())?;
-    let Some(key) = mission_repo_key(conn, mission_id) else { return Ok(()) };
+    let Some(key) = key else { return Ok(()) };
     conn.execute(
         "UPDATE memory_entries SET repo_key = ?1 WHERE id = ?2 AND repo_key IS NULL
             AND (SELECT COUNT(*) FROM memory_revisions r WHERE r.entry_id = memory_entries.id) <= 1",

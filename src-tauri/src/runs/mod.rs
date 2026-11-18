@@ -284,13 +284,26 @@ fn run_start_task_now(
 ) -> Result<Task, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
     let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
+    // Deriva a proveniência do cwd da tarefa antes de travar o banco.
+    let repository_key = crate::memory::repo_scope::repo_key(std::path::Path::new(&cwd));
+    let repository_commit = crate::memory::repo::current_commit_for_db(db, &workspace_id);
 
     let mut task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let tx =
             rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
                 .map_err(|e| e.to_string())?;
-        let run = store::create_run(&tx, &workspace_id, &title, &cwd)?;
+        let run = store::create_run_with_memory_snapshot_and_commit(
+            &tx,
+            &workspace_id,
+            None,
+            &title,
+            &cwd,
+            2,
+            None,
+            repository_commit,
+            repository_key,
+        )?;
         let task = store::create_task(
             &tx,
             &store::NewTask {

@@ -675,11 +675,13 @@ pub struct MemoryFilter {
     pub repo_fail_closed: bool,
 }
 
+#[cfg(test)]
 fn apply_repo_filter(filter: &mut MemoryFilter, mission_id: Option<&str>, conn: &Connection) {
     filter.repo_key = mission_id.and_then(|m| repo_scope::mission_repo_key(conn, m));
     filter.repo_fail_closed = mission_id.is_some() && filter.repo_key.is_none();
 }
 
+#[cfg(test)]
 pub fn list_for_owner(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, cursor: Option<&str>, limit: usize) -> Result<MemoryPage,String> {
     let mut filter = MemoryFilter::default();
     apply_repo_filter(&mut filter, mission_id, conn);
@@ -794,11 +796,24 @@ pub fn list_filtered(
     })
 }
 
+#[cfg(test)]
 pub fn detail_for_owner(
     conn: &Connection,
     entry_id: &str,
     workspace_id: &str,
     mission_id: Option<&str>,
+) -> Result<MemoryDetail, String> {
+    let repo = mission_id.and_then(|m| repo_scope::mission_repo_key(conn, m));
+    detail_for_owner_with_repo(conn, entry_id, workspace_id, mission_id, repo.as_deref())
+}
+
+/// Lê o detalhe usando a chave do repositório resolvida antes de adquirir o mutex do banco.
+pub(crate) fn detail_for_owner_with_repo(
+    conn: &Connection,
+    entry_id: &str,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    repo_key: Option<&str>,
 ) -> Result<MemoryDetail, String> {
     let scope = if mission_id.is_some() {
         "mission"
@@ -806,7 +821,7 @@ pub fn detail_for_owner(
         "workspace"
     };
     validate_owner(conn, scope, workspace_id, mission_id)?;
-    let repo = mission_id.and_then(|m| repo_scope::mission_repo_key(conn, m));
+    let repo = repo_key.map(str::to_owned);
     let fail_closed = mission_id.is_some() && repo.is_none();
     detail_with_repo(conn, entry_id, workspace_id, mission_id, scope, repo, fail_closed)
 }
@@ -1097,9 +1112,17 @@ pub async fn memory_query(workspace_id:String,mission_id:Option<String>,cursor:O
 pub async fn memory_index(workspace_id: String, mission_id: Option<String>, db: tauri::State<'_, DbConnection>) -> Result<String, String> {
     let db = db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let repo_key = repo_scope::mission_repo_key_unlocked(&db, mission_id.as_deref())?;
         let conn = db.lock().map_err(|_| "database unavailable")?;
         validate_owner(&conn, if mission_id.is_some() { "mission" } else { "workspace" }, &workspace_id, mission_id.as_deref())?;
-        let text = repo::approved_open(&conn, &workspace_id, mission_id.as_deref(), "MEMORY.md")?;
+        let text = repo::approved_open_with_repo(
+            &conn,
+            &workspace_id,
+            mission_id.as_deref(),
+            repo_key.as_deref(),
+            mission_id.is_some() && repo_key.is_none(),
+            "MEMORY.md",
+        )?;
         // Injeção do índice no início da sessão: quantas linhas de memória o agente recebeu.
         let injected = text.lines().filter(|line| line.starts_with("- ")).count() as u32;
         usage::record(&conn, &usage::UsageRow { ts: usage::now(), workspace_id: &workspace_id, mission_id: mission_id.as_deref(), tab_id: None, action: "injected", query: None, hits: injected, entry_keys: &[] });
@@ -1737,7 +1760,7 @@ pub async fn memory_history(
     tauri::async_runtime::spawn_blocking(move || {
         let repo = repo_scope::mission_repo_key_unlocked(&db, mission_id.as_deref())?;
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-        history::history_for_entry_with_repo(&conn, &workspace_id, mission_id.as_deref(), &entry_id, repo)
+        history::history_for_entry(&conn, &workspace_id, mission_id.as_deref(), &entry_id, repo)
     })
     .await
     .map_err(|e| e.to_string())?

@@ -148,7 +148,7 @@ mod banco {
                 |row| row.get(0),
             )
             .unwrap();
-        let history = crate::memory::history::history_for_entry(&conn, "w", Some("m"), &entry_id).unwrap();
+        let history = crate::memory::history::history_for_entry(&conn, "w", Some("m"), &entry_id, None).unwrap();
         let created_at = history[0].valid_from;
 
         assert!(search_at(&conn, "w", Some("m"), "agent", 5, created_at - 1).unwrap().is_empty());

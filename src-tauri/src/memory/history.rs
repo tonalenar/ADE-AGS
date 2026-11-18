@@ -85,21 +85,6 @@ pub fn history_for_entry(
     workspace_id: &str,
     mission_id: Option<&str>,
     entry_id: &str,
-) -> Result<Vec<MemoryValidityInterval>, String> {
-    history_for_entry_with_repo(
-        conn,
-        workspace_id,
-        mission_id,
-        entry_id,
-        mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m)),
-    )
-}
-
-pub fn history_for_entry_with_repo(
-    conn: &Connection,
-    workspace_id: &str,
-    mission_id: Option<&str>,
-    entry_id: &str,
     repo: Option<String>,
 ) -> Result<Vec<MemoryValidityInterval>, String> {
     let mut statement = conn
@@ -156,7 +141,7 @@ pub fn validity_at(
     at: i64,
 ) -> Result<Vec<MemoryValidityInterval>, String> {
     Ok(intervals_at(
-        &history_for_entry(conn, workspace_id, mission_id, entry_id)?,
+        &history_for_entry(conn, workspace_id, mission_id, entry_id, None)?,
         at,
     ))
 }
@@ -310,21 +295,21 @@ mod tests {
         let mission_entry = approve_create(&conn, "w1", Some("m1"), "mission", "private");
 
         assert_eq!(
-            history_for_entry(&conn, "w1", Some("m2"), &workspace_entry)
+            history_for_entry(&conn, "w1", Some("m2"), &workspace_entry, None)
                 .unwrap()
                 .len(),
             1
         );
-        assert!(history_for_entry(&conn, "w1", Some("m2"), &mission_entry)
+        assert!(history_for_entry(&conn, "w1", Some("m2"), &mission_entry, None)
             .unwrap()
             .is_empty());
         assert_eq!(
-            history_for_entry(&conn, "w1", Some("m1"), &mission_entry)
+            history_for_entry(&conn, "w1", Some("m1"), &mission_entry, None)
                 .unwrap()
                 .len(),
             1
         );
-        assert!(history_for_entry(&conn, "w2", Some("m1"), &mission_entry)
+        assert!(history_for_entry(&conn, "w2", Some("m1"), &mission_entry, None)
             .unwrap()
             .is_empty());
     }

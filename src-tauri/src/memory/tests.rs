@@ -2227,7 +2227,7 @@ fn memory_list_get_e_historico_isolam_por_repo_key() {
     let snap = snapshot_for_run(&conn, "r1").unwrap();
     assert!(snap.meta.memory_index.contains("ours"));
     assert!(!snap.meta.memory_index.contains("theirs"));
-    assert!(history::history_for_entry(&conn, "w1", Some("m1"), &theirs.entry_id).unwrap().is_empty());
+    assert!(history::history_for_entry(&conn, "w1", Some("m1"), &theirs.entry_id, None).unwrap().is_empty());
     let _ = std::fs::remove_dir_all(&mine);
     let _ = std::fs::remove_dir_all(&other);
 }
@@ -2255,7 +2255,7 @@ fn missao_sem_git_nao_ve_memoria_com_repo_key_de_outro_projeto() {
     let snap = snapshot_for_run(&conn, "r-plain").unwrap();
     assert!(!snap.meta.memory_index.contains("foreign-repo"));
     assert!(snap.meta.memory_index.contains("unscoped"));
-    assert!(history::history_for_entry(&conn, "w1", Some("m-plain"), &foreign.entry_id).unwrap().is_empty());
+    assert!(history::history_for_entry(&conn, "w1", Some("m-plain"), &foreign.entry_id, None).unwrap().is_empty());
     let at = crate::util::now_ts();
     let docs = search::load_docs_at(&conn, "w1", Some("m-plain"), at).unwrap();
     assert!(docs.iter().all(|d| d.key != "foreign-repo"), "{docs:?}");
@@ -2296,6 +2296,31 @@ fn tarefa_sem_missao_filtra_memoria_pelo_cwd_e_falha_fechado_sem_repo() {
     assert!(keys.contains(&"fleet-shared"), "{keys:?}");
     assert!(!keys.contains(&"fleet-own") && !keys.contains(&"fleet-other"), "{keys:?}");
     let _ = std::fs::remove_dir_all(&mine);
+}
+
+#[test]
+fn run_comum_captura_memoria_do_repositorio_de_seu_cwd() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    let repo = git_repo_with_origin("https://github.com/acme/fleet.git");
+    assert_eq!(repo_scope::repo_key(&repo).as_deref(), Some("github.com/acme/fleet"));
+    let own = activate(&conn, "workspace", None, "fleet-own", "memoria do repo");
+    conn.execute(
+        "UPDATE memory_entries SET repo_key='github.com/acme/fleet' WHERE id=?1",
+        [&own.entry_id],
+    )
+    .unwrap();
+
+    let run = crate::runs::store::create_run(&conn, "w1", "memoria do repo", &repo.to_string_lossy()).unwrap();
+    let snapshot = snapshot_for_run(&conn, &run.id).unwrap();
+
+    assert_eq!(
+        snapshot.items.iter().map(|item| item.key.as_str()).collect::<Vec<_>>(),
+        ["fleet-own"],
+        "índice: {}",
+        snapshot.meta.memory_index,
+    );
+    let _ = std::fs::remove_dir_all(repo);
 }
 
 #[test]

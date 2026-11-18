@@ -144,6 +144,7 @@ fn with_deps(conn: &Connection, mut tasks: Vec<Task>) -> Result<Vec<Task>, Strin
 
 // ── Crear ───────────────────────────────────────────────────────
 
+#[cfg(test)]
 pub fn create_run(
     conn: &Connection,
     workspace_id: &str,
@@ -154,6 +155,7 @@ pub fn create_run(
 }
 
 /// Un run con su paralelismo y su presupuesto: lo que declara un plan.
+#[cfg(test)]
 pub fn create_run_with(
     conn: &Connection,
     workspace_id: &str,
@@ -167,14 +169,17 @@ pub fn create_run_with(
 
 /// Atomic Run creation, including an empty or selected durable-memory snapshot.
 /// A savepoint composes with the caller's transaction for Lead/Task creation.
+#[cfg(test)]
 pub fn create_run_with_memory_snapshot(
     conn: &Connection, workspace_id: &str, mission_id: Option<&str>, objective: &str,
     cwd: &str, max_parallel: i64, budget_usd: Option<f64>,
 ) -> Result<Run, String> {
+    // Runs comuns também precisam do escopo do repo no snapshot; derive do cwd antes de gravar.
+    let repository_key = crate::memory::repo_scope::repo_key(std::path::Path::new(cwd));
     let repository_commit = crate::memory::repo::current_commit(conn, workspace_id);
     create_run_with_memory_snapshot_and_commit(
         conn, workspace_id, mission_id, objective, cwd, max_parallel, budget_usd,
-        repository_commit, None,
+        repository_commit, repository_key,
     )
 }
 
