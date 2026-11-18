@@ -1019,9 +1019,6 @@ pub async fn pty_create(
             None => Vec::new(),
         };
         let removed: Vec<PtySession> = old.iter().filter_map(|k| reg.remove(k)).collect();
-        for session in &removed {
-            forget_session(session);
-        }
         if let (Some(tab), Some(token), Some(pid)) = (tab_id.as_deref(), session_token.as_deref(), root_pid) {
             super::publish_token(tab, token, pid);
         }
@@ -1038,11 +1035,16 @@ pub async fn pty_create(
         });
         (old, removed)
     };
-    for (k, mut session) in replaced.0.iter().copied().zip(replaced.1) {
-        session.group.kill_all();
-        let _ = session.killer.kill();
-        let _ = session.killer.wait();
-        buffers().remove(&k);
+    drop(_update_guard);
+    for k in &replaced.0 {
+        buffers().remove(k);
+    }
+    if !replaced.1.is_empty() {
+        tokio::task::spawn_blocking(move || {
+            stop_sessions(replaced.1, std::time::Duration::from_secs(2))
+        })
+        .await
+        .map_err(|error| error.to_string())??;
     }
     buffers().insert(id, PtyBuffer::default());
 
@@ -1281,9 +1283,10 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
     // (até ~300 ms), travando todas as outras terminais a cada agente fechado.
     let removed = registry().remove(&id);
     if let Some(session) = removed {
-        forget_session(&session);
         // Esperar o filho bloqueia: vai para uma thread de bloqueio, não para o runtime.
-        tokio::task::spawn_blocking(move || stop_session(session))
+        tokio::task::spawn_blocking(move || {
+            stop_sessions(vec![session], std::time::Duration::from_secs(2))
+        })
             .await
             .map_err(|e| format!("Kill error: {e}"))??;
     }
@@ -1291,51 +1294,78 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
     Ok(())
 }
 
-/// Quanto o `pty_kill` espera o processo sair depois do sinal.
-const KILL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+const POST_KILL_REAP: std::time::Duration = std::time::Duration::from_millis(150);
 
-fn stop_session(mut session: PtySession) -> Result<(), String> {
-    // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
-    // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los
-    // hijos y se pierde el vínculo). Con cgroups o Job Objects el orden da igual.
-    session.group.kill_all();
-    // No Windows o Job Object já levou o processo, e `TerminateProcess` num processo morto
-    // falha com "acesso negado". Falhar ao matar só é erro se ele continua vivo.
-    let killed = session.killer.kill();
-    // Se reclama el status para que el hijo no quede zombie, mas com prazo: um processo que
-    // não sai não pode travar quem chamou (o "Atualizar" ficava parado em 8%).
-    let deadline = std::time::Instant::now() + KILL_WAIT;
-    loop {
-        if let Ok(Some(_)) = session.killer.try_wait() {
-            return Ok(());
-        }
-        if std::time::Instant::now() >= deadline {
-            return match killed {
-                Err(e) => Err(format!("Kill error: {e}")),
-                Ok(()) => Err("Kill error: o processo não saiu".into()),
-            };
-        }
-        std::thread::sleep(std::time::Duration::from_millis(25));
-    }
+fn stop_sessions(sessions: Vec<PtySession>, grace: std::time::Duration) -> Result<(), String> {
+    stop_sessions_with(sessions, grace, &super::containment::SystemClock)
 }
 
-/// Mata todas las sesiones vivas y su descendencia. Se llama al salir de la app.
-///
-/// Hace falta explícitamente porque el registry es un `lazy_static`: Rust no corre
-/// destructores de estáticos al terminar el proceso, así que sin esto el `Drop` de
-/// `ProcessGroup` nunca se ejecutaría por esta vía.
-///
-/// En Windows hay además una segunda red que NO depende de que esto llegue a correr: el
-/// job tiene `KILL_ON_JOB_CLOSE`, así que un cierre forzado desde el Administrador de
-/// tareas igual se lleva todo cuando el kernel cierra los handles del proceso muerto.
-pub fn kill_all_sessions() {
-    let sessions: Vec<PtySession> = registry().drain().map(|(_, s)| s).collect();
-    for mut session in sessions {
+fn stop_sessions_with(
+    sessions: Vec<PtySession>,
+    grace: std::time::Duration,
+    clock: &dyn super::containment::Clock,
+) -> Result<(), String> {
+    let mut groups = Vec::with_capacity(sessions.len());
+    let mut killers = Vec::with_capacity(sessions.len());
+    for session in sessions {
         forget_session(&session);
-        session.group.kill_all();
-        let _ = session.killer.kill();
-        let _ = session.killer.wait();
+        let PtySession { master, writer, killer, group, .. } = session;
+        // Fechar o master também fecha stdin/ConPTY e dá chance a uma saída cooperativa.
+        drop(master);
+        drop(writer);
+        groups.push(group);
+        killers.push(killer);
     }
+    super::containment::kill_groups_with(&mut groups, grace, clock);
+
+    let mut remaining = vec![true; killers.len()];
+    let mut first_error = None;
+    for (index, killer) in killers.iter_mut().enumerate() {
+        match killer.try_wait() {
+            Ok(Some(_)) => remaining[index] = false,
+            Ok(None) => {}
+            Err(error) => {
+                first_error.get_or_insert_with(|| error.to_string());
+            }
+        };
+    }
+    // O kill do Child usa o handle que recebemos no spawn; é uma última proteção para o
+    // líder caso a identidade do sistema não tenha sido capturada durante o adopt.
+    for (index, killer) in killers.iter_mut().enumerate() {
+        if remaining[index] {
+            let _ = killer.kill();
+        }
+    }
+
+    let deadline = clock.now() + POST_KILL_REAP;
+    while clock.now() < deadline && remaining.iter().any(|pending| *pending) {
+        for (index, killer) in killers.iter_mut().enumerate() {
+            if !remaining[index] {
+                continue;
+            }
+            match killer.try_wait() {
+                Ok(Some(_)) => remaining[index] = false,
+                Ok(None) => {}
+                Err(error) => {
+                    remaining[index] = false;
+                    first_error.get_or_insert_with(|| error.to_string());
+                }
+            }
+        }
+        if remaining.iter().any(|pending| *pending) {
+            clock.sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    if remaining.iter().any(|pending| *pending) {
+        first_error.get_or_insert_with(|| "o processo não saiu após o sinal de encerramento".into());
+    }
+    first_error.map_or(Ok(()), |error| Err(format!("Kill error: {error}")))
+}
+
+/// Mata todas as sessões em uma única janela de graça antes de encerrar a app.
+pub fn kill_all_sessions() {
+    let sessions: Vec<PtySession> = registry().drain().map(|(_, session)| session).collect();
+    let _ = stop_sessions(sessions, std::time::Duration::from_secs(2));
     buffers().clear();
 }
 

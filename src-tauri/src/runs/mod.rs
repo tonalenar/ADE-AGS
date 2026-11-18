@@ -650,54 +650,46 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
 
 /// Para un run entero: lo que espera no arranca y lo que corre se detiene.
 #[tauri::command]
-pub fn run_cancel_run(app: AppHandle, run_id: String) -> Result<(), String> {
-    cancel_run(&app, &run_id)
+pub async fn run_cancel_run(app: AppHandle, run_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || cancel_run(&app, &run_id))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 pub(crate) fn cancel_run(app: &AppHandle, run_id: &str) -> Result<(), String> {
     let db = db_of(app)?;
-    let ids = cancel_run_with(&db, run_id, |id| supervisor::cancel(app, id))?;
+    let ids = cancel_run_with(&db, run_id, |active_ids| {
+        supervisor::cancel_many(app, active_ids).map(|_| ())
+    })?;
     scheduler::bump(run_id);
     for id in &ids {
         supervisor::notify_changed(app, id);
     }
-    // Cancelado desde la flota: la misión que lo cumplía también cambió.
     if let Ok(conn) = db.lock() {
         crate::missions::notify_for_run(app, &conn, run_id);
     }
     Ok(())
 }
 
-/// Cancela lo que espera, para lo que corre con `stop` y recalcula el run. Devuelve las
-/// tareas del run, para avisar que cambiaron.
+/// Cancela pendentes e envia todas as tarefas prontas/em execução para um único lote de stop.
 pub(crate) fn cancel_run_with(
     db: &DbConnection,
     run_id: &str,
-    mut stop: impl FnMut(&str) -> Result<(), String>,
+    stop_many: impl FnOnce(&[String]) -> Result<(), String>,
 ) -> Result<Vec<String>, String> {
-    let live: Vec<String> = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
+    let active_ids: Vec<String> = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
         store::cancel_pending(&conn, run_id, "o run foi cancelado")?;
         store::tasks_of_run(&conn, run_id)?
             .into_iter()
-            .filter(|t| {
-                matches!(
-                    t.status.as_str(),
-                    types::status::READY | types::status::RUNNING
-                )
-            })
-            .map(|t| t.id)
+            .filter(|task| matches!(task.status.as_str(), types::status::READY | types::status::RUNNING))
+            .map(|task| task.id)
             .collect()
     };
-    for id in &live {
-        stop(id)?;
-    }
-    let conn = db.lock().map_err(|e| e.to_string())?;
+    stop_many(&active_ids)?;
+    let conn = db.lock().map_err(|error| error.to_string())?;
     store::refresh_run_status(&conn, run_id)?;
-    Ok(store::tasks_of_run(&conn, run_id)?
-        .into_iter()
-        .map(|t| t.id)
-        .collect())
+    Ok(store::tasks_of_run(&conn, run_id)?.into_iter().map(|task| task.id).collect())
 }
 
 /// Lo que se dejaron escrito los agentes de un run.
@@ -1107,8 +1099,10 @@ pub(crate) fn run_discard_worktree_now(app: &AppHandle, task_id: String) -> Resu
 }
 
 #[tauri::command]
-pub fn run_cancel_task(app: AppHandle, task_id: String) -> Result<(), String> {
-    supervisor::cancel(&app, &task_id)
+pub async fn run_cancel_task(app: AppHandle, task_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || supervisor::cancel(&app, &task_id))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 // ── Pasarle una tarea a otro agente ─────────────────────────────

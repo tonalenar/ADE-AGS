@@ -46,7 +46,7 @@ Comandos Tauri cruzam a fronteira. A CLI não reimplementa essas ações: `ipc/c
 
 No Windows o script de prelaunch roda com `cmd /C`. No Unix, com `$SHELL -l -c`. O agente "bash" da tabela é a saída de emergência e é reportado sempre disponível, sem sondar o `PATH`, porque no Windows `bash` muitas vezes não existe. O shell real da tab no Windows é `cmd`.
 
-Fechar a tab mata a descendência, não só o líder. No Windows isso é um Job Object (`terminal/containment.rs`, `windows-sys` 0.61). O comentário no `Cargo.toml` registra que misturar `windows-sys` 0.59 gera um binário que compila e morre com `STATUS_ENTRYPOINT_NOT_FOUND`. O pin em 0.61 não elimina as versões transitivas 0.48, 0.59 e 0.60.
+Fechar a tab encerra a descendência, não só o líder. Unix envia HUP e TERM a todos os grupos antes de abrir uma janela compartilhada de até 2 s; no fim, revarre e envia SIGKILL apenas a processos com identidade validada, com até 150 ms para o kernel concluir o encerramento. Linux usa cgroup v2 quando disponível e `pidfd` para sinais individuais; macOS enumera com `libproc` e valida o início do processo antes do sinal. No Windows, um Job Object contém a árvore e `TerminateJobObject` é a saída final. O encerramento roda fora das threads de UI e dos handlers async. A contenção fica em `terminal/containment.rs`. O comentário no `Cargo.toml` registra que misturar `windows-sys` 0.59 gera um binário que compila e morre com `STATUS_ENTRYPOINT_NOT_FOUND`. O pin em 0.61 não elimina as versões transitivas 0.48, 0.59 e 0.60.
 
 ## Agent registry
 

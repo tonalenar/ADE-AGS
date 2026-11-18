@@ -3,6 +3,51 @@
 
 use super::pty_manager::{build_launch, launch_script, PARENT_SESSION_ENV};
 
+#[cfg(unix)]
+#[test]
+fn encerramento_em_lote_compartilha_o_prazo_de_graca() {
+    use super::containment::{Clock, ProcessGroup, kill_groups_with};
+    use std::process::{Command, Stdio};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    struct StepClock(Mutex<Instant>);
+    impl Clock for StepClock {
+        fn now(&self) -> Instant {
+            *self.0.lock().unwrap()
+        }
+        fn sleep(&self, duration: Duration) {
+            *self.0.lock().unwrap() += duration;
+            std::thread::yield_now();
+        }
+    }
+
+    let clock = Arc::new(StepClock(Mutex::new(Instant::now())));
+    let mut children = Vec::new();
+    let mut groups = Vec::new();
+    for id in 1..=3 {
+        let child = Command::new("sh")
+            .args(["-c", "trap '' HUP TERM; exec sleep 30"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut group = ProcessGroup::new(id);
+        group.adopt(&child);
+        groups.push(group);
+        children.push(child);
+    }
+
+    let started = clock.now();
+    kill_groups_with(&mut groups, Duration::from_secs(2), clock.as_ref());
+
+    assert!(clock.now().duration_since(started) <= Duration::from_millis(2_150));
+    for child in &mut children {
+        assert!(child.try_wait().unwrap().is_some(), "processo deveria ter encerrado");
+    }
+}
+
 #[test]
 fn resize_measurements_preserve_valid_sizes_and_bound_extremes() {
     use super::pty_manager::{measured_pty_size, MAX_PTY_DIMENSION};
@@ -240,38 +285,174 @@ fn installed_codex_starts_in_windows_pty_without_inference() {
 }
 
 #[cfg(unix)]
-mod arbol {
-    use crate::terminal::containment::unix_tree::descendants;
+#[test]
+fn processo_que_trata_term_sai_antes_do_prazo_sem_sigkill() {
+    use crate::terminal::containment::{Clock, ProcessGroup, kill_groups_with};
+    use std::io::BufRead;
+    use std::process::{Command, Stdio};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
 
-
-    #[test]
-    fn recorre_el_arbol_completo_y_no_toca_ramas_ajenas() {
-        // 100 ─ 200 ─ 300
-        //     └ 201
-        // 900 ─ 901   (rama ajena)
-        let procs = [(200, 100), (300, 200), (201, 100), (901, 900), (100, 1)];
-        let mut got = descendants(100, &procs);
-        got.sort();
-        assert_eq!(got, vec![200, 201, 300]);
+    struct StepClock {
+        now: Mutex<Instant>,
+        elapsed: Mutex<Duration>,
+    }
+    impl Clock for StepClock {
+        fn now(&self) -> Instant {
+            *self.now.lock().unwrap()
+        }
+        fn sleep(&self, duration: Duration) {
+            *self.now.lock().unwrap() += duration;
+            *self.elapsed.lock().unwrap() += duration;
+            std::thread::yield_now();
+        }
     }
 
-    #[test]
-    fn los_hijos_salen_antes_que_los_nietos() {
-        let procs = [(300, 200), (200, 100)];
-        // El orden importa: `kill_tree` lo invierte para matar hojas primero.
-        assert_eq!(descendants(100, &procs), vec![200, 300]);
+    let mut group = ProcessGroup::new(91_022);
+    let mut child = Command::new("sh")
+        .args(["-c", "trap '' HUP; trap 'exit 0' TERM; echo pronto; while :; do :; done"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    group.adopt(&child);
+    let mut ready = String::new();
+    std::io::BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut ready)
+        .unwrap();
+    assert_eq!(ready.trim(), "pronto");
+
+    let clock = StepClock {
+        now: Mutex::new(Instant::now()),
+        elapsed: Mutex::new(Duration::ZERO),
+    };
+    kill_groups_with(
+        std::slice::from_mut(&mut group),
+        Duration::from_secs(2),
+        &clock,
+    );
+
+    assert!(child.try_wait().unwrap().is_some(), "o agente deveria ter tratado TERM");
+    assert!(
+        *clock.elapsed.lock().unwrap() < Duration::from_secs(2),
+        "o lote deveria liberar a espera quando os processos saem"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn processo_que_ignora_term_recebe_sigkill_depois_do_prazo() {
+    use crate::terminal::containment::{Clock, ProcessGroup, kill_groups_with};
+    use crate::terminal::containment::unix_tree::capture_identity;
+    use std::process::{Command, Stdio};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    struct StepClock(Mutex<Instant>);
+    impl Clock for StepClock {
+        fn now(&self) -> Instant { *self.0.lock().unwrap() }
+        fn sleep(&self, duration: Duration) {
+            *self.0.lock().unwrap() += duration;
+            std::thread::yield_now();
+        }
     }
 
-    #[test]
-    fn un_ciclo_de_pids_no_cuelga_el_recorrido() {
-        let procs = [(200, 100), (100, 200)];
-        assert_eq!(descendants(100, &procs), vec![200]);
+    let mut group = ProcessGroup::new(91_023);
+    let mut child = Command::new("sh")
+        .args(["-c", "trap '' HUP TERM; exec sleep 30"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    group.adopt(&child);
+    assert!(capture_identity(child.id()).is_some(), "identidade não capturada para {}", child.id());
+    let clock = StepClock(Mutex::new(Instant::now()));
+    kill_groups_with(
+        std::slice::from_mut(&mut group),
+        Duration::from_secs(2),
+        &clock,
+    );
+    let still_running = child.try_wait().unwrap().is_none();
+    if still_running {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    assert!(!still_running, "o processo {} ignorou TERM e sobreviveu ao SIGKILL", child.id());
+}
+
+#[cfg(unix)]
+#[test]
+fn filho_nascido_na_graca_e_encontrado_na_revarredura() {
+    use crate::terminal::containment::{Clock, ProcessGroup, kill_groups_with};
+    use crate::terminal::containment::unix_tree::{ProcessIdentity, capture_identity, is_alive, signal_victims};
+    use std::io::BufRead;
+    use std::process::{Command, Stdio};
+    use std::sync::{mpsc, Mutex};
+    use std::time::{Duration, Instant};
+
+    struct EventClock {
+        now: Mutex<Instant>,
+        spawned: Mutex<mpsc::Receiver<u32>>,
+        seen: Mutex<Option<ProcessIdentity>>,
+    }
+    impl Clock for EventClock {
+        fn now(&self) -> Instant { *self.now.lock().unwrap() }
+        fn sleep(&self, duration: Duration) {
+            *self.now.lock().unwrap() += duration;
+            if self.seen.lock().unwrap().is_none() {
+                let pid = self.spawned.lock().unwrap()
+                    .recv_timeout(Duration::from_secs(2))
+                    .expect("o processo raiz deveria criar o filho durante a graça");
+                *self.seen.lock().unwrap() = Some(
+                    capture_identity(pid).expect("identidade do filho recém-criado"),
+                );
+            }
+            std::thread::yield_now();
+        }
     }
 
-    #[test]
-    fn una_hoja_sin_hijos_no_devuelve_nada() {
-        assert_eq!(descendants(100, &[(901, 900)]), Vec::<u32>::new());
+    let mut group = ProcessGroup::new(91_024);
+    let mut root = Command::new("sh")
+        .args(["-c", "trap '' HUP; trap 'sleep 30 & echo $!; trap \"\" TERM' TERM; echo pronto; while :; do :; done"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    group.adopt(&root);
+    let reader = root.stdout.take().unwrap();
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(reader);
+        let mut line = String::new();
+        if reader.read_line(&mut line).is_ok() {
+            let _ = ready_tx.send(line.trim().to_string());
+        }
+        line.clear();
+        if reader.read_line(&mut line).is_ok()
+            && let Ok(pid) = line.trim().parse()
+        {
+            let _ = tx.send(pid);
+        }
+    });
+    assert_eq!(ready_rx.recv_timeout(Duration::from_secs(2)).unwrap(), "pronto");
+    let clock = EventClock {
+        now: Mutex::new(Instant::now()),
+        spawned: Mutex::new(rx),
+        seen: Mutex::new(None),
+    };
+    kill_groups_with(std::slice::from_mut(&mut group), Duration::from_secs(2), &clock);
+
+    let seen = clock.seen.lock().unwrap();
+    let identity = seen.as_ref().expect("identidade do filho");
+    let alive = is_alive(identity);
+    if alive {
+        signal_victims(std::slice::from_ref(identity), libc::SIGKILL);
     }
+    if root.try_wait().unwrap().is_none() {
+        let _ = root.kill();
+        let _ = root.wait();
+    }
+    assert!(!alive, "o filho {} nascido durante a graça sobreviveu à revarredura", identity.pid);
 }
 
 // ── Fin a fin: matar la tab se lleva su descendencia ────────────
@@ -419,6 +600,7 @@ mod tests_cgroup {
             assert!(!d.exists(), "el cgroup quedó colgado tras matar la tab");
         }
     }
+
 }
 
 /// Regresión del caso que `examples/orphan_probe.rs` midió fugando en Windows: un hijo
