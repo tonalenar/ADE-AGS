@@ -182,23 +182,34 @@ pub(crate) fn kill_groups_with(
         let remaining = deadline.saturating_duration_since(clock.now());
         clock.sleep(remaining.min(std::time::Duration::from_millis(15)));
     }
-    for group in groups.iter_mut() {
-        imp::force_shutdown(&mut group.imp);
-    }
-    let reap_deadline = clock.now() + POST_KILL_REAP;
-    while clock.now() < reap_deadline
-        && !groups.iter().all(|group| imp::shutdown_complete(&group.imp))
-    {
-        let remaining = reap_deadline.saturating_duration_since(clock.now());
-        clock.sleep(remaining.min(std::time::Duration::from_millis(15)));
+    let needs_force = !groups.iter().all(|group| imp::shutdown_complete(&group.imp));
+    if needs_force {
+        for group in groups.iter_mut() {
+            imp::force_shutdown(&mut group.imp);
+        }
+        let reap_deadline = clock.now() + POST_KILL_REAP;
+        while clock.now() < reap_deadline
+            && !groups.iter().all(|group| imp::shutdown_complete(&group.imp))
+        {
+            let remaining = reap_deadline.saturating_duration_since(clock.now());
+            clock.sleep(remaining.min(std::time::Duration::from_millis(15)));
+        }
     }
     for group in groups.iter_mut() {
         imp::finish_shutdown(&mut group.imp);
     }
 }
 
-pub(crate) async fn kill_groups_async(mut groups: Vec<ProcessGroup>, grace: std::time::Duration) {
-    let _ = tokio::task::spawn_blocking(move || kill_groups(&mut groups, grace)).await;
+pub(crate) async fn kill_groups_async(groups: Vec<ProcessGroup>, grace: std::time::Duration) {
+    kill_groups_async_with(groups, grace, std::sync::Arc::new(SystemClock)).await;
+}
+
+pub(crate) async fn kill_groups_async_with(
+    mut groups: Vec<ProcessGroup>,
+    grace: std::time::Duration,
+    clock: std::sync::Arc<dyn Clock>,
+) {
+    let _ = tokio::task::spawn_blocking(move || kill_groups_with(&mut groups, grace, clock.as_ref())).await;
 }
 
 impl Drop for ProcessGroup {
@@ -241,6 +252,12 @@ pub(crate) mod imp {
             .map(|own| own.join(format!("cc-tab-{id}")))
             .filter(|d| std::fs::create_dir(d).is_ok());
         Group { dir, leader: None, leader_identity: None, pending: Vec::new() }
+    }
+
+    #[cfg(test)]
+    pub fn set_identity_for_test(g: &mut Group, identity: super::unix_tree::ProcessIdentity) {
+        g.leader = Some(identity.pid);
+        g.leader_identity = Some(identity);
     }
 
     pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
@@ -297,7 +314,8 @@ pub(crate) mod imp {
 
     pub fn force_shutdown(g: &mut Group) {
         if let (Some(pid), Some(identity)) = (g.leader, g.leader_identity.as_ref()) {
-            g.pending.extend(super::unix_tree::rescan_tree(pid, identity));
+            let rescanned = super::unix_tree::rescan_tree(pid, identity, &g.pending);
+            super::unix_tree::extend_unique(&mut g.pending, rescanned);
         }
         super::unix_tree::signal_victims(&g.pending, libc::SIGKILL);
         if let Some(dir) = &g.dir {
@@ -375,6 +393,12 @@ pub(crate) mod imp {
         Group { leader: None, leader_identity: None, pending: Vec::new() }
     }
 
+    #[cfg(test)]
+    pub fn set_identity_for_test(g: &mut Group, identity: super::unix_tree::ProcessIdentity) {
+        g.leader = Some(identity.pid);
+        g.leader_identity = Some(identity);
+    }
+
     pub fn adopt<C: super::Adoptable + ?Sized>(g: &mut Group, child: &C) {
         g.leader = child.pid();
         g.leader_identity = g.leader.and_then(super::unix_tree::capture_at_adopt);
@@ -400,7 +424,8 @@ pub(crate) mod imp {
 
     pub fn force_shutdown(g: &mut Group) {
         if let (Some(pid), Some(identity)) = (g.leader, g.leader_identity.as_ref()) {
-            g.pending.extend(super::unix_tree::rescan_tree(pid, identity));
+            let rescanned = super::unix_tree::rescan_tree(pid, identity, &g.pending);
+            super::unix_tree::extend_unique(&mut g.pending, rescanned);
         }
         super::unix_tree::signal_victims(&g.pending, libc::SIGKILL);
     }
@@ -531,6 +556,11 @@ pub(crate) mod unix_tree {
         })
     }
 
+    fn capture_snapshot_identity(pid: u32, expected_start_time: u64) -> Option<ProcessIdentity> {
+        let identity = capture_identity(pid)?;
+        (identity.start_time == expected_start_time).then_some(identity)
+    }
+
     pub(crate) fn capture_at_adopt(pid: u32) -> Option<ProcessIdentity> {
         capture_identity(pid).or_else(|| capture_identity(pid))
     }
@@ -572,14 +602,24 @@ pub(crate) mod unix_tree {
         }
     }
 
-    fn tree(root: u32, identity: &ProcessIdentity, procs: &[ProcessInfo]) -> Vec<u32> {
+    fn tree(
+        root: u32,
+        identity: &ProcessIdentity,
+        pending: &[ProcessIdentity],
+        procs: &[ProcessInfo],
+    ) -> Vec<(u32, u64)> {
         let by_pid: HashMap<u32, &ProcessInfo> = procs.iter().map(|process| (process.pid, process)).collect();
-        let Some(root_info) = by_pid.get(&root).filter(|process| {
-            process.start_time == identity.start_time
-        }) else {
-            return Vec::new();
-        };
-        let mut found = vec![(root, root_info.start_time)];
+        let mut found = Vec::new();
+        if by_pid.get(&root).is_some_and(|process| process.start_time == identity.start_time) {
+            found.push((root, identity.start_time));
+        }
+        for survivor in pending {
+            if by_pid.get(&survivor.pid).is_some_and(|process| process.start_time == survivor.start_time)
+                && !found.iter().any(|(pid, _)| *pid == survivor.pid)
+            {
+                found.push((survivor.pid, survivor.start_time));
+            }
+        }
         let mut index = 0;
         while index < found.len() {
             let (parent, parent_start) = found[index];
@@ -594,29 +634,46 @@ pub(crate) mod unix_tree {
             index += 1;
         }
         #[cfg(target_os = "macos")]
-        if root_info.pgid == root
-            && root_info.pgid > 1
-            && root_info.pgid as i32 != unsafe { libc::getpgrp() }
+        if identity.pgid == root
+            && identity.pgid > 1
+            && identity.pgid as i32 != unsafe { libc::getpgrp() }
         {
             // No macOS, complementa PPID com os membros do grupo de processos do líder:
             // alcança filhos que foram reparentados durante a janela de graça.
             for process in procs {
-                if process.pgid == root_info.pgid
-                    && process.start_time >= root_info.start_time
+                if process.pgid == identity.pgid
+                    && process.start_time >= identity.start_time
                     && !found.iter().any(|(pid, _)| *pid == process.pid)
                 {
                     found.push((process.pid, process.start_time));
                 }
             }
         }
-        found.into_iter().map(|(pid, _)| pid).collect()
+        if found.is_empty() {
+            return Vec::new();
+        }
+        found
     }
 
-    pub(crate) fn rescan_tree(root: u32, identity: &ProcessIdentity) -> Vec<ProcessIdentity> {
+    pub(crate) fn rescan_tree(
+        root: u32,
+        identity: &ProcessIdentity,
+        pending: &[ProcessIdentity],
+    ) -> Vec<ProcessIdentity> {
         let processes = snapshot();
-        let mut pids = tree(root, identity, &processes);
+        let mut pids = tree(root, identity, pending, &processes);
         pids.reverse();
-        pids.into_iter().filter_map(capture_identity).collect()
+        pids.into_iter()
+            .filter_map(|(pid, start_time)| capture_snapshot_identity(pid, start_time))
+            .collect()
+    }
+
+    pub(crate) fn extend_unique(pending: &mut Vec<ProcessIdentity>, rescanned: Vec<ProcessIdentity>) {
+        for process in rescanned {
+            if !pending.iter().any(|known| known.pid == process.pid && known.start_time == process.start_time) {
+                pending.push(process);
+            }
+        }
     }
 
     fn signal_wave(
@@ -638,7 +695,7 @@ pub(crate) mod unix_tree {
         root: u32,
         identity: &ProcessIdentity,
     ) -> Vec<ProcessIdentity> {
-        let victims = rescan_tree(root, identity);
+        let victims = rescan_tree(root, identity, &[]);
         let grouped_pgid = victims.iter().find(|process| process.pid == root).and_then(|leader| {
             let pgid = leader.pgid;
             (pgid == leader.pid
@@ -664,7 +721,10 @@ pub(crate) mod unix_tree {
 
     #[cfg(test)]
     mod tests {
-        use super::{ProcessIdentity, capture_identity, signal_victims, signal_wave};
+        use super::{
+            ProcessIdentity, ProcessInfo, capture_identity, capture_snapshot_identity,
+            rescan_tree, signal_victims, signal_wave, tree,
+        };
 
         #[test]
         fn falha_ao_sinalizar_o_grupo_repassa_a_onda_aos_pids_validados() {
@@ -724,6 +784,14 @@ pub(crate) mod unix_tree {
                 .spawn()
                 .expect("spawn");
             let mut identity = capture_identity(child.id()).expect("identidade do filho");
+            let snapshot_start_time = identity.start_time;
+            assert!(capture_snapshot_identity(child.id(), snapshot_start_time).is_some());
+            let recycled_pid = capture_snapshot_identity(child.id(), snapshot_start_time.saturating_add(1));
+            assert!(recycled_pid.is_none(), "um PID divergente do snapshot não vira vítima");
+            if let Some(victim) = recycled_pid.as_ref() {
+                signal_victims(std::slice::from_ref(victim), libc::SIGKILL);
+            }
+            assert!(child.try_wait().unwrap().is_none(), "o PID do snapshot não deve receber sinal");
             identity.start_time = identity.start_time.saturating_add(1);
             #[cfg(target_os = "linux")]
             {
@@ -737,6 +805,86 @@ pub(crate) mod unix_tree {
             let _ = child.kill();
             let _ = child.wait();
         }
+
+        #[test]
+        fn revarredura_usa_sobrevivente_quando_o_lider_ja_foi_colhido() {
+            let root = 100_000;
+            let survivor = ProcessIdentity {
+                pid: root + 1,
+                start_time: 10,
+                pgid: root,
+                #[cfg(target_os = "linux")]
+                pidfd: None,
+            };
+            let identity = ProcessIdentity {
+                pid: root,
+                start_time: 1,
+                pgid: root,
+                #[cfg(target_os = "linux")]
+                pidfd: None,
+            };
+            let snapshot = [
+                ProcessInfo { pid: root + 1, ppid: 1, pgid: root, start_time: 10, alive: true },
+                ProcessInfo { pid: root + 2, ppid: root + 1, pgid: root, start_time: 11, alive: true },
+            ];
+
+            let found = tree(root, &identity, std::slice::from_ref(&survivor), &snapshot);
+            assert!(found.contains(&(root + 2, 11)), "o descendente novo precisa ser descoberto pelo sobrevivente");
+        }
+
+        #[test]
+        fn identidade_adulterada_nao_emite_killpg() {
+            let mut child = std::process::Command::new("sleep")
+                .arg("30")
+                .spawn()
+                .expect("spawn");
+            let mut identity = capture_identity(child.id()).expect("identidade do filho");
+            identity.start_time = identity.start_time.saturating_add(1);
+            #[cfg(target_os = "linux")]
+            { identity.pidfd = None; }
+
+            let victims = rescan_tree(child.id(), &identity, &[]);
+            let grouped_pgid = victims.iter()
+                .find(|victim| victim.pid == child.id())
+                .filter(|leader| leader.pid == identity.pgid)
+                .map(|leader| leader.pgid);
+            let mut group_calls = Vec::new();
+            signal_wave(&victims, grouped_pgid, libc::SIGKILL,
+                |pgid, signal| { group_calls.push((pgid, signal)); true },
+                |_, _| {});
+
+            assert!(group_calls.is_empty(), "identidade divergente não autoriza killpg");
+            assert!(child.try_wait().unwrap().is_none(), "o alvo precisa continuar vivo");
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod group_tests {
+    use super::{ProcessGroup, imp, kill_groups_with, unix_tree::capture_identity};
+    use std::time::Duration;
+
+    #[test]
+    fn kill_groups_nao_emite_killpg_para_identidade_adulterada() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn");
+        let mut identity = capture_identity(child.id()).expect("identidade do processo");
+        identity.start_time = identity.start_time.saturating_add(1);
+        identity.pgid = identity.pid;
+        #[cfg(target_os = "linux")]
+        { identity.pidfd = None; }
+
+        let mut group = ProcessGroup::new(91_025);
+        imp::set_identity_for_test(&mut group.imp, identity);
+        kill_groups_with(std::slice::from_mut(&mut group), Duration::ZERO, &super::SystemClock);
+
+        assert!(child.try_wait().unwrap().is_none(), "grupo adulterado não deve sinalizar o PID");
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
 
