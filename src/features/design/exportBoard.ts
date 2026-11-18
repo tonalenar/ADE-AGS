@@ -37,7 +37,8 @@ export function printBoard(board: { title: string; html: string; w: number; h: n
     Object.assign(frame.style, { position: "fixed", left: "-10000px", top: "0", width: `${board.w}px`, height: `${board.h}px`, border: "0" });
     const page = `<style>@page{size:${Math.round(board.w)}px ${Math.round(board.h)}px;margin:0}</style>`;
     frame.srcdoc = buildSrcdoc(page + board.html);
-    const cleanup = () => setTimeout(() => frame.remove(), 1000);
+    const watchdog = window.setTimeout(() => { frame.remove(); reject(new Error("print-timeout")); }, 15000);
+    const cleanup = () => { window.clearTimeout(watchdog); window.setTimeout(() => frame.remove(), 1000); };
     frame.onload = () => {
       try {
         frame.contentWindow?.focus();

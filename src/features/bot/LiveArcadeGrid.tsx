@@ -7,6 +7,7 @@ import { getTimings, type MissionTimings } from "@/features/missions/timings";
 import { getTokens, type MissionTokens } from "@/features/missions/tokens";
 import type { MissionReview, MissionSummary } from "@/features/missions/types";
 
+import { shareMissionFetch } from "./arcadeDataCache";
 import { LiveArcade } from "./LiveArcade";
 
 const NO_TASKS: never[] = [];
@@ -21,9 +22,9 @@ function MissionArcade({ mission }: { mission: MissionSummary }) {
   useEffect(() => {
     let alive = true;
     if (!detail) loadDetail(mission.id).catch(() => undefined);
-    getTimings(mission.id).then((x) => alive && setTimings(x)).catch(() => undefined);
-    getTokens(mission.id).then((x) => alive && setTokens(x)).catch(() => undefined);
-    missionReview(mission.id).then((x) => alive && setReview(x)).catch(() => undefined);
+    shareMissionFetch(mission.id, "timings", () => getTimings(mission.id)).then((x) => alive && setTimings(x)).catch(() => undefined);
+    shareMissionFetch(mission.id, "tokens", () => getTokens(mission.id)).then((x) => alive && setTokens(x)).catch(() => undefined);
+    shareMissionFetch(mission.id, "review", () => missionReview(mission.id)).then((x) => alive && setReview(x)).catch(() => undefined);
     return () => { alive = false; };
   }, [mission.id]); // eslint-disable-line react-hooks/exhaustive-deps
   return <LiveArcade mission={mission} tasks={detail?.tasks ?? NO_TASKS} timings={timings} review={review} tokens={tokens} />;

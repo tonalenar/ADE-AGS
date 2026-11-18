@@ -103,7 +103,7 @@ export function suggestedIds(list: CleanupCandidate[]): string[] {
   return list
     .filter((c) => {
       const strong = c.reasons.filter((r) => r !== REVIEW_REASON);
-      return strong.length >= 2 || strong.some((r) => r.startsWith("duplicada") || r.startsWith("chave de teste"));
+      return strong.length >= 2 || strong.some((r) => /^(duplicada|duplicate|chave de teste|test key)/i.test(r));
     })
     .map((c) => c.entryId);
 }

@@ -1,9 +1,10 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { DESIGN_SANDBOX } from "@/features/canvas/design/srcdoc";
 
-import { studioSrcdoc } from "./frameBridge";
+import { htmlHead, postToFrame, studioSrcdoc } from "./frameBridge";
+import { iframeSrcIdentity } from "./iframeSrc";
 import type { Corner } from "./snap";
 import { AgentCursorIcon, ExpandIcon, PlayIcon, StopIcon } from "./studioIcons";
 import { layoutColumns } from "./studioModel";
@@ -59,7 +60,18 @@ export const ArtboardFrame = memo(function ArtboardFrame({ board, live, selected
   const { t } = useTranslation();
   const [name, setName] = useState(board.title);
   useEffect(() => { if (renaming) setName(board.title); }, [renaming]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir
-  const srcDoc = useMemo(() => (live ? studioSrcdoc(board.html) : ""), [live, board.html]);
+  const srcIdentity = iframeSrcIdentity(board.id, live);
+  // O `replaceHtml` troca só o corpo. Se o <head> mudou (estilos), o documento é outro: o srcdoc recarrega.
+  const head = htmlHead(board.html);
+  const srcDoc = useMemo(() => (live ? studioSrcdoc(board.html) : ""), [srcIdentity, head]); // eslint-disable-line react-hooks/exhaustive-deps
+  const htmlRef = useRef({ html: board.html, head });
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  useEffect(() => {
+    const prev = htmlRef.current;
+    htmlRef.current = { html: board.html, head };
+    if (!live || prev.html === board.html || prev.head !== head) return;
+    postToFrame(iframeRef.current, { kind: "replaceHtml", html: board.html });
+  }, [board.html, head, live]);
   const commit = () => {
     const next = name.trim();
     h.onRename(board.id, next && next !== board.title ? next : null);
@@ -111,7 +123,7 @@ export const ArtboardFrame = memo(function ArtboardFrame({ board, live, selected
           outlineOffset: selected ? "calc(-1px * var(--inv))" : undefined,
         }}>
         {live ? (
-          <iframe ref={(el) => h.register(board.id, el)} title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc}
+          <iframe ref={(el) => { iframeRef.current = el; h.register(board.id, el); }} title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc}
             referrerPolicy="no-referrer" onLoad={() => h.onFrameLoad(board.id)}
             className="block border-0 w-full h-full" style={{ pointerEvents: passThrough ? "none" : "auto" }} />
         ) : (

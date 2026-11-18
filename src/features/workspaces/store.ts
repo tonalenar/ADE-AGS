@@ -3,6 +3,7 @@ import { AlertaToast } from "@/shared/ui/alerts";
 import { useTabsStore } from "@/features/tabs/store";
 import { useSkillsStore } from "@/features/skills/store";
 import { broadcastEvent, focusWindow } from "@/shared/ipc/window";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 import * as ipc from "./ipc";
 import type { WorkspaceSummary } from "./types";
@@ -10,6 +11,7 @@ import type { WorkspaceSummary } from "./types";
 interface WorkspacesState {
   workspaces: WorkspaceSummary[];
   loading: boolean;
+  error: string | null;
   loadWorkspaces: () => Promise<void>;
   /** Vacía el bucket "default" (cierra sus ventanas y borra lo guardado) y abre una
    *  ventana nueva en blanco ahí — "Nuevo workspace" del encabezado lateral. Si quería
@@ -35,12 +37,15 @@ interface WorkspacesState {
 export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
   workspaces: [],
   loading: false,
+  error: null,
 
   loadWorkspaces: async () => {
-    set({ loading: true });
+    set({ loading: true, error: null });
     try {
       const rows = await ipc.listWorkspaces();
       set({ workspaces: rows });
+    } catch (e) {
+      set({ error: uiErrorText(e) });
     } finally {
       set({ loading: false });
     }

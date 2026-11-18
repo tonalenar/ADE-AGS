@@ -7,6 +7,7 @@ import type { TreeNode } from "./frameBridge";
 import { SHAPE_COLORS, swatchClass, WIDTH_RANGE, type Shape, type ShapeColor, type ShapeData } from "./shapes";
 import { NOTE_COLORS, noteBg } from "./studioModel";
 import type { StudioNoteItem } from "./StudioNote";
+import { parseFloatDraft } from "./tweakInput";
 import { groupTweaks, readTweaks, type Tweak } from "./tweaks";
 
 export type PanelTab = "props" | "layers" | "code" | "tweaks";
@@ -66,6 +67,7 @@ export function StudioPanel(p: {
           onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); setDrag(true); }}
           onPointerMove={(e) => { if (drag) p.onWidth(clampPanel(e.currentTarget.parentElement!.getBoundingClientRect().right - e.clientX)); }}
           onPointerUp={() => setDrag(false)}
+          onPointerCancel={() => setDrag(false)}
           onDoubleClick={() => p.onWidth(PANEL_SIZE.initial)} />
       )}
       <div role="tablist" className="h-10 shrink-0 flex items-center gap-0.5 px-1.5 border-b border-gray-200 dark:border-white/[0.08]">
@@ -340,6 +342,26 @@ function TweaksTab(p: Parameters<typeof StudioPanel>[0]) {
   );
 }
 
+function FloatTweak({ value, onChange }: { value: Tweak["value"]; onChange: (v: Tweak["value"]) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input className={input} inputMode="decimal" value={draft ?? String(value)} onKeyDown={(e) => e.stopPropagation()}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setDraft(raw);
+        const parsed = parseFloatDraft(raw);
+        if (parsed.kind === "number") onChange(parsed.value);
+      }}
+      onBlur={() => {
+        if (draft != null) {
+          const parsed = parseFloatDraft(draft);
+          if (parsed.kind === "number") onChange(parsed.value);
+        }
+        setDraft(null);
+      }} />
+  );
+}
+
 function TweakControl({ tweak, value, onChange }: { tweak: Tweak; value: Tweak["value"]; onChange: (v: Tweak["value"]) => void }) {
   switch (tweak.editor) {
     case "boolean":
@@ -353,9 +375,10 @@ function TweakControl({ tweak, value, onChange }: { tweak: Tweak; value: Tweak["
     case "range":
       return <input type="range" className="flex-1 accent-accent-500" min={tweak.min ?? 0} max={tweak.max ?? 100} step={tweak.step ?? 1} value={Number(value)} onChange={(e) => onChange(Number(e.target.value))} />;
     case "int":
-    case "float":
       return <input className={input} inputMode="decimal" value={String(value)} onKeyDown={(e) => e.stopPropagation()}
-        onChange={(e) => { const n = Number(e.target.value); if (Number.isFinite(n)) onChange(tweak.editor === "int" ? Math.round(n) : n); }} />;
+        onChange={(e) => { const n = Number(e.target.value); if (Number.isFinite(n)) onChange(Math.round(n)); }} />;
+    case "float":
+      return <FloatTweak value={value} onChange={onChange} />;
     default:
       // Texto e cor: o valor é do usuário/agente, editado como texto (sem seletor de cor nativo, que só aceita hex).
       return <input className={input} value={String(value)} onKeyDown={(e) => e.stopPropagation()} onChange={(e) => onChange(e.target.value)} />;

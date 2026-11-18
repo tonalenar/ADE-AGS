@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useMissionsStore } from "@/features/missions/store";
+import { uiErrorText } from "@/shared/uiErrorText";
 import { approveBulk, flatten, groupsFromWorkspaceReview, normalizeGroups, rejectBulk } from "./bulkReview";
 import * as memoryIpc from "./ipc";
 import { usePendingMemoryStore } from "./pendingStore";
@@ -54,21 +55,21 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
         id === null ? t("memoryInbox.workspaceGroup") : titles.get(id) ?? id.slice(0, 8)));
       setPending(sortReviewItems(flatten(groups)));
     } catch (e) {
-      setMessage(String(e));
+      setMessage(uiErrorText(e));
     } finally {
       setLoaded(true);
     }
   }, [workspaceId, titles, t]);
 
+  // Falha não é "nenhuma memória": mostra o erro e não mexe em `entries`, senão o efeito abaixo
+  // reconsultaria sem parar. Reconsulta o botão "Tentar de novo" ou a troca de aba.
   const loadEntries = useCallback(async (which: "approved" | "rejected") => {
     try {
       const page = await memoryIpc.queryMemory(workspaceId, null, { status: which });
       setEntries((cur) => ({ ...cur, [which]: Array.isArray(page?.items) ? page.items : [] }));
       setEntriesError((cur) => ({ ...cur, [which]: undefined }));
     } catch (e) {
-      // Falha não é "nenhuma memória": mostra o erro e deixa a aba tentar de novo ao voltar.
-      setEntries((cur) => ({ ...cur, [which]: [] }));
-      setEntriesError((cur) => ({ ...cur, [which]: String(e) }));
+      setEntriesError((cur) => ({ ...cur, [which]: uiErrorText(e) }));
     }
   }, [workspaceId]);
 
@@ -200,7 +201,10 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
             </ul>
           )
         ) : entriesError[tab as "approved" | "rejected"] ? (
-          <p role="alert" className="py-8 text-center text-[12.5px] text-red-600 dark:text-red-400">{entriesError[tab as "approved" | "rejected"]}</p>
+          <div className="py-8 text-center">
+            <p role="alert" className="text-[12.5px] text-red-600 dark:text-red-400">{entriesError[tab as "approved" | "rejected"]}</p>
+            <button type="button" className={BTN_SEC + " mt-3"} onClick={() => void loadEntries(tab as "approved" | "rejected")}>{t("btn.retry")}</button>
+          </div>
         ) : entries[tab] === null ? (
           <p className="py-8 text-center text-[12.5px] text-gray-400 dark:text-white/35">{t("memoryInbox.loading")}</p>
         ) : shownEntries.length === 0 ? (

@@ -9,6 +9,7 @@ import { ChatSwitch, SettingsGroup } from "@/features/settings/SettingsSection";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 import { ProviderDetail } from "./ProviderDetail";
 import { providerStatus, versionLabel, type ProviderTone } from "./providersModel";
@@ -50,9 +51,9 @@ export function ProvidersSection() {
   const [adding, setAdding] = useState<string | null>(null);
 
   useEffect(() => {
-    loadAccounts().catch(() => undefined);
-    loadProviders().catch(() => undefined);
-  }, [loadAccounts, loadProviders]);
+    loadAccounts().catch((e) => AlertaToast(t("providers.list"), uiErrorText(e), "error", 6000));
+    loadProviders().catch((e) => AlertaToast(t("providers.list"), uiErrorText(e), "error", 6000));
+  }, [loadAccounts, loadProviders, t]);
 
   const agents = useMemo(() => detected.filter((a) => a.id !== SHELL_AGENT_ID && !a.isCustom), [detected]);
   const open = agents.find((a) => a.id === openId) ?? null;

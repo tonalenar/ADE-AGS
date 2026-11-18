@@ -298,6 +298,14 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("falha ao carregar a revisão mostra a mensagem do erro, não [object Object]", async () => {
+    const ipc = await import("../ipc");
+    vi.mocked(ipc.getWorkspaceReviewSummary).mockRejectedValueOnce({ kind: "db", message: "banco travado" });
+    await act(async () => { root.render(<MemoryInbox workspaceId="w1" onClose={vi.fn()} />); });
+    await act(async () => {});
+    expect(document.body.querySelector('p[role="alert"]')?.textContent).toBe("banco travado");
+  });
+
   it("aviso de caixa cheia vem das contagens POR DONO do backend (P3)", async () => {
     const notice = () => document.body.querySelector('[role="status"]')?.textContent ?? "";
     const mount = async () => {

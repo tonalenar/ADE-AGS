@@ -186,7 +186,7 @@ export function normalizeUrl(input: string): string | null {
   if (/^:\d+/.test(text)) return `http://localhost${text}`;
   if (/^\d+$/.test(text)) return `http://localhost:${text}`;
   const host = text.split(/[/?#]/)[0];
-  const local = /^(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(host) || /\.(localhost|local)(:\d+)?$/i.test(host);
+  const local = isLocalOrigin(/^(?:https?|tauri):\/\//i.test(text) ? text : `http://${text}`);
   if (local) return `http://${text}`;
   // Algo que no parece un host (sin punto ni puerto) no es una dirección.
   if (!host.includes(".") && !host.includes(":")) return null;
