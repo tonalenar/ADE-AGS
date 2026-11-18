@@ -185,7 +185,9 @@ pub(crate) fn kill_groups_with(
     let needs_force = !groups.iter().all(|group| imp::shutdown_complete(&group.imp));
     if needs_force {
         for group in groups.iter_mut() {
-            imp::force_shutdown(&mut group.imp);
+            if !imp::shutdown_complete(&group.imp) {
+                imp::force_shutdown(&mut group.imp);
+            }
         }
         let reap_deadline = clock.now() + POST_KILL_REAP;
         while clock.now() < reap_deadline
@@ -634,7 +636,8 @@ pub(crate) mod unix_tree {
             index += 1;
         }
         #[cfg(target_os = "macos")]
-        if identity.pgid == root
+        if by_pid.get(&root).is_some_and(|process| process.start_time == identity.start_time)
+            && identity.pgid == root
             && identity.pgid > 1
             && identity.pgid as i32 != unsafe { libc::getpgrp() }
         {
@@ -832,6 +835,26 @@ pub(crate) mod unix_tree {
             assert!(found.contains(&(root + 2, 11)), "o descendente novo precisa ser descoberto pelo sobrevivente");
         }
 
+        #[cfg(target_os = "macos")]
+        #[test]
+        fn rodada2_item1_lider_reciclado_nao_autoriza_varrer_o_pgid_antigo() {
+            let root = 100_000;
+            let identity = ProcessIdentity {
+                pid: root,
+                start_time: 1,
+                pgid: root,
+            };
+            // O PID root agora pertence a outro grupo. O membro abaixo continua no PGID
+            // antigo, mas sua identidade também não foi comprovada pela adoção original.
+            let snapshot = [
+                ProcessInfo { pid: root, ppid: 1, pgid: root + 50, start_time: 10, alive: true },
+                ProcessInfo { pid: root + 1, ppid: 1, pgid: root, start_time: 11, alive: true },
+            ];
+
+            let found = tree(root, &identity, &[], &snapshot);
+            assert!(found.is_empty(), "líder reciclado invalida todo o PGID registrado");
+        }
+
         #[test]
         fn identidade_adulterada_nao_emite_killpg() {
             let mut child = std::process::Command::new("sleep")
@@ -883,6 +906,50 @@ mod group_tests {
         kill_groups_with(std::slice::from_mut(&mut group), Duration::ZERO, &super::SystemClock);
 
         assert!(child.try_wait().unwrap().is_none(), "grupo adulterado não deve sinalizar o PID");
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn rodada2_item3_start_time_antigo_nao_mata_lider_do_pgid_reciclado() {
+        use std::os::unix::process::CommandExt;
+        use std::sync::Mutex;
+        use std::time::Instant;
+
+        struct StepClock(Mutex<Instant>);
+        impl super::Clock for StepClock {
+            fn now(&self) -> Instant { *self.0.lock().unwrap() }
+            fn sleep(&self, duration: Duration) {
+                let mut now = self.0.lock().unwrap();
+                *now += duration;
+            }
+        }
+
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "exec sleep 30"]);
+        command.process_group(0);
+        let mut child = command.spawn().expect("spawn do líder de grupo");
+        let mut identity = capture_identity(child.id()).expect("identidade do líder");
+        assert_eq!(identity.pgid, child.id(), "o filho precisa liderar seu grupo");
+        assert!(identity.start_time > 1, "start_time real deve permitir o cenário de PID reciclado");
+        identity.start_time -= 1;
+        let mut group = ProcessGroup::new(91_026);
+        imp::set_identity_for_test(&mut group.imp, identity);
+
+        let clock = StepClock(Mutex::new(Instant::now()));
+        kill_groups_with(
+            std::slice::from_mut(&mut group),
+            Duration::from_millis(30),
+            &clock,
+        );
+
+        let result = child.try_wait().expect("consultar filho");
+        if result.is_some() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        assert!(result.is_none(), "líder com identidade divergente recebeu HUP/TERM ou SIGKILL");
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -977,12 +1044,15 @@ pub(crate) mod imp {
         }
         unsafe {
             TerminateJobObject(g.job, 1);
-            CloseHandle(g.job);
         }
-        g.job = std::ptr::null_mut();
     }
 
-    pub fn finish_shutdown(_g: &mut Group) {}
+    pub fn finish_shutdown(g: &mut Group) {
+        if !g.job.is_null() {
+            unsafe { CloseHandle(g.job); }
+            g.job = std::ptr::null_mut();
+        }
+    }
 
     #[cfg(test)]
     pub fn usa_job(g: &Group) -> bool {
