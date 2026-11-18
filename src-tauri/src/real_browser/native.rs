@@ -231,12 +231,14 @@ pub async fn create(app: &AppHandle, parent: isize, id: &str, profile: std::path
             let _ = start(env);
             return;
         }
+        let callback_id = environment_id.clone();
+        let callback_token = environment_token.clone();
         let handler = CreateCoreWebView2EnvironmentCompletedHandler::create(Box::new(move |result, env| {
             if let (Ok(()), Some(env)) = (result, env) {
                 ENVIRONMENTS.with(|e| { e.borrow_mut().insert(profile_key.clone(), env.clone()); });
                 let _ = start(env);
             } else {
-                cancel_pending(&environment_id, &environment_token);
+                cancel_pending(&callback_id, &callback_token);
             }
             Ok(())
         }));
