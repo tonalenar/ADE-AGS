@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Button, Input } from "neogestify-ui-components";
 import { FolderIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
+import { nextSkillFilePath } from "./skillFilePath";
 
 interface SkillFilePickerStepProps {
   initialPath: string;
@@ -30,7 +31,7 @@ export function SkillFilePickerStep({ initialPath, onPathChange }: SkillFilePick
 
   const handleManualChange = (value: string) => {
     setManualPath(value);
-    if (value.trim()) onPathChange(value.trim());
+    onPathChange(nextSkillFilePath(value));
   };
 
   return (

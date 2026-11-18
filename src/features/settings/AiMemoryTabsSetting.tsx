@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getSetting, setSetting } from "@/shared/ipc/settings";
+import { persistToggle, toastToggleError } from "@/features/settings/persistToggle";
 import { SettingsToggleRow } from "@/features/settings/SettingsSection";
 
 /** Aplica-se apenas ao nascimento de novas abas e de processos de conversa; não reinicia terminais. */
@@ -14,8 +15,7 @@ export function AiMemoryTabsSetting() {
     <SettingsToggleRow
       checked={enabled}
       onChange={(value) => {
-        setEnabled(value);
-        setSetting("ai_memory_tabs_enabled", value ? "true" : "false").catch(console.error);
+        void persistToggle(value, setEnabled, () => setSetting("ai_memory_tabs_enabled", value ? "true" : "false"), (e) => toastToggleError(t("settings.aiMemoryTabs.label"), e));
       }}
       label={t("settings.aiMemoryTabs.label")}
       description={t("settings.aiMemoryTabs.desc")}

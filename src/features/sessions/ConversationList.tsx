@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, AddIcon } from "neogestify-ui-components";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
 
 import { useMissionIndex } from "@/features/missions/groups";
 import { useTabsStore } from "@/features/tabs/store";
@@ -62,7 +63,7 @@ export function ConversationList({ cwd, groupCwds, projectKey: rawKey, workspace
     if (loose.length === 0 || adopting.current) return;
     adopting.current = true;
     adoptLooseTabs({ workspaceId, cwd, projectKey }, loose)
-      .catch((e) => AlertaToast(t("conversations.title"), String(e), "error", 6000))
+      .catch((e) => AlertaToast(t("conversations.title"), uiErrorText(e), "error", 6000))
       .finally(() => { adopting.current = false; });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [looseKey, workspaceId, cwd, projectKey]);
@@ -73,7 +74,7 @@ export function ConversationList({ cwd, groupCwds, projectKey: rawKey, workspace
       const row = await startConversation({ workspaceId, cwd, projectKey });
       if (row) openNewAgentWith({ cwd, title: t("conversations.newTitle") });
     } catch (e) {
-      AlertaToast(t("conversations.title"), String(e), "error", 7000);
+      AlertaToast(t("conversations.title"), uiErrorText(e), "error", 7000);
     }
   };
 

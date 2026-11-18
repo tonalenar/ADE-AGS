@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 
 import { getSetting, setSetting } from "@/shared/ipc/settings";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
+import { parseFixRoundsInput } from "@/features/settings/fixRoundsValue";
 
 /** A mesma chave que `runs/fixrounds.rs` lee. Sin valor, el teto es 2. */
 const KEY = "fix_rounds.max";
@@ -21,17 +23,19 @@ export function FixRoundsSetting() {
         const n = Number(stored);
         if (stored && Number.isInteger(n) && n >= 0 && n <= 20) setValue(String(n));
       })
-      .catch(() => {});
-  }, []);
+      .catch(() => {
+        AlertaToast(t("settings.fixRounds.label"), t("settings.fixRounds.readError"), "warning", 5000);
+      });
+  }, [t]);
 
   const change = (raw: string) => {
-    const n = Number(raw);
-    if (!Number.isInteger(n) || n < 0 || n > 20) return;
+    const n = parseFixRoundsInput(raw);
+    if (n === null) return;
     const previous = value;
     setValue(String(n));
     setSetting(KEY, String(n)).catch((e) => {
       setValue(previous);
-      AlertaToast(t("settings.fixRounds.label"), String(e), "error", 6000);
+      AlertaToast(t("settings.fixRounds.label"), uiErrorText(e), "error", 6000);
     });
   };
 
