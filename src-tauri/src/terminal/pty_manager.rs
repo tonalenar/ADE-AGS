@@ -1040,11 +1040,7 @@ pub async fn pty_create(
         buffers().remove(k);
     }
     if !replaced.1.is_empty() {
-        tokio::task::spawn_blocking(move || {
-            stop_sessions(replaced.1, std::time::Duration::from_secs(2))
-        })
-        .await
-        .map_err(|error| error.to_string())??;
+        stop_replaced_sessions(replaced.1).await;
     }
     buffers().insert(id, PtyBuffer::default());
 
@@ -1296,6 +1292,21 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
 
 const POST_KILL_REAP: std::time::Duration = std::time::Duration::from_millis(150);
 
+async fn stop_replaced_sessions(sessions: Vec<PtySession>) {
+    stop_replaced_sessions_with(move || stop_sessions(sessions, std::time::Duration::from_secs(2))).await;
+}
+
+async fn stop_replaced_sessions_with<F>(cleanup: F)
+where
+    F: FnOnce() -> Result<(), String> + Send + 'static,
+{
+    match tokio::task::spawn_blocking(cleanup).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => eprintln!("[ade-ags] não consegui parar a sessão anterior: {error}"),
+        Err(error) => eprintln!("[ade-ags] tarefa de encerramento da sessão anterior falhou: {error}"),
+    }
+}
+
 fn stop_sessions(sessions: Vec<PtySession>, grace: std::time::Duration) -> Result<(), String> {
     stop_sessions_with(sessions, grace, &super::containment::SystemClock)
 }
@@ -1325,6 +1336,7 @@ fn stop_sessions_with(
             Ok(Some(_)) => remaining[index] = false,
             Ok(None) => {}
             Err(error) => {
+                remaining[index] = false;
                 first_error.get_or_insert_with(|| error.to_string());
             }
         };
@@ -1371,6 +1383,18 @@ pub fn kill_all_sessions() {
 
 #[cfg(test)]
 mod source_tests {
+    #[tokio::test]
+    async fn erro_ao_parar_sessao_antiga_nao_impede_nova_sessao() {
+        let attempted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let attempted_by_cleanup = attempted.clone();
+        let cleanup = super::stop_replaced_sessions_with(move || {
+            attempted_by_cleanup.store(true, std::sync::atomic::Ordering::SeqCst);
+            Err("falha simulada".into())
+        });
+        cleanup.await;
+        assert!(attempted.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
     #[test]
     fn perfil_do_codex_nao_chama_processo_externo_de_acl() {
         let needle = ["ica", "cls"].concat();
