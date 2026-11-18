@@ -3,10 +3,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const backend = vi.hoisted(() => ({ teams: [] as unknown[], calls: [] as [string, unknown][] }));
+const backend = vi.hoisted(() => ({ teams: [] as unknown[], calls: [] as [string, unknown][], failing: [] as string[] }));
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args: unknown) => {
     backend.calls.push([cmd, args]);
+    if (backend.failing.includes(cmd)) return Promise.reject(new Error("banco ocupado"));
     if (cmd === "chat_team_list") return Promise.resolve(backend.teams);
     if (cmd === "chat_team_feed") return Promise.resolve([]);
     return Promise.resolve(null);
@@ -45,6 +46,7 @@ beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   backend.teams = [TEAM];
   backend.calls = [];
+  backend.failing = [];
   useTeamStore.setState({ teams: [TEAM], feeds: {}, targets: {}, told: {}, adding: {} });
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -89,6 +91,23 @@ describe("o painel Time", () => {
     expect(form?.textContent).toContain("chat.team.form.role");
     expect(form?.textContent).toContain("chat.team.form.policy");
     expect(form?.textContent).toContain("chat.team.policyMenu.ask");
+  });
+
+  it("desligar um integrante que o banco recusa mostra o erro no painel, não some", async () => {
+    backend.failing = ["chat_team_unlink"];
+    await render(<TeamPanel conversation={card("tab-lead", "claude-code", "Claude Code")} cards={[]} />);
+    const unlink = Array.from(host.querySelectorAll("button")).find((b) => b.textContent === "chat.team.unlink")!;
+    await act(async () => { unlink.click(); });
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("chat.team.unlinkFailed");
+  });
+
+  it("desfazer o time que o banco recusa mostra o erro no painel, não some", async () => {
+    backend.failing = ["chat_team_dissolve"];
+    await render(<TeamPanel conversation={card("tab-lead", "claude-code", "Claude Code")} cards={[]} />);
+    const dissolve = () => Array.from(host.querySelectorAll("button")).find((b) => b.textContent === "chat.team.dissolve" || b.textContent === "chat.team.dissolveYes")!;
+    await act(async () => { dissolve().click(); });
+    await act(async () => { dissolve().click(); });
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("chat.team.dissolveFailed");
   });
 
   it("uma conversa sem time oferece virar orquestradora", async () => {

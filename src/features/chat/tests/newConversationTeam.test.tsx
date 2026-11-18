@@ -32,8 +32,18 @@ vi.mock("../ChatComposer", () => ({
   ),
 }));
 vi.mock("../team/teamLaunch", () => ({ launchDraftTeam: (...args: unknown[]) => { launch.calls.push(args); return Promise.resolve(launch.result); } }));
+const wt = vi.hoisted(() => ({ calls: [] as unknown[][], scriptCalls: [] as string[], scriptsOk: true }));
+vi.mock("../ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../ipc")>()),
+  chatNewWorktree: (...args: unknown[]) => { wt.calls.push(args); return Promise.resolve({ cwd: `/wt/${wt.calls.length}`, branch: "team/x", submodules: "none" }); },
+}));
+vi.mock("../projectScriptAutomation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../projectScriptAutomation")>()),
+  runProjectScriptsOnWorktreeCreate: (_source: string, worktreeCwd: string) => { wt.scriptCalls.push(worktreeCwd); return Promise.resolve(wt.scriptsOk); },
+}));
 
 import { NewConversation } from "../NewConversation";
+import { saveChatThreadEnvMode } from "../chatWorkspacePrefs";
 import { addToDraft, clearDraft, useTeamDraft } from "../team/draftStore";
 import type { DraftMember } from "../team/teamDraft";
 import { useTeamStore } from "../team/teamStore";
@@ -72,6 +82,19 @@ describe('a tela "Nova conversa" já no projeto escolhido pelo "+"', () => {
   it("sem pedido, cai no primeiro projeto", async () => {
     await mount(null);
     expect(host.querySelector("h1")?.textContent).toContain("ADE-AGS");
+  });
+});
+
+describe("o worktree de uma tentativa cujo script de criação falhou é reaproveitado", () => {
+  it("a nova tentativa usa o worktree já criado, não cria outro", async () => {
+    saveChatThreadEnvMode("worktree");
+    wt.calls = []; wt.scriptCalls = []; wt.scriptsOk = false;
+    await mount("/p/ADE-AGS");
+    await send();
+    wt.scriptsOk = true;
+    await send();
+    expect(wt.calls).toHaveLength(1);
+    expect(wt.scriptCalls).toEqual(["/wt/1", "/wt/1"]);
   });
 });
 

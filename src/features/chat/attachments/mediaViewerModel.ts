@@ -26,6 +26,8 @@ const VIDEO_EXTENSION = /\.(mp4|mov|m4v|webm|mkv|avi)$/i;
  * Caminhos em disco ficam limitados à pasta da conversa; mensagens e saídas de ferramentas são dados não confiáveis.
  */
 export function markdownImages(content: string, cwd: string | null): MarkdownImageMedia[] {
+  // Sem `![` não há imagem em Markdown: a conversa grande não passa pelas regex a cada pedaço do streaming.
+  if (!content.includes("![")) return [];
   const body = content.replace(/```[\s\S]*?```/g, "").replace(/~~~[\s\S]*?~~~/g, "").replace(/`[^`]*`/g, "");
   const result: MarkdownImageMedia[] = [];
   const seen = new Set<string>();
@@ -72,7 +74,8 @@ export function expandBraces(text: string): string[] {
  * restritos à pasta da conversa. Itens já mostrados com `![...]()` não se repetem aqui.
  */
 export function mentionedMedia(content: string, cwd: string | null): ConversationMedia[] {
-  if (!cwd) return [];
+  // Caminho citado só vira link `](` ou código `` ` ``: sem um dos dois, não há o que varrer.
+  if (!cwd || (!content.includes("](") && !content.includes("`"))) return [];
   const body = content.replace(/```[\s\S]*?```/g, "").replace(/~~~[\s\S]*?~~~/g, "");
   const embedded = new Set(markdownImages(content, cwd).map((image) => image.path));
   const candidates: string[] = [];

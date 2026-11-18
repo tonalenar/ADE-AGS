@@ -206,7 +206,8 @@ export function taskSections(tasks: BgTask[]): { running: TaskNode[]; done: Task
   for (const task of tasks) {
     const node = nodes.get(task.id)!;
     const parent = task.parentId && task.parentId !== task.id && ids.has(task.parentId) ? nodes.get(task.parentId) : null;
-    if (parent) parent.children.push(node);
+    // Um filho que ainda roda de um pai já concluído vira raiz: senão "Concluído" esconde o que segue rodando.
+    if (parent && !(task.status === "running" && parent.task.status !== "running")) parent.children.push(node);
     else roots.push(node);
   }
   const running = roots.filter((n) => n.task.status === "running");

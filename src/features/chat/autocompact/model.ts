@@ -113,7 +113,7 @@ export function meterTone(pct: number, thresholdPct: number): MeterTone {
 
 /** 182.400 → «182k», 1.250.000 → «1,25M» (sem locale: a tela usa `Intl` quando precisa). */
 export function compactTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 2).replace(/\.?0+$/, "")}M`;
+  if (n >= 1_000_000) return `${Number((n / 1_000_000).toFixed(2))}M`;
   if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
   return String(n);
 }

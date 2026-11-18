@@ -134,6 +134,17 @@ describe("o + e o menu de superfícies", () => {
     expect(document.activeElement?.getAttribute("aria-keyshortcuts")).toBe("T");
   });
 
+  it("o menu ganha o foco ao abrir e não o retoma a cada render da barra", async () => {
+    useChatStore.setState({ panel: "empty" });
+    await mount();
+    await click(q("[aria-label='chat.panel.addTab']"));
+    const menu = q("[data-surface-list]")!.parentElement!;
+    expect(document.activeElement).toBe(menu);
+    const refocus = vi.spyOn(menu, "focus");
+    await act(async () => { useChatStore.setState({ panelMaximized: true }); });
+    expect(refocus).not.toHaveBeenCalled();
+  });
+
   it("no estado vazio, as letras valem logo de cara (o launcher pega o foco)", async () => {
     useChatStore.setState({ panel: "empty" });
     await mount();

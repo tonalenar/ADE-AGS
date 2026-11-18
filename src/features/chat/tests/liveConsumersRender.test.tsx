@@ -13,6 +13,7 @@ import { useLiveSummary } from "../liveSummary";
 import { usePendingAsks } from "../permissions/permissionsStore";
 import { EMPTY_LIVE, type ThreadLive } from "../structured/model";
 import { useStructured } from "../structured/store";
+import { useChatLive } from "../liveStore";
 
 // Uma conversa por protocolo, ativa, e o texto que chega nela. Os consumidores leem o estado dela pelo store real.
 const thread = { id: "t1", agentId: "claude-code", cwd: "/p/ade", title: "Conversa", model: null, effort: null, access: "ask", accountId: null, state: "active", parentRef: null } as never;
@@ -57,6 +58,17 @@ describe("os consumidores do estado ao vivo não re-renderizam com o texto do st
     await act(async () => {});
     commits = 0;
     await pushText();
+    expect(commits).toBe(0);
+  });
+
+  it("pedidos_pendentes_nao_recalculam_com_turno_de_outra_aba: um turno que muda numa aba sem pedido na TUI não refaz a lista", async () => {
+    const Probe = () => { usePendingAsks(); return null; };
+    await act(async () => { root.render(profiled(<Probe />)); });
+    await act(async () => {});
+    commits = 0;
+    await act(async () => {
+      useChatLive.setState((s) => ({ turn: { ...s.turn, outra: { startedAt: 1, endedAt: null, tools: [{ name: "bash", summary: "ls" }] } } }));
+    });
     expect(commits).toBe(0);
   });
 

@@ -2,11 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** O backend do time, em memória: o que os comandos `chat_team_*` gravam. */
-const backend = vi.hoisted(() => ({ team: null as Record<string, unknown> | null, calls: [] as [string, Record<string, unknown>][] }));
+const backend = vi.hoisted(() => ({ team: null as Record<string, unknown> | null, calls: [] as [string, Record<string, unknown>][], failLink: false }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args: Record<string, unknown> = {}) => {
     backend.calls.push([cmd, args]);
+    if (backend.failLink && cmd === "chat_team_link") return Promise.reject(new Error("aba já está em outro time"));
     const team = backend.team as { members: Record<string, unknown>[] } | null;
     const input = (args.input ?? {}) as Record<string, unknown>;
     if (cmd === "chat_team_list") return Promise.resolve(team ? [team] : []);
@@ -40,6 +41,7 @@ import type { TeamView } from "../ipc";
 let canvas: typeof import("@/features/canvas/store");
 let tabsStore: typeof import("@/features/tabs/store");
 let teamStore: typeof import("../teamStore");
+let toasts: typeof import("@/shared/brand/botToastStore");
 let KEY = "";
 const canvasActions = () => canvas.canvasActions;
 const tab = (id: string, agentId: string): Tab => ({ id, title: id, cwd: "/repo", agentId, agentLabel: agentId, command: agentId, ptyId: null, openedAt: 1 }) as Tab;
@@ -57,6 +59,7 @@ beforeEach(async () => {
   canvas = await import("@/features/canvas/store");
   tabsStore = await import("@/features/tabs/store");
   teamStore = await import("../teamStore");
+  toasts = await import("@/shared/brand/botToastStore");
   const { emptyBoard, reconcile } = await import("@/features/canvas/board");
   KEY = canvas.boardKey("/repo");
   backend.calls = [];
@@ -133,6 +136,20 @@ describe("o espelho canvas -> chat no app", () => {
     expect(calls("chat_team_unlead")).toHaveLength(0);
   });
 
+
+  it("corda que o time não aceita sai do canvas: a falha do espelho não fica como acordo", async () => {
+    backend.failLink = true;
+    try {
+      canvasActions().connect(KEY, "lead", "a");
+      await settle();
+      expect(calls("chat_team_link")).toHaveLength(1);
+      expect(board().edges.some((e) => (e.a === "lead" && e.b === "a") || (e.a === "a" && e.b === "lead"))).toBe(false);
+      // A recusa não some: a pessoa vê o motivo, e o canvas volta ao que o time tem.
+      expect(toasts.useBotToastStore.getState().toasts).toContainEqual(expect.objectContaining({ tone: "warning", text: expect.stringContaining("aba já está em outro time") }));
+    } finally {
+      backend.failLink = false;
+    }
+  });
 
   it("corda para um terminal comum (shell) não vira integrante", async () => {
     canvasActions().connect(KEY, "lead", "sh");
