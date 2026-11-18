@@ -302,7 +302,10 @@ async fn apply_marketplace(app: &AppHandle, db: &DbConnection, merged: &Tree, lo
     // Repositorios borrados en otra máquina: al final, porque borrar uno se lleva sus skills.
     for (key, id) in &local.registries {
         if !m_regs.contains_key(key) {
-            match crate::marketplace::remove_registry(id.clone(), app.state()) {
+            match crate::marketplace::remove_registry_now(
+                id.clone(),
+                app.state::<crate::database::DbConnection>().inner(),
+            ) {
                 Ok(_) => out.changes.push(format!("repository {key} (removed)")),
                 Err(e) => out.failures.push(format!("repository {key}: {e}")),
             }

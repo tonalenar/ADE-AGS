@@ -39,6 +39,8 @@ export interface PendingAsk {
   /** A TUI oferece "permitir nesta sessão" / a conversa aceita `allowSession`. */
   canSession: boolean;
   atMs: number;
+  /** Chave i18n do aviso quando a última resposta a este pedido falhou (o pedido segue na caixa). */
+  errorKey?: string;
 }
 
 /** O comando por dentro: as partes, onde ele escreve e se tem algo que não se sabe interpretar com segurança. */
@@ -263,6 +265,22 @@ function sortOutputs(args: string[]): string[] {
   return out;
 }
 
+/** Interpretadores de código: com código na própria linha de comando (`python3 -c`), o que roda não se lê no pedido. */
+const INTERPRETERS = new Set(["python", "python2", "python3", "node", "deno", "bun", "ruby", "perl", "php", "lua", "bash", "sh", "zsh", "dash", "fish", "pwsh", "powershell", "osascript"]);
+/** As opções que trazem código inline: `-c`, `-e`, `--eval`, `-Command`. */
+const INLINE_CODE = new Set(["-c", "-e", "--eval", "-command", "-encodedcommand"]);
+
+/** O comando roda código inline de um interpretador (`python3 -c "…"`, `node -e "…"`)? Pura. */
+function inlineCode(word: string, rest: string[]): boolean {
+  return INTERPRETERS.has(word.toLowerCase()) && rest.some((t) => INLINE_CODE.has(t.toLowerCase()));
+}
+
+/** Uma parte do comando roda código inline de interpretador? Pura. */
+function hasInlineCode(part: string): boolean {
+  const tokens = words(dequote(part));
+  return tokens.some((t, i) => inlineCode(baseName(t), tokens.slice(i + 1)));
+}
+
 /** Uma parte do comando (já sem aspas) é de risco ALTO? Qualquer palavra pode ser o comando: `xargs rm -rf`, `sudo`, `find -exec`. */
 function partIsHigh(tokens: string[], cwd: string | null): boolean {
   for (let i = 0; i < tokens.length; i++) {
@@ -326,6 +344,19 @@ function partIsReadOnly(part: string): boolean {
   return READ_ONLY[head]?.(args) ?? false;
 }
 
+/**
+ * Um comando que só lê, mas toca arquivo sensível ou fora da pasta, não é baixo risco: a leitura já põe o conteúdo
+ * (um segredo, `~/.aws/credentials`) no contexto do agente. Pura.
+ */
+function readsSensitiveOrOutside(part: string, cwd: string | null): boolean {
+  const tokens = words(dequote(part));
+  return tokens.slice(1).some((t) => {
+    if (isFlag(t)) return false;
+    const r = resolvePath(t, cwd);
+    return !r.inside || SENSITIVE_RE.test(r.full);
+  });
+}
+
 function commandRisk(command: string, cwd: string | null): Risk {
   if (!command) return "medium";
   const analysis = analyzeCommand(command);
@@ -338,7 +369,7 @@ function commandRisk(command: string, cwd: string | null): Risk {
     analysis.writes.some((target) => sensitiveOutside(dequote(target), cwd));
   if (high) return "high";
   if (analysis.unsafe || analysis.writes.length > 0 || analysis.parts.length === 0) return "medium";
-  return analysis.parts.every(partIsReadOnly) ? "low" : "medium";
+  return analysis.parts.every(partIsReadOnly) && !analysis.parts.some((part) => readsSensitiveOrOutside(part, cwd)) ? "low" : "medium";
 }
 
 /** O que um comando mexe, quando dá para saber pelo próprio comando (instalar uma dependência). Pura. */
@@ -401,7 +432,10 @@ export function suggestPattern(ask: Pick<PendingAsk, "kind" | "detail" | "files"
     const host = hostOf(ask.detail);
     return host ? `${host}/**` : null;
   }
-  const first = commandParts(ask.detail)[0];
+  const parts = commandParts(ask.detail);
+  // Código inline de um interpretador não tem padrão seguro: a regra `python3 *` liberaria qualquer script.
+  if (parts.some(hasInlineCode)) return null;
+  const first = parts[0];
   if (!first) return null;
   const words = first.split(/\s+/);
   const program = words[0]!;
@@ -466,6 +500,8 @@ export function ruleMatches(rule: PermissionRule, ask: Pick<PendingAsk, "kind" |
     // escreve: a regra não decide, a pessoa decide.
     const analysis = analyzeCommand(ask.detail);
     if (analysis.unsafe || analysis.writes.length > 0) return false;
+    // Código inline de interpretador (`python3 -c "…"`): o que roda não se lê no pedido, então regra nenhuma decide.
+    if (analysis.parts.some(hasInlineCode)) return false;
     const parts = analysis.parts.map((p) => p.replace(/\s+/g, " "));
     const re = commandGlob(rule.pattern);
     return parts.length > 0 && parts.every((p) => re.test(p));

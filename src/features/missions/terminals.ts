@@ -9,6 +9,7 @@ import { BROWSER_HINT, computerUseHint } from "@/features/canvas/portalNotice";
 import { canvasActions, missionBoardKey, setWorkMode } from "@/features/canvas/store";
 import type { FunctionalRole, Squad, SubagentDefault } from "@/features/squads/types";
 import { useTabsStore } from "@/features/tabs/store";
+import { neutralizeAngles, untrustedBlock } from "@/shared/untrusted";
 import { pasteIntoTab, sendWhenReady, type SendTimings } from "@/features/terminal/terminalRegistry";
 
 import { getAutonomy, withAutonomy } from "./autonomy";
@@ -17,6 +18,7 @@ import { withModel } from "./modelFlags";
 import { STALL_GRACE_MS, shouldWarnStalled, startEventSpan, startupProgress, withActivity, allWorkingSpan, type StartupState } from "./startup";
 import { useStallAlerts } from "./stallAlerts";
 import { recordSpan } from "./timings";
+import { showWorktreeTrustWarnings } from "./trustWarning";
 import { missionTurns } from "./turns";
 import { VIGIA_NAME, vigiaAgentFor } from "./vigia";
 import { useVigiaSwitch } from "./vigiaSwitch";
@@ -115,6 +117,7 @@ export interface PreparedTeam {
   workspaces: TeamWorkspace[];
   precheck: string;
   memory: string;
+  trustWarnings?: string[];
 }
 
 /** Refuse incomplete isolation instead of opening any agent in the shared clone. */
@@ -165,10 +168,8 @@ const MEMORY_END = "<<<FIM_MEMORIA_APROVADA>>>";
  * (Mesma ideia do snapshot da Fleet: a memória é conteúdo de terceiros, nunca instrução.)
  */
 export function neutralizeMemoryText(text: string): string {
-  return text
+  return neutralizeAngles(text)
     .replace(/`/g, "'")
-    .replace(/</g, "‹")
-    .replace(/>/g, "›")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -258,7 +259,8 @@ export function leadBriefing(
     "",
     ...singleBranchRule("lead", workspaces.find((w) => w.name === LEAD_NAME)?.branch),
     "",
-    ...(findings.trim() ? [findings.trim(), ""] : []),
+    // Os achados vêm do pré-cheque: mensagens de commit e títulos de outras missões, escritos por agentes. Dado, não ordem.
+    ...(findings.trim() ? [untrustedBlock("achados prévios da missão", findings.trim()), ""] : []),
     ...(memoryEnvelope(memory, mission.id) ? [memoryEnvelope(memory, mission.id), ""] : []),
     "COMO COORDENAR (use SOMENTE o `ags`; não use `maestri` nem skills de outros apps)",
     "- `ags peers` — quem está conectado com você.",
@@ -351,7 +353,8 @@ export function memberBriefing(
     ...(member.subagent ? ["Você é um SUBAGENTE do orquestrador: execute o que ele enviar."] : []),
     "",
     ...(workspace ? [`SEU WORKTREE: ${workspace.cwd}; branch: ${workspace.branch}. Trabalhe somente nele.`, workspace.environment, ""] : []),
-    ...(findings.trim() ? [findings.trim(), ""] : []),
+    // Os achados vêm do pré-cheque: mensagens de commit e títulos de outras missões, escritos por agentes. Dado, não ordem.
+    ...(findings.trim() ? [untrustedBlock("achados prévios da missão", findings.trim()), ""] : []),
     ...(memoryEnvelope(memory, mission.id) ? [memoryEnvelope(memory, mission.id), ""] : []),
     "Ao receber a tarefa, leia o quadro da missão (`ags swarm read`): regras, contratos e decisões que valem para todos ficam lá, numerados. Publique ali (`ags swarm note --file <arquivo>`) o que outro integrante precisa saber, em vez de repetir em cada mensagem.",
     "Não explore nem edite antes de receber a tarefa do Orquestrador. Aguarde a delegação; use somente seu worktree e preserve a junction node_modules. Não abra PR nem faça merge sem pedido do usuário.",
@@ -467,6 +470,7 @@ export async function startMissionInTerminals(
   const prepared = await invoke<PreparedTeam>("mission_prepare_team", { missionId: mission.id, members: [LEAD_NAME, ...team.map((m) => m.name)] });
   const leadWorkspace = workspaceFor(prepared, LEAD_NAME);
   const memberWorkspaces = team.map((m) => workspaceFor(prepared, m.name));
+  showWorktreeTrustWarnings(prepared.trustWarnings);
   // Teste A/B: o braço "sem-memoria" (marcador no título) sai sem memória nem resumo de missões anteriores.
   const { findings, memory } = priorContext(mission.title, prepared);
 

@@ -44,8 +44,9 @@ async fn blocking<T: Send + 'static>(
 
 /// Las rutas llegan relativas al root. `--` antes de ellas para que una llamada `-f` no
 /// se lea como opción.
-fn with_paths<'a>(args: &[&'a str], paths: &'a [String]) -> Vec<&'a str> {
-    let mut all = args.to_vec();
+pub(super) fn with_paths<'a>(args: &[&'a str], paths: &'a [String]) -> Vec<&'a str> {
+    let mut all = vec!["--literal-pathspecs"];
+    all.extend_from_slice(args);
     all.push("--");
     all.extend(paths.iter().map(String::as_str));
     all

@@ -85,6 +85,7 @@ pub fn screen(udid: &str) -> Result<screen::Screen, String> {
 /// Um toque em (x, y) pontos do iOS: desce e sobe.
 pub fn tap(udid: &str, x: f64, y: f64) -> Result<(), String> {
     let (screen, hid) = connect(udid)?;
+    let mark = hid.mark();
     // Os pontos são os da tela como se vê (os do `shot`, que já sai em pé): em paisagem, voltam para a
     // superfície em retrato, que é a do HID.
     let orientation = crate::simulator::ops::orientation(udid);
@@ -92,12 +93,14 @@ pub fn tap(udid: &str, x: f64, y: f64) -> Result<(), String> {
     let ratio = model::native_ratio(ratio, orientation);
     hid.touch(ratio, hid::Phase::Down)?;
     std::thread::sleep(Duration::from_millis(60));
-    hid.touch(ratio, hid::Phase::Up)
+    hid.touch(ratio, hid::Phase::Up)?;
+    hid.confirm(mark)
 }
 
 /// Desliza de um ponto a outro em `ms` milissegundos (pontos do iOS).
 pub fn swipe(udid: &str, from: (f64, f64), to: (f64, f64), ms: u64) -> Result<(), String> {
     let (screen, hid) = connect(udid)?;
+    let mark = hid.mark();
     // Como em `tap`: pontos da tela em pé → proporção na superfície em retrato (a conta é linear, então os
     // passos intermediários também caem certos).
     let orientation = crate::simulator::ops::orientation(udid);
@@ -112,12 +115,14 @@ pub fn swipe(udid: &str, from: (f64, f64), to: (f64, f64), ms: u64) -> Result<()
         std::thread::sleep(Duration::from_millis(16));
         hid.touch(*p, hid::Phase::Move)?;
     }
-    hid.touch(*points.last().unwrap_or(&b), hid::Phase::Up)
+    hid.touch(*points.last().unwrap_or(&b), hid::Phase::Up)?;
+    hid.confirm(mark)
 }
 
 pub fn type_text(udid: &str, text: &str) -> Result<(), String> {
     let keys = model::text_keys(text)?;
     let (_, hid) = connect(udid)?;
+    let mark = hid.mark();
     for (usage, shift) in keys {
         if shift {
             hid.key(0xe1, true)?;
@@ -128,19 +133,22 @@ pub fn type_text(udid: &str, text: &str) -> Result<(), String> {
             hid.key(0xe1, false)?;
         }
     }
-    Ok(())
+    hid.confirm(mark)
 }
 
 pub fn key(udid: &str, name: &str) -> Result<(), String> {
     let usage = model::key_usage(name)?;
     let (_, hid) = connect(udid)?;
+    let mark = hid.mark();
     hid.key(usage, true)?;
-    hid.key(usage, false)
+    hid.key(usage, false)?;
+    hid.confirm(mark)
 }
 
 pub fn button(udid: &str, name: &str) -> Result<(), String> {
     let source = model::button_source(name)?;
     let (screen, hid) = connect(udid)?;
+    let mark = hid.mark();
     // O botão de início espera um possível segundo clique (~400 ms até o primeiro quadro). Sem botão físico, o
     // gesto da barra reage na hora. Em paisagem a barra fica em outra borda: segue o botão.
     if source == model::button_source("home")?
@@ -154,11 +162,13 @@ pub fn button(udid: &str, name: &str) -> Result<(), String> {
             std::thread::sleep(Duration::from_millis(16));
             hid.touch(*p, hid::Phase::Move)?;
         }
-        return hid.touch(*points.last().unwrap_or(&points[0]), hid::Phase::Up);
+        hid.touch(*points.last().unwrap_or(&points[0]), hid::Phase::Up)?;
+        return hid.confirm(mark);
     }
     hid.button(source, true)?;
     std::thread::sleep(Duration::from_millis(80));
-    hid.button(source, false)
+    hid.button(source, false)?;
+    hid.confirm(mark)
 }
 
 /// Os processos do iOS de um aparelho: o `launchd_sim` dele (o caminho tem o UDID) e toda a descendência.

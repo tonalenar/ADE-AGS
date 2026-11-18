@@ -89,6 +89,10 @@ pub struct Ivars {
     region: RefCell<Vec<Rect>>,
     applied: RefCell<Option<AppliedRegion>>,
     touching: Cell<bool>,
+    /// O último ponto (na superfície em retrato) que o dedo tocou: o soltar de uma view que some usa ele (A268).
+    last_native: Cell<Option<(f64, f64)>>,
+    /// A orientação e o tamanho da view na última vez que ela foi posta em pé (ver `model::needs_orient`, A277).
+    oriented: Cell<Option<(u32, u64, u64)>>,
     /// O dedo de uma rolagem do trackpad (em coordenadas da view), enquanto ela dura.
     scrolling: Cell<Option<(f64, f64)>>,
 }
@@ -195,7 +199,7 @@ impl ScreenView {
             retain(content).expect("CALayer")
         };
         let this = Self::alloc(mtm).set_ivars(Ivars {
-            hid, content, orientation: Cell::new(1), region: RefCell::new(Vec::new()), applied: RefCell::new(None), touching: Cell::new(false), scrolling: Cell::new(None),
+            hid, content, orientation: Cell::new(1), region: RefCell::new(Vec::new()), applied: RefCell::new(None), touching: Cell::new(false), last_native: Cell::new(None), oriented: Cell::new(None), scrolling: Cell::new(None),
         });
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0));
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
@@ -234,8 +238,21 @@ impl ScreenView {
     fn touch_at(&self, x: f64, y: f64, phase: Phase) {
         let bounds = self.bounds();
         if let Some(ratio) = model::touch_ratio(x, y, bounds.size.width, bounds.size.height) {
-            let _ = self.ivars().hid.touch(model::native_ratio(ratio, self.ivars().orientation.get()), phase);
+            let native = model::native_ratio(ratio, self.ivars().orientation.get());
+            self.ivars().last_native.set(Some(native));
+            let _ = self.ivars().hid.touch(native, phase);
         }
+    }
+
+    /// A view sai da tela (fecha, ou o painel a esconde) com o dedo ainda para baixo: manda o soltar. Sem isso o
+    /// aparelho fica com o toque pressionado até o próximo clique (A268).
+    fn release_touch(&self) {
+        if self.ivars().touching.replace(false) {
+            if let Some(native) = self.ivars().last_native.get() {
+                let _ = self.ivars().hid.touch(native, Phase::Up);
+            }
+        }
+        self.ivars().scrolling.set(None);
     }
 
     /// Põe a superfície em pé dentro da view para a orientação `orientation`: a subcamada fica com o tamanho da
@@ -245,6 +262,11 @@ impl ScreenView {
         self.ivars().orientation.set(orientation);
         let bounds = self.bounds();
         let (w, h) = (bounds.size.width, bounds.size.height);
+        // Refazer a geometria a cada `place` (sem mudança) só gasta quatro operações de CALayer (A277).
+        if !model::needs_orient(self.ivars().oriented.get(), orientation, w, h) {
+            return;
+        }
+        self.ivars().oriented.set(Some((orientation, w.to_bits(), h.to_bits())));
         let (cw, ch) = model::oriented_size((w, h), orientation);
         let turns = f64::from(model::display_quarter_turns(orientation));
         let content = Retained::as_ptr(&self.ivars().content) as *mut AnyObject;
@@ -748,6 +770,7 @@ fn frame_in_superview(webview: &NSView, rect: Rect) -> NSRect {
 fn apply(entry: &Entry, webview: &NSView, place: &Place) {
     let view = &entry.view;
     let Some(visible) = place.visible.filter(|v| !v.is_empty() && !place.rect.is_empty()) else {
+        view.release_touch();
         view.setHidden(true);
         stop(entry);
         return;
@@ -819,6 +842,7 @@ pub fn reorient(udid: &str) {
 pub fn detach(id: &str) {
     let entry = SCREENS.with(|s| s.borrow_mut().remove(id));
     if let Some(entry) = entry {
+        entry.view.release_touch();
         stop(&entry);
         entry.view.removeFromSuperview();
     }

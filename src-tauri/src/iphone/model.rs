@@ -26,6 +26,96 @@ pub fn physical_identifier(id: &str) -> Option<&str> {
     ok.then_some(rest)
 }
 
+/// Por que a lista de aparelhos do `devicectl` não veio. O front mostra uma mensagem para cada variante (PR14): a
+/// falta do Xcode não pode mais aparecer no lugar de uma falha momentânea.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "message", rename_all = "camelCase")]
+pub enum DiscoveryError {
+    /// Não há `xcrun` neste Mac (sem Xcode ou Command Line Tools). Só o `ENOENT` do binário chega aqui.
+    XcodeMissing,
+    /// O `devicectl` não respondeu no prazo. É uma falha momentânea: a lista anterior continua valendo.
+    Timeout,
+    /// O aparelho não confia neste Mac, ou o pareamento falhou.
+    NotTrusted,
+    /// Qualquer outra falha (saída de erro, JSON inesperado), com o texto para o diagnóstico.
+    Other(String),
+}
+
+impl std::fmt::Display for DiscoveryError {
+    /// O texto que o `device_error_help` e o `ags device list` usam: as palavras do `devicectl` (confiança, timeout).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DiscoveryError::XcodeMissing => write!(f, "xcrun não encontrado (Xcode)"),
+            DiscoveryError::Timeout => write!(f, "devicectl: timed out"),
+            DiscoveryError::NotTrusted => write!(f, "devicectl: device is not paired or trusted"),
+            DiscoveryError::Other(message) => write!(f, "{message}"),
+        }
+    }
+}
+
+/// Classifica a falha de lançar ou esperar o `xcrun devicectl`.
+pub fn classify_spawn_error(error: &io::Error) -> DiscoveryError {
+    match error.kind() {
+        io::ErrorKind::NotFound => DiscoveryError::XcodeMissing,
+        io::ErrorKind::TimedOut => DiscoveryError::Timeout,
+        _ => DiscoveryError::Other(format!("devicectl: {error}")),
+    }
+}
+
+/// Classifica a saída de erro do `devicectl` (ele saiu com código diferente de zero). Os marcadores de confiança
+/// são os mesmos de `device_error_help`.
+pub fn classify_failure(stderr: &str) -> DiscoveryError {
+    let text = stderr.trim();
+    let lower = text.to_lowercase();
+    if lower.contains("pair") || lower.contains("trust") || lower.contains("confiar") {
+        return DiscoveryError::NotTrusted;
+    }
+    if text.is_empty() {
+        return DiscoveryError::Other("devicectl: saiu com erro sem explicação".into());
+    }
+    DiscoveryError::Other(format!("devicectl: {text}"))
+}
+
+/// Um arquivo temporário novo para a lista do `devicectl`: o contador garante nomes distintos mesmo no mesmo
+/// milissegundo (dois pedidos ao mesmo tempo não leem o JSON um do outro).
+pub fn temp_json_path(dir: &std::path::Path) -> std::path::PathBuf {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    dir.join(format!("ade-devicectl-{}-{}-{seq}.json", std::process::id(), crate::util::now_ts_ms()))
+}
+
+/// O primeiro `<stem>.<ext>` que ainda não existe em `dir` (`<stem> (2).<ext>`, …): uma foto não some por causa de
+/// outra tirada no mesmo segundo.
+pub fn primeiro_caminho_livre(dir: &std::path::Path, stem: &str, ext: &str) -> std::path::PathBuf {
+    let first = dir.join(format!("{stem}.{ext}"));
+    if !first.exists() {
+        return first;
+    }
+    (2u32..).map(|n| dir.join(format!("{stem} ({n}).{ext}"))).find(|p| !p.exists()).unwrap_or(first)
+}
+
+/// O que vai ao helper para um lote de entrada: cada linha seguida de `\n`. Sem a sessão pronta, devolve o motivo e
+/// nada é mandado: o agente recebe o erro, em vez de um "ok" para um toque que não chega.
+pub fn input_payload(lines: &[String], started: bool, input: bool) -> Result<Vec<u8>, String> {
+    if !started {
+        return Err("sessão ainda não começou".into());
+    }
+    if !input {
+        return Err("o toque do aparelho ainda não está pronto; a conexão pode ter caído".into());
+    }
+    let mut bytes = Vec::new();
+    for line in lines {
+        bytes.extend_from_slice(line.as_bytes());
+        bytes.push(b'\n');
+    }
+    Ok(bytes)
+}
+
+/// Quanto falta até `deadline`, a partir de `now` (zero se já passou). Pura: a pausa do toque a usa a cada despertar.
+pub fn restante_ate(deadline: std::time::Instant, now: std::time::Instant) -> Duration {
+    deadline.saturating_duration_since(now)
+}
+
 /// Traduz erros comuns do CoreDevice para o próximo passo prático, sem esconder mensagens desconhecidas.
 pub fn device_error_help(raw: &str) -> String {
     let lower = raw.to_lowercase();

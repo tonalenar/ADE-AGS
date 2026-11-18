@@ -50,6 +50,13 @@ afterEach(async () => {
 });
 
 describe("cartão de permissão no fio", () => {
+  it("pedido cuja resposta falhou mostra o aviso e segue com os botões (rodada 2)", async () => {
+    await render(<PermissionCard ask={{ ...ask, errorKey: "chat.permission.answerFailed" }} terminal />);
+    const alert = host.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("chat.permission.answerFailed");
+    expect(button("chat.permission.allow")).toBeDefined();
+  });
+
   it("mostra o comando, onde, a rede e o que mexe; cada botão responde", async () => {
     await render(<PermissionCard ask={ask} terminal />);
     expect(host.textContent).toContain("chat.permission.titleCommand");

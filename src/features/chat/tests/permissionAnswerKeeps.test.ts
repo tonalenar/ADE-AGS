@@ -3,6 +3,8 @@ import { create } from "zustand";
 
 const structured = vi.hoisted(() => ({ answerRequest: vi.fn(), sendToThread: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve(null) }));
+vi.mock("@/i18n", () => ({ default: { t: (k: string) => k } }));
+vi.mock("@/shared/ui/alerts", () => ({ AlertaToast: vi.fn(() => Promise.resolve({})) }));
 vi.mock("../structured/store", () => ({
   answerRequest: structured.answerRequest,
   sendToThread: structured.sendToThread,

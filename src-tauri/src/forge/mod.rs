@@ -49,7 +49,10 @@ pub(crate) mod for_sync {
 
     /// La cuenta y su API (con el token renovado si hacía falta).
     pub(crate) async fn account_api(app: &tauri::AppHandle, account_id: &str) -> Result<(GitAccount, Api), ForgeError> {
-        let account = super::store::get(&super::store::db(app)?.lock().unwrap(), account_id)
+        let conn = super::store::db(app)?;
+        let id = account_id.to_string();
+        let account = crate::database::blocking_db(&conn, move |conn| Ok(super::store::get(conn, &id)))
+            .await?
             .ok_or_else(|| ForgeError::Api("Esa cuenta de git ya no existe".into()))?;
         let token = super::credentials::token(app, &account).await?;
         let api = Api::new(account.kind, &account.host, &token)?;

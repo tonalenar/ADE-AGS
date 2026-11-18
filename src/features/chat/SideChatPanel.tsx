@@ -8,7 +8,7 @@ import { useTabsStore } from "@/features/tabs/store";
 
 import { readAccess, type ConversationCard } from "./chatModel";
 import { chatSideChatDelete, chatThreadItems, type ThreadRow } from "./structured/ipc";
-import { createFirstThread, firstMessageAccepted, forkSideChat, settleThread, sendToThread, useStructured } from "./structured/store";
+import { createFirstThread, firstMessageAccepted, forkSideChat, removeDeletedSideChat, settleThread, sendToThread, useStructured } from "./structured/store";
 import { threadIdOf, threadKey } from "./structured/model";
 import { StructuredConversationView } from "./structured/StructuredConversationView";
 import { switchableAgents } from "./structured/switchModel";
@@ -185,11 +185,7 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
     setError(null);
     try {
       await chatSideChatDelete(thread.id);
-      useStructured.setState((state) => ({
-        threads: state.threads.filter((row) => row.id !== thread.id),
-        live: Object.fromEntries(Object.entries(state.live).filter(([id]) => id !== thread.id)),
-        hydrated: Object.fromEntries(Object.entries(state.hydrated).filter(([id]) => id !== thread.id)),
-      }));
+      removeDeletedSideChat(thread.id);
       if (selectedId === thread.id) setSelectedId(null);
     } catch (cause) {
       setError(String(cause));

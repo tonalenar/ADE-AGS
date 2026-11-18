@@ -777,19 +777,7 @@ impl CodexServer {
                 let _ = std::io::copy(&mut stderr, &mut std::io::sink());
             });
         }
-        let (sender, lines) = mpsc::channel();
-        thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                match line {
-                    Ok(line) => {
-                        if sender.send(line).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
+        let lines = pump_lines(stdout, MAX_LINE_BYTES);
         Ok(Self {
             child,
             stdin: Some(stdin),
@@ -851,6 +839,43 @@ impl CodexServer {
         serde_json::to_string(&result)
             .map_err(|_| "Could not parse Codex model/list response".to_string())
     }
+}
+
+/// Teto de uma linha do app-server. Uma linha maior que isso não é resposta de quem a gente conhece: a leitura para.
+const MAX_LINE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Quantas linhas do app-server podem esperar o consumidor. Cheia, a leitura para e o pipe do processo enche: a
+/// contrapressão chega até o servidor, que espera para escrever. Nenhuma linha se perde.
+const MAX_QUEUED_LINES: usize = 256;
+
+/// Lê o stdout do app-server numa thread e entrega as linhas, em ordem, pelo canal devolvido. Uma linha que passa de
+/// `max_line` bytes, ou que não é UTF-8, encerra a leitura (o canal desconecta e quem espera vê o processo fechado).
+fn pump_lines(stdout: impl std::io::Read + Send + 'static, max_line: u64) -> Receiver<String> {
+    let (sender, lines) = mpsc::sync_channel(MAX_QUEUED_LINES);
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let mut raw = Vec::new();
+            // O `take` põe o teto na leitura: uma linha sem fim para ali, em vez de crescer a memória.
+            match std::io::Read::take(&mut reader, max_line + 1).read_until(b'\n', &mut raw) {
+                Ok(0) => break,
+                Ok(_) if raw.len() as u64 > max_line => break,
+                Ok(_) => {}
+                Err(_) => break,
+            }
+            let Ok(mut line) = String::from_utf8(raw) else { break };
+            if line.ends_with('\n') {
+                line.pop();
+                if line.ends_with('\r') {
+                    line.pop();
+                }
+            }
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    lines
 }
 
 fn receive_response(

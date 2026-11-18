@@ -1,19 +1,54 @@
 //! Explicit user lifecycle actions; never reachable from Fleet write tools.
 use super::{ProposalActor, ProposalInput, ProposalResult};
-use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
-use serde_json::{json, Value};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use serde_json::{Value, json};
 
 pub fn stats(conn: &Connection, workspace: &str) -> Result<Value, String> {
     let mut result=conn.query_row("SELECT (SELECT COUNT(*) FROM memory_entries WHERE workspace_id=w.id),(SELECT COUNT(*) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.workspace_id=w.id),w.deleted_at,w.delete_after FROM workspaces w WHERE w.id=?1",[workspace],|r|Ok(json!({"entries":r.get::<_,i64>(0)?,"revisions":r.get::<_,i64>(1)?,"deletedAt":r.get::<_,Option<i64>>(2)?,"deleteAfter":r.get::<_,Option<i64>>(3)?}))).map_err(|e|e.to_string())?;
     let usage=conn.query_row("SELECT COUNT(*),COUNT(DISTINCT s.entry_id),COUNT(DISTINCT s.run_id) FROM run_memory_snapshot s JOIN memory_entries e ON e.id=s.entry_id WHERE e.workspace_id=?1",[workspace],|r|Ok(json!({"timesUsed":r.get::<_,i64>(0)?,"entriesUsed":r.get::<_,i64>(1)?,"runsUsingMemory":r.get::<_,i64>(2)?,"method":"selected_in_run_snapshot"}))).map_err(|e|e.to_string())?;
-    result["memoryUsage"]=usage;
+    result["memoryUsage"] = usage;
     Ok(result)
 }
 
 /// Session data becomes only a proposal; approval remains a user action.
-pub fn swarm_promote(conn:&Connection,workspace:&str,mission:&str,id:&str,key:&str)->Result<ProposalResult,String>{
-    let body:String=conn.query_row("SELECT body FROM memory_swarm_notes WHERE id=?1 AND workspace_id=?2 AND mission_id=?3",params![id,workspace,mission],|r|r.get(0)).map_err(|_|"swarm note unavailable")?;
-    super::propose(conn,"mission",workspace,Some(mission),&ProposalInput{scope:"mission".into(),key:key.into(),kind:"note".into(),body,priority:0,operation:"create".into(),expected_revision:None,source_fact_id:None,reason:Some(format!("Swarm note {id}")),acknowledge_secret:false},ProposalActor{kind:"worker",run_id:None,task_id:None,fact_id:None})
+pub fn swarm_promote(
+    conn: &Connection,
+    workspace: &str,
+    mission: &str,
+    id: &str,
+    key: &str,
+) -> Result<ProposalResult, String> {
+    let body: String = conn
+        .query_row(
+            "SELECT body FROM memory_swarm_notes WHERE id=?1 AND workspace_id=?2 AND mission_id=?3",
+            params![id, workspace, mission],
+            |r| r.get(0),
+        )
+        .map_err(|_| "swarm note unavailable")?;
+    super::propose(
+        conn,
+        "mission",
+        workspace,
+        Some(mission),
+        &ProposalInput {
+            scope: "mission".into(),
+            key: key.into(),
+            kind: "note".into(),
+            body,
+            priority: 0,
+            operation: "create".into(),
+            expected_revision: None,
+            source_fact_id: None,
+            reason: Some(format!("Swarm note {id}")),
+            acknowledge_secret: false,
+        },
+        ProposalActor {
+            kind: "worker",
+            run_id: None,
+            task_id: None,
+            fact_id: None,
+        },
+    )
 }
 
 struct ArchivePrep {
@@ -29,7 +64,9 @@ fn prepare_archive(conn: &Connection, workspace: &str) -> Result<ArchivePrep, St
         .prepare("SELECT id,mission_id FROM memory_entries WHERE workspace_id=?1 ORDER BY id")
         .map_err(|e| e.to_string())?;
     let ids = stmt
-        .query_map([workspace], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))
+        .query_map([workspace], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+        })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
@@ -39,8 +76,14 @@ fn prepare_archive(conn: &Connection, workspace: &str) -> Result<ArchivePrep, St
         .collect::<Result<Vec<_>, _>>()?;
     let mut archive = conn.prepare("SELECT metadata_json,content_hash,compacted_at FROM memory_compacted_revisions c JOIN memory_entries e ON e.id=c.entry_id WHERE e.workspace_id=?1 ORDER BY c.entry_id,c.revision").map_err(|e| e.to_string())?;
     let archived = archive.query_map([workspace], |r| Ok(json!({"metadata":r.get::<_,String>(0)?,"contentHash":r.get::<_,String>(1)?,"compactedAt":r.get::<_,i64>(2)?}))).map_err(|e| e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?;
-    let entries = details.iter().map(archive_detail).collect::<Result<Vec<_>, _>>()?;
-    Ok(ArchivePrep { stats: stats(conn, workspace)?, body: json!({"entries": entries, "compactedRevisions": archived}) })
+    let entries = details
+        .iter()
+        .map(archive_detail)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ArchivePrep {
+        stats: stats(conn, workspace)?,
+        body: json!({"entries": entries, "compactedRevisions": archived}),
+    })
 }
 
 fn archive_detail(detail: &super::MemoryDetail) -> Result<Value, String> {
@@ -67,7 +110,11 @@ fn write_archive(repo_path: &std::path::Path, body: &Value) -> Result<(), String
     if path.is_symlink() {
         return Err("export cannot follow a symlink".into());
     }
-    std::fs::write(&path, serde_json::to_vec_pretty(body).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(body).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Atalho de teste. Produção (`memory_export`, `ags memory export`) usa [`export_detached`],
@@ -84,7 +131,11 @@ pub fn export(conn: &Connection, workspace: &str, root: &std::path::Path) -> Res
 
 /// Pede o git ao worker e só então relê o arquivo. O `revisions.json` sai com o banco
 /// de depois do export, sob o mesmo gate do repositório que o purge segura na reescrita.
-pub fn export_detached(db: &crate::database::DbConnection, sync: &super::repo_sync::RepoSync, workspace: &str) -> Result<Value, String> {
+pub fn export_detached(
+    db: &crate::database::DbConnection,
+    sync: &super::repo_sync::RepoSync,
+    workspace: &str,
+) -> Result<Value, String> {
     let projection = sync.export_now(workspace)?;
     let path = std::path::PathBuf::from(&projection.path);
     let prepared: Result<ArchivePrep, String> = super::repo::with_repo_gate(&path, || {
@@ -101,11 +152,36 @@ pub fn export_detached(db: &crate::database::DbConnection, sync: &super::repo_sy
 }
 
 /// Rewrites an archive that already exists. Purge does not create one that the user never exported.
-pub(crate) fn refresh_revision_archive(conn: &Connection, workspace: &str, dir: &std::path::Path) -> Result<(), String> {
+#[cfg(test)]
+pub(crate) fn refresh_revision_archive(
+    conn: &Connection,
+    workspace: &str,
+    dir: &std::path::Path,
+) -> Result<(), String> {
     if !dir.join("revisions.json").exists() {
         return Ok(());
     }
     let prepared = prepare_archive(conn, workspace)?;
+    write_archive(dir, &prepared.body)
+}
+
+/// Como `refresh_revision_archive`, sem o mutex do banco durante a escrita do arquivo: o corpo
+/// é montado com o mutex tomado, o mutex é solto, e só então `revisions.json` é gravado.
+/// `antes_da_escrita` roda logo antes da gravação, com o mutex já solto (os testes usam a sonda).
+pub(crate) fn refresh_revision_archive_db(
+    db: &crate::database::DbConnection,
+    workspace: &str,
+    dir: &std::path::Path,
+    antes_da_escrita: &dyn Fn(),
+) -> Result<(), String> {
+    if !dir.join("revisions.json").exists() {
+        return Ok(());
+    }
+    let prepared = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        prepare_archive(&conn, workspace)?
+    };
+    antes_da_escrita();
     write_archive(dir, &prepared.body)
 }
 
@@ -114,7 +190,11 @@ pub fn compact(conn: &Connection, days: i64) -> Result<usize, String> {
     compact_workspace(conn, days, None)
 }
 
-pub fn compact_workspace(conn: &Connection, days: i64, workspace: Option<&str>) -> Result<usize, String> {
+pub fn compact_workspace(
+    conn: &Connection,
+    days: i64,
+    workspace: Option<&str>,
+) -> Result<usize, String> {
     if days < 30 {
         return Err("minimum retention is 30 days".into());
     }
@@ -123,7 +203,7 @@ pub fn compact_workspace(conn: &Connection, days: i64, workspace: Option<&str>) 
         .map_err(|e| e.to_string())?;
     let mut stmt=tx.prepare("SELECT r.entry_id,r.revision FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE r.status='rejected' AND r.decided_at<?1 AND (?2 IS NULL OR e.workspace_id=?2)").map_err(|e|e.to_string())?;
     let rows = stmt
-        .query_map(params![cutoff,workspace], |r| {
+        .query_map(params![cutoff, workspace], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
         })
         .map_err(|e| e.to_string())?
@@ -205,28 +285,57 @@ pub struct SwarmNote {
 /// O quadro da missão: as notas de sessão (regras, contratos, mocks, decisões), na ordem em que
 /// foram publicadas. Antes só havia como escrever; a equipe reenviava o mesmo bloco de regras em cada
 /// `tell` (11% do texto entre agentes era repetição) porque não tinha onde ler.
-pub fn swarm_read(conn: &Connection, workspace: &str, mission: &str) -> Result<Vec<SwarmNote>, String> {
+pub fn swarm_read(
+    conn: &Connection,
+    workspace: &str,
+    mission: &str,
+) -> Result<Vec<SwarmNote>, String> {
     let mut stmt = conn
         .prepare("SELECT id, kind, body, created_at FROM memory_swarm_notes WHERE workspace_id=?1 AND mission_id=?2 ORDER BY created_at, rowid")
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params![workspace, mission], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))
+        .query_map(params![workspace, mission], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })
         .map_err(|e| e.to_string())?;
     Ok(rows
         .flatten()
         .enumerate()
-        .map(|(i, (id, kind, body, created_at))| SwarmNote { n: i + 1, id, kind, body, created_at })
+        .map(|(i, (id, kind, body, created_at))| SwarmNote {
+            n: i + 1,
+            id,
+            kind,
+            body,
+            created_at,
+        })
         .collect())
 }
 
 /// O quadro como texto para o terminal. Pura.
 pub fn render_board(notes: &[SwarmNote]) -> String {
     if notes.is_empty() {
-        return "O quadro da missão está vazio. Publique com `ags swarm note --file <arquivo>`.".into();
+        return "O quadro da missão está vazio. Publique com `ags swarm note --file <arquivo>`."
+            .into();
     }
     notes
         .iter()
-        .map(|n| format!("#{} [{}] {}", n.n, if n.kind == "question" { "pergunta" } else { "nota" }, n.body.trim()))
+        .map(|n| {
+            format!(
+                "#{} [{}] {}",
+                n.n,
+                if n.kind == "question" {
+                    "pergunta"
+                } else {
+                    "nota"
+                },
+                n.body.trim()
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -264,7 +373,7 @@ pub fn workspace_restore(
     workspace_id: String,
     db: tauri::State<crate::database::DbConnection>,
 ) -> Result<(), String> {
-    crate::database::db_restore_workspace(workspace_id, db)
+    crate::database::db_restore_workspace_now(workspace_id, db.inner())
 }
 
 pub fn deleted_workspaces(conn: &Connection) -> Result<Vec<Value>, String> {
@@ -277,9 +386,16 @@ pub fn deleted_workspaces(conn: &Connection) -> Result<Vec<Value>, String> {
 }
 
 #[tauri::command]
-pub fn workspace_deleted_list(db: tauri::State<crate::database::DbConnection>) -> Result<Vec<Value>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    deleted_workspaces(&conn)
+pub async fn workspace_deleted_list(
+    db: tauri::State<'_, crate::database::DbConnection>,
+) -> Result<Vec<Value>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        deleted_workspaces(&conn)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -291,90 +407,110 @@ pub fn memory_export(
     export_detached(&db, &sync, &workspace_id)
 }
 #[tauri::command]
-pub fn memory_workspace_stats(
+pub async fn memory_workspace_stats(
     workspace_id: String,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Value, String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    stats(&c, &workspace_id)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        stats(&c, &workspace_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub fn memory_agent_drafts(
+pub async fn memory_agent_drafts(
     workspace_id: String,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Vec<Value>, String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    drafts(&c, &workspace_id)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        drafts(&c, &workspace_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub fn memory_promote_draft(
+pub async fn memory_promote_draft(
     workspace_id: String,
     draft_id: String,
     app: tauri::AppHandle,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<ProposalResult, String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    let r = promote_draft(&c, &workspace_id, &draft_id);
-    drop(c);
-    super::notify_changed(&app);
-    r
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        let r = promote_draft(&c, &workspace_id, &draft_id);
+        drop(c);
+        super::notify_changed(&app);
+        r
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub fn memory_discard_draft(
+pub async fn memory_discard_draft(
     workspace_id: String,
     draft_id: String,
     app: tauri::AppHandle,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<(), String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    c.execute(
-        "DELETE FROM memory_agent_drafts WHERE id=?1 AND workspace_id=?2",
-        params![draft_id, workspace_id],
-    )
-    .map_err(|e| e.to_string())?;
-    drop(c);
-    super::notify_changed(&app);
-    Ok(())
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        c.execute(
+            "DELETE FROM memory_agent_drafts WHERE id=?1 AND workspace_id=?2",
+            params![draft_id, workspace_id],
+        )
+        .map_err(|e| e.to_string())?;
+        drop(c);
+        super::notify_changed(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-pub fn memory_compact(
+pub async fn memory_compact(
     retention_days: i64,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<usize, String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    compact(&c, retention_days)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        compact(&c, retention_days)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn memory_verify_source(
+pub async fn memory_verify_source(
     entry_id: String,
     file_path: Option<String>,
     commit: Option<String>,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Value, String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    let source:Option<(Option<String>,Option<String>,Option<String>)>=c.query_row("SELECT r.source_run_id,r.source_task_id,COALESCE(s.cwd,m.cwd) FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id AND r.revision=e.current_revision LEFT JOIN runs s ON s.id=r.source_run_id LEFT JOIN missions m ON m.id=e.mission_id WHERE e.id=?1 AND r.status='approved'",[entry_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(|e|e.to_string())?;
-    let (run, task, cwd) = source.ok_or("approved source unavailable")?;
-    let run_exists = run
-        .as_ref()
-        .map(|id| {
-            c.query_row("SELECT EXISTS(SELECT 1 FROM runs WHERE id=?1)", [id], |r| {
-                r.get::<_, bool>(0)
-            })
-        })
-        .transpose()
-        .map_err(|e| e.to_string())?;
-    let task_exists = task
-        .as_ref()
-        .map(|id| {
-            c.query_row(
-                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND run_id=?2)",
-                params![id, run],
-                |r| r.get::<_, bool>(0),
-            )
-        })
-        .transpose()
-        .map_err(|e| e.to_string())?;
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+    let (cwd, run_exists, task_exists) = {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        let source: Option<(Option<String>, Option<String>, Option<String>)> = c.query_row(
+            "SELECT r.source_run_id,r.source_task_id,COALESCE(s.cwd,m.cwd) FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id AND r.revision=e.current_revision LEFT JOIN runs s ON s.id=r.source_run_id LEFT JOIN missions m ON m.id=e.mission_id WHERE e.id=?1 AND r.status='approved'",
+            [entry_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).optional().map_err(|e| e.to_string())?;
+        let (run, task, cwd) = source.ok_or("approved source unavailable")?;
+        let run_exists = run.as_ref().map(|id| c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM runs WHERE id=?1)", [id], |r| r.get::<_, bool>(0),
+        )).transpose().map_err(|e| e.to_string())?;
+        let task_exists = task.as_ref().map(|id| c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND run_id=?2)",
+            params![id, run], |r| r.get::<_, bool>(0),
+        )).transpose().map_err(|e| e.to_string())?;
+        (cwd, run_exists, task_exists)
+    };
     let root = cwd
         .as_ref()
         .and_then(|path| std::fs::canonicalize(path).ok());
@@ -422,24 +558,32 @@ pub fn memory_verify_source(
     Ok(
         json!({"runExists":run_exists,"taskExists":task_exists,"fileExists":file_exists,"commitExists":commit_exists,"lastVerifiedChanged":false}),
     )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn memory_set_verification(
+pub async fn memory_set_verification(
     entry_id: String,
     last_verified: Option<i64>,
     ttl_days: Option<i64>,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<(), String> {
     if ttl_days.is_some_and(|v| v <= 0) || last_verified.is_some_and(|v| v < 0 || v > super::now())
     {
         return Err("invalid verification metadata".into());
     }
-    let c = db.lock().map_err(|e| e.to_string())?;
-    c.execute(
-        "UPDATE memory_entries SET last_verified=?2,ttl_days=?3 WHERE id=?1",
-        params![entry_id, last_verified, ttl_days],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = db.lock().map_err(|e| e.to_string())?;
+        c.execute(
+            "UPDATE memory_entries SET last_verified=?2,ttl_days=?3 WHERE id=?1",
+            params![entry_id, last_verified, ttl_days],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

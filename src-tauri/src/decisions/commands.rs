@@ -102,8 +102,14 @@ fn dto(settings: &Settings) -> DecisionSettingsDto {
             .as_ref()
             .map_or("none", |second| second.provider.as_str())
             .into(),
-        secondary_base_url: settings.secondary.as_ref().map_or_else(String::new, |second| second.base_url.clone()),
-        secondary_model: settings.secondary.as_ref().map_or_else(String::new, |second| second.model.clone()),
+        secondary_base_url: settings
+            .secondary
+            .as_ref()
+            .map_or_else(String::new, |second| second.base_url.clone()),
+        secondary_model: settings
+            .secondary
+            .as_ref()
+            .map_or_else(String::new, |second| second.model.clone()),
         secondary_key_saved: config::key_saved_in(config::KeySlot::Secondary),
         model_auto_update: settings.model_auto_update,
     }
@@ -145,39 +151,60 @@ fn from_input(input: DecisionSettingsInput) -> Settings {
 }
 
 #[tauri::command]
-pub fn decision_settings_get(db: State<DbConnection>) -> Result<DecisionSettingsDto, String> {
-    let settings = {
-        let conn = db.lock().map_err(|error| error.to_string())?;
-        config::load(&conn)?
-    };
-    Ok(dto(&settings))
-}
-
-#[tauri::command]
-pub fn decision_settings_set(
-    input: DecisionSettingsInput,
-    db: State<DbConnection>,
+pub async fn decision_settings_get(
+    db: State<'_, DbConnection>,
 ) -> Result<DecisionSettingsDto, String> {
-    let settings = from_input(input);
-    {
-        let conn = db.lock().map_err(|error| error.to_string())?;
-        config::persist(&conn, &settings)?;
-    }
-    let stored = {
-        let conn = db.lock().map_err(|error| error.to_string())?;
-        config::load(&conn)?
-    };
-    Ok(dto(&stored))
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = {
+            let conn = db.lock().map_err(|error| error.to_string())?;
+            config::load(&conn)?
+        };
+        Ok(dto(&settings))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn decision_key_set(key: String, slot: Option<String>) -> Result<(), String> {
-    config::save_key_in(config::KeySlot::parse(slot.as_deref()), &key)
+pub async fn decision_settings_set(
+    input: DecisionSettingsInput,
+    db: State<'_, DbConnection>,
+) -> Result<DecisionSettingsDto, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = from_input(input);
+        {
+            let conn = db.lock().map_err(|error| error.to_string())?;
+            config::persist(&conn, &settings)?;
+        }
+        let stored = {
+            let conn = db.lock().map_err(|error| error.to_string())?;
+            config::load(&conn)?
+        };
+        Ok(dto(&stored))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// O keyring pode abrir um prompt do SO: sai da thread principal.
+#[tauri::command]
+pub async fn decision_key_set(key: String, slot: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        config::save_key_in(config::KeySlot::parse(slot.as_deref()), &key)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn decision_key_clear(slot: Option<String>) -> Result<(), String> {
-    config::clear_key_in(config::KeySlot::parse(slot.as_deref()))
+pub async fn decision_key_clear(slot: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        config::clear_key_in(config::KeySlot::parse(slot.as_deref()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Comando síncrono roda na thread principal do Tauri: a chamada de rede (até o timeout, que
@@ -187,10 +214,7 @@ pub async fn decision_test_connection(
     db: State<'_, DbConnection>,
     slot: Option<String>,
 ) -> Result<ConnectionTest, String> {
-    let settings = {
-        let conn = db.lock().map_err(|error| error.to_string())?;
-        config::load(&conn)?
-    };
+    let settings = crate::database::blocking_db(&db, |conn| config::load(conn)).await?;
     let slot = config::KeySlot::parse(slot.as_deref());
     let target = match (slot, &settings.secondary) {
         (config::KeySlot::Secondary, Some(second)) => settings.with_endpoint(second),
@@ -242,15 +266,33 @@ pub(crate) fn ping(settings: &Settings, key: Option<String>) -> ConnectionTest {
 }
 
 #[tauri::command]
-pub fn decision_shadow_report(db: State<DbConnection>) -> Result<log::ShadowReport, String> {
-    let conn = db.lock().map_err(|error| error.to_string())?;
-    log::report(&conn)
+pub async fn decision_shadow_report(
+    db: State<'_, DbConnection>,
+) -> Result<log::ShadowReport, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshot = {
+            let conn = db.lock().map_err(|error| error.to_string())?;
+            log::snapshot(&conn)?
+        };
+        log::report_from_snapshot(snapshot)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn decision_shadow_export_csv(db: State<DbConnection>) -> Result<String, String> {
-    let conn = db.lock().map_err(|error| error.to_string())?;
-    log::export_csv(&conn)
+pub async fn decision_shadow_export_csv(db: State<'_, DbConnection>) -> Result<String, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshot = {
+            let conn = db.lock().map_err(|error| error.to_string())?;
+            log::snapshot(&conn)?
+        };
+        log::export_csv_from_snapshot(snapshot)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn public_error(error: &DecisionError, secret: Option<&str>) -> String {

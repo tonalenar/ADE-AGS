@@ -13,6 +13,7 @@ const same = (a: ProjectChatDefaultsDto, b: ProjectChatDefaultsDto | null) => JS
  */
 export async function syncProjectDefaults(): Promise<void> {
   await hydrateProjectDefaults();
+  if (useProjectDefaultsStore.getState().loadStatus !== "loaded") return;
   for (const dto of Object.values(useProjectDefaultsStore.getState().byKey)) {
     if (adoptBackendDefaults(dto)) notifyProjectDefaults(dto.cwd);
   }

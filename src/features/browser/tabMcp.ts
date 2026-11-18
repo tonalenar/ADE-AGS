@@ -44,7 +44,8 @@ export function browserToolPrefix(agentId: string | null | undefined): string {
   return "";
 }
 
-const quote = (value: string) => (value.includes('"') ? `'${value}'` : `"${value}"`);
+/** Um argumento de shell entre aspas duplas, com `\`, `"`, `$` e crase escapados: o caminho chega como texto, nunca como comando. */
+const quote = (value: string) => `"${value.replace(/[\\"$`]/g, "\\$&")}"`;
 
 /** Un valor de flag como se escribe en la línea de comandos: entre comillas o suelto. */
 const VALUE = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;

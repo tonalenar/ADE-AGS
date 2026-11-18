@@ -18,13 +18,14 @@ export function BrowserSearchSetting() {
   const [error, setError] = useState<"invalid" | "storage" | null>(null);
 
   const selectEngine = (engine: BrowserSearchEngine) => {
-    const next = { ...preferences, engine };
-    setPreferences(next);
     setError(null);
+    // Valida antes de mostrar a escolha: um modelo inválido não pode deixar "Personalizado" na tela com outro motor salvo.
     if (engine === "custom" && !isValidCustomSearchUrl(template)) {
       setError("invalid");
       return;
     }
+    const next = { ...preferences, engine };
+    setPreferences(next);
     try {
       const saved = { ...next, customUrl: template };
       saveBrowserSearchPreferences(saved);

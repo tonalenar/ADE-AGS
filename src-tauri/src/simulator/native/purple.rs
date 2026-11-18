@@ -9,7 +9,7 @@ use objc2::runtime::AnyObject;
 use objc2::sel;
 
 use super::device;
-use super::objc::{call, ns_string};
+use super::objc::{call, ns_string, string};
 use crate::simulator::model;
 
 #[link(name = "System", kind = "dylib")]
@@ -38,7 +38,15 @@ pub fn orient(udid: &str, orientation: u32) -> Result<(), String> {
         call!(dev.ptr(), sel!(lookup:error:), Retained::as_ptr(&name) as *mut AnyObject => *mut AnyObject, &mut error => *mut *mut AnyObject; -> u32)
     };
     if port == 0 || port == u32::MAX {
-        return Err("O aparelho não abriu a porta de eventos do iOS (PurpleWorkspacePort).".into());
+        // O `NSError` do `lookup:error:` diz o porquê; antes ele era descartado e sobrava só "não abriu a porta".
+        let why = if error.is_null() {
+            String::new()
+        } else {
+            // SAFETY: o NSError vem do `lookup:error:` e fica vivo até o fim desta chamada; só lemos a descrição.
+            let text = unsafe { string(call!(error, sel!(localizedDescription); -> *mut AnyObject)) };
+            format!(" ({text})")
+        };
+        return Err(format!("O aparelho não abriu a porta de eventos do iOS (PurpleWorkspacePort){why}."));
     }
     let mut msg = model::orientation_message(port, orientation);
     // SAFETY: `msg` é uma mensagem mach completa e simples (sem descritores), do tamanho declarado no
