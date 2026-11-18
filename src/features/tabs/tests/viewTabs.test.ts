@@ -120,6 +120,12 @@ describe("barra de direcciones", () => {
     expect(isLocalUrl("http://[::1]:3000")).toBe(true);
     expect(isLocalUrl("https://github.com/a/b")).toBe(false);
     expect(isLocalUrl("no es url")).toBe(false);
+    // A mesma regra da política de saída (`egressPolicy.ts`): 0.0.0.0 não é local, e um nome que começa com 127. não é loopback.
+    expect(isLocalUrl("http://0.0.0.0:4000")).toBe(false);
+    expect(isLocalUrl("http://127.0.0.1.evil.com/")).toBe(false);
+    expect(isLocalUrl("http://app.localhost:5173")).toBe(true);
+    expect(isLocalUrl("http://minha-maquina.local:3000")).toBe(true);
+    expect(isLocalUrl("http://2130706433/")).toBe(true);
   });
 });
 
