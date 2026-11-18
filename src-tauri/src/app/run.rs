@@ -43,6 +43,7 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
         if let Some(deferred) = app.try_state::<crate::window::DeferredRestore>() {
             deferred.stage(later);
         }
+        crate::window::arm_deferred_deadline(app);
         crate::window::restore_windows(app, primary, true)?;
         super::housekeeping::spawn_housekeeping(app.clone());
         // Las rotinas se disparan solas, con la app abierta (ver `routines`). En modo
@@ -858,7 +859,10 @@ pub fn run() {
             _ => {}
         })
         .setup(|app| {
-            crate::memory::repo_sync::install(app);
+            // Sem pasta de dados a memória não tem onde morar: aviso de boot e saída, em vez de `expect`.
+            if let Err(error) = crate::memory::repo_sync::install(app) {
+                super::fatal::exit_with_startup_error(&error);
+            }
             // Os envios às abas (peers, `ags tab send`, chat…) tiram um ponto de restauração antes.
             crate::tab_checkpoints::install(app.handle());
             // Las cookies y el storage de cada sitio que se abre en el navegador de las tabs
@@ -887,17 +891,21 @@ pub fn run() {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     let db = handle.state::<DbConnection>().inner().clone();
+                    // Uma base a meio caminho não pode abrir a home: o aviso mostra o caminho do log e o processo sai.
                     if let Err(error) = crate::database::finish_db(&db) {
-                        // Igual que el `expect` del camino sin upgrade: una base a medias
-                        // no puede abrir la home. El splash se queda y el proceso sale.
-                        eprintln!("[ade-ags] no se pudo actualizar la base: {error}");
-                        std::process::exit(1);
+                        super::fatal::exit_with_startup_error(&format!(
+                            "Não foi possível atualizar os dados do ADE AGS: {error}"
+                        ));
                     }
                     if let Some(sync) = handle.try_state::<crate::memory::repo_sync::RepoSync>() {
                         sync.reconcile_pending();
                     }
+                    // Antes, uma falha aqui só ia ao stderr e a base era marcada como pronta: a janela subia
+                    // sem interface. Agora é o mesmo aviso de boot.
                     if let Err(error) = start_ui(&handle) {
-                        eprintln!("[ade-ags] no se pudo abrir la interfaz: {error}");
+                        super::fatal::exit_with_startup_error(&format!(
+                            "Não foi possível abrir a interface do ADE AGS: {error}"
+                        ));
                     }
                     crate::database::mark_db_ready();
                     let _ = handle.emit("cc-db-ready", ());
@@ -905,17 +913,25 @@ pub fn run() {
                 return Ok(());
             }
 
-            start_ui(app.handle())?;
+            if let Err(error) = start_ui(app.handle()) {
+                super::fatal::exit_with_startup_error(&format!(
+                    "Não foi possível abrir a interface do ADE AGS: {error}"
+                ));
+            }
             Ok(())
         })
+        // Antes, um `expect` aqui fechava o app sem mensagem no Windows (subsistema de janela).
         .build(tauri::generate_context!())
-        .expect("error while building tauri application")
+        .unwrap_or_else(|error| {
+            super::fatal::exit_with_startup_error(&format!("Não foi possível montar a janela do ADE AGS: {error}"))
+        })
         .run(|app_handle, event| {
             // A nivel de app (no por ventana individual, ver comentario en on_window_event):
             // si hay varias ventanas abiertas y se intenta salir de la app entera, se pausa
             // la salida y se le pregunta al frontend si quiere cerrar todo o solo la actual.
             if let tauri::RunEvent::Exit = event {
-                crate::screen_recording::stop_all();
+                // Com teto de 3 s: a gravação que não fecha nesse prazo não segura a saída (antes, até ~29 s).
+                crate::screen_recording::stop_all_with_deadline(app_handle);
                 crate::voice_input::cancel_all();
                 #[cfg(target_os = "macos")]
                 crate::real_browser::cef_shutdown();
