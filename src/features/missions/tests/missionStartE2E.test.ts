@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   addTab: vi.fn(),
   activateTab: vi.fn(),
   board: vi.fn(),
+  tabs: [] as Array<{ id: string; ptyId: number | null }>,
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -40,13 +41,17 @@ vi.mock("@/features/accounts/store", () => ({
 vi.mock("@/features/tabs/store", () => ({
   useTabsStore: {
     getState: () => ({
-      addTab: mocks.addTab,
+      addTab: (...args: unknown[]) => {
+        const id = mocks.addTab(...args) as string;
+        if (id) mocks.tabs.push({ id, ptyId: 1 });
+        return id;
+      },
       activateTab: mocks.activateTab,
       detectedAgents: [
         { id: "codex", command: "codex", available: true },
         { id: "claude-code", command: "claude", available: true },
       ],
-      tabs: [],
+      tabs: mocks.tabs,
     }),
   },
 }));
@@ -168,6 +173,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    mocks.tabs.length = 0;
     recordedSpans.length = 0;
     cleanups.splice(0, cleanups.length).forEach((fn) => fn());
 
