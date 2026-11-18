@@ -27,7 +27,7 @@ describe("de quem vem o título da conversa", () => {
       { ...base, agentId: "claude-code", title: "Refatorar o checkout", orchestrator: true },
     ];
     const row = { title: null, customTitle: null } as unknown as ConversationRow;
-    expect(conversationTitle(row, terminals)).toBe("Refatorar o checkout");
+    expect(conversationTitle(row, terminals, "Nova conversa")).toBe("Refatorar o checkout");
   });
 });
 
@@ -82,8 +82,8 @@ describe("o nome da conversa não é um aviso do ADE", () => {
   const base = { agentLabel: "", command: "", titleIsCustom: false, sessionId: null, accountId: null, prelaunch: [], skillIds: [], box: null, role: null, orchestrator: true };
   it("um título gravado do aviso cede para o do orquestrador, e sem ele para \"Nova conversa\"", () => {
     const row = { title: "[ADE AGS] NAVEGADOR: REUTILIZE o que você já tem", customTitle: null } as unknown as ConversationRow;
-    expect(conversationTitle(row, [{ ...base, agentId: "claude-code", title: "Ajustar o faturamento" }])).toBe("Ajustar o faturamento");
-    expect(conversationTitle(row, [{ ...base, agentId: "opencode", title: "Navegador ags portal no canvas" }])).toBe("Nova conversa");
+    expect(conversationTitle(row, [{ ...base, agentId: "claude-code", title: "Ajustar o faturamento" }], "Nova conversa")).toBe("Ajustar o faturamento");
+    expect(conversationTitle(row, [{ ...base, agentId: "opencode", title: "Navegador ags portal no canvas" }], "Nova conversa")).toBe("Nova conversa");
     expect(isAdeNoticeTitle("Corrigir a abertura do ADE AGS")).toBe(false);
   });
 });

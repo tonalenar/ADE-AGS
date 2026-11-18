@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { dateLocale } from "@/i18n/dateLocale";
 import { simulatorScreenshot, simulatorTell } from "./ipc";
 import { addLine, useSimulatorStore, type SimLine } from "./store";
 
@@ -28,7 +29,7 @@ function Avatar({ name, agentId }: { name: string; agentId: string }) {
 }
 
 function time(at: number): string {
-  return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(at).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 }
 
 function Line({ line, agents }: { line: SimLine; agents: SimAgent[] }) {

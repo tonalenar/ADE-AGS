@@ -79,7 +79,7 @@ export function DeleteWorkspaceDialog({
       }
     >
       <div role="alertdialog" aria-label={t("workspaceDelete.title")} className="flex flex-col items-center gap-3 pt-2 text-center">
-        <span aria-hidden className="flex h-16 w-16 items-center justify-center rounded-full bg-[rgba(255,159,10,0.16)] text-[#ff9f0a]">
+        <span aria-hidden className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/15 text-amber-500">
           <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 3.5 2.8 19.5h18.4L12 3.5Z" /><path d="M12 10v4.2" /><circle cx="12" cy="17" r="0.6" fill="currentColor" />
           </svg>

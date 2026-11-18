@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
+import { formatNumber } from "@/i18n/dateLocale";
 import { orchestratorStats, resetOrchestratorUsage, type OrchestratorStats } from "./ipc";
 
 /** A partir de acá el chip avisa en ámbar: el orquestador ya lleva consumido más contexto
@@ -62,7 +63,7 @@ export function OrchestratorIndicator() {
     // `requests` y no `count`: pasar `count` haría que i18next intente resolver plurales
     // y busque una clave `_one`/`_other` que este proyecto no declara para nada.
     t("orchestrator.tooltip.requests", { requests: stats.requests }),
-    t("orchestrator.tooltip.tokens", { tokens: stats.estimatedTokens.toLocaleString() }),
+    t("orchestrator.tooltip.tokens", { tokens: formatNumber(stats.estimatedTokens) }),
     stats.watchLimit > 0
       ? t("orchestrator.tooltip.watched", { watched: stats.watched, limit: stats.watchLimit })
       : null,

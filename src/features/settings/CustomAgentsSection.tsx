@@ -88,8 +88,7 @@ export function CustomAgentsSection() {
                   bg-gray-100/70 dark:bg-surface-raised/60
                   hover:bg-gray-200/60 dark:hover:bg-surface-raised"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0
-                  shadow-[0_0_0_3px_rgba(48,209,88,0.18)]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 ring-2 ring-emerald-500/20" />
                 <div className="flex flex-col gap-px min-w-0 flex-1">
                   <span title={agent.label} className="truncate text-[13px] font-semibold
                     text-gray-900 dark:text-gray-100">

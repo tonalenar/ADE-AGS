@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+import { dateLocale } from "@/i18n/dateLocale";
 import { ChevronLeftIcon, ExternalIcon, ReloadIcon, TrashIcon } from "@/features/chat/chatIcons";
 
 import { renderDelete, renderList, renderOpenExternal, type RenderPage } from "./ipc";
@@ -129,7 +130,7 @@ export function RendersPanel() {
                   className="flex w-full flex-col items-start gap-0.5 rounded-lg px-2.5 py-2 text-left hover:bg-gray-100 dark:hover:bg-white/[0.07]">
                   <span className="w-full truncate text-[13px] font-medium text-gray-800 dark:text-white/85">{page.title || t("renders.untitled")}</span>
                   <span className="w-full truncate text-[11.5px] text-gray-500 dark:text-white/50">
-                    {[renderProjectName(page.cwd), new Date(page.createdAt).toLocaleString()].filter(Boolean).join(" · ")}
+                    {[renderProjectName(page.cwd), new Date(page.createdAt).toLocaleString(dateLocale())].filter(Boolean).join(" · ")}
                   </span>
                 </button>
               </li>

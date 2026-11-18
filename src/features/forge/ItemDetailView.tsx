@@ -13,6 +13,7 @@ import { pasteIntoTab } from "@/features/terminal/terminalRegistry";
 import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
 import { Markdown } from "@/shared/ui/Markdown";
 import { openExternalUrl } from "@/shared/openExternalUrl";
+import { dateLocale } from "@/i18n/dateLocale";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { uiErrorText } from "@/shared/uiErrorText";
 import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
@@ -29,7 +30,7 @@ type MergeMethod = "merge" | "squash" | "rebase";
 export const STATE_VARIANT = { open: "success", merged: "accent", closed: "danger" } as const;
 
 function when(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : "";
+  return iso ? new Date(iso).toLocaleString(dateLocale()) : "";
 }
 
 /**

@@ -21,11 +21,11 @@ type Tab = "pending" | "approved" | "rejected";
 type Flag = "duplicate" | "contradiction" | "highValue";
 
 const MARK_STYLE = {
-  duplicate: "bg-yellow-500/15 text-yellow-700 dark:text-[#ffd60a]",
-  contradiction: "bg-orange-500/15 text-orange-700 dark:text-[#ff9f0a]",
+  duplicate: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-300",
+  contradiction: "bg-orange-500/15 text-orange-700 dark:text-orange-300",
 } as const;
 
-const BTN_OK = "h-7 rounded-[7px] bg-[#34c759] px-3 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.3)] hover:brightness-110 disabled:opacity-50 dark:bg-[#30d158]";
+const BTN_OK = "h-7 rounded-[7px] bg-emerald-500 px-3 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.3)] hover:brightness-110 disabled:opacity-50 dark:bg-emerald-400";
 const BTN_SEC = "h-7 rounded-[7px] bg-gray-200/80 px-3 text-[13px] font-medium text-gray-800 hover:bg-gray-300/70 disabled:opacity-50 dark:bg-surface-overlay dark:text-gray-100 dark:hover:brightness-110";
 
 export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
@@ -116,7 +116,7 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl bg-white shadow-[0_0_0_0.5px_rgba(0,0,0,0.08)] dark:bg-surface dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.06)]">
       <header className="flex shrink-0 items-start gap-2 px-4 pb-3 pt-4 pr-12">
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-[15px] leading-5 font-semibold text-gray-900 dark:text-[#f5f5f7]">{t("memoryPanel.title")}</h2>
+          <h2 className="truncate text-[15px] leading-5 font-semibold text-gray-900 dark:text-gray-50">{t("memoryPanel.title")}</h2>
           <p className="truncate text-[11.5px] leading-4 text-gray-500 dark:text-white/55">
             {workspaceName} · {t("memoryPanel.subtitle", { count: pending.length })}
           </p>
@@ -178,7 +178,7 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
                 return (
                   <li key={`${item.entryId}:${item.revision}`}
                     className="flex flex-col gap-2 rounded-[10px] bg-white p-3 shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.1)] focus-within:shadow-[inset_0_0_0_1px_var(--color-accent-500)] dark:bg-surface-raised/60 dark:shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06)] dark:focus-within:shadow-[inset_0_0_0_1px_var(--color-accent-500)]">
-                    <h3 className="text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-[#f5f5f7] [overflow-wrap:anywhere]">{item.key}</h3>
+                    <h3 className="text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-gray-50 [overflow-wrap:anywhere]">{item.key}</h3>
                     {reviewMarks(item).length > 0 && (
                       <ul className="flex flex-wrap gap-1.5">
                         {reviewMarks(item).map((m) => (
@@ -214,7 +214,7 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
             {shownEntries.map((e) => (
               <li key={e.id} className="flex flex-col gap-1.5 rounded-[10px] bg-white p-3 shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.1)] dark:bg-surface-raised/60 dark:shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06)]">
                 <div className="flex items-center gap-2">
-                  <h3 className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-[#f5f5f7]" title={e.key}>{e.key}</h3>
+                  <h3 className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-gray-50" title={e.key}>{e.key}</h3>
                   <span className="shrink-0 rounded-full bg-black/[0.06] px-2 text-[10.5px] leading-[18px] text-gray-500 dark:bg-white/[0.08] dark:text-white/60">{e.kind}</span>
                 </div>
                 {e.body && <p title={e.body} className="line-clamp-4 whitespace-pre-wrap break-words text-[12.5px] leading-[17px] text-gray-600 dark:text-white/60">{e.body}</p>}

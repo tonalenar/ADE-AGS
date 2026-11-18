@@ -11,8 +11,10 @@ import { useAccountsStore } from "@/features/accounts/store";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { pickAndExport } from "@/features/sessions/sessionExport";
 
+import { dateLocale } from "@/i18n/dateLocale";
+
 function formatDateTime(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toLocaleString(undefined, {
+  return new Date(unixSeconds * 1000).toLocaleString(dateLocale(), {
     dateStyle: "medium",
     timeStyle: "short",
   });

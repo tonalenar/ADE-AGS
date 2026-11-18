@@ -17,7 +17,6 @@ const MAX_TERMINALS = 24;
 const MAX_LINKS = 64;
 const TITLE_MAX = 60;
 const CUSTOM_MAX = 120;
-const FALLBACK_TITLE = "Nova conversa";
 
 /** Um terminal de agente tal como vai para o snapshot da conversa. */
 export interface TerminalSnapshot {
@@ -265,13 +264,13 @@ export function activeAgentWork(tabs: Tab[], isWorking: (tabId: string) => boole
  * Título de uma conversa: o título personalizado (aparado, até 120) > o título (aparado) >
  * o título do orquestrador, ou do primeiro terminal sem coroa (até 60) > "Nova conversa". Nunca vazio.
  */
-export function conversationTitle(row: ConversationRow, terminals: TerminalSnapshot[]): string {
+export function conversationTitle(row: ConversationRow, terminals: TerminalSnapshot[], emptyTitle: string): string {
   const custom = cleanText(row.customTitle, CUSTOM_MAX);
   if (custom) return custom;
   const title = typeof row.title === "string" ? row.title.trim() : "";
   if (title && !isAdeNoticeTitle(title)) return title;
   const lead = cleanText(pickRestoreOrder(terminals)[0]?.title, TITLE_MAX);
-  return lead && !isAdeNoticeTitle(lead) ? lead : FALLBACK_TITLE;
+  return lead && !isAdeNoticeTitle(lead) ? lead : emptyTitle;
 }
 
 /**

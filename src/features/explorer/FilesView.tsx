@@ -330,7 +330,7 @@ export function FilesView({ cwd, repo, title }: {
         onSelect: () => setSendMenu({ x: menu?.x ?? 0, y: menu?.y ?? 0, entry }),
       },
       { key: "rename", label: t("explorer.menu.rename"), icon: <EditIcon className="w-4 h-4" />, hint: IS_MAC ? "↵" : "F2", separator: true, onSelect: () => setEditing({ kind: "rename", path: entry.path }) },
-      { key: "delete", label: t("explorer.menu.delete"), icon: <TrashIcon className="w-4 h-4" />, hint: IS_MAC ? "⌘⌫" : "Supr", danger: true, onSelect: () => setDeleting(entry) },
+      { key: "delete", label: t("explorer.menu.delete"), icon: <TrashIcon className="w-4 h-4" />, hint: IS_MAC ? "⌘⌫" : t("explorer.keys.delete"), danger: true, onSelect: () => setDeleting(entry) },
     ];
   };
 

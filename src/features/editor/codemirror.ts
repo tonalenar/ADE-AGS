@@ -29,18 +29,18 @@ const base = EditorView.theme({
 const dark = [
   EditorView.theme(
     {
-      "&": { color: "#e6e7ea" },
-      ".cm-gutters": { color: "rgba(255,255,255,0.22)" },
-      ".cm-activeLine": { backgroundColor: "rgba(255,255,255,0.035)" },
-      ".cm-activeLineGutter": { backgroundColor: "transparent", color: "rgba(255,255,255,0.65)" },
-      ".cm-cursor, .cm-dropCursor": { borderLeftColor: "#8cb0ca" },
+      "&": { color: "var(--color-gray-100)" },
+      ".cm-gutters": { color: "color-mix(in oklab, var(--color-gray-100) 22%, transparent)" },
+      ".cm-activeLine": { backgroundColor: "color-mix(in oklab, white 3.5%, transparent)" },
+      ".cm-activeLineGutter": { backgroundColor: "transparent", color: "color-mix(in oklab, var(--color-gray-100) 65%, transparent)" },
+      ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-accent-300)" },
       "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
-        { backgroundColor: "rgba(140,176,202,0.26)" },
-      ".cm-searchMatch": { backgroundColor: "rgba(210,153,34,0.3)" },
-      ".cm-panels": { backgroundColor: "#0c0c0d", color: "#e6e7ea" },
+        { backgroundColor: "color-mix(in oklab, var(--color-accent-300) 26%, transparent)" },
+      ".cm-searchMatch": { backgroundColor: "color-mix(in oklab, var(--color-accent-400) 30%, transparent)" },
+      ".cm-panels": { backgroundColor: "var(--color-gray-950)", color: "var(--color-gray-100)" },
       ".cm-panels input, .cm-panels button": { color: "inherit" },
-      ".cm-tooltip": { backgroundColor: "#1b1c1e", border: "1px solid rgba(255,255,255,0.12)" },
-      ".cm-foldPlaceholder": { backgroundColor: "rgba(255,255,255,0.08)", border: "none", color: "#9fa0a4" },
+      ".cm-tooltip": { backgroundColor: "var(--color-gray-900)", border: "1px solid color-mix(in oklab, white 12%, transparent)" },
+      ".cm-foldPlaceholder": { backgroundColor: "color-mix(in oklab, white 8%, transparent)", border: "none", color: "var(--color-gray-400)" },
     },
     { dark: true }
   ),
@@ -50,10 +50,10 @@ const dark = [
 const light = [
   EditorView.theme(
     {
-      ".cm-gutters": { color: "#9fa0a4" },
-      ".cm-activeLine": { backgroundColor: "rgba(0,0,0,0.03)" },
-      ".cm-activeLineGutter": { backgroundColor: "transparent", color: "#3f4044" },
-      ".cm-panels": { backgroundColor: "#f3f4f6" },
+      ".cm-gutters": { color: "var(--color-gray-400)" },
+      ".cm-activeLine": { backgroundColor: "color-mix(in oklab, black 3%, transparent)" },
+      ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--color-gray-700)" },
+      ".cm-panels": { backgroundColor: "var(--color-gray-100)" },
     },
     { dark: false }
   ),

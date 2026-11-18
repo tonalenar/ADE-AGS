@@ -67,7 +67,7 @@ type Confirm = { items: MemoryReviewItem[] } | null;
 /** Botones del modal: primario verde para aprobar, secundario gris para rechazar. */
 const BTN_OK = "h-7 rounded-md bg-emerald-600 px-3 text-[12px] font-medium text-white hover:bg-emerald-500 disabled:opacity-50";
 const BTN_SEC = "h-7 rounded-md bg-gray-200/80 px-3 text-[12px] font-medium text-gray-800 hover:bg-gray-300/70 disabled:opacity-50 dark:bg-surface-overlay dark:text-gray-100 dark:hover:bg-white/[0.14]";
-const BTN_ITEM_OK = "h-7 rounded-[7px] bg-[#34c759] px-3 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.3)] hover:brightness-110 disabled:opacity-50 dark:bg-[#30d158]";
+const BTN_ITEM_OK = "h-7 rounded-[7px] bg-emerald-500 px-3 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.3)] hover:brightness-110 disabled:opacity-50 dark:bg-emerald-400";
 const BTN_ITEM_SEC = "h-7 rounded-[7px] bg-gray-200/80 px-3 text-[13px] font-medium text-gray-800 hover:bg-gray-300/70 disabled:opacity-50 dark:bg-surface-overlay dark:text-gray-100 dark:hover:brightness-110";
 
 /**
@@ -273,7 +273,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                         : "bg-white shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.1)] dark:bg-surface-raised/60 dark:shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06)]"}`}>
                       <div className="flex items-center gap-2">
                         <input type="checkbox" className="size-3.5 accent-accent-500" checked={selected.has(id)} onChange={() => toggle(id)} aria-label={t("memoryInbox.selectItem", { key: item.key })} />
-                        <span className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-[#f5f5f7]" title={item.key}>{item.key}</span>
+                        <span className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-gray-50" title={item.key}>{item.key}</span>
                         {hints[id] && (
                           <span title={t("memoryInbox.jev.title", { provider: hints[id].provider, confidence: hints[id].confidence === null ? "—" : Math.round((hints[id].confidence ?? 0) * 100) + "%", secret: hints[id].secret ? t("memoryInbox.jev.secretYes") : t("memoryInbox.jev.secretNo") })}
                             data-testid="jev-hint" data-tone={hintTone(hints[id])}
@@ -342,7 +342,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                   </button>
                 )}
                 <button type="button" autoFocus onClick={() => void approve(confirm.items, false)} className={BTN_OK}>
-                  {(plan.needsWarning ? t("memoryInbox.confirmSkip") : t("memoryInbox.confirm")) + " (Enter)"}
+                  {t("memoryInbox.enterHint", { action: plan.needsWarning ? t("memoryInbox.confirmSkip") : t("memoryInbox.confirm") })}
                 </button>
               </div>
             </div>

@@ -9,6 +9,7 @@ import { getRoster } from "@/features/runs/ipc";
 import type { Roster } from "@/features/runs/types";
 import { openNewAgentWith } from "@/features/tabs/tabActions";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
+import { dateLocale } from "@/i18n/dateLocale";
 import { openExternalUrl } from "@/shared/openExternalUrl";
 
 import { forgePullFiles, reviewGuideGet } from "./ipc";
@@ -131,7 +132,7 @@ export function ReviewGuidePanel({ cwd, item, workspaces }: { cwd: string; item:
           <span className="text-[11px] text-gray-500 dark:text-white/45">
             {t("forge.guide.meta", {
               agent: roster?.agents.find((a) => a.agentId === entry.agentId)?.label ?? entry.agentId,
-              when: new Date(entry.createdAt).toLocaleString(),
+              when: new Date(entry.createdAt).toLocaleString(dateLocale()),
             })}
             {entry.costUsd != null && ` · ${t("forge.guide.cost", { cost: entry.costUsd.toFixed(2) })}`}
           </span>

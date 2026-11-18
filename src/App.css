@@ -325,10 +325,12 @@ html[data-code-wrap="on"] pre {
   --cc-diff-del-fg: #b91c1c;
   --cc-diff-del-bg: rgb(255 0 0 / 0.12);
   --cc-diff-del-strong: rgb(255 0 0 / 0.22);
+  --cc-diff-mod-fg: #1d4ed8;
 }
 html.dark {
   --cc-diff-add-fg: #86efac;
   --cc-diff-del-fg: #fca5a5;
+  --cc-diff-mod-fg: #93c5fd;
 }
 html[data-diff-colors="blue-orange"] {
   --cc-diff-add-fg: #1d4ed8;
@@ -337,10 +339,13 @@ html[data-diff-colors="blue-orange"] {
   --cc-diff-del-fg: #c2410c;
   --cc-diff-del-bg: rgb(249 115 22 / 0.14);
   --cc-diff-del-strong: rgb(249 115 22 / 0.26);
+  /* Modificado não pode colidir com o azul de add nem com o laranja de del. */
+  --cc-diff-mod-fg: var(--color-violet-600);
 }
 html.dark[data-diff-colors="blue-orange"] {
   --cc-diff-add-fg: #93c5fd;
   --cc-diff-del-fg: #fdba74;
+  --cc-diff-mod-fg: var(--color-violet-300);
 }
 
 /* Color de las barras: el acento del tema, translúcido. Un solo lugar para todo el app

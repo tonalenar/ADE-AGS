@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { Button, CloseIcon, Tooltip } from "neogestify-ui-components";
 
+import { dateLocale } from "@/i18n/dateLocale";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 import type { RunSummary } from "./fleetOrder";
@@ -132,7 +133,7 @@ function FactsDialog({ runId, onClose }: { runId: string; onClose: () => void })
               </span>
               <span title={f.author ?? t("fleet.runs.authorUser")} className="truncate text-gray-400 dark:text-white/35">{f.author ?? t("fleet.runs.authorUser")}</span>
               <span className="ml-auto shrink-0 tabular-nums text-gray-400 dark:text-white/30">
-                {new Date(f.createdAt * 1000).toLocaleTimeString()}
+                {new Date(f.createdAt * 1000).toLocaleTimeString(dateLocale())}
               </span>
             </span>
             <span className="whitespace-pre-wrap text-[12px] leading-relaxed text-gray-800 dark:text-gray-200">{f.body}</span>

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import i18n from "i18next";
 
 import { linkedPeers } from "@/features/canvas/orchestratorNotice";
 import { boardKeyOfTab, conversationOfKey, useCanvasStore } from "@/features/canvas/store";
@@ -470,7 +471,7 @@ function conversationTeams(tabs: Tab[], boards: Record<string, Board>, now: numb
       activity: team.flatMap((tab) => [lastOutputAt(tab.id), sentAt.get(tab.id)]),
     })) continue;
     // O nome da conversa, não o do terminal ("Decisão pendente — Claude Code" não dizia qual era).
-    const title = row ? conversationTitle(row, parseTerminals(row.terminals)) : lead.title.split(" — ")[0];
+    const title = row ? conversationTitle(row, parseTerminals(row.terminals), i18n.t("conversations.newTitle")) : lead.title.split(" — ")[0];
     out.push({ id: `c:${conversation}`, kind: "conversation", title, startedAt: null, team, lead });
   }
   return out;

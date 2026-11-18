@@ -11,3 +11,12 @@ export function dateLocale(): string {
   if (language.startsWith("en")) return "en-US";
   return "pt-BR";
 }
+
+/** Locale de números segue o idioma do app, separado do das datas. */
+export function numberLocale(): string {
+  return dateLocale();
+}
+
+export function formatNumber(n: number): string {
+  return n.toLocaleString(numberLocale());
+}

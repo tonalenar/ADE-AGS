@@ -1,3 +1,5 @@
+import i18n from "i18next";
+
 /** Maior rodada de correção registrada na telemetria (`n=` no detalhe do span). */
 export function maxFixRound(spans: { kind: string; detail: string }[]): number | null {
   let max: number | null = null;
@@ -13,5 +15,6 @@ export function maxFixRound(spans: { kind: string; detail: string }[]): number |
 
 /** Texto curto da rodada na tarjeta. A última leva o gate completo. */
 export function fixRoundCaption(round: number, fullGate: boolean): string {
-  return fullGate ? `correção ${round} · gate completo` : `correção ${round}`;
+  const key = fullGate ? "fleet.fixRound.full" : "fleet.fixRound.short";
+  return i18n.t(key, { n: round });
 }
