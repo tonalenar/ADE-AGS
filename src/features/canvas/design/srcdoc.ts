@@ -113,8 +113,8 @@ export interface SrcdocOptions {
 export function buildSrcdoc(html: string, opts: SrcdocOptions = {}): string {
   const meta = `<meta http-equiv="Content-Security-Policy" content="${DESIGN_CSP}">`;
   const extra = opts.picker ? `<script>${PICKER_SCRIPT}</script>` : opts.script ? `<script>${opts.script}</script>` : "";
-  // O modo Escolher liga por postMessage: o srcdoc não muda (o iframe não recarrega).
-  const chooser = `<script>${CHOOSER_SCRIPT}</script>`;
+  // No canvas o modo Escolher liga por postMessage (sem recarregar); script próprio (Design Studio) entra sozinho.
+  const chooser = opts.script ? "" : `<script>${CHOOSER_SCRIPT}</script>`;
   return `<!doctype html><html><head><meta charset="utf-8">${meta}<style>html,body{margin:0}${SCROLLBAR_CSS}</style></head><body>${stripUnsafeHead(html)}${extra}${chooser}</body></html>`;
 }
 
