@@ -809,3 +809,41 @@ fn entrada_sem_toque_pronto_nao_finge_ok() {
     // Helper que caiu (toque `false`): não é "ok" para um toque que não chega.
     assert!(input_payload(&["a".to_string()], true, false).is_err());
 }
+
+#[test]
+fn eventos_de_confirmacao_da_entrada() {
+    assert_eq!(parse_event(br#"{"event":"inputDone"}"#), HelperEvent::InputDone);
+}
+
+#[test]
+fn confirmacao_so_sai_quando_o_helper_executa_todas_as_linhas() {
+    let mut acks = InputAcks::default();
+    acks.push(2, Some("toque"));
+    // A primeira linha (dedo desce) executada ainda não responde: falta o dedo subir.
+    assert_eq!(acks.ack(Ok(())), None);
+    assert_eq!(acks.ack(Ok(())), Some(("toque", Ok(()))));
+    assert!(acks.is_empty());
+}
+
+#[test]
+fn recusa_do_hid_responde_erro_e_nao_vira_ok_depois() {
+    let mut acks = InputAcks::default();
+    acks.push(2, Some("toque"));
+    acks.push(1, Some("tecla"));
+    assert_eq!(acks.ack(Err("O aparelho recusou a entrada.".into())), Some(("toque", Err("O aparelho recusou a entrada.".into()))));
+    // A segunda linha do mesmo toque chega depois: não responde de novo.
+    assert_eq!(acks.ack(Ok(())), None);
+    assert_eq!(acks.ack(Ok(())), Some(("tecla", Ok(()))));
+}
+
+#[test]
+fn entrada_da_pessoa_sem_resposta_mantem_a_fila_alinhada() {
+    let mut acks: InputAcks<&str> = InputAcks::default();
+    acks.push(2, None);
+    acks.push(1, Some("agente"));
+    assert_eq!(acks.ack(Ok(())), None);
+    assert_eq!(acks.ack(Ok(())), None);
+    assert_eq!(acks.ack(Ok(())), Some(("agente", Ok(()))));
+    // Confirmação sem pedido na fila (helper antigo, linha de controle): ignorada.
+    assert_eq!(acks.ack(Ok(())), None);
+}

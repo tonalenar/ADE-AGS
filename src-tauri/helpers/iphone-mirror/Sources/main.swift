@@ -17,7 +17,9 @@
 //   button <page> <code> <down|up>            botão HID (página e uso)
 //   key <uso> <down|up>                       tecla (uso HID do teclado)
 //   stop                                      para (fim do stdin também)
-// Um comando de entrada que falha vira o evento `inputError`; quando o HID fica pronto, `inputReady`.
+// Cada comando de entrada responde, na ordem, `inputDone` (o HID aceitou) ou `inputError` (não chegou ao aparelho):
+// a ADE só diz "tocou" depois disso. Quando o HID fica pronto, `inputReady`. Se o HID recusa (o canal ficou velho,
+// por exemplo depois de o aparelho trocar de USB para Wi-Fi), o helper reabre o HID e tenta a linha mais uma vez.
 // O stream sempre é parado no aparelho ao sair (stop, fim do stdin, SIGTERM ou stdout fechado).
 import Foundation
 import Darwin
@@ -25,7 +27,7 @@ import CoreGraphics
 @preconcurrency import CoreDevice
 @preconcurrency import CoreDeviceProtocols
 
-let VERSAO = "1"
+let VERSAO = "2"
 
 signal(SIGPIPE, SIG_IGN)
 setvbuf(stderr, nil, _IONBF, 0)
@@ -316,7 +318,8 @@ final class Entrada: @unchecked Sendable {
         let borda: DigitizerEdge
         switch resto.first ?? "none" { case "top": borda = .top; case "bottom": borda = .bottom; case "left": borda = .left; case "right": borda = .right; default: borda = .none }
         try t.send(pointOne: CGPoint(x: x, y: y), pointTwo: segundo, eventType: tipo, edge: borda, target: .mainScreen)
-        if tipo == .end { t.sendBarrier() }
+        // A barreira em toda fase: sem ela no "desce", o início do toque podia ficar retido e chegar colado ao "sobe".
+        t.sendBarrier()
       case "button":
         guard let b else { return "Os botões do aparelho ainda não estão prontos." }
         guard p.count == 4, let pagina = Int(p[1]), let uso = Int(p[2]) else { return "button mal formado" }
@@ -334,13 +337,32 @@ final class Entrada: @unchecked Sendable {
       }
     } catch {
       log("HID: \(error)")
-      return "O aparelho recusou a entrada."
+      return "O aparelho recusou a entrada: \(error)"
     }
     return nil
   }
 }
 
+
+
 let entrada = Entrada()
+
+/// Quem abre o HID: preenchido depois que o aparelho abre (o laço do stdin nasce antes dele).
+nonisolated(unsafe) var abridorHID: (@Sendable () async -> (toque: (any HIDDigitizer)?, botao: (any HIDButton)?, teclado: (any HIDKeyboard)?))? = nil
+
+/// Reabre o HID de forma síncrona (na thread do stdin, que já executa uma linha de cada vez).
+func reabrirHID() {
+  guard let abrir = abridorHID else { return }
+  let pronto = DispatchSemaphore(value: 0)
+  Task {
+    let hid = await abrir()
+    entrada.definir(toque: hid.toque, botao: hid.botao, teclado: hid.teclado)
+    log("HID reaberto: toque=\(hid.toque != nil) botões=\(hid.botao != nil) teclado=\(hid.teclado != nil)")
+    pronto.signal()
+  }
+  _ = pronto.wait(timeout: .now() + 35)
+}
+
 
 // Comandos pelo stdin, um de cada vez (a fila serial). Fim do stdin = a ADE fechou ou caiu: para.
 Thread.detachNewThread {
@@ -351,8 +373,16 @@ Thread.detachNewThread {
     case "stop": Task { await sessao.encerrar() }; return
     case "": break
     default:
-      if let erro = entrada.executar(comando) {
+      var erro = entrada.executar(comando)
+      if erro != nil {
+        // O HID pode ter ficado velho: reabre e tenta a mesma linha uma vez.
+        reabrirHID()
+        erro = entrada.executar(comando)
+      }
+      if let erro {
         saida.evento(["event": "inputError", "message": erro, "command": String(comando.prefix(80))])
+      } else {
+        saida.evento(["event": "inputDone"])
       }
     }
   }
@@ -483,12 +513,20 @@ sessao.timerRR = timer
   // Dentro do genérico o tipo devolvido vem do próprio framework: a conversão abaixo é feita em tempo de execução.
   try await aparelho.getImplementation(for: membro)
 }
-Task {
-  var pronto: [String: Any] = ["event": "inputReady"]
+/// Abre o HID do aparelho (toque, botões e teclado). Usado na partida e quando o HID recusa uma entrada.
+@Sendable func abrirHID() async -> (toque: (any HIDDigitizer)?, botao: (any HIDButton)?, teclado: (any HIDKeyboard)?) {
   var toque: (any HIDDigitizer)? = nil, botao: (any HIDButton)? = nil, teclado: (any HIDKeyboard)? = nil
   do { toque = try await comPrazo(10) { try await implementacao(CapabilityStaticMember<HIDDeviceCapability>.digitizer) } as? any HIDDigitizer } catch { log("sem toque: \(error)") }
   do { botao = try await comPrazo(10) { try await implementacao(CapabilityStaticMember<HIDDeviceCapability>.button) } as? any HIDButton } catch { log("sem botões: \(error)") }
   do { teclado = try await comPrazo(10) { try await implementacao(CapabilityStaticMember<HIDDeviceCapability>.keyboard) } as? any HIDKeyboard } catch { log("sem teclado: \(error)") }
+  return (toque, botao, teclado)
+}
+
+
+Task {
+  var pronto: [String: Any] = ["event": "inputReady"]
+  abridorHID = abrirHID
+  let (toque, botao, teclado) = await abrirHID()
   entrada.definir(toque: toque, botao: botao, teclado: teclado)
   pronto["touch"] = toque != nil; pronto["buttons"] = botao != nil; pronto["keyboard"] = teclado != nil
   saida.evento(pronto)

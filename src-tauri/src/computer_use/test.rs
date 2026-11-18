@@ -617,3 +617,33 @@ fn termos_de_cada_categoria_valem_em_pt_en_e_es() {
     assert_eq!(dialog_cue("¿Quiere acceder a Documentos?"), Some(Category::GrantPermission));
     assert_eq!(dialog_cue("Desea instalar esta aplicación"), Some(Category::Install));
 }
+
+#[test]
+fn falha_ao_ver_a_tela_diz_a_etapa_sem_consultar_o_provedor() {
+    let mut driver = Mock::new(vec![], vec![]);
+    let mut decider = model(vec![decision(Operation::Click)]);
+    let report = run(&request(), &mut driver, &mut decider);
+    assert_eq!(report.status, Status::Blocked);
+    assert!(report.reason.contains("ver a tela"), "{}", report.reason);
+    assert!(decider.inner.sent.is_empty());
+    assert!(report.actions.is_empty());
+}
+
+#[test]
+fn falha_do_provedor_diz_que_foi_o_provedor_e_nada_foi_feito() {
+    let mut driver = Mock::new(vec![observation("a", "tela")], vec![]);
+    let report = run(&request(), &mut driver, &mut model(vec![]));
+    assert_eq!(report.status, Status::Blocked);
+    assert!(report.reason.contains("provedor não respondeu"), "{}", report.reason);
+    assert!(!report.reason.contains("ver a tela"), "{}", report.reason);
+    assert_eq!(driver.executions, 0);
+}
+
+#[test]
+fn falha_na_execucao_diz_que_a_acao_nao_chegou_sem_ecoar_o_erro() {
+    let mut driver = Mock::new(vec![observation("a", "tela")], vec![]);
+    driver.fail_execute = true;
+    let report = run(&request(), &mut driver, &mut model(vec![decision(Operation::Click)]));
+    assert!(report.reason.contains("ação não chegou"), "{}", report.reason);
+    assert!(!report.reason.contains("valor-secreto"));
+}

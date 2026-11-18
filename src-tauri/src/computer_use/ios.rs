@@ -635,7 +635,7 @@ impl Surface for IosSurface {
         }
         if crate::iphone::model::is_physical(&self.udid) {
             // O celular de verdade: o espelho precisa estar ligado com o toque pronto (não se liga nada no aparelho).
-            crate::iphone::ops::ready_now(&self.app, &self.udid).map_err(|_| Failure::Operation)?;
+            crate::iphone::ops::ready_now(&self.app, &self.udid).map_err(|_| Failure::DeviceNotReady)?;
             return Ok(());
         }
         if !ops::booted(&self.udid).map_err(|_| Failure::Operation)? {

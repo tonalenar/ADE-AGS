@@ -114,12 +114,14 @@ Mapeado pelos símbolos do `CoreDeviceUtilities.framework` (Xcode 27) e conferid
 | Parte | API | Onde |
 |---|---|---|
 | Pegar a capacidade | `RemoteDevice.getImplementation<A: DeviceCapability>(for: CapabilityStaticMember<A>) async throws -> A.ProtocolType`, com `CapabilityStaticMember<HIDDeviceCapability>.digitizer/.button/.keyboard` | `helpers/iphone-mirror/Sources/main.swift` (dentro de um genérico, o valor sai como `Any` com o tipo real do framework e depois vira `any HIDDigitizer`) |
-| Toque | `HIDDigitizer.send(pointOne: CGPoint, pointTwo: CGPoint?, eventType: .start/.position/.end, edge: .none/.top/.bottom, target: .mainScreen)`; `sendBarrier()` ao soltar | idem |
+| Toque | `HIDDigitizer.send(pointOne: CGPoint, pointTwo: CGPoint?, eventType: .start/.position/.end, edge: .none/.top/.bottom, target: .mainScreen)`; `sendBarrier()` em toda fase | idem |
 | Botões | `HIDButton.sendCustomButton(usagePage:usageCode:state: .down/.up)`; página 0x0C: início 0x40, bloquear/lateral 0x30, volume 0xE9/0xEA, mudo 0xE2, Siri 0xCF | idem; nomes em `iphone::model::button_usage` |
 | Teclado | `HIDKeyboard.send(key: HIDKeyboardUsageCode(rawValue:), state:)` (uso HID; Shift = 0xE1) | idem; `iphone::model::text_lines` |
 | Gestos do sistema | arrastos: Central de Controle de (0,9; 0,005) a (0,9; 0,45) com borda `top`; Notificações de (0,2; 0,005) a (0,2; 0,6) com `top`; Busca de (0,5; 0,35) a (0,5; 0,6); início de (0,5; 0,995) a (0,5; 0,7) com `bottom` | `iphone::model::gesture` |
 
-O helper lê uma linha por comando no stdin (`touch start|move|end x y [x2 y2] edge`, `button página uso down|up`, `key uso down|up`) e as executa na thread do stdin, uma de cada vez, na ordem (a fila serial). O HID é pedido depois de o vídeo abrir; quando fica pronto, o helper avisa `inputReady` e a linha de estado libera os controles (`MirrorStatus.input`). Uma entrada que falha vira `inputError` no log. As coordenadas vão em proporção da tela em pé (0..1, origem no topo), o mesmo formato do `dtuhidd` do simulador.
+O helper lê uma linha por comando no stdin (`touch start|move|end x y [x2 y2] edge`, `button página uso down|up`, `key uso down|up`) e as executa na thread do stdin, uma de cada vez, na ordem (a fila serial). O HID é pedido depois de o vídeo abrir; quando fica pronto, o helper avisa `inputReady` e a linha de estado libera os controles (`MirrorStatus.input`). Cada linha de entrada responde, na ordem, `inputDone` (o HID aceitou) ou `inputError` (não chegou ao aparelho). O pedido de um agente só recebe o "ok" (`tapped`, `typed`…) depois do `inputDone` de todas as suas linhas; um `inputError` volta como erro. Antes, o "ok" saía quando a linha era escrita no stdin, e um toque que o HID recusava voltava como `tapped`. Se o HID recusa uma linha, o helper reabre o HID (o canal pode ficar velho, por exemplo quando o aparelho troca de USB para Wi-Fi) e tenta a mesma linha mais uma vez.
+
+O toque de agente segura o dedo por 150 ms (`ops::TAP_HOLD_MS`). Com 60 ms, no Google Maps pelo Wi-Fi, 2 de 6 toques em "Iniciar" eram aceitos pelo HID e ignorados pelo app; com 150 ms, 12 de 13 pegaram (medido em 18/11/2026, `rodadas.sh` fora do repositório: reabrir a rota, tocar, conferir a cor do botão "Sair"). As coordenadas vão em proporção da tela em pé (0..1, origem no topo), o mesmo formato do `dtuhidd` do simulador.
 
 ## Agentes
 

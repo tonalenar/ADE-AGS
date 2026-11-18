@@ -26,8 +26,9 @@ const HELPER: &str = "ade-iphone-mirror";
 pub const COREDEVICE: &str = "/Library/Developer/PrivateFrameworks/CoreDevice.framework";
 /// O helper tem este tempo para sair depois do `stop` (ele mesmo espera até 4 s pelo aparelho).
 const STOP_WAIT: Duration = Duration::from_secs(6);
-/// Quanto o agente espera a sessão dizer se a entrada foi ao helper (a sessão responde logo; isto é só a garantia).
-const INPUT_REPLY_WAIT: Duration = Duration::from_secs(5);
+/// Quanto o agente espera o HID do aparelho aceitar a entrada. A resposta sai com o `inputDone` do helper; se ele
+/// precisar reabrir o HID (até ~35 s), a espera cobre.
+const INPUT_REPLY_WAIT: Duration = Duration::from_secs(45);
 /// Mensagem de quem pede entrada quando não há sessão ligada para recebê-la.
 const SEM_SESSAO: &str = "a sessão do aparelho não está ligada";
 /// O relógio do RTP do vídeo (medido: Δts/Δt ≈ 24.070 Hz).
@@ -405,6 +406,9 @@ impl Worker {
         let mut refreshed = Instant::now();
         // Para o diagnóstico: quando saiu a última entrada (o primeiro quadro depois dela é a reação do aparelho).
         let mut last_input: Option<Instant> = None;
+        // As entradas escritas que ainda esperam a confirmação do HID. Ao sair desta vida do helper, a fila cai e quem
+        // esperava recebe "a sessão caiu antes de confirmar".
+        let mut acks: model::InputAcks<Sender<Result<(), String>>> = model::InputAcks::default();
 
         let interval = Duration::from_secs(1);
         let mut sampled_at = Instant::now();
@@ -489,8 +493,18 @@ impl Worker {
                     Ok(bytes) => {
                         last_input = Some(Instant::now());
                         match child.commands.as_ref() {
-                            // A resposta sai da thread de escrita, depois do `write` e do `flush`.
-                            Some(pipe) => pipe.submit(bytes, reply),
+                            // A resposta só sai quando o helper confirma cada linha no HID (`inputDone`/`inputError`):
+                            // a escrita no stdin não prova que o toque chegou ao aparelho. A thread de escrita só
+                            // responde se a escrita falhar; a fila entra antes do envio, para a confirmação não chegar
+                            // antes dela.
+                            Some(pipe) => match pipe.broken() {
+                                Some(why) => answer(reply, Err(refusal(&why))),
+                                None => {
+                                    acks.push(lines.len(), reply);
+                                    // Escrita quebrada = o helper caiu: o `Closed` encerra a fila inteira com erro.
+                                    pipe.submit(bytes, None);
+                                }
+                            },
                             None => answer(reply, Err("o helper do espelhamento não tem entrada".into())),
                         }
                     }
@@ -525,7 +539,17 @@ impl Worker {
                         self.input = touch;
                         self.emit();
                     }
-                    HelperEvent::InputError(message) => eprintln!("[iphone] entrada: {message}"),
+                    HelperEvent::InputError(message) => {
+                        eprintln!("[iphone] entrada: {message}");
+                        if let Some((reply, result)) = acks.ack(Err(message)) {
+                            let _ = reply.send(result);
+                        }
+                    }
+                    HelperEvent::InputDone => {
+                        if let Some((reply, result)) = acks.ack(Ok(())) {
+                            let _ = reply.send(result);
+                        }
+                    }
                     HelperEvent::Connecting | HelperEvent::Stopped | HelperEvent::Other(_) => {}
                 },
                 Msg::Helper(_, HelperMsg::Datagram(packet)) => {
@@ -720,6 +744,11 @@ struct CommandPipe {
 }
 
 impl CommandPipe {
+    /// Por que a escrita quebrou, se quebrou.
+    fn broken(&self) -> Option<String> {
+        self.broken.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     /// Enfileira `bytes`. Quem pediu confirmação recebe a resposta da thread de escrita, depois do `write` e do
     /// `flush`. Com a escrita quebrada, ou com a thread fora do ar, a resposta é o erro: nunca um "ok" silencioso.
     fn submit(&self, bytes: Vec<u8>, reply: Option<Sender<Result<(), String>>>) {

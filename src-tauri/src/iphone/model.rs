@@ -279,7 +279,52 @@ pub enum HelperEvent {
     InputReady { touch: bool, buttons: bool, keyboard: bool },
     /// Uma entrada não chegou ao aparelho.
     InputError(String),
+    /// O HID do aparelho aceitou uma linha de entrada (uma por linha, na ordem).
+    InputDone,
     Other(String),
+}
+
+/// As entradas mandadas ao helper que esperam a confirmação dele. Cada linha recebe do helper um `inputDone` ou um
+/// `inputError`, na ordem. Um pedido só recebe o "ok" quando todas as suas linhas foram aceitas pelo HID: antes, o
+/// "ok" saía quando a linha era escrita no stdin, e um toque que o HID recusava voltava como "tapped".
+#[derive(Debug)]
+pub struct InputAcks<R> {
+    fila: std::collections::VecDeque<(usize, Option<R>)>,
+}
+
+impl<R> Default for InputAcks<R> {
+    fn default() -> Self {
+        Self { fila: Default::default() }
+    }
+}
+
+impl<R> InputAcks<R> {
+    /// Um pedido de `linhas` linhas. Sem `reply` (a pessoa tocando na tela), só mantém a fila alinhada.
+    pub fn push(&mut self, linhas: usize, reply: Option<R>) {
+        if linhas > 0 {
+            self.fila.push_back((linhas, reply));
+        }
+    }
+
+    /// O helper confirmou ou recusou a próxima linha. Devolve quem responder, e com o quê, quando o pedido termina ou
+    /// quando a primeira linha dele falha (as linhas seguintes do mesmo pedido não respondem de novo).
+    pub fn ack(&mut self, resultado: Result<(), String>) -> Option<(R, Result<(), String>)> {
+        let frente = self.fila.front_mut()?;
+        frente.0 -= 1;
+        let resposta = match resultado {
+            Err(e) => frente.1.take().map(|r| (r, Err(e))),
+            Ok(()) if frente.0 == 0 => frente.1.take().map(|r| (r, Ok(()))),
+            Ok(()) => None,
+        };
+        if frente.0 == 0 {
+            self.fila.pop_front();
+        }
+        resposta
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.fila.is_empty()
+    }
 }
 
 /// Maior quadro aceito: um datagrama UDP cabe em 64 KB; um evento, em bem menos.
@@ -324,6 +369,7 @@ pub fn parse_event(body: &[u8]) -> HelperEvent {
             HelperEvent::InputReady { touch: flag("touch"), buttons: flag("buttons"), keyboard: flag("keyboard") }
         }
         "inputError" => HelperEvent::InputError(s("message")),
+        "inputDone" => HelperEvent::InputDone,
         other => HelperEvent::Other(other.to_string()),
     }
 }
