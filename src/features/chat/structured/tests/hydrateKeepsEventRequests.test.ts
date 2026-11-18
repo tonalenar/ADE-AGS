@@ -21,7 +21,7 @@ const request = (id: string) => ({ id, threadId: "t1", kind: "command", itemId: 
 
 beforeEach(() => {
   vi.useFakeTimers();
-  useStructured.setState({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, hydrateErrors: {}, logFailures: {} });
+  useStructured.setState({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, hydrateErrors: {}, logFailures: {}, arrivalSeq: 0, requestArrivalSeq: {} } as never);
   db.items.mockReset().mockResolvedValue([]);
   db.requests.mockReset().mockResolvedValue([]);
   db.status.mockReset().mockResolvedValue({ working: false });
@@ -35,7 +35,7 @@ describe("a releitura da conversa não perde pedido que chegou por evento durant
     db.requests.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
     hydrateThread("t1");
     // Chega por evento enquanto a leitura de pedidos ainda está no banco.
-    useStructured.setState((s) => ({ live: { ...s.live, t1: { ...(s.live.t1 ?? { items: [], requests: [], phase: "idle", drafts: [], error: null, providerCommands: [], providerConfig: null }), requests: [request("novo")] } } }) as never);
+    useStructured.setState((s) => ({ live: { ...s.live, t1: { ...(s.live.t1 ?? { items: [], requests: [], phase: "idle", drafts: [], error: null, providerCommands: [], providerConfig: null }), requests: [request("novo")] } }, arrivalSeq: s.arrivalSeq + 1, requestArrivalSeq: { t1: { novo: s.arrivalSeq + 1 } } }) as never);
     answer([request("antigo")]);
     await vi.runAllTimersAsync();
     expect(useStructured.getState().live.t1!.requests.map((r) => r.id)).toEqual(["antigo", "novo"]);
