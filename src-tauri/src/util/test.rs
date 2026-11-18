@@ -1,5 +1,8 @@
 //! Tests de las utilidades.
 
+#[cfg(test)]
+mod user_json;
+
 #[cfg(unix)]
 use std::process::Command;
 #[cfg(unix)]

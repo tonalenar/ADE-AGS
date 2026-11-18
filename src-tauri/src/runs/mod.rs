@@ -215,10 +215,12 @@ pub async fn run_start_task(
     let db = db_of(&app)?;
     let request = route_request(agent_id, model, complexity, account_id, auto_account);
     let assignment = assign(&db, request).await?;
-    let _update_guard = crate::agents::updates::activity_guard()?;
     let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
 
+    // O guard de atualização é de leitura e não atravessa um `.await` (não é `Send`): cada trecho síncrono o toma por
+    // conta própria, e o isolamento o toma dentro da thread de bloqueio.
     let mut task = {
+        let _update_guard = crate::agents::updates::activity_guard()?;
         let conn = db.lock().map_err(|e| e.to_string())?;
         let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
         let run = store::create_run(&tx, &workspace_id, &title, &cwd)?;
@@ -257,13 +259,27 @@ pub async fn run_start_task(
     };
 
     if isolate {
-        match worktrees_base().and_then(|base| isolate_task(&base, &db, &task)) {
+        // O `git worktree add` pode levar dezenas de segundos num checkout grande: não roda no worker async.
+        let (db_iso, task_iso) = (db.clone(), task.clone());
+        let isolated = tauri::async_runtime::spawn_blocking(move || {
+            let _update_guard = crate::agents::updates::activity_guard()?;
+            worktrees_base().and_then(|base| isolate_task(&base, &db_iso, &task_iso))
+        })
+        .await
+        .map_err(|error| error.to_string())
+        .and_then(|result| result);
+        match isolated {
             Ok(isolated) => task = isolated,
             Err(e) => return fail(&task.id, e),
         }
     }
 
-    let memory = {let conn=db.lock().map_err(|e|e.to_string())?; crate::memory::snapshot_context_for_run(&conn,&task.run_id)?};
+    // O guard do lançamento, tomado de novo depois do `.await` acima.
+    let _update_guard = match crate::agents::updates::activity_guard() {
+        Ok(guard) => guard,
+        Err(e) => return fail(&task.id, e),
+    };
+    let memory ={let conn=db.lock().map_err(|e|e.to_string())?; crate::memory::snapshot_context_for_run(&conn,&task.run_id)?};
     let extras=supervisor::LaunchExtras {prompt:Some(format!("{}{memory}",task.prompt)), ..Default::default()};
     if let Err(e) = supervisor::start(&app, task.clone(), extras) {
         return fail(&task.id, e);
@@ -1357,7 +1373,8 @@ pub async fn start_memory_dream(
             1,
             None,
         )?;
-        let prompt=format!("Leia os dados e proponha somente melhorias justificadas.\nUNTRUSTED DATA BEGIN\n{}\nUNTRUSTED DATA END",input);
+        // O histórico é dado não confiável: vai no envelope único (`memory::dream::prompt_for`), não em marcadores soltos.
+        let prompt = crate::memory::dream::prompt_for(&input);
         let task = store::create_task(
             &tx,
             &store::NewTask {

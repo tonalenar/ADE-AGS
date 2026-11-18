@@ -28,6 +28,7 @@ export function PrelaunchChain({ value, onChange, agentCommand }: PrelaunchChain
   const { t } = useTranslation();
   const presets = usePrelaunchStore((s) => s.presets);
   const loaded = usePrelaunchStore((s) => s.loaded);
+  const loadError = usePrelaunchStore((s) => s.loadError);
   const load = usePrelaunchStore((s) => s.load);
   const [draft, setDraft] = useState("");
 
@@ -69,7 +70,10 @@ export function PrelaunchChain({ value, onChange, agentCommand }: PrelaunchChain
           {value.map((step, i) => {
             const command = stepCommand(step, presets);
             const label = stepLabel(step, presets);
-            const missing = isPresetStep(step) && command === null;
+            // Sem a lista lida, um preset não é "ausente": ele só não se pôde conferir (ver `loadError` na store).
+            const unread = !loaded && isPresetStep(step) && command === null;
+            const missing = loaded && isPresetStep(step) && command === null;
+            const absent = unread ? (loadError ? t("prelaunch.loadFailedChain") : t("prelaunch.loadingPreset")) : t("prelaunch.missingPreset");
             return (
               <li
                 key={`${i}-${isPresetStep(step) ? step.presetId : step.command}`}
@@ -92,8 +96,8 @@ export function PrelaunchChain({ value, onChange, agentCommand }: PrelaunchChain
                   <code className={`block truncate font-mono text-[11px]
                     ${missing
                       ? "text-red-600 dark:text-red-400"
-                      : "text-gray-700 dark:text-gray-200"}`} title={command ?? t("prelaunch.missingPreset")}>
-                    {command ?? t("prelaunch.missingPreset")}
+                      : "text-gray-700 dark:text-gray-200"}`} title={command ?? absent}>
+                    {command ?? absent}
                   </code>
                 </div>
 

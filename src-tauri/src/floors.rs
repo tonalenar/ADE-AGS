@@ -73,6 +73,11 @@ lazy_static::lazy_static! {
     static ref LOCK: Mutex<()> = Mutex::new(());
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_FILE_PATH: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 const MAX_NAME: usize = 40;
 
 /// Override lido pelo processo da app. `per-worktree` separa o target de cada recruit;
@@ -295,30 +300,49 @@ pub(crate) fn worktree_shell() -> (WorktreeShell, String) {
 }
 
 fn data_dir() -> Result<PathBuf, String> {
+    #[cfg(test)]
+    if let Some(path) = TEST_FILE_PATH.with(|path| path.borrow().clone()) {
+        if let Some(parent) = path.parent() {
+            return Ok(parent.to_path_buf());
+        }
+    }
     let dir = crate::util::datadir::ags_home().ok_or("Pasta de dados indisponível")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
 
 fn file_path() -> Result<PathBuf, String> {
+    #[cfg(test)]
+    if let Some(path) = TEST_FILE_PATH.with(|path| path.borrow().clone()) {
+        return Ok(path);
+    }
     Ok(data_dir()?.join("floors.json"))
 }
 
-fn read_file() -> Vec<Floor> {
-    let Ok(path) = file_path() else { return Vec::new() };
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<FloorsFile>(&raw).ok())
-        .map(|f| f.floors)
-        .unwrap_or_default()
+fn read_file() -> Result<Vec<Floor>, String> {
+    let path = file_path()?;
+    crate::util::user_json::read_user_json::<FloorsFile>(&path)
+        .map(|file| file.map(|f| f.floors).unwrap_or_default())
+        .map_err(|e| e.to_string())
 }
 
 fn write_file(floors: &[Floor]) -> Result<(), String> {
     let path = file_path()?;
-    let tmp = path.with_extension("json.tmp");
-    let body = serde_json::to_string_pretty(&FloorsFile { floors: floors.to_vec() }).map_err(|e| e.to_string())?;
-    std::fs::write(&tmp, body).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    crate::util::user_json::write_user_json(&path, &FloorsFile { floors: floors.to_vec() })
+}
+
+fn persist_floor(floors: &mut Vec<Floor>, floor: Floor, persist: impl FnOnce(&[Floor]) -> Result<(), String>, rollback: impl FnOnce() -> Result<(), String>) -> Result<Floor, String> {
+    floors.push(floor.clone());
+    if let Err(persist_error) = persist(floors) {
+        floors.pop();
+        return match rollback() {
+            Ok(()) => Err(persist_error),
+            Err(rollback_error) => Err(format!(
+                "{persist_error}; não foi possível reverter o worktree recém-criado: {rollback_error}"
+            )),
+        };
+    }
+    Ok(floor)
 }
 
 /// Una ruta en forma comparable: barras `/`, sin barra final y, en Windows, sin
@@ -440,7 +464,7 @@ pub(crate) fn apply_exclusions(root: &Path, excluded: &[String]) -> Result<(), S
 }
 
 /// Todos los pisos guardados.
-pub fn all() -> Vec<Floor> {
+pub fn all() -> Result<Vec<Floor>, String> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     read_file()
 }
@@ -455,7 +479,7 @@ pub fn create(cwd: &str, name: &str, start: Option<&str>) -> Result<Floor, Strin
 /// piso no crea rama: la origen (`start`) no tiene sentido ahí y se rechaza.
 pub fn create_with(cwd: &str, name: &str, opts: CreateOpts) -> Result<Floor, String> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut floors = read_file();
+    let mut floors = read_file()?;
     let ground = ground_for(&floors, cwd);
     let name = check_name(&floors, &ground, name)?;
     // Se valida antes de crear nada: una pasta mala no deja un worktree a medias.
@@ -510,18 +534,17 @@ pub fn create_with(cwd: &str, name: &str, opts: CreateOpts) -> Result<Floor, Str
         Err(error) => eprintln!("[ags] aviso: não foi possível localizar o clone principal para node_modules: {error}"),
     }
 
+    let rollback_wt = wt.clone();
     let floor = Floor {
         id: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(),
         name,
-        ground,
+        ground: ground.clone(),
         cwd: wt.task_cwd.to_string_lossy().to_string(),
         root: wt.root.to_string_lossy().to_string(),
         branch: wt.branch,
         excluded,
     };
-    floors.push(floor.clone());
-    write_file(&floors)?;
-    Ok(floor)
+    persist_floor(&mut floors, floor, write_file, || crate::runs::worktrees::remove_with_branch(Path::new(&ground), &rollback_wt, Path::new(""), Path::new(""), existing.is_none()).map(|_| ()))
 }
 
 /// Saca un piso de la lista por id.
@@ -550,7 +573,7 @@ pub fn remove(id: &str, skills_dir: &Path) -> Result<Dropped, String> {
 /// tenía no se toca, aunque esté mergeada. Con `keep_branch`, nunca se borra.
 pub(crate) fn remove_with(id: &str, skills_dir: &Path, keep_branch: bool) -> Result<Dropped, String> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut floors = read_file();
+    let mut floors = read_file()?;
     let floor = floors.iter().find(|f| f.id == id).cloned().ok_or("Esse andar já não existe.")?;
 
     // Las skills que la app montó en el piso (una carpeta por agente) estorban a git: son
@@ -590,19 +613,19 @@ pub struct FloorList {
     pub floors: Vec<Floor>,
 }
 
-pub fn list_for(cwd: &str) -> FloorList {
-    let floors = all();
+pub fn list_for(cwd: &str) -> Result<FloorList, String> {
+    let floors = all()?;
     let ground = ground_for(&floors, cwd);
-    FloorList { floors: floors_of(&floors, &ground), ground }
+    Ok(FloorList { floors: floors_of(&floors, &ground), ground })
 }
 
 /// Piso que contém `cwd`, quando a pasta já é ou está dentro de um worktree gerido.
-pub(crate) fn floor_for_path(cwd: &str) -> Option<Floor> {
+pub(crate) fn floor_for_path(cwd: &str) -> Result<Option<Floor>, String> {
     let here = norm(cwd);
-    all().into_iter().find(|floor| {
+    Ok(all()?.into_iter().find(|floor| {
         let root = norm(&floor.root);
         here == root || here.starts_with(&format!("{root}/"))
-    })
+    }))
 }
 
 /// El evento que avisa al frontend que cambió la lista de pisos (por ejemplo, porque un
@@ -610,7 +633,7 @@ pub(crate) fn floor_for_path(cwd: &str) -> Option<Floor> {
 pub const CHANGED_EVENT: &str = "cc-floors-changed";
 
 #[tauri::command]
-pub fn floor_list(cwd: String) -> FloorList {
+pub fn floor_list(cwd: String) -> Result<FloorList, String> {
     list_for(&cwd)
 }
 
@@ -653,6 +676,55 @@ pub fn floor_delete(app: tauri::AppHandle, id: String) -> Result<Dropped, String
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn floors_ilegivel_recusa_criar() {
+        let root = std::env::temp_dir().join(format!("ags-floors-corrupt-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("floors.json");
+        let original = br#"{"floors":"#;
+        std::fs::write(&path, original).unwrap();
+        TEST_FILE_PATH.with(|slot| *slot.borrow_mut() = Some(path.clone()));
+
+        let result = create_with("/projeto", "novo", CreateOpts::default());
+
+        TEST_FILE_PATH.with(|slot| *slot.borrow_mut() = None);
+        assert!(result.unwrap_err().contains("ilegível"));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn listar_floors_propaga_erro_de_leitura() {
+        let root = std::env::temp_dir().join(format!("ags-floors-list-corrupt-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("floors.json");
+        std::fs::write(&path, br#"{"floors":"#).unwrap();
+        TEST_FILE_PATH.with(|slot| *slot.borrow_mut() = Some(path.clone()));
+
+        let result = all();
+
+        TEST_FILE_PATH.with(|slot| *slot.borrow_mut() = None);
+        assert!(result.unwrap_err().contains("ilegível"));
+        assert_eq!(std::fs::read(&path).unwrap(), br#"{"floors":"#);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn falha_ao_salvar_piso_chama_rollback_e_nao_o_registra_em_memoria() {
+        let mut floors = Vec::new();
+        let mut rolled_back = false;
+        let result = persist_floor(
+            &mut floors,
+            floor("Nova", "/projeto"),
+            |_| Err("falha simulada".into()),
+            || { rolled_back = true; Ok(()) },
+        );
+
+        assert!(result.unwrap_err().contains("falha simulada"));
+        assert!(rolled_back);
+        assert!(floors.is_empty());
+    }
 
     fn floor(name: &str, ground: &str) -> Floor {
         Floor {

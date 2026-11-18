@@ -4,9 +4,18 @@
  * que já tinha o anterior (os "[Pasted text #3] [Pasted text #4]" empacados), e cutucava quem
  * já entregou e esperava com razão. Tudo aqui é puro.
  */
+import { isWaitingForUser } from "./stalled";
 
 /** Uma cutucada sem resposta bloqueia as seguintes por isto. */
 export const POKE_PENDING_MS = 10 * 60_000;
+
+/**
+ * O terminal está ocupado para a cutucada? Trabalhando, ou esperando a pessoa num menu de permissão aberto (o do
+ * Codex incluído): colar texto e Enter ali aprovaria ou negaria por ela. Pura.
+ */
+export function pokeBusy(lines: readonly string[], working: boolean): boolean {
+  return working || isWaitingForUser(lines);
+}
 
 /**
  * Pode escrever agora? Não com o agente trabalhando (a TUI enfileira o texto e o Enter se perde),

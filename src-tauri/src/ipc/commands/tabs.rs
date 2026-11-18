@@ -785,7 +785,7 @@ pub(super) fn tab_send(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let clean = |key: &str| arg_str_opt(args, key).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
     let caller = crate::terminal::classify_caller(clean("session").as_deref(), clean("from").as_deref(), crate::ipc::current_client_pid())?;
     let opened_by = crate::ipc::guard::opened_by(&tab_id);
-    if let Some(error) = crate::ipc::guard::tab_send_error(&crate::canvas::load_boards(), &caller, &tab_id, opened_by.as_deref()) {
+    if let Some(error) = crate::ipc::guard::tab_send_error(&crate::canvas::load_boards()?, &caller, &tab_id, opened_by.as_deref()) {
         return Err(error);
     }
     let from_tab = match &caller {

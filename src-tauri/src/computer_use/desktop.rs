@@ -249,6 +249,7 @@ impl Surface for DeskSurface {
             revision: revision.clone(),
             pick: None,
             reveal: None,
+            cue: None,
         };
         self.authorize()
             .map_err(|_| "Autorização ou prazo expirou durante a captura.")?;

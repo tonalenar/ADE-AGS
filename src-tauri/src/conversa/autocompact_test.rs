@@ -4,6 +4,16 @@
 use super::autocompact::*;
 use crate::canal::timeline::{Item, ItemKind, ToolStatus};
 
+/// A tentativa de uma conversa é guardada enquanto o processo dela vive. Fechada, ela sai do mapa: a medida que
+/// mandou compactar já tem o aviso gravado, e o corte pela medida de antes da compactação (`StaleUsage`) impede a
+/// repetição depois de reabrir.
+#[test]
+fn fechar_a_conversa_solta_a_tentativa_de_compactacao() {
+    attempts().lock().unwrap().insert("t-fechada-compact".into(), ("usage:a".into(), 500));
+    on_closed("t-fechada-compact");
+    assert!(!attempts().lock().unwrap().contains_key("t-fechada-compact"), "a tentativa de uma conversa fechada não fica no mapa");
+}
+
 fn usage(used: u64, window: u64, at: i64) -> Usage {
     Usage { used, window, at: Some(at), id: "usage:a".into() }
 }

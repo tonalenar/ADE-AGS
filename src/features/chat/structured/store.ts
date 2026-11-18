@@ -5,14 +5,14 @@ import { setComposing, useChatStore } from "../store";
 import { fastModeForThread } from "../fastMode";
 import {
   chatAccountSet, chatRequestAnswer, chatSideChatFork, chatThreadAutoCompactOnReturn, chatThreadClearContext, chatThreadCompactContext, chatThreadCreate, chatThreadGoalAction, chatThreadGoalGet, chatThreadInterrupt, chatThreadItems, chatThreadProviderConfig, chatThreadRequests, chatThreadRetune, chatThreadSend, chatThreadSwitchAgent,
-  chatThreadSettle, chatThreads, chatThreadStatus, type SideChatForkOutcome, type ThreadAccess, type ThreadRow,
+  chatThreadSettle, chatThreads, chatThreadStatus, type RequestRow, type SideChatForkOutcome, type ThreadAccess, type ThreadRow,
 } from "./ipc";
 import type { ThreadGoal } from "./ipc";
 import { createFrameBatcher } from "../timeline/streaming";
 import { unsnoozeConversation } from "../shelf";
 import { dispatchSkillMentions } from "../skillMentions";
 import { useAgentSkillsStore } from "@/features/skills/agentSkillsStore";
-import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, isLocalAcpAgent, threadKey, type ThreadEvent, type ThreadLive } from "./model";
+import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, forgetGoneAnswerErrors, isLocalAcpAgent, threadKey, type ThreadEvent, type ThreadLive } from "./model";
 import { addLogFailure, dismissLogFailure, parseLogFailure, type LogFailure } from "./logFailureModel";
 
 /** O sinal da janela quando uma gravação do log de execução falha de vez (ver `runs/execution_log.rs`). */
@@ -32,9 +32,15 @@ interface StructuredState {
   hydrated: Record<string, boolean>;
   /** Falhas de gravação do log, por conversa, até a pessoa dispensá-las. Não entram no chat. */
   logFailures: Record<string, LogFailure[]>;
+  /** Avisos de falha de resposta, por id de pedido. Ficam fora de `live.requests`: uma releitura do fio não os apaga. */
+  answerErrors: Record<string, string>;
+  /** Contador local monotônico para ordenar pedidos recebidos por evento, independente do relógio do servidor. */
+  arrivalSeq: number;
+  /** Última chegada local de cada pedido, por conversa e id do pedido. */
+  requestArrivalSeq: Record<string, Record<string, number>>;
 }
 
-export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, logFailures: {} }));
+export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, logFailures: {}, answerErrors: {}, arrivalSeq: 0, requestArrivalSeq: {} }));
 
 /** Um sinal de falha do log entra na conversa afetada, sem repetir o mesmo aviso. Sinal sem conversa é ignorado. */
 export function recordLogFailure(raw: unknown): void {
@@ -55,7 +61,50 @@ export function dismissThreadLogFailure(threadId: string, key: string): void {
 const liveOf = (id: string) => useStructured.getState().live[id] ?? EMPTY_LIVE;
 
 function patchLive(id: string, fn: (live: ThreadLive) => ThreadLive): void {
-  useStructured.setState((s) => ({ live: { ...s.live, [id]: fn(s.live[id] ?? EMPTY_LIVE) } }));
+  useStructured.setState((s) => {
+    const before = s.live[id] ?? EMPTY_LIVE;
+    const after = fn(before);
+    // Quando um pedido sai da caixa (respondido, ou fechado pelo agente), o seu aviso sai junto.
+    return {
+      live: { ...s.live, [id]: after },
+      answerErrors: forgetGoneAnswerErrors(before, after, s.answerErrors),
+      requestArrivalSeq: forgetGoneRequestArrivals(id, after, s.requestArrivalSeq),
+    };
+  });
+}
+
+/** Remove os marcos locais de pedidos que já saíram da caixa da conversa. */
+function forgetGoneRequestArrivals(threadId: string, live: ThreadLive, arrivals: Record<string, Record<string, number>>): Record<string, Record<string, number>> {
+  const byRequest = arrivals[threadId];
+  if (!byRequest) return arrivals;
+  const pending = new Set(live.requests.map((request) => request.id));
+  const gone = Object.keys(byRequest).filter((id) => !pending.has(id));
+  if (gone.length === 0) return arrivals;
+  const nextByRequest = { ...byRequest };
+  for (const id of gone) delete nextByRequest[id];
+  const next = { ...arrivals };
+  if (Object.keys(nextByRequest).length === 0) delete next[threadId];
+  else next[threadId] = nextByRequest;
+  return next;
+}
+
+/** Um pedido que entra pelo evento recebe ordem local; o carimbo do servidor não participa da concorrência. */
+export function recordThreadRequest(threadId: string, request: RequestRow): void {
+  useStructured.setState((s) => {
+    const before = s.live[threadId] ?? EMPTY_LIVE;
+    const after = applyThreadEvent(before, { type: "request", threadId, request });
+    const arrivalSeq = s.arrivalSeq + 1;
+    const arrivals = {
+      ...s.requestArrivalSeq,
+      [threadId]: { ...(s.requestArrivalSeq[threadId] ?? {}), [request.id]: arrivalSeq },
+    };
+    return {
+      arrivalSeq,
+      live: { ...s.live, [threadId]: after },
+      answerErrors: forgetGoneAnswerErrors(before, after, s.answerErrors),
+      requestArrivalSeq: forgetGoneRequestArrivals(threadId, after, arrivals),
+    };
+  });
 }
 
 function upsertThread(row: ThreadRow): void {
@@ -64,6 +113,17 @@ function upsertThread(row: ThreadRow): void {
 
 export function reloadThreads(): Promise<void> {
   return chatThreads().then((threads) => useStructured.setState({ threads })).catch(() => undefined);
+}
+
+/** Remove do estado local uma conversa lateral excluída no backend e os avisos dos seus pedidos. */
+export function removeDeletedSideChat(id: string): void {
+  useStructured.setState((state) => ({
+    threads: state.threads.filter((row) => row.id !== id),
+    live: Object.fromEntries(Object.entries(state.live).filter(([threadId]) => threadId !== id)),
+    hydrated: Object.fromEntries(Object.entries(state.hydrated).filter(([threadId]) => threadId !== id)),
+    answerErrors: forgetGoneAnswerErrors(state.live[id] ?? EMPTY_LIVE, EMPTY_LIVE, state.answerErrors),
+    requestArrivalSeq: Object.fromEntries(Object.entries(state.requestArrivalSeq).filter(([threadId]) => threadId !== id)),
+  }));
 }
 
 type DeltaEvent = Extract<ThreadEvent, { type: "delta" }>;
@@ -123,6 +183,10 @@ export function startStructured(): void {
     }
     // Pedidos e falhas são pontos de atenção: tiram o fio do adiamento sem acordar turnos normais.
     if (event.type === "request" || event.type === "error") unsnoozeConversation(threadKey(event.threadId));
+    if (event.type === "request") {
+      recordThreadRequest(event.threadId, event.request);
+      return;
+    }
     patchLive(event.threadId, (live) => applyThreadEvent(live, event));
     if (event.type === "item") {
       useStructured.setState((s) => ({ threads: s.threads.map((t) => (t.id === event.threadId ? { ...t, updatedAt: Date.now() } : t)) }));
@@ -131,16 +195,19 @@ export function startStructured(): void {
 }
 
 /** Lê do banco a timeline e os pendentes de uma conversa (uma vez). */
-export function hydrateThread(id: string): void {
-  if (useStructured.getState().hydrated[id]) return;
+export function hydrateThread(id: string): Promise<void> {
+  if (useStructured.getState().hydrated[id]) return Promise.resolve();
   useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: true } }));
-  void Promise.all([chatThreadItems(id), chatThreadRequests(id), chatThreadStatus(id), chatThreadGoalGet(id), chatThreadProviderConfig(id)])
+  const readSeq = useStructured.getState().arrivalSeq;
+  return Promise.all([chatThreadItems(id), chatThreadRequests(id), chatThreadStatus(id), chatThreadGoalGet(id), chatThreadProviderConfig(id)])
     .then(([items, requests, status, goal, providerConfig]) => {
+      const requestArrivals = useStructured.getState().requestArrivalSeq[id] ?? {};
       patchLive(id, (live) => ({
         ...live,
         // O que chegou por evento enquanto lia fica (é mais novo).
         items: [...items.filter((i) => !live.items.some((x) => x.id === i.id)), ...live.items],
-        requests: requests.length > 0 ? requests : live.requests,
+        // Uma caixa vazia confirma a resolução dos pedidos anteriores à leitura; eventos recebidos depois prevalecem.
+        requests: requests.length > 0 ? requests : live.requests.filter((request) => (requestArrivals[request.id] ?? 0) > readSeq),
         phase: status.working ? "working" : live.phase,
         providerConfig: providerConfig ?? live.providerConfig,
       }));
@@ -262,11 +329,37 @@ export async function runThreadGoalAction(id: string, action: "show" | "set" | "
   }
 }
 
-export function answerRequest(threadId: string, requestId: string, choice: string): void {
+/**
+ * Responde um pedido do protocolo. O pedido só sai da tela depois de o backend confirmar: se ele recusar (o agente
+ * fechou o pedido, ou o IPC falhou), o pedido fica e o erro aparece. Devolve `true` quando o backend confirmou.
+ */
+/** Uma falha de resposta: o pedido fica na conversa, e o aviso vai ao mapa `answerErrors`, fora de `requests`. */
+function failAnswer(requestId: string): void {
+  useStructured.setState((s) => ({ answerErrors: { ...s.answerErrors, [requestId]: "chat.permission.answerFailed" } }));
+}
+
+/**
+ * Responde um pedido do protocolo. O pedido só sai da tela depois de o backend confirmar. Falha (erro, ou `false` do
+ * backend, que é "o pedido já não está aberto") não é sucesso: o pedido fica na conversa e o aviso vai ao mapa
+ * `answerErrors`, que sobrevive a uma releitura do fio. Devolve `true` quando o backend confirmou.
+ */
+export async function answerRequest(threadId: string, requestId: string, choice: string): Promise<boolean> {
   unsnoozeConversation(threadKey(threadId));
-  // Some da tela na hora; se o backend recusar (o agente fechou), o erro aparece.
+  let confirmed: boolean;
+  try {
+    confirmed = await chatRequestAnswer(requestId, choice);
+  } catch (e) {
+    patchLive(threadId, (live) => ({ ...live, error: String(e) }));
+    failAnswer(requestId);
+    return false;
+  }
+  if (confirmed !== true) {
+    failAnswer(requestId);
+    return false;
+  }
+  // Confirmada: o pedido sai da lista, e `patchLive` tira o aviso junto (ver `forgetGoneAnswerErrors`).
   patchLive(threadId, (live) => ({ ...live, requests: live.requests.filter((r) => r.id !== requestId) }));
-  chatRequestAnswer(requestId, choice).catch((e) => patchLive(threadId, (live) => ({ ...live, error: String(e) })));
+  return true;
 }
 
 export async function retuneThread(id: string, model: string | null, effort: string | null, access: ThreadAccess): Promise<boolean> {

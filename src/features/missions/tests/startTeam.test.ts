@@ -2,8 +2,10 @@ import { beforeEach, expect, it, vi } from "vitest";
 import type { Mission } from "../types";
 import type { Squad } from "@/features/squads/types";
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), addTab: vi.fn(), send: vi.fn(), board: vi.fn(), addPortal: vi.fn(), openGemini: vi.fn() }));
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), addTab: vi.fn(), send: vi.fn(), board: vi.fn(), addPortal: vi.fn(), openGemini: vi.fn(), toast: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@/shared/ui/alerts", () => ({ AlertaToast: mocks.toast }));
+vi.mock("i18next", () => ({ default: { t: (key: string, options?: { error?: string }) => `${key} ${options?.error ?? ""}`.trim() } }));
 vi.mock("@/features/accounts/store", () => ({ useAccountsStore: { getState: () => ({ accounts: [] }) } }));
 vi.mock("@/features/tabs/store", () => ({ useTabsStore: { getState: () => ({
   addTab: mocks.addTab, activateTab: vi.fn(), detectedAgents: [{ id: "codex", command: "codex", available: true }],
@@ -56,4 +58,22 @@ it("does not mark running or open terminals when preparation fails", async () =>
   await expect(startMissionInTerminals(mission, squad, [])).rejects.toThrow("git unavailable");
   expect(mocks.addTab).not.toHaveBeenCalled();
   expect(mocks.invoke).toHaveBeenCalledTimes(1);
+});
+
+it("avisa a falha de pré-aprovação sem impedir o início da missão", async () => {
+  mocks.invoke
+    .mockResolvedValueOnce({ workspaces: [workspace("Orquestrador", "C:/wt/lead")], precheck: "", memory: "", trustWarnings: [".claude.json: acesso negado"] })
+    .mockResolvedValueOnce({})
+    .mockResolvedValue(undefined);
+
+  await startMissionInTerminals(mission, { ...squad, members: [] }, []);
+
+  expect(mocks.toast).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.stringContaining(".claude.json: acesso negado"),
+    "warning",
+    9000,
+  );
+  expect(mocks.invoke.mock.calls[1][0]).toBe("mission_start_terminals");
+  expect(mocks.addTab).toHaveBeenCalledTimes(1);
 });

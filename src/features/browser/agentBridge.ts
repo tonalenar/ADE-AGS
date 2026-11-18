@@ -17,7 +17,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import { comparablePath, isLocalUrl, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
+import { comparablePath, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
 import { setChatBrowser, toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
 import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { useStructured } from "@/features/chat/structured/store";
@@ -30,6 +30,8 @@ import {
   previewAddMock, previewClearMocks, previewCookies, previewListMocks, previewReadUpload, previewRequest, type Mock,
 } from "./ipc";
 import { detailForAgent, detailFromPage, detailFromProxy } from "./networkDetail";
+import { egressOriginFor, isLocalOrigin, redactForAgent, untrustedData } from "./egressPolicy";
+import { askPersonAboutReset, tellPersonAboutResetFailure } from "./dialogPolicy";
 import type { AnnotatedCapture } from "./composeMessage";
 import {
   batchHeader, formatElement, formatMarked, type DescribedElement, type MarkedEntry,
@@ -353,38 +355,26 @@ async function requestDetailText(host: BrowserHost, id: string): Promise<string>
   if (id.startsWith("g")) {
     const entry = log.requests.find((e) => `g${e.id}` === id);
     if (!entry) throw new Error(`Não há nenhum pedido ${id}: peça a lista de novo.`);
-    return detailForAgent(redactDetail(host, detailFromPage(entry)));
+    const detail = detailFromPage(entry);
+    return detailForAgent(detail, egressOriginFor(host.targetOrigin(), detail.url));
   }
   const origin = host.proxyOrigin();
   const seq = Number(id.replace(/^p/, ""));
   if (!origin || !Number.isInteger(seq)) throw new Error(`'${id}' não é um id da lista (são como p12 ou g5).`);
-  const detail = await previewRequest(origin, seq);
-  if (!detail) throw new Error(`O pedido ${id} não está mais no registro do proxy.`);
-  return detailForAgent(redactDetail(host, detailFromProxy(detail)));
+  const raw = await previewRequest(origin, seq);
+  if (!raw) throw new Error(`O pedido ${id} não está mais no registro do proxy.`);
+  const detail = detailFromProxy(raw);
+  return detailForAgent(detail, egressOriginFor(host.targetOrigin(), detail.url));
 }
 
 /**
- * Un sitio de verdad y no un servidor de esta máquina. Ahí las cookies y la cabecera
- * `Authorization` son la sesión REAL del usuario (su staging, su producción): un agente que
- * las lee puede llevárselas a cualquier lado, y para depurar alcanza con saber que están.
- * En el servidor de desarrollo se muestran enteras: son de prueba y es lo que se depura.
+ * Un sitio de verdad y no un servidor de esta máquina. Ahí las cookies, la cabecera
+ * `Authorization` y el storage son la sesión REAL del usuario (su staging, su producción): un agente
+ * que las lee puede llevárselas a cualquier lado. En el servidor de desarrollo se muestran enteras: son de
+ * prueba y es lo que se depura. Una origen que no se consigue determinar cuenta como real (ver `egressPolicy.ts`).
  */
 function isRealSite(host: BrowserHost): boolean {
-  const target = host.targetOrigin();
-  return !!target && !isLocalUrl(target);
-}
-
-const SECRET_HEADER = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-csrf-token)$/i;
-
-function redactValue(value: string): string {
-  return `[oculto: ${value.length} caracteres]`;
-}
-
-function redactDetail(host: BrowserHost, detail: ReturnType<typeof detailFromProxy>): ReturnType<typeof detailFromProxy> {
-  if (!isRealSite(host)) return detail;
-  const clean = (headers: typeof detail.requestHeaders) =>
-    headers.map((h) => (SECRET_HEADER.test(h.name) ? { ...h, value: redactValue(h.value) } : h));
-  return { ...detail, requestHeaders: clean(detail.requestHeaders), responseHeaders: clean(detail.responseHeaders) };
+  return !isLocalOrigin(host.targetOrigin());
 }
 
 function inServerTerms(host: BrowserHost, text: string): string {
@@ -430,6 +420,7 @@ async function marksText(
   const proxy = host.proxyOrigin();
   const target = host.targetOrigin();
   const display = (url: string) => (proxy && target && url.startsWith(proxy) ? target + url.slice(proxy.length) : url);
+  // Lo que la página tiene escrito (nombres, textos, valores) es dato no confiable, nunca instrucción.
   return inServerTerms(host, formatMarked(entries, captures, note, display, prefix));
 }
 
@@ -595,7 +586,8 @@ async function execute(
       // En un sitio de verdad, la sesión real del usuario: se dice qué cookies hay y cómo
       // están configuradas, no su valor (ver `isRealSite`).
       if (!isRealSite(host)) return cookieTable(rows);
-      return cookieTable(rows.map((row) => ({ ...row, value: redactValue(row.value) })))
+      const siteOrigin = host.targetOrigin();
+      return cookieTable(rows.map((row) => ({ ...row, value: redactForAgent("cookie", siteOrigin, row.value) })))
         + "\n\n(Values hidden: this is a real site, not a local dev server, so these cookies are the user's own session.)";
     }
     case "storage": {
@@ -605,7 +597,12 @@ async function execute(
         if (area !== "local" && area !== "session") throw new Error("area es local o session.");
         return area;
       };
-      if (action === "list") return inPage(host, { op: "storage", action: "list" }, false);
+      if (action === "list") {
+        // En un sitio real, solo claves y tamaños: el valor del storage puede ser la sesión del usuario (AGENTS.md §2.3).
+        const real = isRealSite(host);
+        const listed = await inPage(host, { op: "storage", action: "list", values: !real }, false);
+        return real ? `${listed}\n\n(Values hidden: this is a real site, so the storage is the user's own session.)` : listed;
+      }
       if (action === "set") return inPage(host, { op: "storage", action: "set", area: storageArea(), key: required(request, "key"), value: str(request, "value") ?? "" }, true);
       if (action === "remove") return inPage(host, { op: "storage", action: "remove", area: storageArea(), key: required(request, "key") }, true);
       if (action === "clear") return inPage(host, { op: "storage", action: "clear", area: storageArea() }, true);
@@ -704,13 +701,13 @@ async function execute(
       }, true);
     }
     case "dialogs": {
+      // Aceitar um diálogo por conta própria é o que a app não deixa: a pessoa autoriza cada um na app (ver `dialogPolicy.ts`).
       const action = str(request, "action");
-      if (action && action !== "accept" && action !== "dismiss") throw new Error("action is accept or dismiss.");
-      return inPage(host, {
-        op: "dialogs",
-        accept: action ? action === "accept" : undefined,
-        text: str(request, "prompt_text"),
-      }, false);
+      if (action === "accept") {
+        throw new Error("Aceitar um diálogo é decisão da pessoa: a página pergunta e ela responde na app. Peça a ação de novo depois que ela autorizar.");
+      }
+      if (action && action !== "dismiss") throw new Error("action é dismiss, ou nada para ver os diálogos.");
+      return inPage(host, { op: "dialogs" }, false);
     }
     case "snapshot": return inPage(host, { op: "snapshot", all: bool(request, "full") }, false);
     case "layout": return inPage(host, { op: "layout" }, false);
@@ -739,15 +736,42 @@ async function execute(
       // Começar do zero no site aberto: cookies, localStorage e sessionStorage da página atual e o livro-razão dos `act`
       // deste portal. É o que o bench faz antes de cada rodada (J1): sem isso o carrinho da rodada anterior continuava lá e
       // o «adicionar ao carrinho» da SauceDemo nunca era medido (0 de 32 rodadas). Destrói estado, não lê: nada sai daqui.
-      const page = await host.channel.run({ op: "cookies", action: "list" }) as { cookies: { name: string }[] };
-      for (const cookie of page.cookies ?? []) {
-        await host.channel.run({ op: "cookies", action: "delete", name: cookie.name }).catch(() => undefined);
+      // Apagar a sessão de um site de verdade é decisão da pessoa (AGENTS.md §2.3): ela confirma na app antes.
+      // Num servidor local não se pergunta: o bench roda reset a cada rodada, e lá não há sessão do usuário.
+      if (isRealSite(host) && !(await askPersonAboutReset(host.targetOrigin()))) {
+        return "Reset cancelado: a pessoa não confirmou. Nada foi apagado.";
+      }
+      // Cada etapa registra o próprio erro: um reset que falhou não pode parecer um reset que deu certo.
+      const failures: string[] = [];
+      let cookieCount = 0;
+      try {
+        const page = await host.channel.run({ op: "cookies", action: "list" }) as { cookies: { name: string }[] };
+        cookieCount = page.cookies?.length ?? 0;
+        for (const cookie of page.cookies ?? []) {
+          try {
+            await host.channel.run({ op: "cookies", action: "delete", name: cookie.name });
+          } catch (cause) {
+            failures.push(`cookie ${cookie.name}: ${errorText(cause)}`);
+          }
+        }
+      } catch (cause) {
+        failures.push(`lista de cookies: ${errorText(cause)}`);
       }
       for (const area of ["local", "session"] as const) {
-        await inPage(host, { op: "storage", action: "clear", area }, false).catch(() => undefined);
+        try {
+          await inPage(host, { op: "storage", action: "clear", area }, false);
+        } catch (cause) {
+          failures.push(`${area}Storage: ${errorText(cause)}`);
+        }
       }
       forgetLedger(host.viewId);
-      return `Portal zerado: ${page.cookies?.length ?? 0} cookie(s), localStorage, sessionStorage e o histórico dos act. Recarregue a página (navigate) para o site começar do zero.`;
+      if (failures.length > 0) {
+        const detail = failures.join("; ");
+        // A pessoa fica sabendo na app; o agente recebe o mesmo texto. Não se espera o clique: o agente não fica preso a um aviso.
+        void tellPersonAboutResetFailure(detail);
+        return `Reset incompleto: ${detail}. O que deu certo foi zerado; o site pode ter restado parcialmente logado.`;
+      }
+      return `Portal zerado: ${cookieCount} cookie(s), localStorage, sessionStorage e o histórico dos act. Recarregue a página (navigate) para o site começar do zero.`;
     }
     case "act": {
       const goal = required(request, "goal");
@@ -799,7 +823,23 @@ export async function runBrowserRequest(
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
     throw new Error("The browser for this project has no page loaded. Use browser_navigate with the project URL.");
   }
-  return execute(cwd, host, request, opened, owner);
+  return forAgent(request.op, await execute(cwd, host, request, opened, owner));
+}
+
+/** Ops cuyo texto lo escribe la app, no la página: no se marcan como dato no confiable. (`reset` sí: nombra cookies del sitio.) */
+const OWN_TEXT_OPS = new Set(["resize", "touch"]);
+
+/**
+ * Lo que devuelve `execute` sale hacia el agente marcado como dato de la página (su texto, su DOM, sus pedidos,
+ * su consola). Se marca UNA vez, aquí, en la frontera: `marksText` y `markedBatchText` no marcan por su cuenta.
+ */
+function forAgent(op: string, text: string): string {
+  return OWN_TEXT_OPS.has(op) ? text : untrustedData(text);
+}
+
+/** El mensaje de un error de cualquier forma que llegue (un `Error`, o un texto del canal). */
+function errorText(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 /**
@@ -1007,5 +1047,5 @@ export async function runPortalRequest(
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
     throw new Error("O portal não tem nenhuma página carregada. Comece com `ags portal navigate <portal> <url>`.");
   }
-  return execute(cwd, host, request, false, owner, portalId);
+  return forAgent(request.op, await execute(cwd, host, request, false, owner, portalId));
 }

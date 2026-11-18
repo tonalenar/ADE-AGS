@@ -3,7 +3,7 @@
 //! o I/O com o agente.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use rusqlite::TransactionBehavior;
 use serde::Serialize;
@@ -703,9 +703,22 @@ pub async fn send_with_request_and_fast_mode(
 /// outro envio no meio. Vale para todo chamador (tela, CLI, fila de mensagens entre agentes). É
 /// `tokio::sync::Mutex` porque é segurada através de `.await`.
 pub(super) fn send_gate(thread_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    static GATES: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    static GATES: OnceLock<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>> = OnceLock::new();
     let mut map = GATES.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap_or_else(|e| e.into_inner());
-    map.entry(thread_id.to_string()).or_default().clone()
+    gate_in(&mut map, thread_id)
+}
+
+/// O gate da conversa dentro do mapa. O mapa guarda `Weak`: o gate vive enquanto alguém o segura (um envio em curso ou
+/// um esperando por ele, que mantém o `Arc` na mão), e quem chega enquanto isso pega o mesmo. Quando ninguém mais o
+/// segura, a entrada morre, e a poda a tira do mapa: ele não cresce com as conversas que já passaram.
+pub(super) fn gate_in(map: &mut HashMap<String, Weak<tokio::sync::Mutex<()>>>, thread_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    map.retain(|_, gate| gate.strong_count() > 0);
+    if let Some(gate) = map.get(thread_id).and_then(Weak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(tokio::sync::Mutex::new(()));
+    map.insert(thread_id.to_string(), Arc::downgrade(&gate));
+    gate
 }
 
 /// Pura: o modo deixa a mensagem entrar agora? `queue_after_active` só com a conversa livre.

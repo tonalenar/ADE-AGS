@@ -61,28 +61,32 @@ export async function freezePage(page: HTMLElement, column: HTMLElement): Promis
   const columnBox = boxOf(column.getBoundingClientRect());
   const viewport = { width: window.innerWidth, height: window.innerHeight };
   const image = await decode(await previewCapture());
-  const crop = cropFor(pageBox, columnBox, viewport, { width: image.width, height: image.height });
-  if (!crop) {
-    throw new Error(
-      "a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. "
-      + "Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).",
-    );
-  }
+  // O bitmap da janela inteira é grande: solta-se em qualquer saída, inclusive a de erro (antes só saía no sucesso).
+  try {
+    const crop = cropFor(pageBox, columnBox, viewport, { width: image.width, height: image.height });
+    if (!crop) {
+      throw new Error(
+        "a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. "
+        + "Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).",
+      );
+    }
 
-  const canvas = document.createElement("canvas");
-  canvas.width = crop.source.width;
-  canvas.height = crop.source.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("não há canvas 2D");
-  const { left, top, width, height } = crop.source;
-  ctx.drawImage(image, left, top, width, height, 0, 0, width, height);
-  if ("close" in image && typeof image.close === "function") image.close();
-  return {
-    canvas,
-    offset: { x: crop.screen.left - columnBox.left, y: crop.screen.top - columnBox.top },
-    screen: { width: crop.screen.width, height: crop.screen.height },
-    column: { width: columnBox.width, height: columnBox.height },
-  };
+    const canvas = document.createElement("canvas");
+    canvas.width = crop.source.width;
+    canvas.height = crop.source.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("não há canvas 2D");
+    const { left, top, width, height } = crop.source;
+    ctx.drawImage(image, left, top, width, height, 0, 0, width, height);
+    return {
+      canvas,
+      offset: { x: crop.screen.left - columnBox.left, y: crop.screen.top - columnBox.top },
+      screen: { width: crop.screen.width, height: crop.screen.height },
+      column: { width: columnBox.width, height: columnBox.height },
+    };
+  } finally {
+    if ("close" in image && typeof image.close === "function") image.close();
+  }
 }
 
 export async function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
