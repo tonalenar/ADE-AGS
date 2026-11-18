@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error Flag global do React para act em happy-dom
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const invokeMock = vi.fn();
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 const listenMock = vi.hoisted(() => ({
   listen: vi.fn<(name: string, cb: (event: { payload: string }) => void) => Promise<() => void>>(
     async () => () => {},
