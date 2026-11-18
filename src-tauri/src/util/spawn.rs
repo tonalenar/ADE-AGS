@@ -151,12 +151,17 @@ fn output_with_stdout_limit_inner(
     )
 }
 
+type StderrWaitHook<'a> = (
+    std::sync::mpsc::Sender<Vec<u8>>,
+    &'a mut dyn FnMut() -> Duration,
+);
+
 fn output_with_stdout_limit_inner_with_stderr_wait(
     cmd: &mut Command,
     timeout: Duration,
     max_stdout_bytes: usize,
     keep_truncated: bool,
-    stderr_wait: Option<Duration>,
+    stderr_wait_hook: Option<StderrWaitHook<'_>>,
 ) -> io::Result<(Output, bool)> {
     apply_window(cmd, WindowMode::Hidden);
     prepare_session(cmd);
@@ -178,6 +183,10 @@ fn output_with_stdout_limit_inner_with_stderr_wait(
         let _ = child.wait();
         return Err(io::Error::other("stderr indisponível"));
     };
+    let (stderr_progress_tx, stderr_wait) = match stderr_wait_hook {
+        Some((tx, wait)) => (Some(tx), Some(wait)),
+        None => (None, None),
+    };
     let stderr_capture = Arc::new(Mutex::new(Vec::with_capacity(STDERR_CAPTURE_LIMIT)));
     let stderr_shared = stderr_capture.clone();
     let (stderr_done_tx, stderr_done_rx) = std::sync::mpsc::channel();
@@ -187,9 +196,15 @@ fn output_with_stdout_limit_inner_with_stderr_wait(
             match stderr_pipe.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(count) => {
-                    let Ok(mut bytes) = stderr_shared.lock() else { break };
-                    let remaining = STDERR_CAPTURE_LIMIT.saturating_sub(bytes.len());
-                    bytes.extend_from_slice(&chunk[..count.min(remaining)]);
+                    let snapshot = {
+                        let Ok(mut bytes) = stderr_shared.lock() else { break };
+                        let remaining = STDERR_CAPTURE_LIMIT.saturating_sub(bytes.len());
+                        bytes.extend_from_slice(&chunk[..count.min(remaining)]);
+                        stderr_progress_tx.as_ref().map(|_| bytes.clone())
+                    };
+                    if let (Some(tx), Some(snapshot)) = (&stderr_progress_tx, snapshot) {
+                        let _ = tx.send(snapshot);
+                    }
                 }
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 Err(_) => break,
@@ -299,10 +314,11 @@ fn output_with_stdout_limit_inner_with_stderr_wait(
             format!("stdout excedeu o limite de {max_stdout_bytes} bytes"),
         ));
     }
-    if stderr_done_rx
-        .recv_timeout(stderr_wait.unwrap_or_else(|| timeout.saturating_sub(started.elapsed())))
-        .is_err()
-    {
+    let stderr_timeout = match stderr_wait {
+        Some(wait) => wait(),
+        None => timeout.saturating_sub(started.elapsed()),
+    };
+    if stderr_done_rx.recv_timeout(stderr_timeout).is_err() {
         // O processo principal já terminou, mas um descendente pode manter o pipe herdado.
         // Mata o grupo e não espera além do prazo por um leitor preso num pipe ainda aberto.
         guard.kill();
@@ -752,12 +768,21 @@ mod tests {
         let script = "( read _ < \"$1\"; printf 'descendente\\n' >&2 ) >/dev/null & printf 'principal\\n' >&2; exit 0";
         let mut cmd = hidden_command("sh");
         cmd.args(["-c", script, "sh", fifo.to_str().unwrap()]);
+        let (stderr_tx, stderr_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let mut wait_until_principal = || {
+            while let Ok(bytes) = stderr_rx.recv() {
+                if String::from_utf8_lossy(&bytes).contains("principal") {
+                    break;
+                }
+            }
+            Duration::ZERO
+        };
         let (out, _) = output_with_stdout_limit_inner_with_stderr_wait(
             &mut cmd,
             Duration::from_secs(5),
             256,
             false,
-            Some(Duration::ZERO),
+            Some((stderr_tx, &mut wait_until_principal)),
         )
         .unwrap();
         // Libera o descendente caso a leitura ainda esteja aberta durante a limpeza.
