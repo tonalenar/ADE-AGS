@@ -92,6 +92,25 @@ fn a_regiao_de_toque_e_a_visivel_menos_o_menu_por_cima() {
 }
 
 #[test]
+fn a_memoria_soma_o_phys_footprint_so_dos_processos_que_ainda_existem() {
+    let footprint = |pid: u32| match pid {
+        500 => Some(1_000),
+        501 => Some(250),
+        502 => None,
+        _ => Some(1),
+    };
+    assert_eq!(sum_footprint(&[500, 501, 502], footprint), Memory { processes: 2, bytes: 1_250 });
+    assert_eq!(sum_footprint(&[], footprint), Memory::default());
+}
+
+#[test]
+fn a_memoria_do_aparelho_soma_a_arvore_do_seu_launchd_sim() {
+    let ps = "  1     0 /sbin/launchd\n 500     1 launchd_sim /Users/x/Library/Developer/CoreSimulator/Devices/AAA/data/var/run/launchd_bootstrap.plist\n 501   500 /Runtime/SpringBoard\n 502   501 /Runtime/PosterExtension\n 600     1 launchd_sim /Users/x/Library/Developer/CoreSimulator/Devices/BBB/data/var/run/launchd_bootstrap.plist\n 601   600 /Runtime/SpringBoard\n";
+    let pids = process_tree(ps, "AAA");
+    assert_eq!(sum_footprint(&pids, |pid| Some(u64::from(pid) * 10)), Memory { processes: 3, bytes: (500 + 501 + 502) * 10 });
+}
+
+#[test]
 fn a_arvore_do_ios_sai_do_launchd_sim_do_aparelho() {
     let ps = "  1     0 /sbin/launchd\n 500     1 launchd_sim /Users/x/Library/Developer/CoreSimulator/Devices/AAA/data/var/run/launchd_bootstrap.plist\n 501   500 /Runtime/SpringBoard\n 502   501 /Runtime/PosterExtension\n 600     1 launchd_sim /Users/x/Library/Developer/CoreSimulator/Devices/BBB/data/var/run/launchd_bootstrap.plist\n 601   600 /Runtime/SpringBoard\n 700     1 /Applications/Outro.app\n";
     let mut tree = process_tree(ps, "AAA");

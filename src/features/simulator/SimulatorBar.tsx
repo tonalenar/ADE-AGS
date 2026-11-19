@@ -9,6 +9,7 @@ import { canTouch, statusView, type MirrorStatus, type PhysicalDevice } from "@/
 import { watchPhysical } from "@/features/iphone/store";
 
 import { SIM_BAR_H } from "./geometry";
+import { formatMemory, useSimulatorMemory } from "./memory";
 import { HIBERNATE_OPTIONS } from "./prefs";
 import type { SimDevice } from "./ipc";
 
@@ -173,10 +174,11 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
   closeArmed: boolean;
   actions: SimBarActions;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [menu, setMenu] = useState(false);
   const menuRef = useDismiss(menu, () => setMenu(false));
   const on = state === "booted" && !physical;
+  const memory = useSimulatorMemory(on ? current?.udid : undefined);
   const name = physical ? physical.device?.name : current?.name;
   const label = name ? (full ? name : name.replace(/^iPhone |^iPad /, "")) : t("simulator.pick");
   const tone = physical ? statusView(physical.status).tone : null;
@@ -209,6 +211,11 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
       bg-surface/92 backdrop-blur-md ring-1 ring-white/10 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.6)] ade-device-bar-in"
       style={{ height: SIM_BAR_H }}>
       <DevicePicker devices={devices} current={current} picked={physical?.id ?? current?.udid} state={dot} label={label} onPick={actions.onPick} onOpen={actions.onOpenPicker} showStatusDot={!physical} />
+      {memory && !physical && (
+        <span className="ml-1.5 min-w-0 shrink truncate whitespace-nowrap text-[10.5px] tabular-nums text-white/50" title={t("simulator.memory.hint")}>
+          {t("simulator.memory.label", { memory: formatMemory(memory.bytes, i18n.language), processes: memory.processes })}
+        </span>
+      )}
       {physical ? (
         <>
           {physical.disconnected

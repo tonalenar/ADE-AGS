@@ -42,6 +42,12 @@ export const simulatorButton = (udid: string, name: string) => invoke<void>("sim
 
 export const simulatorOpenUrl = (udid: string, url: string) => invoke<void>("simulator_open_url", { udid, url });
 
+/** A memória de um aparelho ligado: quantos processos do iOS ele tem e a soma do `phys_footprint` em bytes. */
+export interface SimMemory { processes: number; bytes: number }
+
+/** Lê a memória do aparelho `udid` (`simulator::memory`): a soma do `phys_footprint` da árvore do `launchd_sim`. */
+export const simulatorMemory = (udid: string) => invoke<SimMemory>("simulator_memory", { udid });
+
 /** A foto da tela num PNG temporário: o caminho. */
 export const simulatorScreenshot = (udid: string) => invoke<string>("simulator_screenshot", { udid });
 

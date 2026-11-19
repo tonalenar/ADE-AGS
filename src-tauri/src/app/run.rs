@@ -147,6 +147,7 @@ pub fn run() {
             crate::simulator::simulator_rotate,
             crate::simulator::simulator_clipboard,
             crate::simulator::simulator_orientation,
+            crate::simulator::simulator_memory,
             crate::simulator::simulator_attach,
             crate::simulator::simulator_place,
             crate::simulator::simulator_detach,

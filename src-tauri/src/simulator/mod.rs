@@ -19,14 +19,14 @@ pub use commands::*;
 #[allow(unused_imports)] // a CLI usa o resto (ipc::commands::devices)
 pub mod ops {
     #[cfg(not(target_os = "macos"))]
-    use super::model::Device;
+    use super::model::{Device, Memory};
 
     #[cfg(target_os = "macos")]
-    pub use super::native::{boot, booted, button, devices, key, orient, set_priority, shutdown, swipe, tap, type_text};
+    pub use super::native::{boot, booted, button, devices, key, memory, orient, set_priority, shutdown, swipe, tap, type_text};
 
     #[cfg(not(target_os = "macos"))]
     mod none {
-        use super::Device;
+        use super::{Device, Memory};
         const NO: &str = "O simulador iOS só existe no macOS, com o Xcode instalado.";
         pub fn devices() -> Result<Vec<Device>, String> { Err(NO.into()) }
         pub fn boot(_: &str, _: bool) -> Result<(), String> { Err(NO.into()) }
@@ -39,6 +39,7 @@ pub mod ops {
         pub fn button(_: &str, _: &str) -> Result<(), String> { Err(NO.into()) }
         pub fn set_priority(_: &str, _: i32) -> Result<usize, String> { Err(NO.into()) }
         pub fn orient(_: &str, _: u32) -> Result<(), String> { Err(NO.into()) }
+        pub fn memory(_: &str) -> Result<Memory, String> { Err(NO.into()) }
     }
     #[cfg(not(target_os = "macos"))]
     pub use none::*;

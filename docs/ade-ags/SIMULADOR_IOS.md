@@ -195,6 +195,7 @@ Achados:
   - o aparelho embaixo;
   - com a conversa aberta, o painel ao lado, com o mesmo topo e o mesmo pé do aparelho.
 - **Escala:** sai da altura gravada no `box`.
+- **Memória na barra:** com o aparelho ligado, a barra mostra "2,6 GB · 78 proc." (`simulator_memory`, `simulator/native::memory`). É a soma do `phys_footprint` de cada processo da árvore do `launchd_sim` do aparelho, o mesmo método do `simslim measure`; RSS não serve, porque conta a memória compartilhada várias vezes. O `launchd_sim` entra na soma. A leitura se repete a cada 5 s só com o aparelho ligado e a aba visível.
 - **Painel iOS do chat:** as ações do simulador ficam numa barra única abaixo da tela, com início, girar, captura, gravação, aparência, localização, Face ID, teclado, menu, zoom, ajustar, 1:1 e tela cheia. O zoom se ajusta novamente ao painel quando se escolhe Ajustar.
 - **Conversa:** o que a pessoa escreve vai, pela fila de cada terminal (`peer_queue::enqueue`), para todos os agentes ligados ao nó, com a foto da tela se ela quiser (`simulator_tell`). O que os agentes fazem e dizem (`ags device say`) chega pelo evento `simulator-activity`. A conversa fica só na memória.
 

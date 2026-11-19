@@ -4140,6 +4140,8 @@
   "simulator.shot": "Captura de pantalla",
   "simulator.shotSaved": "Captura guardada en {{path}}",
   "simulator.more": "Más",
+  "simulator.memory.label": "{{memory}} · {{processes}} proc.",
+  "simulator.memory.hint": "Memoria que este dispositivo usa en el Mac: la suma de phys_footprint (el número del Monitor de Actividad, con las páginas comprimidas y en swap) de todos sus procesos de iOS, el árbol de launchd_sim. No es la suma de RSS, que cuenta la memoria compartida una vez por proceso.",
   "simulator.zoom": "Tamaño",
   "simulator.smaller": "Achicar el dispositivo",
   "simulator.bigger": "Agrandar el dispositivo",
