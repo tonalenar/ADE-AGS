@@ -37,7 +37,16 @@ As pranchetas de um design agora podem ser dispostas diretamente no canvas princ
   - Ao clicar em "Abrir" em um aviso de novo design, a câmera do canvas viaja diretamente até a moldura do design correspondente.
 - **Aviso de Novo Design (`freshDesigns`)**:
   - Quando um agente emite `ags design create`, o evento `design-changed` com `isNew: true` dispara um toast de notificação (`canvas.design.newDesign`).
-  - O toast traz botão rápido "Abrir", permitindo inspecionar o trabalho do agente imediatamente sem interromper o fluxo.
+  - O toast traz botão rápido "Abrir", permitindo inspecionar o trabalho do agente imediatamente sem interromper o fluxo. O "Abrir" também põe o design no canvas (ver [Abrir e fechar no canvas](#abrir-e-fechar-no-canvas)).
+
+### Abrir e fechar no canvas
+
+- **Nenhum design aparece por padrão.** Um design entra no canvas quando alguém o abre: "Abrir" no aviso de novo design, "Editar" numa prancheta, escolher o design no seletor do painel Design, ou `ags design open` (que também mostra a tela e marca o design no canvas da pasta ou da missão dele).
+- **Criar ou atualizar não abre.** `ags design create` e as mudanças de prancheta continuam só no aviso.
+- **Fechar:** o X da moldura recolhe o design. Os nós e os iframes das pranchetas saem do canvas e são desmontados.
+- **Disposição:** só os designs abertos formam a coluna de molduras; fechar um do meio não deixa buraco (`openDetails`, antes de `layoutGroups`, em `design/scope.ts`).
+- **Lembrado por canvas:** o que está aberto fica em `localStorage`, na chave `cc-design-open`, por chave de canvas (`boardKey`; o canvas de missão leva a missão colada). Sobrevive a reiniciar o app. Cada mudança é gravada sobre o que já está no storage, então duas janelas não apagam o aberto uma da outra. Storage quebrado não derruba o canvas: o aberto vale só até fechar o app. Ids de designs arquivados ou excluídos continuam guardados e são ignorados (`design/openStore.ts`).
+- A moldura não recebe o mouse, exceto o X. Enquanto o design estiver aberto, o iframe fica montado mesmo fora da tela (`keepFrameMounted`).
 
 ## Deduplicação, Exclusão e Arquivamento (Schema v37)
 
@@ -83,7 +92,7 @@ A mesma tela (`DesignStudio`) abre na rota `/design/:id` e na aba Design do pain
 - **Páginas:** renomear, apagar (a última página nunca se apaga) e reordenar (`pageIds` com exatamente as páginas do design). Sem `order`, a página nova vai para o fim.
 - **Comandos IPC novos:** `design_artboard_duplicate|artboard_delete|page_rename|page_delete|page_reorder|note_add|note_update|note_delete|shape_add|shape_update|shape_delete|view_set|view_get`. As ops que criam algo devolvem o design e o id novo (`pageId`, `artboardId`, `noteId`, `shapeId`, `commentId`).
 - **View state:** `design_view_set {designId, state}` guarda em memória, por design, o que a pessoa vê (modo, página, pranchetas visíveis e selecionadas, elementos escolhidos, zoom), normalizado e com teto. `ags design view [<designId>]` (e a tool `design_view`) lê; sem id, o design aberto mais recentemente. Não emite `design-changed`.
-- **Abrir:** `ags design open <designId> [--artboard <id>] [--page <id>]` confere o design no banco e pede ao front, pela ponte, a op `design.open` com `{designId, title, pageId, artboardId}` (a página vem da prancheta, se só ela foi dada).
+- **Abrir:** `ags design open <designId> [--artboard <id>] [--page <id>]` confere o design no banco e pede ao front, pela ponte, a op `design.open` com `{designId, title, pageId, artboardId}` (a página vem da prancheta, se só ela foi dada). O front também marca o design como aberto no canvas da pasta ou da missão dele (`openDesignOnCanvases`, ver [Abrir e fechar no canvas](#abrir-e-fechar-no-canvas)).
 - **CLI e MCP:** `ags design view|open`, `design artboard duplicate|delete|resize`, `design page rename|delete`, `design note add`; tools `design_*` só nas abas (como as `chat_*`), e os papéis de leitura só veem `design_list|get|view`. Aprovar e rejeitar não têm tool.
 
 ## Segurança: o HTML nunca é confiável

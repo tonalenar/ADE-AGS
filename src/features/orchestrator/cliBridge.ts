@@ -35,6 +35,7 @@ import { boardKey, boardKeyOfTab, canvasActions, flushSave, setWorkMode, useCanv
 import { AGENT_PORTAL_SIZE } from "@/features/canvas/board";
 import { DEFAULT_SCREEN, nodeSize, SIM_SCALE } from "@/features/simulator/geometry";
 import { orphanPortal } from "@/features/canvas/portalReuse";
+import { openDesignOnCanvases } from "@/features/canvas/design/openOnCanvas";
 
 /**
  * Lado frontend del puente de la CLI (ver `ipc/bridge.rs`).
@@ -520,12 +521,14 @@ async function handleChatOpen(args: Record<string, unknown>): Promise<unknown> {
 }
 
 /**
- * `ags design open <id> [--artboard] [--page]`: no modo chat abre a aba Design do painel direito com
- * aquele design (fechando a tela cheia que estiver por cima); nas abas e no canvas, a tela cheia
- * `/design/:id`.
+ * `ags design open <id> [--artboard] [--page]`: marca o design como aberto no canvas da pasta ou da missão
+ * dele. No modo chat abre a aba Design do painel direito com aquele design (fechando a tela cheia que
+ * estiver por cima); nas abas e no canvas, a tela cheia `/design/:id`.
  */
-function handleDesignOpen(args: Record<string, unknown>): unknown {
+async function handleDesignOpen(args: Record<string, unknown>): Promise<unknown> {
   const req = parseDesignOpen(args);
+  // Marcar no canvas é extra: se falhar (design sumiu, IPC fora), a tela do design abre do mesmo jeito.
+  await openDesignOnCanvases(req.designId).catch(() => undefined);
   const path = window.location.hash.replace(/^#/, "") || "/";
   if (chatShellOn(useUiStore.getState())) {
     if (isPageRoute(path)) window.location.hash = useTabsStore.getState().tabs.length > 0 ? "#/workspace" : "#/";

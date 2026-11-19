@@ -23,12 +23,14 @@ import { designRoute } from "@/features/design/openRoute";
  * O canvas de Design: as pranchetas que o agente desenhou, para ver, comentar, editar e
  * aprovar ANTES de construir. O HTML é hostil: só roda em iframe sandbox (ver `srcdoc.ts`).
  */
-export function DesignPanel({ details, reload, initial, onClose }: {
+export function DesignPanel({ details, reload, initial, onPickDesign, onClose }: {
   /** Os designs deste canvas (já filtrados por missão/pasta) e como recarregá-los. */
   details: DesignDetail[];
   reload: () => void | Promise<void>;
   /** O design a abrir (e a prancheta a editar), quando se chega por um aviso ou pelo botão EDITAR de um nó. */
   initial?: { designId?: string; editBoardId?: string } | null;
+  /** A pessoa escolheu um design no seletor: ele entra no canvas. */
+  onPickDesign?: (designId: string) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -130,7 +132,7 @@ export function DesignPanel({ details, reload, initial, onClose }: {
       <div className="flex items-center gap-2 px-3 h-10 shrink-0 border-b border-gray-200 dark:border-white/10">
         <span className="text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">{t("canvas.design.title")}</span>
         {designs.length > 0 && (
-          <PopupSelect value={currentId ?? ""} onChange={(e) => { setDesignId(e.target.value); setPageId(null); setEditing(null); }}
+          <PopupSelect value={currentId ?? ""} onChange={(e) => { setDesignId(e.target.value); setPageId(null); setEditing(null); onPickDesign?.(e.target.value); }}
             aria-label={t("canvas.design.pick")}
             className="max-w-[14rem]">
             {designs.map((d) => <option key={d.id} value={d.id}>{ownerOf(d) ? d.title : `${d.title} (${t("canvas.design.noOwnerTag")})`}</option>)}

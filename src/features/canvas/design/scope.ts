@@ -26,6 +26,11 @@ export function designsForBoardDetails(details: DesignDetail[], scope: { cwd: st
   return details.filter((d) => ids.has(d.design.id));
 }
 
+/** Só os designs abertos neste canvas: os demais não têm moldura nem prancheta. Pura. */
+export function openDetails(details: DesignDetail[], openIds: ReadonlySet<string>): DesignDetail[] {
+  return details.filter((d) => openIds.has(d.design.id));
+}
+
 /** O ponto livre do canvas: à direita de tudo o que já existe (terminais, notas, portais...). */
 export function freeOrigin(board: Board): { x: number; y: number } {
   const boxes = [
