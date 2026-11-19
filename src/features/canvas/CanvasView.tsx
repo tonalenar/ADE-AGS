@@ -70,18 +70,29 @@ import { useCliOutdatedNotice } from "./cliStatus";
 import { useMissionIndex } from "@/features/missions/groups";
 import { CanvasSchedulesPanel } from "./CanvasSchedulesPanel";
 import { RoleEditDialog } from "./RoleEditDialog";
-import { applyTabRole } from "./applyRole";
+import { applyTabRole, applyThreadRole } from "./applyRole";
 import type { AgentRoleChoice } from "./agentRole";
+import { CrownIcon, PencilIcon, ROLE_PILL_BASE, rolePill } from "./nodeBadges";
 import { boardKeyOfTab, canvasActions, compareOfKey, missionOfKey, useActiveBoardKey, useCanvasActive, useCanvasStore } from "./store";
 import { usePortalViewLifetime } from "./portalLifetime";
 import { ThreadNode, type ThreadFlowNode } from "./ThreadNode";
 import { selectConversation } from "@/features/chat/unified/selectionActions";
 import { useSelectedRef } from "@/features/chat/unified/useConversations";
-import { threadIdOf } from "@/features/chat/structured/model";
+import { useChatLive, type TabTurn } from "@/features/chat/liveStore";
+import { threadIdOf, type ThreadLive } from "@/features/chat/structured/model";
 import { useStructured } from "@/features/chat/structured/store";
 import { ComparisonBar } from "@/features/compare/ComparisonBar";
 import { openCompareDialog } from "@/features/compare/store";
 import { cleanPreviewLines } from "./previewText";
+import { SubagentCardNode, type SubagentCardFlowNode } from "./SubagentCardNode";
+import {
+  buildEphemeralSubagents, EMPTY_EPHEMERAL_SUBAGENTS, isEphemeralEdgeId, isEphemeralSubagentNodeId,
+  type EphemeralSubagentCard,
+} from "./subagentsModel";
+import { useBoardHarnessTasks } from "./useBoardHarnessTasks";
+
+const EMPTY_LIVE: Record<string, ThreadLive> = {};
+const EMPTY_TURNS: Record<string, TabTurn> = {};
 
 /** Avisa o agente quando a pessoa liga uma corda entre ele e um navegador do canvas. */
 function announcePortal(key: string, a: string, b: string): void {
@@ -128,7 +139,7 @@ interface PortalNodeData extends Record<string, unknown> {
 }
 
 type PortalFlowNode = Node<PortalNodeData, "portal">;
-type FlowNode = AgentFlowNode | ThreadFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode | FolderFlowNode | DesignBoardFlowNode | DesignFrameFlowNode;
+type FlowNode = AgentFlowNode | ThreadFlowNode | SubagentCardFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode | FolderFlowNode | DesignBoardFlowNode | DesignFrameFlowNode;
 
 // El navegador pesa más de un megabyte: se baja con el primer portal, no con el canvas.
 const BrowserTab = lazy(() => import("@/features/browser/BrowserTab").then((m) => ({ default: m.BrowserTab })));
@@ -180,7 +191,11 @@ const boxSig = (b: { x: number; y: number; w: number; h: number }) => `${b.x},${
 
 const agentSig = (n: AgentFlowNode) =>
   [n.id, n.data.tab.title, n.data.tab.agentId, n.data.tab.agentLabel, boxSig(n.data.box), n.selected, n.data.live,
-    n.data.links, n.data.orchestrator, n.data.role].join("|");
+    n.data.links, n.data.orchestrator, n.data.role, n.data.subagent].join("|");
+const threadSig = (n: ThreadFlowNode) =>
+  [n.id, n.position.x, n.position.y, n.width, n.height, n.selected, n.data.links, n.data.orchestrator, n.data.role, n.data.subagent].join("|");
+const subagentCardSig = (n: SubagentCardFlowNode) =>
+  [n.id, n.data.card.title, n.data.card.subtitle, n.data.card.status, n.data.card.kind, n.data.card.openRef, boxSig(n.data.card.box)].join("|");
 const noteSig = (n: NoteFlowNode) => [
   n.id, n.data.note.name, boxSig(n.data.note.box), n.selected, n.data.links, n.data.note.content,
   n.data.stack.map((s) => s.id + s.name).join(","), n.data.others.map((o) => o.id + o.name).join(","),
@@ -524,16 +539,72 @@ function CanvasInner() {
     return threadId ? [{
       id: ref, type: "thread" as const, position: { x: box.x, y: box.y }, width: box.w, height: box.h,
       selected: ref === selected, dragHandle: ".ade-node-drag", deletable: false,
-      data: { ref, threadId },
+      data: {
+        ref, threadId,
+        links: neighbors(board, ref).length,
+        orchestrator: board.orchestrators.includes(ref),
+        role: board.roles[ref],
+        subagent: board.subagents.includes(ref),
+        onToggleOrchestrator: (id: string) => { if (!key) return; canvasActions.toggleOrchestrator(key, id); announceToOrchestrators(key, [id]); },
+        onSetRole: (id: string, choice: AgentRoleChoice) => {
+          if (!key) return;
+          void applyThreadRole(key, id, choice).then(() => {
+            announceToOrchestrators(key, useCanvasStore.getState().boards[key]?.orchestrators ?? []);
+          });
+        },
+      },
     }] : [];
-  }), [board.threads, selected]);
-  const threadNodes = useStable(rawThreadNodes, (n: ThreadFlowNode) => [n.id, n.position.x, n.position.y, n.width, n.height, n.selected].join("|"));
+  }), [board, selected, key]);
+  const threadNodes = useStable(rawThreadNodes, threadSig);
   const agentNodes = useStable(rawAgentNodes, agentSig);
   const folderNodes = useStable(rawFolderNodes, folderSig);
   const textNodes = useStable(rawTextNodes, textSig);
   const imageNodes = useStable(rawImageNodes, imageSig);
   const noteNodes = useStable(rawNoteNodes, noteSig);
   const portalNodes = useStable(rawPortalNodes, portalSig);
+
+  // Subagentes internos em execução, tarefas delegadas do harness e conversas filhas (`parentRef`):
+  // cartões compactos e cordas pontilhadas efêmeros pendurados no nó pai, sem persistir em `canvas.json`.
+  const structuredLive = useStructured((s) => (canvasActive ? s.live : EMPTY_LIVE));
+  const tabTurns = useChatLive((s) => (canvasActive ? s.turn : EMPTY_TURNS));
+  const boardThreadIds = useMemo(
+    () => Object.keys(board.threads).flatMap((ref) => { const id = threadIdOf(ref); return id ? [id] : []; }),
+    [board.threads],
+  );
+  const harnessTasks = useBoardHarnessTasks(boardThreadIds, canvasActive);
+  const ephemeralSubagents = useMemo(
+    () => (!canvasActive
+      ? EMPTY_EPHEMERAL_SUBAGENTS
+      : buildEphemeralSubagents({ board, threads: liveThreadIds, structuredLive, tabTurns, harnessTasks })),
+    [canvasActive, board, liveThreadIds, structuredLive, tabTurns, harnessTasks],
+  );
+  const focusNodeRef = useRef(focusNode);
+  focusNodeRef.current = focusNode;
+  const onSubagentCardClick = useCallback((card: EphemeralSubagentCard) => {
+    if (card.openRef) {
+      selectConversation(card.openRef);
+      return;
+    }
+    if (threadIdOf(card.parentRef)) {
+      selectConversation(card.parentRef);
+      return;
+    }
+    focusNodeRef.current(card.parentRef);
+  }, []);
+  const rawSubagentNodes: SubagentCardFlowNode[] = useMemo(() => ephemeralSubagents.cards.map((card) => ({
+    id: card.id,
+    type: "subagentCard" as const,
+    position: { x: card.box.x, y: card.box.y },
+    width: card.box.w,
+    height: card.box.h,
+    draggable: false,
+    selectable: false,
+    focusable: false,
+    deletable: false,
+    connectable: false,
+    data: { card, onClick: onSubagentCardClick },
+  })), [ephemeralSubagents.cards, onSubagentCardClick]);
+  const subagentNodes = useStable(rawSubagentNodes, subagentCardSig);
 
   // Las pranchetas de diseño de este canvas: nodos en una zona libre, a la derecha de lo que ya hay.
   const ownerTabs = useMemo(() => allTabs.map((tab) => ({ id: tab.id, title: tab.title })), [allTabs]);
@@ -569,8 +640,8 @@ function CanvasInner() {
   }), [groups, dragPos, design.details, t]);
 
   const nodes: FlowNode[] = useMemo(
-    () => [...designNodes, ...imageNodes, ...folderNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...threadNodes, ...textNodes],
-    [designNodes, imageNodes, folderNodes, noteNodes, portalNodes, agentNodes, threadNodes, textNodes],
+    () => [...designNodes, ...imageNodes, ...folderNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...threadNodes, ...subagentNodes, ...textNodes],
+    [designNodes, imageNodes, folderNodes, noteNodes, portalNodes, agentNodes, threadNodes, subagentNodes, textNodes],
   );
 
   // El modo de foco (solo el diseño) y a qué abre: el aviso, el botón EDITAR de un nodo o el último diseño.
@@ -620,7 +691,7 @@ function CanvasInner() {
   // La punta en una nota tapada se dibuja en la del frente de su pila.
   const edges: Edge[] = useMemo(() => {
     const seen = new Set<string>();
-    return board.edges.filter((e) => boxOf(board, e.a) && boxOf(board, e.b)).flatMap((e) => {
+    const persisted = board.edges.filter((e) => boxOf(board, e.a) && boxOf(board, e.b)).flatMap((e) => {
       const source = shownNote(board, e.a);
       const target = shownNote(board, e.b);
       const pair = [source, target].sort().join("|");
@@ -633,11 +704,26 @@ function CanvasInner() {
       return [{ id: e.id, source, target, sourceHandle, targetHandle, type: "link", selected: e.id === selectedEdge,
         data: { color: cordColor(e.id), hovered: e.id === hoveredEdge } } as Edge];
     });
-  }, [board, selectedEdge, hoveredEdge]);
+    const ephemeral: Edge[] = ephemeralSubagents.edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.sourceHandle,
+      targetHandle: e.targetHandle,
+      type: "link",
+      selectable: false,
+      focusable: false,
+      deletable: false,
+      reconnectable: false,
+      data: { color: cordColor(e.id), ephemeral: true },
+    }));
+    return [...persisted, ...ephemeral];
+  }, [board, selectedEdge, hoveredEdge, ephemeralSubagents.edges]);
 
   const onNodesChange = (changes: NodeChange<FlowNode>[]) => {
     if (!key) return;
     for (const c of changes) {
+      if ("id" in c && isEphemeralSubagentNodeId(c.id)) continue;
       if ("id" in c && isDesignNodeId(c.id)) {
         if (c.type === "position" && c.position && c.id.startsWith(BOARD_NODE_PREFIX)) {
           const pos = c.position;
@@ -811,6 +897,7 @@ function CanvasInner() {
   const onEdgesChange = (changes: EdgeChange[]) => {
     if (!key) return;
     for (const c of changes) {
+      if ("id" in c && isEphemeralEdgeId(c.id)) continue;
       if (c.type === "remove") canvasActions.disconnect(key, c.id);
       else if (c.type === "select") setSelectedEdge((cur) => (c.selected ? c.id : cur === c.id ? null : cur));
     }
@@ -818,6 +905,7 @@ function CanvasInner() {
 
   const onConnect = (c: Connection) => {
     if (!key || !c.source || !c.target) return;
+    if (isEphemeralSubagentNodeId(c.source) || isEphemeralSubagentNodeId(c.target)) return;
     canvasActions.connect(key, c.source, c.target);
     announceToOrchestrators(key, [c.source, c.target]);
     announcePortal(key, c.source, c.target);
@@ -828,11 +916,13 @@ function CanvasInner() {
 
   // Puxar a ponta: soltar numa alça reconecta; soltar no vazio desconecta.
   const onReconnectStart = (_: unknown, edge: Edge) => {
+    if (isEphemeralEdgeId(edge.id)) return;
     reconnected.current = false;
     wrapRef.current?.style.setProperty("--cord-magnet", cordColor(edge.id));
   };
   const onReconnect = (old: Edge, c: Connection) => {
-    if (!key || !c.source || !c.target) return;
+    if (!key || !c.source || !c.target || isEphemeralEdgeId(old.id)) return;
+    if (isEphemeralSubagentNodeId(c.source) || isEphemeralSubagentNodeId(c.target)) return;
     reconnected.current = true;
     const same = (old.source === c.source && old.target === c.target) || (old.source === c.target && old.target === c.source);
     if (same) return;
@@ -843,6 +933,7 @@ function CanvasInner() {
     flashNode(c.target, cordColor(old.id));
   };
   const onReconnectEnd = (_: unknown, edge: Edge) => {
+    if (isEphemeralEdgeId(edge.id)) return;
     wrapRef.current?.style.removeProperty("--cord-magnet");
     if (!reconnected.current && key) canvasActions.disconnect(key, edge.id);
     reconnected.current = false;
@@ -889,9 +980,13 @@ function CanvasInner() {
         onReconnectStart={onReconnectStart}
         onReconnect={onReconnect}
         onReconnectEnd={onReconnectEnd}
-        onEdgeMouseEnter={(_, e) => setHoveredEdge(e.id)}
-        onEdgeMouseLeave={(_, e) => setHoveredEdge((cur) => (cur === e.id ? null : cur))}
-        onEdgeContextMenu={(ev, e) => { ev.preventDefault(); setEdgeMenu({ id: e.id, x: ev.clientX, y: ev.clientY }); }}
+        onEdgeMouseEnter={(_, e) => { if (!isEphemeralEdgeId(e.id)) setHoveredEdge(e.id); }}
+        onEdgeMouseLeave={(_, e) => { if (!isEphemeralEdgeId(e.id)) setHoveredEdge((cur) => (cur === e.id ? null : cur)); }}
+        onEdgeContextMenu={(ev, e) => {
+          if (isEphemeralEdgeId(e.id)) return;
+          ev.preventDefault();
+          setEdgeMenu({ id: e.id, x: ev.clientX, y: ev.clientY });
+        }}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} />
         <DrawingLayer strokes={board.drawings} live={liveStroke} erasing={tool === "erase"}
@@ -1031,11 +1126,11 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
             </span>
           </span>
           {orchestrator ? (
-            <span className={`${PILL} ${rolePill("orquestrador")}`}>{t("canvas.orchestrator")}</span>
+            <span className={`${ROLE_PILL_BASE} ${rolePill("orquestrador")}`}>{t("canvas.orchestrator")}</span>
           ) : role ? (
-            <span className={`${PILL} max-w-32 truncate ${rolePill(role)}`} title={t("canvas.role", { role })}>{role}</span>
+            <span className={`${ROLE_PILL_BASE} max-w-32 truncate ${rolePill(role)}`} title={t("canvas.role", { role })}>{role}</span>
           ) : null}
-          {subagent && <span className={`${PILL} bg-black/[0.06] text-gray-500 dark:bg-white/[0.08] dark:text-white/60`}>{t("role.subagentTag")}</span>}
+          {subagent && <span className={`${ROLE_PILL_BASE} bg-black/[0.06] text-gray-500 dark:bg-white/[0.08] dark:text-white/60`}>{t("role.subagentTag")}</span>}
           {/* "N na fila": o que outros agentes mandaram e espera este terminar o turno. */}
           <PeerQueueBadge tabId={tab.id} name={tab.title.split(" — ")[0]} variant="node" />
           {/* `nodrag`: sin esto el clic arrastraría el nodo en vez de apretar el botón. */}
@@ -1092,18 +1187,6 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
   );
 });
 
-const PILL = "shrink-0 inline-flex h-[18px] items-center rounded-full px-[7px] text-[10px] font-semibold uppercase tracking-[0.06em]";
-
-/** A cor do selo da função (prancheta 1): orquestrador argila, backend azul-claro, frontend roxo, QA laranja. */
-function rolePill(role: string): string {
-  const r = role.toLowerCase();
-  if (/orq|orch|lead|l[ií]der/.test(r)) return "bg-[rgba(217,119,87,0.16)] text-[#c96442] dark:text-[#d97757]";
-  if (/back|api|server/.test(r)) return "bg-[rgba(100,210,255,0.16)] text-sky-600 dark:text-[#64d2ff]";
-  if (/front|ui|design/.test(r)) return "bg-[rgba(191,90,242,0.16)] text-purple-600 dark:text-[#bf5af2]";
-  if (/qa|test/.test(r)) return "bg-[rgba(255,159,10,0.16)] text-amber-600 dark:text-[#ff9f0a]";
-  return "bg-accent-500/15 text-accent-600 dark:text-accent-400";
-}
-
 /** A bolinha de status do terminal: verde enquanto o agente escreve, cinza parado. */
 function NodeStatus({ tabId, active = true }: { tabId: string; active?: boolean }) {
   const on = useSyncExternalStore(
@@ -1115,23 +1198,6 @@ function NodeStatus({ tabId, active = true }: { tabId: string; active?: boolean 
     <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${on
       ? "bg-[#30d158] shadow-[0_0_0_3px_rgba(48,209,88,0.18)]"
       : "bg-gray-300 dark:bg-white/25 shadow-[0_0_0_3px_rgba(142,142,147,0.12)]"}`} />
-  );
-}
-
-function PencilIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-    </svg>
-  );
-}
-
-function CrownIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
-      <path d="M3 7.5 7.5 11 12 4l4.5 7L21 7.5 19 18H5L3 7.5Z" />
-      <rect x="5" y="19.5" width="14" height="2" rx="1" />
-    </svg>
   );
 }
 
@@ -1513,5 +1579,5 @@ const PortalOrDevice = memo(function PortalOrDevice(props: NodeProps<PortalFlowN
     : <PortalNode {...props} />;
 });
 
-const NODE_TYPES = { designBoard: DesignBoardNode, designFrame: DesignFrameNode, agent: AgentNode, thread: ThreadNode, note: NoteNode, portal: PortalOrDevice, text: TextNode, image: ImageNode, folder: FolderNode };
+const NODE_TYPES = { designBoard: DesignBoardNode, designFrame: DesignFrameNode, agent: AgentNode, thread: ThreadNode, subagentCard: SubagentCardNode, note: NoteNode, portal: PortalOrDevice, text: TextNode, image: ImageNode, folder: FolderNode };
 const EDGE_TYPES = { link: CordEdge };

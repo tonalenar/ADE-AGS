@@ -255,7 +255,7 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
   const roles = roleIds.every(participant)
     ? board.roles
     : Object.fromEntries(Object.entries(board.roles).filter(([id]) => participant(id)));
-  const subagents = board.subagents.every((id) => open.has(id)) ? board.subagents : board.subagents.filter((id) => open.has(id));
+  const subagents = board.subagents.every(participant) ? board.subagents : board.subagents.filter(participant);
   // O nó de uma conversa por protocolo só some quando se SABE que ela acabou (`liveThreads` dado); sem a lista
   // (ainda não carregou) nada some, como as abas antes de restaurar.
   const threads = !liveThreads || Object.keys(board.threads).every((id) => liveThreads.has(id))

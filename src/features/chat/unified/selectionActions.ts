@@ -10,7 +10,8 @@ import { useTeamIndex } from "../team/teamIndex";
 import { homeBoardKey } from "./selection";
 
 /** O canvas em que a conversa por protocolo `ref` mora (ver `homeBoardKey`). */
-function threadBoard(ref: string): string {
+function threadBoard(ref: string, visited = new Set<string>()): string {
+  visited.add(ref);
   const id = threadIdOf(ref);
   const row = useStructured.getState().threads.find((t) => t.id === id);
   const team = useTeamIndex.getState().teams.find((t) => t.orchestrator === ref || t.members.some((m) => m.member === ref));
@@ -27,7 +28,15 @@ function threadBoard(ref: string): string {
     ? leadTab ? boardKeyOfTab(leadTab, boards)
       : storedSpecial ?? leadSpecial ?? storedCanvasBoard ?? leadHomeBoard
     : undefined;
-  let key = homeBoardKey(ref, { boards, cwd: row?.cwd ?? "", teamBoardKey, cwdKey: boardKey });
+  let parentBoardKey: string | undefined;
+  if (!teamBoardKey && row?.parentRef && !visited.has(row.parentRef)) {
+    if (threadIdOf(row.parentRef)) parentBoardKey = threadBoard(row.parentRef, visited);
+    else {
+      const parentTab = useTabsStore.getState().tabs.find((t) => t.id === row.parentRef);
+      if (parentTab) parentBoardKey = boardKeyOfTab(parentTab, boards);
+    }
+  }
+  let key = homeBoardKey(ref, { boards, cwd: row?.cwd ?? "", teamBoardKey: teamBoardKey ?? parentBoardKey, cwdKey: boardKey });
   // Na primeira ativação, uma conversa por protocolo que já tinha cartão no canvas da pasta vai para o novo
   // canvas com as cordas, a coroa e o papel dela (movidos, não copiados: ver `moveSessionArtifacts`).
   const sourceKey = row ? boardKey(row.cwd) : null;

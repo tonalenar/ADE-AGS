@@ -50,6 +50,7 @@ export function missionRefsOf(boards: Record<string, Board>): Set<string> {
     if (!key.includes(MISSION_SEP)) continue;
     for (const id of board.orchestrators) out.add(id);
     for (const id of Object.keys(board.nodes)) out.add(id);
+    for (const id of Object.keys(board.threads ?? {})) out.add(id);
   }
   return out;
 }
@@ -83,9 +84,10 @@ function crownedBoards(team: TeamView, boards: Record<string, Board>): Board[] {
 }
 
 /**
- * O que o canvas diz do time: as abas de agente ligadas por corda ao orquestrador coroado, com papel e
- * subagente, e os integrantes que são abas abertas sem corda (para perceber que a corda saiu). `null` =
- * o orquestrador não está coroado: o time continua, só deixa de ser espelhado. Pura.
+ * O que o canvas diz do time: as conversas elegíveis (abas de agente ou conversas por protocolo ativas)
+ * ligadas por corda ao orquestrador coroado, com papel e subagente, e os integrantes elegíveis sem corda
+ * (para perceber que a corda saiu). `null` = o orquestrador não está coroado: o time continua, só deixa de
+ * ser espelhado. Pura.
  */
 export function projectCanvas(team: TeamView, boards: Record<string, Board>, isAgentTab: (ref: string) => boolean): CanvasProjection | null {
   const crowned = crownedBoards(team, boards);

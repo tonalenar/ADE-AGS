@@ -4,12 +4,15 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const pickMock = vi.hoisted(() => vi.fn<() => Promise<string | null>>());
+
 vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve([]) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => undefined) }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ onResized: () => Promise.resolve(() => undefined) }) }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: "pt-BR" } }) }));
 vi.mock("@/features/missions/MissionsSection", () => ({ MissionsSection: () => <div data-testid="missoes" /> }));
 vi.mock("@/shared/brand/Pet", () => ({ usePetStatus: () => ({}), PetCard: () => <div data-testid="pet" /> }));
+vi.mock("../NewConversation", () => ({ pickProjectFolder: (...args: unknown[]) => pickMock(...(args as [])) }));
 
 import { useTabsStore } from "@/features/tabs/store";
 import { useChatStore } from "@/features/chat/store";
@@ -30,6 +33,7 @@ function Where() { where = useLocation().pathname; return null; }
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  pickMock.mockReset().mockResolvedValue(null);
   where = "";
   useChatStore.setState({ composing: false, composeFolder: null, thread: null });
   useTabsStore.setState({ tabs: [], activeTabId: null });
@@ -92,5 +96,25 @@ describe("a barra de sessões nas Abas e no Canvas", () => {
     expect(where).toBe("/settings");
     expect(useChatStore.getState().composing).toBe(true);
     expect(useChatStore.getState().composeFolder).toBe("/p/ADE");
+  });
+
+  it("Projetos abre o seletor de pasta e abre o composer sem sair do modo nem ir para a Home", async () => {
+    pickMock.mockResolvedValueOnce("/p/novo");
+    await mount();
+    const btn = host.querySelector("[aria-label='chat.sidebar.addProject']") as HTMLElement;
+    expect(btn).not.toBeNull();
+    await act(async () => { btn.click(); });
+    expect(pickMock).toHaveBeenCalledTimes(1);
+    expect(where).toBe("/settings");
+    expect(useChatStore.getState()).toMatchObject({ composing: true, composeFolder: "/p/novo" });
+  });
+
+  it("Projetos cancelado não abre o composer nem navega", async () => {
+    pickMock.mockResolvedValueOnce(null);
+    await mount();
+    const btn = host.querySelector("[aria-label='chat.sidebar.addProject']") as HTMLElement;
+    await act(async () => { btn.click(); });
+    expect(where).toBe("/settings");
+    expect(useChatStore.getState().composing).toBe(false);
   });
 });

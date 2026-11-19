@@ -12,7 +12,7 @@ import type { UnifiedConversation } from "./types";
  */
 export interface UnifiedSources {
   tabs: Pick<Tab, "id" | "title" | "cwd" | "agentId" | "ptyId" | "openedAt">[];
-  threads: Pick<ThreadRow, "id" | "agentId" | "cwd" | "title" | "state" | "updatedAt">[];
+  threads: Pick<ThreadRow, "id" | "agentId" | "cwd" | "title" | "state" | "updatedAt" | "parentRef">[];
   teams: TeamView[];
   boards: Record<string, Pick<Board, "nodes" | "threads" | "roles" | "edges">>;
   cwdKey?: (cwd: string) => string;
@@ -62,7 +62,7 @@ export function selectConversations(src: UnifiedSources): UnifiedConversation[] 
   const slots = teamSlots(src.teams);
   const nodeBoard = boardKeyByNode(src.boards);
 
-  const build = (base: Pick<UnifiedConversation, "ref" | "kind" | "agentId" | "cwd" | "title" | "starting" | "openedAt">): UnifiedConversation => {
+  const build = (base: Pick<UnifiedConversation, "ref" | "kind" | "agentId" | "cwd" | "title" | "parentRef" | "starting" | "openedAt">): UnifiedConversation => {
     const slot = slots.get(base.ref);
     const folderKey = (src.cwdKey ?? ((cwd) => `main|${cwd}`))(base.cwd);
     const teamBoard = slot ? ownerBoardKey(slot.team, nodeBoard, src.cwdKey) : undefined;
@@ -93,8 +93,24 @@ export function selectConversations(src: UnifiedSources): UnifiedConversation[] 
     .map((t) => build({ ref: t.id, kind: "pty", agentId: t.agentId, cwd: t.cwd, title: t.title, starting: t.ptyId == null, openedAt: t.openedAt }));
   const threads = src.threads
     .filter((t) => t.state === "active")
-    .map((t) => build({ ref: threadKey(t.id), kind: "protocol", agentId: t.agentId, cwd: t.cwd, title: t.title, starting: false, openedAt: t.updatedAt }));
-  return [...threads, ...tabs].sort((a, b) => b.openedAt - a.openedAt);
+    .map((t) => build({ ref: threadKey(t.id), kind: "protocol", agentId: t.agentId, cwd: t.cwd, title: t.title, parentRef: t.parentRef || undefined, starting: false, openedAt: t.updatedAt }));
+  const all = [...threads, ...tabs];
+  const byRef = new Map(all.map((c) => [c.ref, c]));
+  const inheritBoard = (conv: UnifiedConversation, visited = new Set<string>()): string | undefined => {
+    if (!conv.parentRef || conv.teamId || nodeBoard.has(conv.ref) || visited.has(conv.ref)) return conv.boardKey;
+    visited.add(conv.ref);
+    const parent = byRef.get(conv.parentRef);
+    return parent ? inheritBoard(parent, visited) : conv.boardKey;
+  };
+  for (const conv of all) {
+    if (!conv.parentRef || conv.teamId || nodeBoard.has(conv.ref)) continue;
+    const inherited = inheritBoard(conv);
+    if (inherited) {
+      conv.boardKey = inherited;
+      conv.missionId = conv.missionId ?? missionOfKey(inherited);
+    }
+  }
+  return all.sort((a, b) => b.openedAt - a.openedAt);
 }
 
 /** O canvas da coroa é o dono; time vindo de um grupo manual mantém a chave de origem. */

@@ -201,22 +201,25 @@ export function CordEdge({ id, sourceX, sourceY, targetX, targetY, sourcePositio
   const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
   const color = (data?.color as string | undefined) ?? cordColor(id);
   const hovered = !!data?.hovered;
+  const ephemeral = !!data?.ephemeral;
   const born = data?.born as number | undefined;
   const fresh = born !== undefined && Date.now() - born < 400;
-  const showCut = (selected || hovered) && key;
+  const showCut = !ephemeral && (selected || hovered) && key;
   return (
     <>
-      <path d={path} fill="none" stroke={color} strokeWidth={selected || hovered ? 9 : 7} strokeOpacity={0.3}
+      <path d={path} fill="none" stroke={color} strokeWidth={ephemeral ? 5 : selected || hovered ? 9 : 7} strokeOpacity={ephemeral ? 0.14 : 0.3}
         className="ade-cord-glow" pointerEvents="none" />
       <BaseEdge
         id={id}
         path={path}
-        interactionWidth={20}
+        interactionWidth={ephemeral ? 0 : 20}
         className={fresh ? "ade-cord-born" : undefined}
         style={{
           stroke: selected ? "var(--color-accent-500)" : color,
-          strokeWidth: selected || hovered ? 4 : 3,
+          strokeWidth: ephemeral ? 2 : selected || hovered ? 4 : 3,
           strokeLinecap: "round",
+          strokeDasharray: ephemeral ? "6 5" : undefined,
+          strokeOpacity: ephemeral ? 0.78 : undefined,
           ["--cord-color" as string]: color,
         }}
       />

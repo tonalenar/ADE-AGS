@@ -135,8 +135,7 @@ export function canvasPlan(input: CanvasInput): CanvasOp[] {
     const label = input.roleLabel(m.role);
     const current = boards[nodeKey]?.roles[ref] ?? boards[leadKey]?.roles[ref];
     const markedNow = boards[nodeKey]?.subagents.includes(ref) ?? boards[leadKey]?.subagents.includes(ref) ?? false;
-    // A conversa por protocolo não tem nó: a marca do canvas fica como está (a do time vale só no painel).
-    const subagent = isThreadRef(ref) ? markedNow : m.subagent;
+    const subagent = m.subagent;
     if ((label && current !== label) || subagent !== markedNow) ops.push({ kind: "role", key: nodeKey, id: ref, label: label || current || "", subagent });
   }
 
