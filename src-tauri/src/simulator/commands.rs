@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter, Runtime, Webview};
 
 use super::lifecycle;
 
-use super::model::{Device, Place};
+use super::model::{Device, Memory, Place};
 use super::ops;
 
 #[tauri::command(async)]
@@ -184,6 +184,13 @@ pub fn simulator_clipboard(udid: String, direction: String) -> Result<(), String
 #[tauri::command]
 pub fn simulator_orientation(udid: String) -> String {
     crate::simulator::model::orientation_name(ops::orientation(&udid)).to_string()
+}
+
+/// A memória do aparelho ligado (`processes` e `bytes`): a soma do `phys_footprint` da árvore do `launchd_sim`.
+/// Bloqueia (chama o `ps`): `async`, fora da thread da interface.
+#[tauri::command(async)]
+pub fn simulator_memory(udid: String) -> Result<Memory, String> {
+    ops::memory(&udid)
 }
 
 /// A foto da tela (PNG temporário): o caminho, para anexar na conversa com os agentes.

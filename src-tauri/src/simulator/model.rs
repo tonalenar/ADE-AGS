@@ -317,6 +317,20 @@ pub fn process_tree(ps: &str, udid: &str) -> Vec<u32> {
     tree
 }
 
+/// A memória de um aparelho: quantos processos do iOS ele tem e a soma do `phys_footprint` deles (bytes).
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Memory {
+    pub processes: usize,
+    pub bytes: u64,
+}
+
+/// Soma o `phys_footprint` (`footprint` devolve `None` para um processo que já saiu). Pura: a chamada ao sistema
+/// fica no `native`. RSS não serve: conta a memória compartilhada uma vez por processo que a mapeia.
+pub fn sum_footprint(pids: &[u32], footprint: impl Fn(u32) -> Option<u64>) -> Memory {
+    pids.iter().filter_map(|&pid| footprint(pid)).fold(Memory::default(), |m, bytes| Memory { processes: m.processes + 1, bytes: m.bytes + bytes })
+}
+
 // ── Controles do painel do chat (aparência, local, Face ID, app em primeiro plano, rotação) ──
 
 /// A aparência pedida (`light`/`dark`), validada antes de ir para o `simctl ui`.

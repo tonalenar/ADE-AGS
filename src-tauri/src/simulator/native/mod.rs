@@ -179,6 +179,22 @@ fn ios_processes(udid: &str) -> Result<Vec<u32>, String> {
     Ok(model::process_tree(&String::from_utf8_lossy(&out.stdout), udid))
 }
 
+/// A memória do aparelho ligado: a soma do `phys_footprint` (o número do Monitor de Atividade, com as páginas
+/// comprimidas e em swap) de cada processo da árvore do `launchd_sim` dele, como o `simslim measure`.
+pub fn memory(udid: &str) -> Result<model::Memory, String> {
+    let pids = ios_processes(udid)?;
+    Ok(model::sum_footprint(&pids, phys_footprint))
+}
+
+/// O `phys_footprint` de um processo, em bytes (`None` se ele já saiu).
+fn phys_footprint(pid: u32) -> Option<u64> {
+    // SAFETY: `rusage_info_v4` só tem inteiros e bytes: zerado é válido.
+    let mut info: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };
+    // SAFETY: `proc_pid_rusage` com RUSAGE_INFO_V4 escreve um `rusage_info_v4` no buffer; processos do mesmo usuário.
+    let rc = unsafe { libc::proc_pid_rusage(pid as libc::c_int, libc::RUSAGE_INFO_V4, &mut info as *mut _ as *mut libc::rusage_info_t) };
+    (rc == 0).then_some(info.ri_phys_footprint)
+}
+
 /// Espera o `launchd_sim` do aparelho abrir os primeiros serviços (até `wait`).
 fn launchd_started(udid: &str, wait: Duration) {
     let until = std::time::Instant::now() + wait;

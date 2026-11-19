@@ -4140,6 +4140,8 @@
   "simulator.shot": "Screenshot",
   "simulator.shotSaved": "Screenshot saved to {{path}}",
   "simulator.more": "More",
+  "simulator.memory.label": "{{memory}} · {{processes}} proc.",
+  "simulator.memory.hint": "Memory this device uses on the Mac: the sum of phys_footprint (the number Activity Monitor shows, including compressed and swapped pages) across all of its iOS processes, the launchd_sim tree. Not the sum of RSS, which counts shared memory once per process.",
   "simulator.zoom": "Size",
   "simulator.smaller": "Make the device smaller",
   "simulator.bigger": "Make the device bigger",
