@@ -41,7 +41,7 @@ export function useTerminalPrompts(tabs: { id: string; name: string }[], enabled
         return same ? prev : next;
       });
     };
-    scan();
+    if (typeof document === "undefined" || document.visibilityState !== "hidden") scan();
     let timer: number | undefined;
     const resume = () => {
       if (timer !== undefined) window.clearInterval(timer);

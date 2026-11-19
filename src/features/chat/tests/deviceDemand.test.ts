@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  canvasDeviceEngaged, deviceActionTitle, deviceControlEnabled, deviceTool, mirrorShouldAttach, shouldProbeDevices,
+  canvasDeviceEngaged, deviceActionTitle, deviceControlEnabled, deviceTool, isWorkspaceRoute, mirrorShouldAttach, shouldProbeDevices,
 } from "../deviceDemand";
 
 describe("aparelho sob demanda", () => {
   it("não busca nem conecta com o app montado e a superfície fechada", () => {
     expect(canvasDeviceEngaged("canvas", true)).toBe(false);
     expect(canvasDeviceEngaged("tabs", false)).toBe(false);
+    expect(canvasDeviceEngaged("canvas", false, "/settings")).toBe(false);
+    expect(isWorkspaceRoute("/workspace")).toBe(true);
+    expect(isWorkspaceRoute("/workspace/123")).toBe(true);
+    expect(isWorkspaceRoute("/settings")).toBe(false);
     expect(shouldProbeDevices(false, "macos", "ios-simulator")).toBe(false);
     expect(shouldProbeDevices(false, "macos", "ios-physical")).toBe(false);
     expect(shouldProbeDevices(false, "linux", "android")).toBe(false);

@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
+import { useLocation } from "react-router-dom";
 import { create } from "zustand";
 
+import { useChatShell } from "@/app/uiStore";
+import { canvasDeviceEngaged } from "@/features/chat/deviceDemand";
 import { useTabsStore } from "@/features/tabs/store";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
@@ -131,6 +134,14 @@ export function useActiveBoardKey(): string | null {
 export function useWorkMode(): WorkMode {
   const key = useActiveBoardKey();
   return useCanvasStore((s) => (key ? s.modes[key] ?? "tabs" : "tabs"));
+}
+
+/** `true` quando o canvas está visível: modo `"canvas"`, sem o chat por cima e na rota `/workspace`. */
+export function useCanvasActive(): boolean {
+  const mode = useWorkMode();
+  const chatShell = useChatShell();
+  const { pathname } = useLocation();
+  return canvasDeviceEngaged(mode, chatShell, pathname);
 }
 
 const MODES_KEY = "ade-canvas-modes";

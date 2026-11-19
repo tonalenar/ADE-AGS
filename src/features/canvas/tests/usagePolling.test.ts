@@ -95,4 +95,29 @@ describe("barrido de cuota", () => {
     expect(claude).toHaveBeenNthCalledWith(1, "cl", false);
     expect(claude).toHaveBeenNthCalledWith(2, "cl", true);
   });
+
+  it("não consulta nem agenda intervalo quando active=false e lê na hora ao voltar a active=true", async () => {
+    vi.useFakeTimers();
+    try {
+      claude.mockImplementation(async () => live(Math.floor(Date.now() / 1000), true));
+      codex.mockImplementation(async () => codexUsage(Math.floor(Date.now() / 1000)));
+      discover.mockImplementation(async () => ({
+        accountId: "ag", projectId: "p", inferenceVerified: false, fetchedAt: Math.floor(Date.now() / 1000), models: [],
+      }));
+
+      stop = startUsagePolling(accounts, false);
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+      expect(claude).not.toHaveBeenCalled();
+      expect(codex).not.toHaveBeenCalled();
+      expect(discover).not.toHaveBeenCalled();
+      stop();
+
+      stop = startUsagePolling(accounts, true);
+      await vi.waitFor(() => expect(claude).toHaveBeenCalledTimes(1));
+      expect(codex).toHaveBeenCalledTimes(1);
+      expect(discover).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -109,9 +109,11 @@ function StartStage({ device, viewport, onResize, zoom, children }: {
   return <ResponsiveStage viewport={viewport} onResize={onResize} zoom={zoom} device={device}>{children}</ResponsiveStage>;
 }
 
-export function BrowserTab({ view, active, device = null, floatingPreview = false }: {
+export function BrowserTab({ view, active, surfaceActive = true, device = null, floatingPreview = false }: {
   view: BrowserView;
   active: boolean;
+  /** `false` quando o container do navegador está fora de cena (aba oculta, canvas ocioso, outra rota). */
+  surfaceActive?: boolean;
   /** O mesmo navegador, destacado sobre a conversa sem criar outra página. */
   floatingPreview?: boolean;
   /** "Celular solto" (canvas): só o aparelho deste modelo, sem a barra do navegador; a página na resolução dele. */
@@ -1290,7 +1292,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
               zoom={stageViewport && !floatingPreview ? zoom : 1} device={floatingPreview ? null : device}
               platform={mobile} url={address} actions={phoneActions.current} floatingPreview={floatingPreview}>
             <RealBrowserView viewId={view.id} url={view.url} zoom={realZoom} script={INJECTED}
-              profileId={browserProfileId} projectPath={view.cwd} floatingPreview={floatingPreview} onError={setError}
+              profileId={browserProfileId} projectPath={view.cwd} floatingPreview={floatingPreview} surfaceActive={surfaceActive} onError={setError}
               onUrl={(u) => {
                 setRealReady(true);
                 setAddress(u);

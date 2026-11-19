@@ -5,7 +5,7 @@ import { Position } from "@xyflow/react";
 
 import { CordPort } from "@/features/canvas/cords";
 import { isNoteId, isPortalId, neighbors, type CanvasPortal } from "@/features/canvas/board";
-import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
+import { canvasActions, useActiveBoardKey, useCanvasActive, useCanvasStore } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { AlertaToast } from "@/shared/ui/alerts";
 
@@ -14,9 +14,8 @@ import {
   SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorClipboard, simulatorOrientation, simulatorPriority, simulatorRotate, simulatorScreenshot,
   simulatorShutdown, type SimDevice, type SimOrientationEvent,
 } from "./ipc";
-import { useChatShell } from "@/app/uiStore";
 import { DESKTOP_OS } from "@/app/platform";
-import { canvasDeviceEngaged, shouldProbeDevices } from "@/features/chat/deviceDemand";
+import { shouldProbeDevices } from "@/features/chat/deviceDemand";
 import { canTouch, frameLayout, isPhysicalId, physicalScreen } from "@/features/iphone/model";
 import { iphoneMirrorConnect, iphoneMirrorDisconnect } from "@/features/iphone/ipc";
 import { DeviceFrame, screenRadiusOf } from "@/features/iphone/DeviceFrame";
@@ -64,7 +63,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
   const [landscape, setLandscape] = useState(false);
   const [physicalSearching, setPhysicalSearching] = useState(false);
   const [physicalSessionBusy, setPhysicalSessionBusy] = useState(false);
-  const surfaceOpen = canvasDeviceEngaged(useWorkMode(), useChatShell());
+  const surfaceOpen = useCanvasActive();
   const probeSimulator = shouldProbeDevices(surfaceOpen, DESKTOP_OS, "ios-simulator");
   const probePhysical = shouldProbeDevices(surfaceOpen, DESKTOP_OS, "ios-physical");
 

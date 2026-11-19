@@ -9,11 +9,9 @@ import { AlertaToast } from "@/shared/ui/alerts";
 
 import { PHONE_MIN, type CanvasPortal } from "./board";
 import { NOTE_HEADER_H } from "./geometry";
-import { useChatShell } from "@/app/uiStore";
-import { canvasDeviceEngaged } from "@/features/chat/deviceDemand";
 import { androidFrameShouldPoll } from "./androidPoll";
 
-import { canvasActions, useActiveBoardKey, useWorkMode } from "./store";
+import { canvasActions, useActiveBoardKey, useCanvasActive } from "./store";
 
 interface AndroidDevice {
   serial: string;
@@ -85,7 +83,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
 }) {
   const { t } = useTranslation();
   const key = useActiveBoardKey();
-  const surfaceOpen = canvasDeviceEngaged(useWorkMode(), useChatShell());
+  const surfaceOpen = useCanvasActive();
   const [armed, setArmed] = useState(false);
   const [list, setList] = useState<AndroidList | null>(null);
   const [frame, setFrame] = useState<Frame | null>(null);
