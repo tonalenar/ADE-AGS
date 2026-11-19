@@ -153,6 +153,31 @@ describe("o + e o menu de superfícies", () => {
     await pressKey(launcher, "d");
     expect(useChatStore.getState().panel).toBe("diff");
   });
+
+  it("o menu '+' marca data-over-webview e alinha à direita se passar da borda da janela", async () => {
+    useChatStore.setState({ panel: "empty" });
+    await mount();
+    const menu = await openMenu();
+    expect(menu.hasAttribute("data-over-webview")).toBe(true);
+    expect(menu.className).toContain("left-0");
+    await click(q("[aria-label='chat.panel.addTab']"));
+
+    const origRect = HTMLElement.prototype.getBoundingClientRect;
+    const origInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { value: 1000, configurable: true });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.querySelector?.("[data-surface-list]")) {
+        return { x: 800, y: 40, left: 800, top: 40, width: 260, height: 300, right: 1060, bottom: 340, toJSON: () => ({}) } as DOMRect;
+      }
+      return origRect.call(this);
+    });
+
+    const flipped = await openMenu();
+    expect(flipped.className).toContain("right-0");
+    expect(flipped.className).not.toContain("left-0");
+    Object.defineProperty(window, "innerWidth", { value: origInnerWidth, configurable: true });
+    vi.restoreAllMocks();
+  });
 });
 
 describe("trocar de aba não remonta terminal nem navegador (o slot é o mesmo nó; só muda quem ele publica)", () => {

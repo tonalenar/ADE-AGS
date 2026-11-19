@@ -2,7 +2,7 @@ import { useContext, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { FLOATING_PREVIEW_CORNER_RADIUS, NativeCornerRadius } from "./nativeCorner";
 import { closeAppPopovers } from "./outsidePointer";
-import { boxOf, clippingAncestors, COVER_MS, coversOf } from "./nativeSurface";
+import { boxOf, clippingAncestors, COVER_MS, coversOf, HIT_OVERLAYS, hitCoversOf, OVERLAYS } from "./nativeSurface";
 import { miniBrowserZoom, placeOf, realBrowserClose, realBrowserOpen, realBrowserPlace, samePlace, type Box, type Place } from "./realBrowser";
 import { setChatBrowserMiniHover, useChatStore } from "@/features/chat/store";
 
@@ -75,6 +75,7 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     let sent: Place | null = null;
     let clips: HTMLElement[] = clippingAncestors(el);
     let covers: Box[] = [];
+    let hitCovers: Box[] = [];
     let coveredAt = 0;
     let frame = 0;
     let placeInFlight = false;
@@ -100,12 +101,21 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
         lastRect = rect;
         clips = clippingAncestors(el);
         covers = coversOf(el, rect);
+        hitCovers = hitCoversOf(el);
       }
       const windowBox = { x: 0, y: 0, width: innerWidth, height: innerHeight };
       const clipsToUse = latest.current.floatingPreview ? [] : clips.map(boxOf);
       return {
         // Com o aparelho emoldurado na miniatura, o palco já escala a página: vale o zoom dele, não o da miniatura.
-        ...placeOf(rect, el.offsetWidth, latest.current.floatingPreview && latest.current.screenRadius <= 0 ? latest.current.miniZoom : latest.current.zoom, [windowBox, ...clipsToUse], shown ? covers : [], shown),
+        ...placeOf(
+          rect,
+          el.offsetWidth,
+          latest.current.floatingPreview && latest.current.screenRadius <= 0 ? latest.current.miniZoom : latest.current.zoom,
+          [windowBox, ...clipsToUse],
+          shown ? covers : [],
+          shown,
+          shown ? hitCovers : [],
+        ),
         clickToExpand: latest.current.floatingPreview,
         // A tela do aparelho manda nos cantos, também na miniatura.
         cornerRadius: latest.current.screenRadius > 0 ? latest.current.screenRadius : latest.current.floatingPreview ? FLOATING_PREVIEW_CORNER_RADIUS : 0,
@@ -177,6 +187,41 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
         mo.observe(cur, { attributes: true, attributeFilter: ["style", "class", "hidden"] });
       }
     }
+    const overlaySelector = `${OVERLAYS}, ${HIT_OVERLAYS}`;
+    const hasOverlayNode = (node: Node): boolean => {
+      if (node.nodeType !== 1) return false;
+      const elem = node as Element;
+      if (el.contains(elem)) return false;
+      return elem.matches(overlaySelector) || Boolean(elem.querySelector(overlaySelector));
+    };
+    const isOverlayMutation = (records: MutationRecord[]): boolean => records.some((record) => {
+      if (record.type === "childList") {
+        for (const node of record.addedNodes) if (hasOverlayNode(node)) return true;
+        for (const node of record.removedNodes) if (hasOverlayNode(node)) return true;
+        return false;
+      }
+      if (record.target.nodeType !== 1) return false;
+      const target = record.target as Element;
+      if (el.contains(target)) return false;
+      if (record.attributeName === "open" || record.attributeName === "data-over-webview" || record.attributeName === "popover" || record.attributeName === "role") {
+        return true;
+      }
+      if (target === document.body || target === document.documentElement) return false;
+      return target.matches(overlaySelector) || Boolean(target.querySelector(overlaySelector));
+    });
+    const bodyMo = typeof MutationObserver !== "undefined"
+      ? new MutationObserver((records) => {
+          if (!isOverlayMutation(records)) return;
+          invalidateCovers();
+          wake();
+        })
+      : null;
+    bodyMo?.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["open", "data-over-webview", "popover", "role", "style", "class", "hidden", "data-state"],
+    });
     document.addEventListener("visibilitychange", wake);
     window.addEventListener("resize", wake);
 
@@ -190,7 +235,11 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       listen<{ id: string; back: boolean; forward: boolean }>("real-browser-history", mine((p) => latest.current.onHistory?.(p))),
       listen<{ id: string }>("real-browser-pointer", mine(() => closeAppPopovers())),
       listen<{ id: string; inside: boolean }>("real-browser-mini-hover", mine((p) => {
-        if (latest.current.floatingPreview) setChatBrowserMiniHover(viewId, p.inside);
+        if (latest.current.floatingPreview) {
+          setChatBrowserMiniHover(viewId, p.inside);
+          invalidateCovers();
+          wake();
+        }
       })),
       listen<{ id: string; popup: string; url: string }>("real-browser-popup", mine((p) => latest.current.onPopup?.({ id: p.popup, url: p.url }))),
       listen<{ id: string }>("real-browser-closed", mine(() => latest.current.onClosedByPage?.())),
@@ -202,6 +251,7 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       ro?.disconnect();
       io?.disconnect();
       mo?.disconnect();
+      bodyMo?.disconnect();
       document.removeEventListener("visibilitychange", wake);
       window.removeEventListener("resize", wake);
       window.removeEventListener("blur", onBlur);

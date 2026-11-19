@@ -84,6 +84,21 @@ describe("lugar do navegador nativo no Portal", () => {
     expect(samePlace(a, placeOf({ ...portal, x: 101 }, 800, 1, [window], [], true))).toBe(false);
     expect(samePlace(null, a)).toBe(false);
   });
+
+  it("overlay_cobrindo_todo_o_portal_zera_visibleRect_para_esconder_superficie", () => {
+    const modal = { x: 0, y: 0, width: 1920, height: 1080 };
+    const place = placeOf(portal, 800, 1, [window], [modal], true);
+    expect(place.visibleRect).toBeNull();
+    expect(place.holes).toEqual([]);
+  });
+
+  it("hitCovers_gera_hitHoles_sem_abrir_buraco_visual_em_holes", () => {
+    const hitGrip = { x: 800, y: 60, width: 90, height: 36 };
+    const place = placeOf(portal, 800, 1, [window], [], true, [hitGrip]);
+    expect(place.visibleRect).toEqual({ x: 0, y: 0, width: 800, height: 600 });
+    expect(place.holes).toEqual([]);
+    expect(place.hitHoles).toEqual([{ x: 700, y: 10, width: 90, height: 36 }]);
+  });
 });
 
 describe("zoom da miniatura viva", () => {
