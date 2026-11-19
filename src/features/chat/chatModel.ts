@@ -36,6 +36,12 @@ export const ACCESS_MODES: ChatAccess[] = ["ask", "edits", "safe", "full"];
 
 /** As TUI cuja saída a ADE lê e mostra como timeline, em vez de um PTY bruto. */
 const TIMELINE_AGENTS = new Set(["claude-code", "codex"]);
+const REAL_TERMINAL_AGENTS = new Set(["claude-code", "codex"]);
+
+/** Claude Code e Codex podem usar a TUI real como padrão de uma conversa nova. */
+export function hasRealTerminalMode(agentId: string | null | undefined): boolean {
+  return !!agentId && REAL_TERMINAL_AGENTS.has(agentId);
+}
 
 /** Flags específicos declarados pelo adapter de lançamento da TUI. */
 const REASONING_EFFORT_AGENTS = new Set(["claude-code", "codex", "antigravity"]);
