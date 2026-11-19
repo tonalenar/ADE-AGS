@@ -183,6 +183,8 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
   const error = useSimulatorStore((s) => s.error);
   const light = useSimulatorPrefs((s) => s.light);
   const lightMax = useSimulatorPrefs((s) => s.lightMax);
+  // O painel do chat não tem projeto: vale o padrão global das categorias mantidas ligadas.
+  const exceptions = useSimulatorPrefs((s) => s.exceptions);
   const picked = useChatStore((s) => s.devices.ios);
   const [booting, setBooting] = useState(false);
   const [appRevision, setAppRevision] = useState(0);
@@ -229,7 +231,7 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
     if (!current) return;
     setBooting(true);
     try {
-      await simulatorBoot(current.udid, light, lightMax);
+      await simulatorBoot(current.udid, light, lightMax, exceptions);
       setDeviceState(current.udid, "booted");
     } catch (e) {
       fail(e);

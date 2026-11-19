@@ -106,6 +106,29 @@ fn usage() -> &'static Mutex<HashMap<String, Usage>> {
     U.get_or_init(Default::default)
 }
 
+/// As exceções (categorias mantidas ligadas) do último boot de cada aparelho, para o religamento automático
+/// depois de hibernar e o `ags device start` usarem as mesmas do usuário em vez de desligar tudo.
+fn last_exceptions() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    static E: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+    E.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Guarda as exceções usadas no boot de `udid` (vazio apaga a entrada).
+pub fn remember_exceptions(udid: &str, exceptions: &[String]) {
+    if let Ok(mut map) = last_exceptions().lock() {
+        if exceptions.is_empty() {
+            map.remove(udid);
+        } else {
+            map.insert(udid.to_string(), exceptions.to_vec());
+        }
+    }
+}
+
+/// As exceções do último boot de `udid` (vazio se nunca houve).
+pub fn exceptions_for(udid: &str) -> Vec<String> {
+    last_exceptions().lock().ok().and_then(|map| map.get(udid).cloned()).unwrap_or_default()
+}
+
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
 /// Hora de hibernar: fora de vista há pelo menos `after`. Pura.
@@ -196,7 +219,7 @@ fn hibernate_marked(udid: &str, reason: &str, level: Option<super::slim::Level>)
     };
     let reopen = usage().lock().map(|mut map| finish_hibernation(&mut map, udid, off)).unwrap_or(false);
     if reopen {
-        match ops::boot(udid, level) {
+        match ops::boot(udid, level, &exceptions_for(udid)) {
             Ok(()) => emit(udid, "booted", "reopened"),
             Err(e) => eprintln!("[simulator] não religuei {udid}, que foi pedido durante o desligamento: {e}"),
         }

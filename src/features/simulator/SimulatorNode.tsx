@@ -27,6 +27,7 @@ import { SimulatorChat, type SimAgent } from "./SimulatorChat";
 import { SimulatorScreen } from "./SimulatorScreen";
 import { addLine, deviceByUdid, listenActivity, refreshDevices, setDeviceState, useSimulatorStore } from "./store";
 import { syncSimulatorPrefs, useSimulatorPrefs } from "./prefs";
+import { projectKey } from "./prefsModel";
 
 const handle = "w-2.5! h-2.5! border-2! border-white! dark:border-surface-deep! bg-accent-400! dark:bg-accent-500!";
 
@@ -38,7 +39,7 @@ function screenOf(device: SimDevice | undefined): SimScreen {
  * O simulador iOS solto no canvas: a barra flutuante, o aparelho e (aberta) a conversa com os agentes ligados a
  * ele, alinhados num bloco só (ver `geometry.ts`). A tela é nativa (`SimulatorScreen`); o resto é DOM.
  */
-export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected }: { id: string; portal: CanvasPortal; selected: boolean }) {
+export const SimulatorNode = memo(function SimulatorNode({ id, cwd, portal, selected }: { id: string; cwd: string; portal: CanvasPortal; selected: boolean }) {
   const { t } = useTranslation();
   const key = useActiveBoardKey();
   const devices = useSimulatorStore((s) => s.devices);
@@ -57,6 +58,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
   const lightMax = useSimulatorPrefs((s) => s.lightMax);
   const hibernateMin = useSimulatorPrefs((s) => s.hibernateMin);
   const single = useSimulatorPrefs((s) => s.single);
+  const exceptions = useSimulatorPrefs((s) => s.projectExceptions[projectKey(cwd)] ?? s.exceptions);
   const paused = useSimulatorStore((s) => (portal.udid ? s.paused[portal.udid] : undefined));
   const [booting, setBooting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -191,7 +193,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
     setBooting(true);
     setError(null);
     try {
-      await simulatorBoot(portal.udid, light, lightMax);
+      await simulatorBoot(portal.udid, light, lightMax, exceptions);
       setDeviceState(portal.udid, "booted");
     } catch (e) {
       fail(e);
@@ -270,6 +272,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
     },
     onHibernate: (minutes: number) => useSimulatorPrefs.getState().set({ hibernateMin: minutes }),
     onSingle: () => useSimulatorPrefs.getState().set({ single: !single }),
+    onExceptionsChange: (next: string[]) => useSimulatorPrefs.getState().setExceptions(next, cwd),
     onClose: () => {
       if (!closeArmed) {
         setCloseArmed(true);
@@ -287,7 +290,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       <CordPort id="t" type="source" position={Position.Top} className={handle} />
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
       <div className="flex h-full w-full flex-col" style={{ gap: SIM_GAP_Y }}>
-        <SimulatorBar full={chat} devices={devices} current={current} state={state} scale={scale} light={light} lightMax={lightMax}
+        <SimulatorBar full={chat} devices={devices} current={current} state={state} scale={scale} light={light} lightMax={lightMax} exceptions={exceptions} hasProject={!!projectKey(cwd)}
           physical={physicalId ? { id: physicalId, device: physical, status: mirror, disconnected, searching: physicalSearching, sessionBusy: physicalSessionBusy } : undefined}
           hibernateMin={hibernateMin} single={single}
           agents={agents.length} chatOpen={chat} closeArmed={closeArmed} actions={actions} />

@@ -103,6 +103,10 @@ Ficam ligados de propósito:
 
 Desligar o ⚡ com o aparelho ligado devolve a prioridade normal na hora. Ligar só grava a preferência: o iOS vai para a prioridade baixa pela regra do ciclo de vida, quando a tela sair de vista. Os serviços só mudam quando o aparelho religa.
 
+### Exceções por categoria
+
+No menu **⋯ → Serviços do modo leve**, cada categoria mostra o que ela desliga. Marcar **manter ligado** exclui os serviços daquela categoria do `disabled.plist`; a mudança vale no próximo boot. A escolha fica salva pelo `cwd` do canvas (um por projeto) e, quando não há pasta de projeto, usa o padrão global. O comando de boot aceita a lista como parâmetro opcional (`exceptions`), junto com `light` e `lightMax`. No modo máximo, cada um dos 16 extras segue uma categoria (`slim::max_extra_category`: loja, web, MDM, conectividade, apps): manter "Loja" ligada mantém também StoreKit e App Store. O ADE guarda as exceções do último boot de cada aparelho (`lifecycle::remember_exceptions`) e o religamento depois de hibernar e o `ags device start` as reutilizam. Os 157 rótulos originais estão cobertos por `slim-labels.expected`; o teste confirma o conjunto, a contagem e a ausência de duplicatas.
+
 A tela recebe o que o iOS desenha. Com `ADE_SIMULATOR_FPS=1`, o log mostra a cada segundo:
 - quantos quadros chegaram à camada;
 - o maior intervalo entre eles e quantos passaram de 25 ms;

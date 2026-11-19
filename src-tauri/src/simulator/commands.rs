@@ -19,9 +19,11 @@ pub fn simulator_devices() -> Result<Vec<Device>, String> {
 
 /// Liga o aparelho (sem persist: desliga junto com a ADE). `light` = modo leve; `light_max` = modo máximo.
 #[tauri::command(async)]
-pub fn simulator_boot(app: AppHandle, udid: String, light: Option<bool>, light_max: Option<bool>) -> Result<(), String> {
+pub fn simulator_boot(app: AppHandle, udid: String, light: Option<bool>, light_max: Option<bool>, exceptions: Option<Vec<String>>) -> Result<(), String> {
     let level = super::slim::Level::from_flags(light.unwrap_or(true), light_max.unwrap_or(false));
-    ops::boot(&udid, level)?;
+    let exceptions = exceptions.unwrap_or_default();
+    super::lifecycle::remember_exceptions(&udid, &exceptions);
+    ops::boot(&udid, level, &exceptions)?;
     ops::forget_orientation(&udid);
     lifecycle::booted(&app, &udid, true);
     Ok(())

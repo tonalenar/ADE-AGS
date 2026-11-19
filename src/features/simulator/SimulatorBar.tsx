@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { SIMULATOR_CATEGORIES } from "./categories";
 
 import { PhysicalSection, MirrorStatusLine } from "@/features/iphone/PhysicalParts";
 import { PhysicalMenu, useDeviceActions } from "@/features/iphone/PhysicalControls";
@@ -151,6 +152,7 @@ export interface SimBarActions {
   onShutdown: () => void;
   onHibernate: (minutes: number) => void;
   onSingle: () => void;
+  onExceptionsChange: (exceptions: string[]) => void;
   onClose: () => void;
 }
 
@@ -159,7 +161,7 @@ export interface SimBarActions {
  * arrastam (`nodrag`). `full` = a conversa está aberta e a barra cobre o bloco inteiro (aparelho + conversa);
  * compacta, ela tem a largura do aparelho e o zoom, o modo leve, desligar e fechar vão para o "⋯".
  */
-export function SimulatorBar({ full, devices, current, physical, state, scale, light, lightMax, hibernateMin, single, agents, chatOpen, closeArmed, actions }: {
+export function SimulatorBar({ full, devices, current, physical, state, scale, light, lightMax, exceptions, hasProject, hibernateMin, single, agents, chatOpen, closeArmed, actions }: {
   full: boolean;
   /** O nó físico mostra buscar, pausar/reconectar, início e "⋯" com Sistema e Botões. */
   physical?: { id: string; device: PhysicalDevice | undefined; status: MirrorStatus | undefined; disconnected: boolean; searching: boolean; sessionBusy: boolean };
@@ -169,6 +171,8 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
   scale: number;
   light: boolean;
   lightMax: boolean;
+  exceptions: string[];
+  hasProject: boolean;
   hibernateMin: number;
   single: boolean;
   agents: number;
@@ -178,6 +182,7 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
 }) {
   const { t, i18n } = useTranslation();
   const [menu, setMenu] = useState(false);
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
   const menuRef = useDismiss(menu, () => setMenu(false));
   const on = state === "booted" && !physical;
   const memory = useSimulatorMemory(on ? current?.udid : undefined);
@@ -285,7 +290,7 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
             )}
             {!physical && (
               <>
-              <button type="button" role="menuitemcheckbox" aria-checked={light && lightMax} disabled={!light} onClick={actions.onLightMax}
+                <button type="button" role="menuitemcheckbox" aria-checked={light && lightMax} disabled={!light} onClick={actions.onLightMax}
                 title={t("simulator.lightMaxHint")}
                 className="cc-t flex w-full flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
                 <span className="flex w-full items-center gap-2.5">
@@ -293,6 +298,41 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
                 </span>
                 <span className="text-[11px] leading-snug text-white/55">{t("simulator.lightMaxHint")}</span>
               </button>
+                <div className="mx-1.5 my-1 h-px bg-white/8" />
+                <button type="button" role="menuitem" aria-expanded={categoriesOpen} onClick={() => setCategoriesOpen(!categoriesOpen)}
+                  className="cc-t flex min-h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-left text-white/90 hover:bg-white/8">
+                  <span className="flex-1">{t("simulator.exceptions.title")}</span>
+                  <span aria-hidden className="text-[10px] text-white/55">{categoriesOpen ? "▾" : "▸"}</span>
+                </button>
+                {categoriesOpen && (
+                  <div className="mx-1.5 mt-1 max-h-[45vh] overflow-y-auto rounded-lg bg-black/15 p-1" aria-label={t("simulator.exceptions.title")}>
+                    <div className="flex justify-between gap-2 px-1.5 py-1 text-[10px] text-white/50">
+                      <span>{t("simulator.exceptions.keepOn")}</span>
+                      <span>{t(hasProject ? "simulator.exceptions.project" : "simulator.exceptions.global")}</span>
+                    </div>
+                    {SIMULATOR_CATEGORIES.map((category) => {
+                      const checked = exceptions.includes(category.id);
+                      return (
+                        <button key={category.id} type="button" role="menuitemcheckbox" aria-checked={checked}
+                          onClick={() => actions.onExceptionsChange(checked
+                            ? exceptions.filter((id) => id !== category.id)
+                            : SIMULATOR_CATEGORIES.filter(({ id }) => exceptions.includes(id) || id === category.id).map(({ id }) => id))}
+                          className="cc-t flex w-full items-start gap-2 rounded-md px-1.5 py-1.5 text-left text-white/90 hover:bg-white/8">
+                          <span aria-hidden className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${checked ? "border-accent-300 bg-accent-500 text-white" : "border-white/35"}`}>{checked && "✓"}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[11.5px] font-medium">{t(category.name)}</span>
+                            <span className="mt-0.5 block whitespace-normal text-[10.5px] leading-snug text-white/55">{t(category.description)}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                    <div className="px-1.5 py-1 text-[10px] leading-snug text-white/45">{t("simulator.exceptions.nextBoot")}</div>
+                  </div>
+                )}
+              </>
+            )}
+            {!physical && (
+              <>
               <div className="px-2.5 pb-1 pt-1.5 text-[11px] text-white/55">{t("simulator.hibernate")}</div>
               <div role="radiogroup" aria-label={t("simulator.hibernate")} className="mx-1.5 mb-1 flex overflow-hidden rounded-lg ring-1 ring-white/10">
                 {HIBERNATE_OPTIONS.map((min) => (
