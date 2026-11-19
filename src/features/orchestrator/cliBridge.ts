@@ -527,7 +527,8 @@ async function handleChatOpen(args: Record<string, unknown>): Promise<unknown> {
  */
 async function handleDesignOpen(args: Record<string, unknown>): Promise<unknown> {
   const req = parseDesignOpen(args);
-  await openDesignOnCanvases(req.designId);
+  // Marcar no canvas é extra: se falhar (design sumiu, IPC fora), a tela do design abre do mesmo jeito.
+  await openDesignOnCanvases(req.designId).catch(() => undefined);
   const path = window.location.hash.replace(/^#/, "") || "/";
   if (chatShellOn(useUiStore.getState())) {
     if (isPageRoute(path)) window.location.hash = useTabsStore.getState().tabs.length > 0 ? "#/workspace" : "#/";
