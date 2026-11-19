@@ -19,6 +19,26 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
 - O composer cola a mensagem na TUI e envia (`pasteIntoTab`).
 - A sidebar lista os agentes abertos da janela (sem os terminais de shell), os mais novos primeiro.
 
+## Canvas por conversa
+
+Abas e Canvas são uma preferência da janela: trocar de conversa mantém o modo escolhido. Cada sessão TUI usa
+`<chave-da-pasta>#s:<id-da-aba>`; cada conversa por protocolo usa `<chave-da-pasta>#s:thread:<id>`.
+Uma ref já presente em missão, comparação ou canvas de projeto legado `#c:` continua ali. Integrantes de time
+seguem o canvas do orquestrador. Se o time foi promovido de um canvas de pasta, ele continua dono daquele
+grupo manual. Uma sessão já criada permanece no seu canvas.
+
+Na primeira ativação, nós da pasta ganham uma cópia no canvas de sessão, incluindo posição, papel, marca de
+subagente, coroa e notas com cordas exclusivas. O quadro da pasta fica guardado. Quando duas conversas tinham
+uma corda manual entre si na pasta, ambas continuam juntas ali. A migração nunca remove uma aresta que o backend
+usa para autorizar `ags peers`. O painel legado de conversas de projeto não puxa automaticamente essas sessões nem
+grupos ligados da pasta para `#c:`.
+
+O separador `#s:` identifica apenas a sessão: não cria escopo de time, missão nem grade. Criar conversa no
+workspace e no Canvas usa o mesmo composer de Chat sem sair para a Home nem trocar o modo Abas/Canvas. Designs
+abertos pela CLI ficam associados ao canvas da conversa ativa; se ele ainda não estiver carregado, a preferência
+é gravada para quando abrir. A ferramenta Terminal no canvas cria a aba na pasta da conversa ativa e a coloca
+naquele canvas.
+
 ## Timeline, permissões e painel (caminho A)
 
 - **A conversa é lida do transcript do agente** (Claude Code e Codex), o mesmo arquivo que o canal estruturado já acompanha.
