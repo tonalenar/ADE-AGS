@@ -15,7 +15,7 @@ import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
-import { openNewAgentWizard, requestCloseItem } from "@/features/tabs/tabActions";
+import { openNewAgentWizard, openNewAgentWith, requestCloseItem } from "@/features/tabs/tabActions";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import type { BrowserView } from "@/features/tabs/viewTabs";
 import type { Tab } from "@/features/tabs/types";
@@ -481,7 +481,7 @@ function CanvasInner() {
     selected: id === selectedNote,
     dragHandle: ".ade-node-drag",
     deletable: false,
-    data: { id, cwd: portal.kind === "gemini" ? key?.split("|").slice(1).join("|").split("#m:")[0] ?? portalCwd : portalCwd, portal, links: neighbors(board, id).length },
+    data: { id, cwd: portal.kind === "gemini" ? key?.split("|").slice(1).join("|").split(/#(?:m|c|cmp|s):/)[0] ?? portalCwd : portalCwd, portal, links: neighbors(board, id).length },
   })), [board, selectedNote, portalCwd]);
 
   const rawTextNodes: TextFlowNode[] = useMemo(() => Object.entries(board.texts).map(([id, text]) => ({
@@ -581,6 +581,11 @@ function CanvasInner() {
     setDesignFocus(initial ?? {});
     setPanel("design");
   };
+  useEffect(() => {
+    if (!designFocus?.designId) return;
+    const frames = designNodes.filter((node): node is DesignFrameFlowNode => node.type === "designFrame" && node.data.designId === designFocus.designId);
+    if (frames.length) void rf.fitView({ nodes: frames, padding: 0.18, maxZoom: 1, duration: 220 });
+  }, [designFocus, designNodes, rf]);
   const designActions = useMemo<DesignActions>(() => {
     const fail = (e: unknown) => AlertaToast(t("canvas.design.title"), String(e), "error", 6000);
     const run = (p: Promise<unknown>) => p.then(() => design.reload()).catch(fail);
@@ -662,9 +667,17 @@ function CanvasInner() {
     const size = { w: box.w, h: box.h };
     switch (kind) {
       case "terminal":
-        if (!useTabsStore.getState().activeTabId) break;
-        setPlacement(key, box);
-        openNewAgentWizard();
+        {
+          const selectedThreadId = selected ? threadIdOf(selected) : null;
+          const selectedThread = selectedThreadId ? liveThreadIds.find((thread) => thread.id === selectedThreadId) : undefined;
+          if (selectedThread) {
+            setPlacement(key, box);
+            openNewAgentWith({ cwd: selectedThread.cwd });
+          } else if (useTabsStore.getState().activeTabId) {
+            setPlacement(key, box);
+            openNewAgentWizard();
+          }
+        }
         break;
       case "note":
         setSelectedNote(canvasActions.addNote(key, { name: t("canvas.noteDefaultName"), content: "", at, size }).id);
@@ -901,7 +914,7 @@ function CanvasInner() {
       })()}
       <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
         <CanvasToolbar
-          onGemini={() => { if (!key) return; const c = viewCenter(); canvasActions.addPortal(key, { name: "Gemini Desktop", kind: "gemini", at: { x: c.x - 500, y: c.y - 350 } }); useViewTabsStore.getState().openGemini(key.split("|").slice(1).join("|").split("#m:")[0]); }}
+          onGemini={() => { if (!key) return; const c = viewCenter(); canvasActions.addPortal(key, { name: "Gemini Desktop", kind: "gemini", at: { x: c.x - 500, y: c.y - 350 } }); useViewTabsStore.getState().openGemini(key.split("|").slice(1).join("|").split(/#(?:m|c|cmp|s):/)[0]); }}
           tool={tool} onTool={setTool} style={drawStyle} onStyle={setDrawStyle}
           armed={armed} onArm={setArmed} lastPlaced={lastPlaced}
           defaultSize={armed && sizes[armed] ? defaultPlaceSize(armed, sizes) : null}
@@ -913,7 +926,7 @@ function CanvasInner() {
         {compareOfKey(key) && <ComparisonBar comparisonId={compareOfKey(key)!} />}
         {panel === "routines" && <CanvasSchedulesPanel onClose={() => setPanel(null)} />}
         {panel === "design" && design.details.length > 0 && (
-          <DesignPanel details={design.details} reload={design.reload} initial={designFocus} onPickDesign={(designId) => openDesignOn(key, designId)} onClose={() => { setPanel(null); setDesignFocus(null); }} />
+          <DesignPanel details={design.details} reload={design.reload} initial={designFocus} onPickDesign={(designId) => { openDesignOn(key, designId); setDesignFocus({ designId }); }} onClose={() => { setPanel(null); setDesignFocus(null); }} />
         )}
         {design.loadError && (
           <div role="alert" className="pointer-events-auto absolute right-3 bottom-[7.5rem] flex items-center gap-2 rounded-lg border border-amber-500/40

@@ -67,6 +67,9 @@ import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
 import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
 import { TabDialogs, openNewAgentWith } from "@/features/tabs/tabActions";
+import { boardKeyOfTab, useCanvasStore } from "@/features/canvas/store";
+import { emptyBoard } from "@/features/canvas/board";
+import { setPlacement } from "@/features/canvas/placement";
 
 const CODEX_AGENT: AgentInfo = {
   id: "codex",
@@ -104,6 +107,7 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
       workspaceId: "ws-test",
       hydrated: true,
     });
+    useCanvasStore.setState({ boards: {}, loaded: true, loadError: null });
     useAccountsStore.setState({ accounts: [], loaded: true });
     usePoolsStore.setState({ pools: [], loaded: true });
     useSkillsStore.setState({ skills: [], loading: false });
@@ -274,6 +278,23 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
   });
 
   describe("integração com TabDialogs: prompt + memória em um único envio (P2)", () => {
+    it("o Terminal do canvas põe a nova aba no canvas da conversa por protocolo ativa", async () => {
+      const key = "main|/thread#s:thread:active";
+      const box = { x: 24, y: 48, w: 500, h: 300 };
+      useCanvasStore.setState({ boards: { [key]: emptyBoard() }, loaded: true });
+      setPlacement(key, box);
+      openNewAgentWith({ cwd: "/thread" });
+
+      await act(async () => { root.render(<TabDialogs />); });
+      await act(async () => { byText("Codex")?.click(); });
+      await act(async () => { byText("btn.next")?.click(); });
+      await act(async () => { byText("newAgent.openAgent")?.click(); });
+
+      const created = useTabsStore.getState().tabs[0]!;
+      expect(useCanvasStore.getState().boards[key]?.nodes[created.id]).toEqual(box);
+      expect(boardKeyOfTab(created)).toBe(key);
+    });
+
     it("TUI com prompt e memória: sendWhenReady é chamado UMA vez com memória antes do prompt", async () => {
       mocks.invoke.mockImplementation(async (cmd: string) => {
         if (cmd === "list_skills" || cmd === "list_agent_accounts" || cmd === "system_accounts" || cmd === "account_capable_agents") {
