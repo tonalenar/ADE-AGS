@@ -187,6 +187,11 @@ export function autoShowAgentBrowser(viewId: string, owner: ViewOwner | null): v
   const view = useViewTabsStore.getState().views.find((candidate) => candidate.id === viewId);
   if (!belongsToCurrentChat || !view || view.kind !== "browser") return;
   if (chat.browserFloating && chat.browser?.viewId === viewId) return;
+  // Se o painel do navegador já está aberto e visível, apenas garante a página na coluna sem forçar salto para PiP.
+  if (chat.panel === "browser" && !chat.browserFloating) {
+    adoptBrowserInColumn(view.cwd, owner, viewId);
+    return;
+  }
   pendingMiniatureMeasures.get(viewId)?.();
   // Painel no navegador: é a única forma de o slot montar e medir. Com o painel fechado a miniatura nunca abria.
   if (chat.panel !== "browser") setRightPanel("browser");

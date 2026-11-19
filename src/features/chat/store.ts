@@ -1,7 +1,10 @@
 import { create } from "zustand";
 
 import type { Rect } from "@/features/tabs/layout/layoutStore";
+import { floatAspectRatioOf } from "@/features/browser/deviceMode";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { closeTab, moveTab, openTab, panelOfActive, reconcileColumn, type ColumnKind, type ColumnTab } from "./columnTabs";
+import { chatFloatBounds, defaultFloatRect } from "./floatRect";
 import type { ArchivedMessageSearchHit } from "@/features/sessions/ipc.conversations";
 
 /**
@@ -554,9 +557,15 @@ export function toggleChatBrowserFloating(): void {
     useChatStore.setState({ browserFloating: false, browserFloatRect: null, browserFloatPinned: false, panel: "browser", panelMaximized: false });
     return;
   }
+  const view = useViewTabsStore.getState().views.find((v) => v.id === state.browser?.viewId);
+  const aspectRatio = floatAspectRatioOf(view?.kind === "browser" ? view.viewport : null);
+  const bounds = typeof document !== "undefined" ? chatFloatBounds(document) : null;
+  const browserFloatRect = bounds
+    ? defaultFloatRect(bounds, { sourceRect: state.browser.rect, aspectRatio })
+    : null;
   useChatStore.setState({
     browserFloating: true,
-    browserFloatRect: null, browserFloatPinned: false,
+    browserFloatRect, browserFloatPinned: false,
     deviceFloat: null,
     panel: null,
     panelMaximized: false,
