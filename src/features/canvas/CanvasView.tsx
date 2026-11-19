@@ -70,8 +70,9 @@ import { useCliOutdatedNotice } from "./cliStatus";
 import { useMissionIndex } from "@/features/missions/groups";
 import { CanvasSchedulesPanel } from "./CanvasSchedulesPanel";
 import { RoleEditDialog } from "./RoleEditDialog";
-import { applyTabRole } from "./applyRole";
+import { applyTabRole, applyThreadRole } from "./applyRole";
 import type { AgentRoleChoice } from "./agentRole";
+import { CrownIcon, PencilIcon, ROLE_PILL_BASE, rolePill } from "./nodeBadges";
 import { boardKeyOfTab, canvasActions, compareOfKey, missionOfKey, useActiveBoardKey, useCanvasActive, useCanvasStore } from "./store";
 import { usePortalViewLifetime } from "./portalLifetime";
 import { ThreadNode, type ThreadFlowNode } from "./ThreadNode";
@@ -180,7 +181,9 @@ const boxSig = (b: { x: number; y: number; w: number; h: number }) => `${b.x},${
 
 const agentSig = (n: AgentFlowNode) =>
   [n.id, n.data.tab.title, n.data.tab.agentId, n.data.tab.agentLabel, boxSig(n.data.box), n.selected, n.data.live,
-    n.data.links, n.data.orchestrator, n.data.role].join("|");
+    n.data.links, n.data.orchestrator, n.data.role, n.data.subagent].join("|");
+const threadSig = (n: ThreadFlowNode) =>
+  [n.id, n.position.x, n.position.y, n.width, n.height, n.selected, n.data.links, n.data.orchestrator, n.data.role, n.data.subagent].join("|");
 const noteSig = (n: NoteFlowNode) => [
   n.id, n.data.note.name, boxSig(n.data.note.box), n.selected, n.data.links, n.data.note.content,
   n.data.stack.map((s) => s.id + s.name).join(","), n.data.others.map((o) => o.id + o.name).join(","),
@@ -524,10 +527,23 @@ function CanvasInner() {
     return threadId ? [{
       id: ref, type: "thread" as const, position: { x: box.x, y: box.y }, width: box.w, height: box.h,
       selected: ref === selected, dragHandle: ".ade-node-drag", deletable: false,
-      data: { ref, threadId },
+      data: {
+        ref, threadId,
+        links: neighbors(board, ref).length,
+        orchestrator: board.orchestrators.includes(ref),
+        role: board.roles[ref],
+        subagent: board.subagents.includes(ref),
+        onToggleOrchestrator: (id: string) => { if (!key) return; canvasActions.toggleOrchestrator(key, id); announceToOrchestrators(key, [id]); },
+        onSetRole: (id: string, choice: AgentRoleChoice) => {
+          if (!key) return;
+          void applyThreadRole(key, id, choice).then(() => {
+            announceToOrchestrators(key, useCanvasStore.getState().boards[key]?.orchestrators ?? []);
+          });
+        },
+      },
     }] : [];
-  }), [board.threads, selected]);
-  const threadNodes = useStable(rawThreadNodes, (n: ThreadFlowNode) => [n.id, n.position.x, n.position.y, n.width, n.height, n.selected].join("|"));
+  }), [board, selected, key]);
+  const threadNodes = useStable(rawThreadNodes, threadSig);
   const agentNodes = useStable(rawAgentNodes, agentSig);
   const folderNodes = useStable(rawFolderNodes, folderSig);
   const textNodes = useStable(rawTextNodes, textSig);
@@ -1031,11 +1047,11 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
             </span>
           </span>
           {orchestrator ? (
-            <span className={`${PILL} ${rolePill("orquestrador")}`}>{t("canvas.orchestrator")}</span>
+            <span className={`${ROLE_PILL_BASE} ${rolePill("orquestrador")}`}>{t("canvas.orchestrator")}</span>
           ) : role ? (
-            <span className={`${PILL} max-w-32 truncate ${rolePill(role)}`} title={t("canvas.role", { role })}>{role}</span>
+            <span className={`${ROLE_PILL_BASE} max-w-32 truncate ${rolePill(role)}`} title={t("canvas.role", { role })}>{role}</span>
           ) : null}
-          {subagent && <span className={`${PILL} bg-black/[0.06] text-gray-500 dark:bg-white/[0.08] dark:text-white/60`}>{t("role.subagentTag")}</span>}
+          {subagent && <span className={`${ROLE_PILL_BASE} bg-black/[0.06] text-gray-500 dark:bg-white/[0.08] dark:text-white/60`}>{t("role.subagentTag")}</span>}
           {/* "N na fila": o que outros agentes mandaram e espera este terminar o turno. */}
           <PeerQueueBadge tabId={tab.id} name={tab.title.split(" — ")[0]} variant="node" />
           {/* `nodrag`: sin esto el clic arrastraría el nodo en vez de apretar el botón. */}
@@ -1092,18 +1108,6 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
   );
 });
 
-const PILL = "shrink-0 inline-flex h-[18px] items-center rounded-full px-[7px] text-[10px] font-semibold uppercase tracking-[0.06em]";
-
-/** A cor do selo da função (prancheta 1): orquestrador argila, backend azul-claro, frontend roxo, QA laranja. */
-function rolePill(role: string): string {
-  const r = role.toLowerCase();
-  if (/orq|orch|lead|l[ií]der/.test(r)) return "bg-[rgba(217,119,87,0.16)] text-[#c96442] dark:text-[#d97757]";
-  if (/back|api|server/.test(r)) return "bg-[rgba(100,210,255,0.16)] text-sky-600 dark:text-[#64d2ff]";
-  if (/front|ui|design/.test(r)) return "bg-[rgba(191,90,242,0.16)] text-purple-600 dark:text-[#bf5af2]";
-  if (/qa|test/.test(r)) return "bg-[rgba(255,159,10,0.16)] text-amber-600 dark:text-[#ff9f0a]";
-  return "bg-accent-500/15 text-accent-600 dark:text-accent-400";
-}
-
 /** A bolinha de status do terminal: verde enquanto o agente escreve, cinza parado. */
 function NodeStatus({ tabId, active = true }: { tabId: string; active?: boolean }) {
   const on = useSyncExternalStore(
@@ -1115,23 +1119,6 @@ function NodeStatus({ tabId, active = true }: { tabId: string; active?: boolean 
     <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${on
       ? "bg-[#30d158] shadow-[0_0_0_3px_rgba(48,209,88,0.18)]"
       : "bg-gray-300 dark:bg-white/25 shadow-[0_0_0_3px_rgba(142,142,147,0.12)]"}`} />
-  );
-}
-
-function PencilIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-    </svg>
-  );
-}
-
-function CrownIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
-      <path d="M3 7.5 7.5 11 12 4l4.5 7L21 7.5 19 18H5L3 7.5Z" />
-      <rect x="5" y="19.5" width="14" height="2" rx="1" />
-    </svg>
   );
 }
 

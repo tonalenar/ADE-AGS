@@ -189,11 +189,16 @@ describe("o time no canvas", () => {
     expect(boards["main|/repo#s:lead"]!.subagents).toEqual([]);
   });
 
-  it("a conversa por protocolo não ganha a marca no canvas", () => {
+  it("a conversa por protocolo também espelha a marca de subagente no canvas", () => {
     const boards: Record<string, Board> = { "main|/repo": withNodes(["lead"]) };
     const t = team("lead", [["thread:x", "qa"]]);
     t.members[0]!.subagent = true;
-    const roles = canvasPlan(input(t, boards, { lead: "main|/repo" })).filter((op) => op.kind === "role");
-    expect(roles).toEqual([{ kind: "role", key: "main|/repo#s:lead", id: "thread:x", label: "QA", subagent: false }]);
+    const on = canvasPlan(input(t, boards, { lead: "main|/repo" })).filter((op) => op.kind === "role");
+    expect(on).toEqual([{ kind: "role", key: "main|/repo#s:lead", id: "thread:x", label: "QA", subagent: true }]);
+    runCanvasPlan(on, fakeApi(boards));
+    expect(boards["main|/repo#s:lead"]!.subagents).toEqual(["thread:x"]);
+    t.members[0]!.subagent = false;
+    const off = canvasPlan(input(t, boards, { lead: "main|/repo" })).filter((op) => op.kind === "role");
+    expect(off).toEqual([{ kind: "role", key: "main|/repo#s:lead", id: "thread:x", label: "QA", subagent: false }]);
   });
 });

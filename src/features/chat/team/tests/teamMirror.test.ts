@@ -153,6 +153,27 @@ describe("o sentido canvas -> chat", () => {
     open.delete("c");
     expect(reversePlan({ teams: [t], boards: { [KEY]: board([]) }, baselines: baseline, isAgentTab: (r) => open.has(r), roleIdOf: ID_OF })).toEqual([]);
   });
+
+  it("conversa por protocolo elegível espelha ligação, papel, subagente e desligamento", () => {
+    const participants = new Set(["lead", "thread:x"]);
+    const isMember = (ref: string) => participants.has(ref);
+    const t0 = team();
+    const start = { [KEY]: board([]) };
+    const base0 = { t1: projectCanvas(t0, start, isMember)! };
+    const linked = { [KEY]: setRole(addEdge(board([]), "lead", "thread:x", "e1"), "thread:x", "QA", true) };
+    expect(reversePlan({ teams: [t0], boards: linked, baselines: base0, isAgentTab: isMember, isOpen: isMember, roleIdOf: ID_OF }))
+      .toEqual([{ kind: "link", teamId: "t1", ref: "thread:x", role: "qa", subagent: true }]);
+
+    const t1 = team([["thread:x", "qa", { subagent: true }]]);
+    const base1 = { t1: projectCanvas(t1, linked, isMember)! };
+    const edited = { [KEY]: setRole(linked[KEY]!, "thread:x", "BACKEND", false) };
+    expect(reversePlan({ teams: [t1], boards: edited, baselines: base1, isAgentTab: isMember, isOpen: isMember, roleIdOf: ID_OF }))
+      .toEqual([{ kind: "update", teamId: "t1", ref: "thread:x", role: "backend", subagent: false }]);
+
+    const unlinked = { [KEY]: board([]) };
+    expect(reversePlan({ teams: [t1], boards: unlinked, baselines: base1, isAgentTab: isMember, isOpen: isMember, roleIdOf: ID_OF }))
+      .toEqual([{ kind: "unlink", teamId: "t1", ref: "thread:x" }]);
+  });
 });
 
 describe("convergência sem laço", () => {

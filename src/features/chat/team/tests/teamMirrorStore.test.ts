@@ -158,4 +158,33 @@ describe("o espelho canvas -> chat no app", () => {
     await settle();
     expect(calls("chat_team_link")).toHaveLength(0);
   });
+
+  it("conversa por protocolo ativa espelha ligação, papel, subagente e corte entre canvas e chat sem laço", async () => {
+    const structured = await import("../../structured/store");
+    structured.useStructured.setState({
+      threads: [{ id: "tx", agentId: "codex", cwd: "/repo", title: "Revisar API", model: null, effort: null, access: "ask", accountId: null, state: "active", createdAt: 1, updatedAt: 1 }],
+    });
+    canvasActions().addThread(KEY, "thread:tx");
+    canvasActions().connect(KEY, "lead", "thread:tx");
+    canvasActions().setRole(KEY, "thread:tx", "QA", true);
+    await settle();
+    expect(calls("chat_team_link")).toHaveLength(1);
+    expect(calls("chat_team_link")[0]![1].input).toMatchObject({ member: "thread:tx", agentId: "codex", subagent: true });
+    expect(board().subagents).toContain("thread:tx");
+
+    backend.calls = [];
+    canvasActions().setRole(KEY, "thread:tx", "Arquiteto", false);
+    await settle();
+    expect(calls("chat_team_update")).toHaveLength(1);
+    expect(calls("chat_team_update")[0]![1].input).toMatchObject({ member: "thread:tx", role: "Arquiteto", subagent: false });
+    expect(board().subagents).not.toContain("thread:tx");
+
+    backend.calls = [];
+    canvasActions().disconnectPair(KEY, "lead", "thread:tx");
+    await settle();
+    expect(calls("chat_team_unlink")).toHaveLength(1);
+    await settle();
+    expect(calls("chat_team_unlink")).toHaveLength(1);
+    expect(calls("chat_team_link")).toHaveLength(0);
+  });
 });

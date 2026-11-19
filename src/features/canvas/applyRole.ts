@@ -14,3 +14,9 @@ export async function applyTabRole(tabId: string, choice: AgentRoleChoice): Prom
   canvasActions.setRole(boardKeyOfTab(tab), tabId, roleLabelOf(roles, choice.roleId), choice.subagent);
   return roleBriefing(roles, choice);
 }
+
+/** Grava no canvas a função e a marca de subagente de uma conversa por protocolo (`thread:<id>`). */
+export async function applyThreadRole(boardKey: string, ref: string, choice: AgentRoleChoice): Promise<void> {
+  const roles = await loadCanvasRoles();
+  canvasActions.setRole(boardKey, ref, roleLabelOf(roles, choice.roleId), choice.subagent);
+}

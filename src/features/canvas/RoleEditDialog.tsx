@@ -30,7 +30,7 @@ export function RoleEditDialog({ name, label, subagent, tab, tunable = true, onC
   /** O rótulo da função que está no canvas, se houver. */
   label?: string;
   subagent: boolean;
-  tab: Tab;
+  tab?: Tab;
   tunable?: boolean;
   onClose: () => void;
   onSave: (choice: AgentRoleChoice) => void;
@@ -39,8 +39,8 @@ export function RoleEditDialog({ name, label, subagent, tab, tunable = true, onC
   const [roles, setRoles] = useState<CanvasRole[] | null>(null);
   const [choice, setChoice] = useState<AgentRoleChoice>({ roleId: null, subagent });
   const accountLabel = useSquadAccountLabel();
-  const isAgent = tunable && tab.agentId !== SHELL_AGENT_ID;
-  const before = useMemo(() => readTuning(tab.agentId, tab.command), [tab.agentId, tab.command]);
+  const isAgent = tunable && !!tab && tab.agentId !== SHELL_AGENT_ID;
+  const before = useMemo(() => (tab ? readTuning(tab.agentId, tab.command) : { model: null, effort: null, fast: false }), [tab?.agentId, tab?.command]);
   const [effort, setEffort] = useState<string | null>(before.effort);
   const [fast, setFast] = useState(before.fast);
   const [roster, setRoster] = useState<Roster | null>(null);
@@ -63,20 +63,20 @@ export function RoleEditDialog({ name, label, subagent, tab, tunable = true, onC
   }, [isAgent]);
 
   const catalog = useMemo(
-    () => modelsForAccount(roster?.agents.find((a) => a.agentId === tab.agentId), tab.accountId ?? null, !tab.accountId),
-    [roster, tab.agentId, tab.accountId],
+    () => (tab ? modelsForAccount(roster?.agents.find((a) => a.agentId === tab.agentId), tab.accountId ?? null, !tab.accountId) : []),
+    [roster, tab?.agentId, tab?.accountId],
   );
   const efforts = useMemo(() => {
     // Claude: os níveis vêm da linha do modelo (sem nível = sem esforço); sem modelo escolhido, a lista padrão.
     const known = reasoningOptions(before.model, catalog);
-    const base = tab.agentId === "claude-code"
+    const base = tab?.agentId === "claude-code"
       ? (claudeEffortLevels(before.model, catalog) ?? DEFAULT_EFFORTS)
       : known.length > 0 ? known : DEFAULT_EFFORTS;
     return effort && !base.includes(effort) ? [...base, effort] : base;
-  }, [before.model, catalog, effort]);
+  }, [before.model, catalog, effort, tab?.agentId]);
 
   const save = async () => {
-    if (isAgent && tuningChanged(before, effort, fast)) {
+    if (isAgent && tab && tuningChanged(before, effort, fast)) {
       // Reiniciar no meio de um turno o interrompe: pergunta antes.
       if (isWorking(screenOf(tab.id)?.lines ?? []) || activeTabIds().includes(tab.id)) {
         const ok = await appConfirm({
@@ -111,7 +111,7 @@ export function RoleEditDialog({ name, label, subagent, tab, tunable = true, onC
           <p className="text-xs text-gray-500 dark:text-gray-400">{t("role.stepHint")}</p>
           <RolePicker value={choice} onChange={setChoice} />
         </div>
-        {isAgent && (
+        {isAgent && tab && (
           <div className="flex flex-col gap-3 border-t border-black/[0.08] pt-3 dark:border-white/10">
             <div className="flex items-center justify-between gap-3">
               <span className="text-[12px] font-medium text-gray-600 dark:text-gray-300">{t("role.account")}</span>

@@ -197,14 +197,16 @@ let mirrorTimer: ReturnType<typeof setTimeout> | null = null;
 /** Os canvases em que a pessoa coroou ou ligou algo desde o último espelho: só neles uma coroa vira time. */
 const touchedBoards = new Set<string>();
 
-function isAgentTab(ref: string): boolean {
+function isMirrorMember(ref: string): boolean {
+  const tid = threadIdOf(ref);
+  if (tid) return useStructured.getState().threads.some((t) => t.id === tid && t.state === "active");
   return useTabsStore.getState().tabs.some((t) => t.id === ref && t.agentId !== SHELL_AGENT_ID);
 }
 
 const roleName = (role: string) => i18n.t(`chat.team.roles.${role}`, { defaultValue: role });
 
 function adoptBaseline(team: TeamView): void {
-  const projection = projectCanvas(team, useCanvasStore.getState().boards, isAgentTab);
+  const projection = projectCanvas(team, useCanvasStore.getState().boards, isMirrorMember);
   if (projection) baselines[team.id] = projection;
   else delete baselines[team.id];
 }
@@ -216,7 +218,8 @@ function mirrorOps(): ReverseOp[] {
     teams,
     boards: useCanvasStore.getState().boards,
     baselines,
-    isAgentTab,
+    isAgentTab: isMirrorMember,
+    isOpen: isMirrorMember,
     roleIdOf: (label) => roleIdOfLabel(label, TEAM_ROLES, roleName),
   });
 }
@@ -256,6 +259,14 @@ async function applyReverse(op: ReverseOp): Promise<void> {
       return;
     }
     case "link": {
+      const tid = threadIdOf(op.ref);
+      if (tid) {
+        const row = useStructured.getState().threads.find((t) => t.id === tid && t.state === "active");
+        if (!row) return;
+        const agentLabel = useTabsStore.getState().detectedAgents.find((a) => a.id === row.agentId)?.label ?? row.agentId;
+        await linkExisting(op.teamId, { key: op.ref, agentId: row.agentId, agentLabel, title: row.title, cwd: row.cwd }, op.role, null, op.subagent);
+        return;
+      }
       const tab = useTabsStore.getState().tabs.find((t) => t.id === op.ref);
       if (!tab) return;
       await linkExisting(op.teamId, { key: tab.id, agentId: tab.agentId, agentLabel: tab.agentLabel, title: tab.title, cwd: tab.cwd }, op.role, null, op.subagent);

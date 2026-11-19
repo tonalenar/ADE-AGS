@@ -35,13 +35,21 @@ describe("nó de conversa por protocolo no canvas", () => {
     expect(removeThreadNode(gone, "thread:a")).toBe(gone);
   });
 
-  it("reconcile mantém o nó e a corda de thread: sem aba nenhuma", () => {
+  it("reconcile mantém nó, corda, coroa, papel e marca de subagente de thread: sem aba nenhuma", () => {
     let b = addThreadNode({ ...emptyBoard(), nodes: { t1: box(0, 0) } }, "thread:a");
-    b = { ...b, edges: [{ id: "e", a: "t1", b: "thread:a" }], orchestrators: ["thread:a"] };
+    b = {
+      ...b,
+      edges: [{ id: "e", a: "t1", b: "thread:a" }],
+      orchestrators: ["thread:a"],
+      roles: { "thread:a": "QA" },
+      subagents: ["thread:a"],
+    };
     const next = reconcile(b, ["t1"]);
     expect(next.threads["thread:a"]).toEqual(b.threads["thread:a"]);
     expect(next.edges).toHaveLength(1);
     expect(next.orchestrators).toEqual(["thread:a"]);
+    expect(next.roles).toEqual({ "thread:a": "QA" });
+    expect(next.subagents).toEqual(["thread:a"]);
   });
 
   it("reconcile não coloca uma aba nova em cima do nó da conversa", () => {
