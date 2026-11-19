@@ -10,7 +10,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
-  AccountCapableAgent, AccountHealth, AccountLimits, AccountUsageSummary, AgentAccount, CodexUsage,
+  AccountCapableAgent, AccountHealth, AccountIdentity, AccountLimits, AccountUsageSummary, AgentAccount, CodexUsage,
 } from "./types";
 
 export const listAccounts = () => invoke<AgentAccount[]>("list_agent_accounts");
@@ -27,6 +27,10 @@ export const createApiKeyAccount = (agentId: string, name: string, apiKey: strin
 
 /** Le pregunta a la CLI (o al proveedor) si la cuenta funciona. No gasta tokens. */
 export const accountHealth = (accountId: string) => invoke<AccountHealth>("account_health", { accountId });
+
+/** Muda o nome de exibição e a cor do selo (inclusive da conta principal, `system:<agente>`). Texto vazio limpa. */
+export const accountIdentitySet = (accountId: string, displayName: string | null, accentColor: string | null) =>
+  invoke<AccountIdentity>("account_identity_set", { accountId, displayName, accentColor });
 
 export const deleteAccount = (id: string, deleteFiles: boolean) =>
   invoke<void>("delete_agent_account", { id, deleteFiles });

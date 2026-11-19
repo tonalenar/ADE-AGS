@@ -694,6 +694,7 @@ pub fn run() {
             crate::accounts::codex_account_usage,
             crate::accounts::delete_agent_account,
             crate::accounts::system_accounts,
+            crate::accounts::account_identity_set,
             crate::accounts::antigravity_oauth::antigravity_oauth_config,
             crate::accounts::antigravity_oauth::antigravity_oauth_configure,
             crate::accounts::antigravity_oauth::antigravity_oauth_accounts,

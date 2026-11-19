@@ -2024,3 +2024,31 @@ fn refrescar_titulos_solo_toca_las_entradas_debiles_con_sesion() {
     // Una segunda pasada no encuentra nada nuevo que grabar.
     assert_eq!(refresh_weak_session_titles(&db, "ws").unwrap(), 0);
 }
+
+#[test]
+fn migrar_agent_accounts_acrescenta_identidade_visual_sem_tocar_nas_contas() {
+    let conn = schema::in_memory();
+    conn.execute_batch(
+        "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at, kind, base_url, key_hint)
+             VALUES ('a', 'claude-code', 'trabalho', '/d/a', 7, 'api_key', 'https://gw', 'abcd');
+         ALTER TABLE agent_accounts DROP COLUMN display_name;
+         ALTER TABLE agent_accounts DROP COLUMN accent_color;",
+    )
+    .unwrap();
+
+    schema::migrate(&conn).expect("migrar uma base sem as colunas de identidade");
+    schema::migrate(&conn).expect("e de novo: idempotente");
+
+    let linha: (String, String, i64, String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT name, dir, created_at, kind, display_name, accent_color FROM agent_accounts WHERE id = 'a'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        linha,
+        ("trabalho".into(), "/d/a".into(), 7, "api_key".into(), None, None),
+        "a conta que já estava fica intacta, com as colunas novas em NULL"
+    );
+}

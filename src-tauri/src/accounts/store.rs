@@ -71,6 +71,10 @@ pub struct AgentAccount {
     pub base_url: Option<String>,
     /// Los últimos caracteres de la key, para reconocerla. Nunca la key.
     pub key_hint: Option<String>,
+    /// Nome que a pessoa vê (o `name` é o da pasta). `None` = usa o padrão.
+    pub display_name: Option<String>,
+    /// Nome de um token da paleta do tema (`green`…), nunca um hex. `None` = sem cor própria.
+    pub accent_color: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,11 +114,13 @@ pub(super) struct AccountRow {
     pub kind: AccountKind,
     pub base_url: Option<String>,
     pub key_hint: Option<String>,
+    pub display_name: Option<String>,
+    pub accent_color: Option<String>,
 }
 
 /// Las columnas que espera [`AccountRow::from_row`], en ese orden.
 pub(super) const ACCOUNT_COLUMNS: &str =
-    "id, agent_id, name, dir, created_at, kind, base_url, key_hint";
+    "id, agent_id, name, dir, created_at, kind, base_url, key_hint, display_name, accent_color";
 
 impl AccountRow {
     pub(super) fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
@@ -127,6 +133,8 @@ impl AccountRow {
             kind: AccountKind::parse(&row.get::<_, String>(5)?),
             base_url: row.get(6)?,
             key_hint: row.get(7)?,
+            display_name: row.get(8)?,
+            accent_color: row.get(9)?,
         })
     }
 }
@@ -178,6 +186,8 @@ pub(super) fn row_to_account(row: AccountRow) -> Option<AgentAccount> {
         kind: row.kind,
         base_url: row.base_url,
         key_hint: row.key_hint,
+        display_name: row.display_name,
+        accent_color: row.accent_color,
     })
 }
 

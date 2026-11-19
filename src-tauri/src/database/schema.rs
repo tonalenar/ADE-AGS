@@ -824,6 +824,15 @@ pub fn migrate(conn: &Connection) -> SqlResult<()> {
              ALTER TABLE agent_accounts ADD COLUMN key_hint TEXT;",
         )?;
     }
+    // Identidade visual da conta (selo e cor no seletor). Colunas só aditivas, padrão NULL:
+    // `display_name` é o nome que a pessoa vê (o `name` continua sendo o nome da pasta) e
+    // `accent_color` guarda o NOME de um token do tema, nunca um hex.
+    if table_exists(conn, "agent_accounts") && !has_column(conn, "agent_accounts", "display_name") {
+        conn.execute("ALTER TABLE agent_accounts ADD COLUMN display_name TEXT", [])?;
+    }
+    if table_exists(conn, "agent_accounts") && !has_column(conn, "agent_accounts", "accent_color") {
+        conn.execute("ALTER TABLE agent_accounts ADD COLUMN accent_color TEXT", [])?;
+    }
     // Si la cuenta de una tarea la eligió el ruteo (se puede cambiar por otra con cupo) o la
     // fijó alguien (nunca se cambia sola). Las tareas viejas quedan en 1: es lo que hacía el
     // scheduler con todas hasta ahora.

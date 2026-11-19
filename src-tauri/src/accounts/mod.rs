@@ -33,6 +33,7 @@ pub(crate) mod antigravity_oauth;
 pub(crate) mod broker;
 mod commands;
 mod health;
+mod identity;
 pub mod pools;
 mod profiles;
 mod secrets;
