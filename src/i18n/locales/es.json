@@ -6561,5 +6561,6 @@
   "settings.accounts.identity.save": "Guardar",
   "settings.accounts.add.displayName": "Nombre visible (opcional)",
   "settings.accounts.add.color": "Color del distintivo (opcional)",
-  "chat.picker.accountLoggedOut": "sin sesión"
+  "chat.picker.accountLoggedOut": "sin sesión",
+  "chat.picker.accountLimitUsed": "{{percent}}% del límite usado"
 }

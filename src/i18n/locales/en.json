@@ -6561,5 +6561,6 @@
   "settings.accounts.identity.save": "Save",
   "settings.accounts.add.displayName": "Display name (optional)",
   "settings.accounts.add.color": "Badge color (optional)",
-  "chat.picker.accountLoggedOut": "not signed in"
+  "chat.picker.accountLoggedOut": "not signed in",
+  "chat.picker.accountLimitUsed": "{{percent}}% of limit used"
 }
