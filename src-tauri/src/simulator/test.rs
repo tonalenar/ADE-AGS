@@ -181,6 +181,29 @@ fn o_modo_leve_desliga_cada_servico_uma_vez_e_o_caminho_e_seguro() {
 }
 
 #[test]
+fn o_modo_maximo_soma_16_servicos_sem_duplicata_com_o_modo_leve() {
+    use super::slim;
+    let light: std::collections::HashSet<&str> = slim::LABELS.iter().copied().collect();
+    let mut extra = std::collections::HashSet::new();
+    for label in slim::MAX_EXTRA_LABELS {
+        assert!(extra.insert(*label), "rótulo repetido em MAX_EXTRA_LABELS: {label}");
+        assert!(label.starts_with("com.apple."), "{label}");
+        assert!(!light.contains(label), "duplicado com LABELS: {label}");
+    }
+    assert_eq!(slim::MAX_EXTRA_LABELS.len(), 16);
+    // Sem estes três o iOS fica tentando subir de novo, então continuam ligados mesmo no modo máximo.
+    for keep in ["com.apple.assistantd", "com.apple.gamed", "com.apple.sharingd"] {
+        assert!(!extra.contains(keep), "{keep} não pode sair nem no modo máximo");
+    }
+    assert_eq!(slim::Level::Light.labels().count(), slim::LABELS.len());
+    assert_eq!(slim::Level::Max.labels().count(), slim::LABELS.len() + 16);
+    assert_eq!(slim::Level::from_flags(false, false), None);
+    assert_eq!(slim::Level::from_flags(false, true), None);
+    assert_eq!(slim::Level::from_flags(true, false), Some(slim::Level::Light));
+    assert_eq!(slim::Level::from_flags(true, true), Some(slim::Level::Max));
+}
+
+#[test]
 fn o_app_em_primeiro_plano_sai_do_launchctl_e_prefere_o_que_nao_e_da_apple() {
     let out = "PID\tStatus\tLabel\n70010\t0\tUIKitApplication:com.apple.mobilesafari[2368][rb-legacy]\n-\t0\tcom.apple.backboardd\n71000\t0\tUIKitApplication:br.com.autovale.app[a1b2][rb-legacy]\n69297\t0\tUIKitApplication:com.apple.Spotlight[231e][rb-legacy]\n";
     assert_eq!(parse_foreground_app(out).as_deref(), Some("br.com.autovale.app"));

@@ -146,6 +146,7 @@ export interface SimBarActions {
   onChat: () => void;
   onScale: (direction: 1 | -1) => void;
   onLight: () => void;
+  onLightMax: () => void;
   onClipboard: (direction: "toDevice" | "toMac") => void;
   onShutdown: () => void;
   onHibernate: (minutes: number) => void;
@@ -158,7 +159,7 @@ export interface SimBarActions {
  * arrastam (`nodrag`). `full` = a conversa está aberta e a barra cobre o bloco inteiro (aparelho + conversa);
  * compacta, ela tem a largura do aparelho e o zoom, o modo leve, desligar e fechar vão para o "⋯".
  */
-export function SimulatorBar({ full, devices, current, physical, state, scale, light, hibernateMin, single, agents, chatOpen, closeArmed, actions }: {
+export function SimulatorBar({ full, devices, current, physical, state, scale, light, lightMax, hibernateMin, single, agents, chatOpen, closeArmed, actions }: {
   full: boolean;
   /** O nó físico mostra buscar, pausar/reconectar, início e "⋯" com Sistema e Botões. */
   physical?: { id: string; device: PhysicalDevice | undefined; status: MirrorStatus | undefined; disconnected: boolean; searching: boolean; sessionBusy: boolean };
@@ -167,6 +168,7 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
   state: SimDevice["state"] | "error";
   scale: number;
   light: boolean;
+  lightMax: boolean;
   hibernateMin: number;
   single: boolean;
   agents: number;
@@ -283,6 +285,14 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
             )}
             {!physical && (
               <>
+              <button type="button" role="menuitemcheckbox" aria-checked={light && lightMax} disabled={!light} onClick={actions.onLightMax}
+                title={t("simulator.lightMaxHint")}
+                className="cc-t flex w-full flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
+                <span className="flex w-full items-center gap-2.5">
+                  <span className="flex-1">{t("simulator.lightMaxShort")}</span>{light && lightMax && <span aria-hidden>✓</span>}
+                </span>
+                <span className="text-[11px] leading-snug text-white/55">{t("simulator.lightMaxHint")}</span>
+              </button>
               <div className="px-2.5 pb-1 pt-1.5 text-[11px] text-white/55">{t("simulator.hibernate")}</div>
               <div role="radiogroup" aria-label={t("simulator.hibernate")} className="mx-1.5 mb-1 flex overflow-hidden rounded-lg ring-1 ring-white/10">
                 {HIBERNATE_OPTIONS.map((min) => (

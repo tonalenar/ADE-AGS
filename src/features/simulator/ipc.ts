@@ -24,8 +24,9 @@ export interface SimPlace {
 
 export const simulatorDevices = () => invoke<SimDevice[]>("simulator_devices");
 
-/** Liga sem o app Simulator; desliga junto com a ADE. `light` = o iOS na prioridade baixa. */
-export const simulatorBoot = (udid: string, light: boolean) => invoke<void>("simulator_boot", { udid, light });
+/** Liga sem o app Simulator; desliga junto com a ADE. `light` = modo leve; `lightMax` = modo máximo. */
+export const simulatorBoot = (udid: string, light: boolean, lightMax = false) =>
+  invoke<void>("simulator_boot", { udid, light, lightMax });
 
 /** Modo leve num aparelho ligado: o iOS passa para a prioridade baixa (ou volta à normal) na hora. */
 export const simulatorPriority = (udid: string, light: boolean) => invoke<number>("simulator_priority", { udid, light });
@@ -33,9 +34,9 @@ export const simulatorPriority = (udid: string, light: boolean) => invoke<number
 export const simulatorShutdown = (udid: string) => invoke<void>("simulator_shutdown", { udid });
 
 /** O ciclo de vida (ver `simulator::lifecycle`): hibernar depois de `hibernateMinutes` fora de vista (0 = nunca),
- *  um aparelho por vez e o modo leve. */
-export const simulatorSettings = (hibernateMinutes: number, single: boolean, light: boolean) =>
-  invoke<void>("simulator_settings", { hibernateMinutes, single, light });
+ *  um aparelho por vez, modo leve e modo máximo. */
+export const simulatorSettings = (hibernateMinutes: number, single: boolean, light: boolean, lightMax = false) =>
+  invoke<void>("simulator_settings", { hibernateMinutes, single, light, lightMax });
 
 /** `home`, `lock`, `side` ou `siri`. */
 export const simulatorButton = (udid: string, name: string) => invoke<void>("simulator_button", { udid, name });

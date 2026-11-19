@@ -182,6 +182,7 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
   const loaded = useSimulatorStore((s) => s.loaded);
   const error = useSimulatorStore((s) => s.error);
   const light = useSimulatorPrefs((s) => s.light);
+  const lightMax = useSimulatorPrefs((s) => s.lightMax);
   const picked = useChatStore((s) => s.devices.ios);
   const [booting, setBooting] = useState(false);
   const [appRevision, setAppRevision] = useState(0);
@@ -228,7 +229,7 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
     if (!current) return;
     setBooting(true);
     try {
-      await simulatorBoot(current.udid, light);
+      await simulatorBoot(current.udid, light, lightMax);
       setDeviceState(current.udid, "booted");
     } catch (e) {
       fail(e);
@@ -476,6 +477,7 @@ function TypePop({ udid, onDone, onError }: { udid: string; onDone: () => void; 
 function IosMore({ device, booted, onBoot, onDone, onError }: { device: SimDevice; booted: boolean; onBoot: () => void; onDone: () => void; onError: (e: unknown) => void }) {
   const { t } = useTranslation();
   const light = useSimulatorPrefs((s) => s.light);
+  const lightMax = useSimulatorPrefs((s) => s.lightMax);
   const setPrefs = useSimulatorPrefs((s) => s.set);
   const [url, setUrl] = useState("");
   const toggleLight = () => {
@@ -495,6 +497,9 @@ function IosMore({ device, booted, onBoot, onDone, onError }: { device: SimDevic
       {booted && <button type="button" disabled={deviceAction("ios-simulator", "clipboard", true, t("simulator.clipboardToMac"), t).disabled} title={deviceAction("ios-simulator", "clipboard", true, t("simulator.clipboardToMac"), t).label} onClick={() => { simulatorClipboard(device.udid, "toMac").then(onDone).catch(onError); }} className={itemCls}>{t("simulator.clipboardToMac")}</button>}
       <button type="button" onClick={toggleLight} className={itemCls} title={t("simulator.light")}>
         <span className="w-4 shrink-0">{light && <CheckIcon className="w-3.5 h-3.5" />}</span>{t("simulator.lightShort")}
+      </button>
+      <button type="button" disabled={!light} onClick={() => setPrefs({ lightMax: !lightMax })} className={`${itemCls} disabled:opacity-40`} title={t("simulator.lightMaxHint")}>
+        <span className="w-4 shrink-0">{light && lightMax && <CheckIcon className="w-3.5 h-3.5" />}</span>{t("simulator.lightMaxShort")}
       </button>
       <div className="my-1 h-px bg-gray-200 dark:bg-white/[0.08]" />
       {booted ? (

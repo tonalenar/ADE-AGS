@@ -92,3 +92,55 @@ pub fn paths(udid: &str) -> Option<(PathBuf, PathBuf)> {
     let dir = dir(udid)?;
     Some((dir.join("disabled.plist"), dir.join("disabled.ade-original.plist")))
 }
+
+/// Os 16 serviços extras desligados apenas no modo máximo (além de [`LABELS`]): push, compras/StoreKit,
+/// App Store, universal links, histórico do Safari, web push, App Clips e gerenciamento remoto.
+pub const MAX_EXTRA_LABELS: &[&str] = &[
+    "com.apple.ClipServices.clipserviced",
+    "com.apple.RemoteManagementAgent",
+    "com.apple.Safari.History",
+    "com.apple.accessibility.axassetsd",
+    "com.apple.amsaccountsd",
+    "com.apple.amsengagementd",
+    "com.apple.amsondevicestoraged",
+    "com.apple.appstorecomponentsd",
+    "com.apple.appstored",
+    "com.apple.apsd",
+    "com.apple.itunesstored",
+    "com.apple.managedassetsd",
+    "com.apple.remotemanagementd",
+    "com.apple.storekitd",
+    "com.apple.swcd",
+    "com.apple.webkit.webpushd",
+];
+
+/// Nível do modo leve aplicado no `disabled.plist` antes do boot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Level {
+    /// Desliga os serviços de [`LABELS`], mantendo push, compras/StoreKit e universal links.
+    Light,
+    /// Além de [`LABELS`], desliga também [`MAX_EXTRA_LABELS`].
+    Max,
+}
+
+impl Level {
+    /// Rótulos desligados neste nível.
+    pub fn labels(self) -> impl Iterator<Item = &'static str> {
+        let extra: &[&str] = match self {
+            Self::Light => &[],
+            Self::Max => MAX_EXTRA_LABELS,
+        };
+        LABELS.iter().chain(extra.iter()).copied()
+    }
+
+    /// Converte as preferências (`light`, `max`) no nível de boot. O modo máximo só vale com o modo leve ligado.
+    pub fn from_flags(light: bool, max: bool) -> Option<Self> {
+        if !light {
+            None
+        } else if max {
+            Some(Self::Max)
+        } else {
+            Some(Self::Light)
+        }
+    }
+}

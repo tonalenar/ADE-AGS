@@ -54,6 +54,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
     return tab ? [`${tab.id}\t${tab.title}\t${String(tab.agentId)}`] : [];
   }).join("\n"));
   const light = useSimulatorPrefs((s) => s.light);
+  const lightMax = useSimulatorPrefs((s) => s.lightMax);
   const hibernateMin = useSimulatorPrefs((s) => s.hibernateMin);
   const single = useSimulatorPrefs((s) => s.single);
   const paused = useSimulatorStore((s) => (portal.udid ? s.paused[portal.udid] : undefined));
@@ -190,7 +191,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
     setBooting(true);
     setError(null);
     try {
-      await simulatorBoot(portal.udid, light);
+      await simulatorBoot(portal.udid, light, lightMax);
       setDeviceState(portal.udid, "booted");
     } catch (e) {
       fail(e);
@@ -243,6 +244,11 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
         fail(e);
       }
     },
+    onLightMax: () => {
+      const next = !lightMax;
+      useSimulatorPrefs.getState().set({ lightMax: next });
+      void AlertaToast(portal.name, t(next ? "simulator.lightMaxOnNext" : "simulator.lightMaxOffNext"), "info", 3500);
+    },
     onClipboard: async (direction: "toDevice" | "toMac") => {
       if (!portal.udid) return;
       try {
@@ -281,7 +287,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       <CordPort id="t" type="source" position={Position.Top} className={handle} />
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
       <div className="flex h-full w-full flex-col" style={{ gap: SIM_GAP_Y }}>
-        <SimulatorBar full={chat} devices={devices} current={current} state={state} scale={scale} light={light}
+        <SimulatorBar full={chat} devices={devices} current={current} state={state} scale={scale} light={light} lightMax={lightMax}
           physical={physicalId ? { id: physicalId, device: physical, status: mirror, disconnected, searching: physicalSearching, sessionBusy: physicalSessionBusy } : undefined}
           hibernateMin={hibernateMin} single={single}
           agents={agents.length} chatOpen={chat} closeArmed={closeArmed} actions={actions} />

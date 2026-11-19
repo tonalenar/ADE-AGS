@@ -16,14 +16,14 @@ fn exclusive() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Põe os serviços do modo leve como desligados, guardando antes o original. Devolve quantos rótulos o arquivo
-/// tem agora.
-pub fn apply(udid: &str) -> Result<usize, String> {
+/// Põe os serviços do nível pedido (`Light` ou `Max`) como desligados, guardando antes o original. Devolve
+/// quantos rótulos o arquivo tem agora.
+pub fn apply(udid: &str, level: slim::Level) -> Result<usize, String> {
     let _exclusive = exclusive();
-    apply_inner(udid)
+    apply_inner(udid, level)
 }
 
-fn apply_inner(udid: &str) -> Result<usize, String> {
+fn apply_inner(udid: &str, level: slim::Level) -> Result<usize, String> {
     let (file, original) = slim::paths(udid).ok_or("UDID inválido.")?;
     // Sobrou cópia de uma vez que não terminou (a ADE caiu no meio do boot): ela é o original de verdade.
     restore_inner(udid);
@@ -43,7 +43,7 @@ fn apply_inner(udid: &str) -> Result<usize, String> {
             dict = call!(dict_class, sel!(dictionary); -> *mut AnyObject);
         }
         let yes = call!(class(c"NSNumber").expect("Foundation"), sel!(numberWithBool:), true => bool; -> *mut AnyObject);
-        for label in slim::LABELS {
+        for label in level.labels() {
             let key = ns_string(label);
             call!(dict, sel!(setObject:forKey:), yes => *mut AnyObject, Retained::as_ptr(&key) as *mut AnyObject => *mut AnyObject; -> ());
         }
