@@ -155,7 +155,7 @@ pub fn schema() -> Value {
     let path = json!({"type":"string","minLength":1,"maxLength":MAX_PATH_BYTES});
     let list = |items: Value| json!({"type":"array","maxItems":MAX_ITEMS,"items":items});
     json!({"type":"object","additionalProperties":false,"required":["version","summary"],"properties":{
-        "version":{"type":"integer","enum":[1]}, "summary":{"type":"string","minLength":1,"maxLength":MAX_SUMMARY_BYTES},
+        "version":{"type":"integer","minimum":1,"maximum":1,"description":"Always 1."}, "summary":{"type":"string","minLength":1,"maxLength":MAX_SUMMARY_BYTES},
         "changed_files":list(json!({"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":path,"description":text}})),
         "tests":list(json!({"type":"object","additionalProperties":false,"required":["command","status"],"properties":{"command":text,"status":{"type":"string","enum":["passed","failed","not_run"]},"notes":text}})),
         "decisions":list(text.clone()), "risks":list(text.clone()), "next_steps":list(text.clone()),
