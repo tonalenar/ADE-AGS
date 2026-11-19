@@ -16,7 +16,7 @@ import { threadMessage, tuiMessage } from "./attachments/send";
 import { startConversation } from "./chatActions";
 import { setComposing } from "./store";
 import { BotIcon, BranchIcon, CheckIcon, ChevronDownIcon, FolderGitIcon, FolderIcon, SettingsIcon } from "./chatIcons";
-import { accessModesFor, conversationTitle, extractSlashCommand, fastModeSupported, type ChatProject } from "./chatModel";
+import { accessModesFor, conversationTitle, extractSlashCommand, fastModeSupported, hasRealTerminalMode, type ChatProject } from "./chatModel";
 import { matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
 import { chatNewWorktree } from "./ipc";
 import { clearDraft, setDraftLead, useTeamDraft } from "./team/draftStore";
@@ -117,6 +117,9 @@ export function NewConversation({ projects, folder, onFolder }: {
   const [projectPolicySaving, setProjectPolicySaving] = useState(false);
   const [projectPolicyError, setProjectPolicyError] = useState("");
   const [projectSettingsError, setProjectSettingsError] = useState(false);
+  // A escolha desta conversa fica codificada na própria conversa: aba persistida = PTY/TUI;
+  // thread persistida = protocolo. O rascunho começa em PTY para Claude Code e Codex.
+  const [realTerminalOverride, setRealTerminalOverride] = useState<boolean | null>(null);
 
   const update = (patch: Partial<ChatPrefs>) => {
     setPrefs((prev) => {
@@ -235,7 +238,9 @@ export function NewConversation({ projects, folder, onFolder }: {
   const agent = projectAgents.find((a) => a.id === prefs.agentId) ?? projectAgents.find((a) => a.id === PREFERRED_AGENT) ?? projectAgents[0] ?? null;
   const mine = !!agent && prefs.agentId === agent.id;
   // Por protocolo (sem TUI) o agente tem os acessos e o Plano do motor dele; na TUI, os flags dela.
-  const viaProtocol = !!agent && (isLocalAcpAgent(agent.id) || (prefs.structured && isStructuredAgent(agent.id)));
+  const terminalReal = realTerminalOverride ?? true;
+  const viaProtocol = !!agent && (isLocalAcpAgent(agent.id) || (isStructuredAgent(agent.id)
+    && (hasRealTerminalMode(agent.id) ? !terminalReal : prefs.structured)));
   const fastSurface = viaProtocol ? "chat" : "tui";
   const planCapability = useHarnessCapability(fastSurface, matrixProviderForAgent(agent?.id), "plan");
   const hasPlan = planCapability.support === "supported";
@@ -251,7 +256,7 @@ export function NewConversation({ projects, folder, onFolder }: {
     fastMode: fastModeSupported(agent?.id, fastSurface) && prefs.fastMode,
     worktree: workspaceMode.worktree,
     worktreeSubmodules: worktreeSubmodules.mode,
-    structured: isLocalAcpAgent(agent?.id ?? "") || prefs.structured,
+    structured: isLocalAcpAgent(agent?.id ?? "") || viaProtocol,
   };
 
   const saveProjectDefaults = () => {
@@ -559,7 +564,20 @@ export function NewConversation({ projects, folder, onFolder }: {
                 speed={{ fast: prefs.fastMode, onChange: (fastMode) => update({ fastMode }) }}
                 onCompare={(picks) => openCompareDialog(project?.cwd ?? "", { prompt: text, picks, attachments })}
                 compareDisabled={hasQuotes}
-                onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account, fastMode: fastModeSupported(v.agentId, fastSurface) ? prefs.fastMode : false })} />
+                onChange={(v) => {
+                  setRealTerminalOverride(null);
+                  update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account, fastMode: fastModeSupported(v.agentId, fastSurface) ? prefs.fastMode : false });
+                }} />
+              {agent && hasRealTerminalMode(agent.id) && (
+                <button type="button" role="switch" aria-checked={terminalReal} aria-label={t("chat.new.terminalReal")}
+                  title={t("chat.new.terminalRealHint")} onClick={() => setRealTerminalOverride(!terminalReal)}
+                  className="flex items-center gap-2 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-700 dark:text-white/75 hover:bg-gray-100 dark:hover:bg-white/[0.07]">
+                  <span>{t("chat.new.terminalReal")}</span>
+                  <span aria-hidden="true" className={`relative h-[18px] w-8 rounded-full transition-colors ${terminalReal ? "bg-accent-500" : "bg-gray-300 dark:bg-white/20"}`}>
+                    <span className={`absolute top-[3px] h-3 w-3 rounded-full bg-white transition-transform ${terminalReal ? "translate-x-[17px]" : "translate-x-[3px]"}`} />
+                  </span>
+                </button>
+              )}
               {agent && hasPlan && plan && (
                 <button type="button" onClick={() => update({ plan: !prefs.plan })} aria-pressed={plan}
                   title={plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}

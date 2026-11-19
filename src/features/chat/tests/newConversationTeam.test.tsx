@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const launch = vi.hoisted(() => ({ calls: [] as unknown[][], result: { ok: true, ref: "tab-1", teamId: "t1" } as unknown, submitted: [] as boolean[] }));
+const conversation = vi.hoisted(() => ({ tui: vi.fn(), protocol: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve([]) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => undefined) }));
 vi.mock("@tauri-apps/api/path", () => ({ homeDir: () => Promise.resolve("/home") }));
@@ -32,6 +33,14 @@ vi.mock("../ChatComposer", () => ({
   ),
 }));
 vi.mock("../team/teamLaunch", () => ({ launchDraftTeam: (...args: unknown[]) => { launch.calls.push(args); return Promise.resolve(launch.result); } }));
+vi.mock("../chatActions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../chatActions")>()),
+  startConversation: (...args: unknown[]) => conversation.tui(...args),
+}));
+vi.mock("../structured/store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../structured/store")>()),
+  startThread: (...args: unknown[]) => conversation.protocol(...args),
+}));
 const wt = vi.hoisted(() => ({ calls: [] as unknown[][], scriptCalls: [] as string[], scriptsOk: true }));
 vi.mock("../ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../ipc")>()),
@@ -64,6 +73,8 @@ beforeEach(() => {
   localStorage.clear();
   launch.calls = []; launch.submitted = []; launch.result = { ok: true, ref: "tab-1", teamId: "t1" };
   clearDraft();
+  conversation.tui.mockReset().mockResolvedValue("tab-1");
+  conversation.protocol.mockReset().mockResolvedValue("thread-1");
   useTeamStore.setState({ teams: [], targets: {} });
   useChatStore.setState({ composing: true });
   host = document.createElement("div");
@@ -121,20 +132,34 @@ describe("o time montado antes da conversa", () => {
     expect(host.querySelector("[data-testid=placeholder]")?.textContent).toBe("chat.team.placeholderLead");
   });
 
-  it("enviar cria a conversa COM o time: orquestrador do composer, integrantes, texto e destino", async () => {
+  it("Claude Code começa com terminal real, inclusive como orquestrador de um time", async () => {
     await mount("/p/Outro");
     await act(async () => { addToDraft(codex); });
     await send();
     expect(launch.calls).toHaveLength(1);
     const [spec, members, prompt, target] = launch.calls[0] as [Record<string, unknown>, DraftMember[], string, string];
-    // Por padrão as conversas novas do chat saem por protocolo (sem TUI).
-    expect(spec).toMatchObject({ cwd: "/p/Outro", viaProtocol: true });
+    expect(spec).toMatchObject({ cwd: "/p/Outro", viaProtocol: false });
     expect((spec.agent as { id: string }).id).toBe("claude-code");
     expect(members.map((m) => m.id)).toEqual(["d1"]);
     expect(prompt).toBe("monte o painel");
     expect(target).toBe("team");
     expect(launch.submitted).toEqual([true]);
     expect(useTeamDraft.getState().members).toEqual([]);
+  });
+
+  it("envio comum com Terminal real cria uma aba PTY, não uma thread por protocolo", async () => {
+    await mount("/p/Outro");
+    await send();
+    expect(conversation.tui).toHaveBeenCalledWith(expect.objectContaining({ agent: expect.objectContaining({ id: "claude-code" }) }));
+    expect(conversation.protocol).not.toHaveBeenCalled();
+  });
+
+  it("desligar Terminal real escolhe o protocolo para Claude Code", async () => {
+    await mount("/p/Outro");
+    await act(async () => { (host.querySelector('[aria-label="chat.new.terminalReal"]') as HTMLElement).click(); });
+    await send();
+    expect(conversation.protocol).toHaveBeenCalledWith(expect.objectContaining({ agentId: "claude-code" }), "monte o painel", expect.anything(), false, expect.anything(), expect.any(Function));
+    expect(conversation.tui).not.toHaveBeenCalled();
   });
 
   it("em falha mostra o erro, devolve false (o texto fica na caixa) e mantém o rascunho para tentar de novo", async () => {

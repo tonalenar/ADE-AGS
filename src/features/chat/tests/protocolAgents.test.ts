@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { accessModesFor, fastModeSupported, planSupported, reasoningEffortSupported } from "@/features/chat/chatModel";
+import { accessModesFor, fastModeSupported, hasRealTerminalMode, planSupported, reasoningEffortSupported } from "@/features/chat/chatModel";
 import { STRUCTURED_AGENTS } from "@/features/chat/structured/model";
 
 describe("agentes por protocolo (espelho de conversa::api::Engine)", () => {
@@ -14,6 +14,12 @@ describe("agentes por protocolo (espelho de conversa::api::Engine)", () => {
     expect(fastModeSupported("claude-code", "chat")).toBe(false);
     expect(reasoningEffortSupported("antigravity")).toBe(true);
     expect(reasoningEffortSupported("opencode")).toBe(false);
+  });
+
+  it("Claude Code e Codex oferecem Terminal real como padrão", () => {
+    expect(hasRealTerminalMode("claude-code")).toBe(true);
+    expect(hasRealTerminalMode("codex")).toBe(true);
+    expect(hasRealTerminalMode("opencode")).toBe(false);
   });
 
   it("por protocolo o OpenCode e o Antigravity têm os quatro acessos e o Plano", () => {

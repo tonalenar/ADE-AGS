@@ -45,4 +45,10 @@ describe("a barra só navega para rotas que existem", () => {
     expect(sidebar).toContain("pickProjectFolder");
     expect(sidebar).not.toMatch(/navigate\("\/"\)/);
   });
+
+  it("atalhos de nova conversa preservam a casca de trabalho em vez de forçar o chat", () => {
+    const shortcuts = read("../../../app/useGlobalShortcuts.ts");
+    expect(shortcuts.match(/newConversationShortcutRoute\(/g)).toHaveLength(3);
+    expect(shortcuts).not.toMatch(/setShellMode\("chat"\);\s*newConversation/);
+  });
 });

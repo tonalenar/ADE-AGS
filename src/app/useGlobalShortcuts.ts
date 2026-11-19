@@ -25,6 +25,7 @@ import { canOpenWorkspaceAgent, requestWorkspaceAgent } from "@/features/tabs/wo
 import { canToggleChatTerminal, toggleChatTerminal } from "@/features/chat/terminalCommands";
 
 import { WORKSPACE_PATH, matchShortcut, nextTabId, resolveGoto } from "./shortcuts";
+import { newConversationShortcutRoute } from "./newConversationShortcut";
 
 /**
  * Engancha los atajos globales. Se monta una sola vez, en `AppShell`.
@@ -241,23 +242,23 @@ export function useGlobalShortcuts() {
       }
 
       if (shortcut.action.kind === "newConversation") {
-        useUiStore.getState().setShellMode("chat");
         newConversation();
-        navigate("/");
+        const route = newConversationShortcutRoute(chatShellOn(useUiStore.getState()), location.pathname);
+        if (route) navigate(route);
         return;
       }
 
       if (shortcut.action.kind === "newConversationLocal") {
-        useUiStore.getState().setShellMode("chat");
         newConversationLocal();
-        navigate("/");
+        const route = newConversationShortcutRoute(chatShellOn(useUiStore.getState()), location.pathname);
+        if (route) navigate(route);
         return;
       }
 
       if (shortcut.action.kind === "newConversationWithoutProject") {
-        useUiStore.getState().setShellMode("chat");
         newConversationWithoutProject();
-        navigate("/");
+        const route = newConversationShortcutRoute(chatShellOn(useUiStore.getState()), location.pathname);
+        if (route) navigate(route);
         return;
       }
 

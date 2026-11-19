@@ -44,6 +44,12 @@ abertos pela CLI ficam associados ao canvas da conversa ativa; se ele ainda não
 é gravada para quando abrir. A ferramenta Terminal no canvas cria a aba na pasta da conversa ativa e a coloca
 naquele canvas.
 
+No composer, **Terminal real** começa ligado para Claude Code e Codex. Ligado, a conversa nasce como uma aba com
+PTY real; o `TerminalPanel` existente é a fonte e aparece sobre o nó do agente no Canvas. Desligado, ela nasce como
+conversa por protocolo e usa o cartão `thread:<id>`. A escolha fica persistida com a própria conversa (aba/PTY ou
+thread), sem um campo adicional no banco. Os demais agentes mantêm a preferência de interface por protocolo nas
+Configurações. Atalhos de conversa nova preservam Abas/Canvas e só vão para o workspace quando vêm de outra rota.
+
 ## Timeline, permissões e painel (caminho A)
 
 - **A conversa é lida do transcript do agente** (Claude Code e Codex), o mesmo arquivo que o canal estruturado já acompanha.
@@ -364,6 +370,8 @@ A conversa escolhida é a **mesma** nos três modos, e trocar de conversa em qua
 - **Seleção única:** a ref (`tab.id` ou `thread:<id>`) à vista é `selectedRef({ thread, activeTabId })` (`chat/unified/selection.ts`; hook `useSelectedRef`). A conversa por protocolo aberta vence a aba ativa; **ativar uma aba** (a tira, o canvas, a sidebar, mesmo a que já é a ativa: `activationListeners` do store de abas) fecha a conversa por protocolo. A sidebar das Abas e do Canvas marca a seleção por essa ref.
 - **`selectConversation(ref)`** (`unified/selectionActions.ts`) é o único caminho da sidebar: protocolo abre a conversa; TUI ativa a aba; nos dois casos pede ao canvas que centre o nó (`canvasActions.focusRef`). Só estado: nenhum `<Terminal>` muda de `key`, pai ou ponto de montagem. `startSelectionSync` (no `AppShell`) mantém `useCanvasStore.activeThread` (o canvas da conversa por protocolo aberta) em dia, venha a abertura de onde vier.
 - **Canvas:** `Board.threads` (`thread:<id>` → retângulo; TS `canvas/board.ts`, Rust `canvas/mod.rs` com `#[serde(default)]`, teste de ida e volta em `canvas/test.rs`). O cartão (`ThreadNode.tsx`) reaproveita `StructuredConversationView` (timeline, estado, aprovação e composer), em React puro, sem xterm. O cartão nasce **quando a conversa é escolhida** com o canvas dela no modo Canvas, ou quando uma corda do time a liga a algo; nunca em massa no boot. `addThreadNode` acha um lugar livre sem cobrir terminais, notas, portais, pastas, imagens nem outros cartões. `reconcile` mantém a corda **e** o nó; só descarta o nó se receber `liveThreads` (conversa encerrada) e, sem essa lista, nada some. O canvas da conversa é (`homeBoardKey`): onde já há nó dela (o especial vence), senão onde está a coroa do time, senão a pasta do `cwd`.
+- **Terminal real:** Claude Code e Codex começam em PTY pelo composer. O mesmo `Terminal` permanece no `TerminalPanel`; o canvas só atualiza sua posição no nó, sem remontá-lo. A escolha desligada mantém o motor por protocolo e o cartão sem xterm. Cada conversa persiste no tipo de entidade que foi criado (aba ou thread).
+- **Nova conversa no workspace:** Criar, adicionar projeto e o `+` de projeto usam o composer sem mudar Abas/Canvas. Os três atalhos de conversa nova preservam a casca de trabalho; fora do workspace, levam a `/workspace`.
 - **Abas:** qualquer conversa por protocolo escolhida (de time ou não) abre o `ProtocolPane` por cima da área (`EditorArea::SelectedProtocolPane`); os terminais seguem montados por baixo.
 - **Não verificado visualmente** nesta etapa (sem instância isolada rodada): só vitest, tipos e o teste Rust.
 
