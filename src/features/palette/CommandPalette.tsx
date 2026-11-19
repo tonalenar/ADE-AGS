@@ -10,6 +10,7 @@ import {
 
 import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { DESKTOP_OS } from "@/app/platform";
+import { newConversationShortcutRoute } from "@/app/newConversationShortcut";
 import { newConversation, newConversationIn, newConversationLocal, newConversationWithoutProject, stopFocusedConversation } from "@/features/chat/chatActions";
 import { ProjectBadge } from "@/features/chat/ChatProjectBadge";
 import { useChatProjectIdentityList } from "@/features/chat/chatProjectIdentity";
@@ -761,9 +762,9 @@ function PaletteDialog() {
         icon: <HomeIcon className={icon} />,
         shortcut: shortcutForId("chat.new") ?? undefined,
         run: () => {
-          useUiStore.getState().setShellMode("chat");
           newConversation();
-          navigate("/");
+          const route = newConversationShortcutRoute(chatShellOn(useUiStore.getState()), location.pathname);
+          if (route) navigate(route);
         },
       });
       list.push({
@@ -774,9 +775,9 @@ function PaletteDialog() {
         icon: <HomeIcon className={icon} />,
         shortcut: shortcutForId("chat.newWithoutProject") ?? undefined,
         run: () => {
-          useUiStore.getState().setShellMode("chat");
           newConversationWithoutProject();
-          navigate("/");
+          const route = newConversationShortcutRoute(chatShellOn(useUiStore.getState()), location.pathname);
+          if (route) navigate(route);
         },
       });
       list.push({
@@ -787,9 +788,9 @@ function PaletteDialog() {
         icon: <HomeIcon className={icon} />,
         shortcut: shortcutForId("chat.newLocal") ?? undefined,
         run: () => {
-          useUiStore.getState().setShellMode("chat");
           newConversationLocal();
-          navigate("/");
+          const route = newConversationShortcutRoute(chatShellOn(useUiStore.getState()), location.pathname);
+          if (route) navigate(route);
         },
       });
       for (const { cwd, name: project } of projectFolders) {
@@ -801,9 +802,9 @@ function PaletteDialog() {
           keywords: ["new conversation", "new thread", "project", "nova conversa", "novo chat", "projeto", project, cwd],
           icon: <ProjectBadge name={project} cwd={cwd} size="sm" />,
           run: () => {
-            useUiStore.getState().setShellMode("chat");
             newConversationIn(cwd);
-            navigate("/");
+            const route = newConversationShortcutRoute(chatShellOn(useUiStore.getState()), location.pathname);
+            if (route) navigate(route);
           },
         });
       }
