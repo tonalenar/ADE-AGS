@@ -160,11 +160,26 @@ fn a_prioridade_e_baixa_fora_de_vista_e_normal_quando_se_olha() {
 fn o_modo_leve_desliga_cada_servico_uma_vez_e_o_caminho_e_seguro() {
     use super::slim;
     let mut seen = std::collections::HashSet::new();
-    for label in slim::LABELS {
-        assert!(seen.insert(*label), "rótulo repetido: {label}");
-        assert!(label.starts_with("com.apple."), "{label}");
+    let ids: Vec<_> = slim::LABELS.iter().map(|category| category.id).collect();
+    assert_eq!(ids, [
+        "widgets", "siri", "search", "icloud", "store", "pim", "web", "family", "health", "photos",
+        "apps", "messaging", "connectivity", "telemetry", "mdm",
+    ]);
+    for category in slim::LABELS {
+        for label in category.labels {
+            assert!(seen.insert(*label), "rótulo repetido: {label}");
+            assert!(label.starts_with("com.apple."), "{label}");
+        }
     }
-    assert_eq!(slim::LABELS.len(), 157);
+    assert_eq!(seen.len(), 157);
+    let expected: std::collections::HashSet<_> = include_str!("slim-labels.expected").lines().collect();
+    assert_eq!(expected.len(), 157, "o conjunto de referência deve ser único");
+    assert_eq!(seen, expected, "as categorias devem preservar exatamente os rótulos existentes");
+    assert_eq!(slim::all_labels().count(), 157);
+    let only_widgets = slim::labels_except(&["widgets".to_string()]);
+    assert_eq!(only_widgets.len(), 153);
+    assert!(!only_widgets.contains(&"com.apple.PosterBoard"));
+    assert!(only_widgets.contains(&"com.apple.searchd"));
     // Os que ficam ligados de propósito (sem eles o iOS fica tentando subir de novo, ou quebra quem testa app):
     // push, compras e App Store, e o Safari com push de site e universal links.
     for keep in [
@@ -183,7 +198,7 @@ fn o_modo_leve_desliga_cada_servico_uma_vez_e_o_caminho_e_seguro() {
 #[test]
 fn o_modo_maximo_soma_16_servicos_sem_duplicata_com_o_modo_leve() {
     use super::slim;
-    let light: std::collections::HashSet<&str> = slim::LABELS.iter().copied().collect();
+    let light: std::collections::HashSet<&str> = slim::all_labels().collect();
     let mut extra = std::collections::HashSet::new();
     for label in slim::MAX_EXTRA_LABELS {
         assert!(extra.insert(*label), "rótulo repetido em MAX_EXTRA_LABELS: {label}");
@@ -195,8 +210,15 @@ fn o_modo_maximo_soma_16_servicos_sem_duplicata_com_o_modo_leve() {
     for keep in ["com.apple.assistantd", "com.apple.gamed", "com.apple.sharingd"] {
         assert!(!extra.contains(keep), "{keep} não pode sair nem no modo máximo");
     }
-    assert_eq!(slim::Level::Light.labels().count(), slim::LABELS.len());
-    assert_eq!(slim::Level::Max.labels().count(), slim::LABELS.len() + 16);
+    assert_eq!(slim::Level::Light.labels(&[]).len(), 157);
+    assert_eq!(slim::Level::Max.labels(&[]).len(), 157 + 16);
+    for label in slim::MAX_EXTRA_LABELS {
+        assert!(slim::LABELS.iter().any(|c| c.id == slim::max_extra_category(label)), "{label}");
+    }
+    // Manter "store" ligada também poupa os extras de loja no modo máximo.
+    let keep_store = slim::Level::Max.labels(&["store".to_string()]);
+    assert!(!keep_store.contains(&"com.apple.storekitd") && !keep_store.contains(&"com.apple.appstored"));
+    assert!(keep_store.contains(&"com.apple.swcd"));
     assert_eq!(slim::Level::from_flags(false, false), None);
     assert_eq!(slim::Level::from_flags(false, true), None);
     assert_eq!(slim::Level::from_flags(true, false), Some(slim::Level::Light));
@@ -507,4 +529,16 @@ fn orientacao_so_se_refaz_quando_muda() {
     assert!(needs_orient(agora, 3, w, h), "girou");
     assert!(needs_orient(agora, 1, 120.0, h), "mudou o tamanho da view");
     assert!(needs_orient(None, 1, w, h), "a primeira vez sempre");
+}
+
+#[test]
+fn o_religamento_reusa_as_excecoes_do_ultimo_boot_do_aparelho() {
+    use super::lifecycle::{exceptions_for, remember_exceptions};
+    let udid = "11111111-2222-3333-4444-555555555555";
+    assert!(exceptions_for(udid).is_empty(), "sem boot anterior não há exceções");
+    remember_exceptions(udid, &["widgets".to_string(), "store".to_string()]);
+    assert_eq!(exceptions_for(udid), ["widgets", "store"]);
+    assert!(exceptions_for("99999999-2222-3333-4444-555555555555").is_empty(), "uma entrada por aparelho");
+    remember_exceptions(udid, &[]);
+    assert!(exceptions_for(udid).is_empty(), "um boot sem exceções apaga as anteriores");
 }

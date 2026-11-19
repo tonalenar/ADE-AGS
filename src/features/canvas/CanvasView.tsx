@@ -486,7 +486,7 @@ function CanvasInner() {
     },
   })), [board, selectedNote]);
 
-  const portalCwd = tabs[0]?.cwd ?? "";
+  const portalCwd = tabs[0]?.cwd || key?.split("|").slice(1).join("|").split(/#(?:m|c|cmp|s):/)[0] || "";
   const rawPortalNodes: PortalFlowNode[] = useMemo(() => Object.entries(board.portals).map(([id, portal]) => ({
     id,
     type: "portal" as const,
@@ -1573,7 +1573,7 @@ const PortalBody = memo(function PortalBody({ view, active, surfaceActive, devic
 const PortalOrDevice = memo(function PortalOrDevice(props: NodeProps<PortalFlowNode>) {
   const { data, selected } = props;
   if (data.portal.kind === "gemini") return <GeminiDesktopNode id={data.id} cwd={data.cwd} portal={data.portal} selected={!!selected} />;
-  if (data.portal.kind === "ios") return <SimulatorNode id={data.id} portal={data.portal} selected={!!selected} />;
+  if (data.portal.kind === "ios") return <SimulatorNode id={data.id} cwd={data.cwd} portal={data.portal} selected={!!selected} />;
   return data.portal.kind === "android"
     ? <DeviceNode id={data.id} portal={data.portal} links={data.links} selected={!!selected} />
     : <PortalNode {...props} />;

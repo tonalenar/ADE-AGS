@@ -29,7 +29,7 @@ pub mod ops {
         use super::{Device, Memory};
         const NO: &str = "O simulador iOS só existe no macOS, com o Xcode instalado.";
         pub fn devices() -> Result<Vec<Device>, String> { Err(NO.into()) }
-        pub fn boot(_: &str, _: Option<crate::simulator::slim::Level>) -> Result<(), String> { Err(NO.into()) }
+        pub fn boot(_: &str, _: Option<crate::simulator::slim::Level>, _: &[String]) -> Result<(), String> { Err(NO.into()) }
         pub fn booted(_: &str) -> Result<bool, String> { Err(NO.into()) }
         pub fn shutdown(_: &str) -> Result<(), String> { Err(NO.into()) }
         pub fn tap(_: &str, _: f64, _: f64) -> Result<(), String> { Err(NO.into()) }

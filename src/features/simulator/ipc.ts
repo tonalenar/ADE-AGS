@@ -24,9 +24,10 @@ export interface SimPlace {
 
 export const simulatorDevices = () => invoke<SimDevice[]>("simulator_devices");
 
-/** Liga sem o app Simulator; desliga junto com a ADE. `light` = modo leve; `lightMax` = modo máximo. */
-export const simulatorBoot = (udid: string, light: boolean, lightMax = false) =>
-  invoke<void>("simulator_boot", { udid, light, lightMax });
+/** Liga sem o app Simulator; desliga junto com a ADE. `light` = modo leve; `lightMax` = modo máximo;
+ *  `exceptions` = categorias que ficam ligadas neste boot. */
+export const simulatorBoot = (udid: string, light: boolean, lightMax = false, exceptions: string[] = []) =>
+  invoke<void>("simulator_boot", { udid, light, lightMax, exceptions });
 
 /** Modo leve num aparelho ligado: o iOS passa para a prioridade baixa (ou volta à normal) na hora. */
 export const simulatorPriority = (udid: string, light: boolean) => invoke<number>("simulator_priority", { udid, light });
