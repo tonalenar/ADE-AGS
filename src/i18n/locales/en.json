@@ -6560,5 +6560,6 @@
   "settings.accounts.identity.color": "Badge color",
   "settings.accounts.identity.save": "Save",
   "settings.accounts.add.displayName": "Display name (optional)",
-  "settings.accounts.add.color": "Badge color (optional)"
+  "settings.accounts.add.color": "Badge color (optional)",
+  "chat.picker.accountLoggedOut": "not signed in"
 }

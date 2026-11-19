@@ -21,6 +21,7 @@ export function AccountBadge({ label, accentColor, size = "md", named = false, c
   const neutral = style ? "" : "bg-gray-200 text-gray-600 dark:bg-white/12 dark:text-gray-300";
   return (
     <span
+      data-account-badge=""
       role={named ? "img" : undefined}
       aria-label={named ? label : undefined}
       aria-hidden={named ? undefined : true}
