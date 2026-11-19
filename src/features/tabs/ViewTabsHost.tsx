@@ -59,7 +59,7 @@ export function ViewTabsHost() {
   const lastRect = useRef(new Map<string, Rect | null>());
   const desktopNode = mode === "canvas" && portals ? Object.entries(portals).find(([, p]) => p.kind === "gemini") : undefined;
   const desktopRect = desktopNode && desktopRects[desktopNode[0]];
-  const boardCwd = boardKey?.split("|").slice(1).join("|").split("#m:")[0];
+  const boardCwd = boardKey?.split("|").slice(1).join("|").split(/#(?:m|c|cmp|s):/)[0];
   // No chat só aparece o navegador do painel direito (nunca o Gemini Desktop do canvas).
   const chat = chatOn;
   const floatingBrowserId = chatOn && floating ? chatBrowser?.viewId ?? null : null;

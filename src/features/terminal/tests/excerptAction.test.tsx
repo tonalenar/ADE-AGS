@@ -23,6 +23,8 @@ vi.mock("@/features/tabs/viewStore", () => ({ useViewTabsStore: { getState: () =
 vi.mock("@/features/canvas/chatUnread", () => ({ useUnreadStore: { getState: () => ({ setJump: m.setJump }) } }));
 vi.mock("@/features/canvas/store", () => ({
   boardKeyOfTab: () => "k",
+  windowModeKey: () => "@window:test",
+  workModeFor: () => "canvas",
   useCanvasStore: { getState: () => ({ boards: {}, modes: { k: "canvas" } }) },
 }));
 vi.mock("@/shared/brand/botToastStore", () => ({ showBotToast: m.toast }));

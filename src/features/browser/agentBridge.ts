@@ -12,7 +12,7 @@
  * página necesita ver sin tener que preguntarlo aparte.
  */
 import { AGENT_PORTAL_SIZE, neighbors } from "@/features/canvas/board";
-import { boardKeyOfTab, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
+import { boardKeyOfTab, canvasActions, flushSave, useCanvasStore, windowModeKey, workModeFor } from "@/features/canvas/store";
 import { invoke } from "@tauri-apps/api/core";
 
 import { useTabsStore } from "@/features/tabs/store";
@@ -163,7 +163,7 @@ async function openPortalFor(owner: ViewOwner, url: string): Promise<string | nu
   if (!tab) return null;
   const key = boardKeyOfTab(tab);
   const board = useCanvasStore.getState().boards[key];
-  if (!board || !(owner.id in board.nodes) || useCanvasStore.getState().modes[key] !== "canvas") return null;
+  if (!board || !(owner.id in board.nodes) || workModeFor(useCanvasStore.getState().modes, windowModeKey(), key) !== "canvas") return null;
   const created = canvasActions.addPortal(key, { name: undefined, url, near: owner.id, size: { ...AGENT_PORTAL_SIZE } });
   await flushSave(key);
   return created.id;

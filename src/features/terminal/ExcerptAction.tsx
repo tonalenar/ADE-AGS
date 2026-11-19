@@ -10,7 +10,7 @@ import { useUnreadStore } from "@/features/canvas/chatUnread";
 import { ChatBubbleIcon } from "@/features/chat/chatIcons";
 import { addQuoteFor } from "@/features/chat/quotes/quoteStore";
 import { MAX_QUOTE_CHARS } from "@/features/chat/quotes/quoteModel";
-import { boardKeyOfTab, useCanvasStore } from "@/features/canvas/store";
+import { boardKeyOfTab, useCanvasStore, windowModeKey, workModeFor } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type Tab } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -199,7 +199,7 @@ export function ExcerptAction({ tabId, term, host }: { tabId: string; term: XTer
         });
       }
       const { boards, modes } = useCanvasStore.getState();
-      const inCanvas = modes[boardKeyOfTab(source, boards)] === "canvas";
+      const inCanvas = workModeFor(modes, windowModeKey(), boardKeyOfTab(source, boards)) === "canvas";
       items.push({ key: "chat", label: tr(inCanvas ? "terminal.excerpt.chat" : "terminal.excerpt.chatCanvas"), separator: items.length > 0, onSelect: () => toChat(excerpt) });
     }
     const others = tabs.filter((tab) => tab.id !== tabId && tab.agentId !== SHELL_AGENT_ID);

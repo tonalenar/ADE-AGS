@@ -31,7 +31,7 @@ import { respondToCli } from "./ipc";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 import { sendAutonomous } from "@/features/terminal/safeWrite";
 import { requestPtyLaunch } from "@/features/terminal/ptyLaunch";
-import { boardKey, boardKeyOfTab, canvasActions, flushSave, setWorkMode, useCanvasStore } from "@/features/canvas/store";
+import { boardKey, boardKeyOfTab, canvasActions, flushSave, setWorkMode, useCanvasStore, windowModeKey, workModeFor } from "@/features/canvas/store";
 import { AGENT_PORTAL_SIZE } from "@/features/canvas/board";
 import { DEFAULT_SCREEN, nodeSize, SIM_SCALE } from "@/features/simulator/geometry";
 import { orphanPortal } from "@/features/canvas/portalReuse";
@@ -443,7 +443,7 @@ async function handlePortal(args: Record<string, unknown>) {
       return created;
     }
     // O navegador só existe na tela se o canvas está à vista: quem pediu um navegador quer vê-lo.
-    if (useCanvasStore.getState().modes[key] !== "canvas") setWorkMode(key, "canvas");
+    if (workModeFor(useCanvasStore.getState().modes, windowModeKey(), key) !== "canvas") setWorkMode(key, "canvas");
     await flushSave(key);
     return created;
   }
@@ -458,7 +458,7 @@ async function handlePortal(args: Record<string, unknown>) {
     const id = board ? orphanPortal(board, open, str(args, "url")) : null;
     if (!board || !id) return { id: null };
     canvasActions.connect(key, id, near);
-    if (useCanvasStore.getState().modes[key] !== "canvas") setWorkMode(key, "canvas");
+    if (workModeFor(useCanvasStore.getState().modes, windowModeKey(), key) !== "canvas") setWorkMode(key, "canvas");
     await flushSave(key);
     return { id, name: board.portals[id].name || id, url: board.portals[id].url ?? "" };
   }
@@ -521,8 +521,8 @@ async function handleChatOpen(args: Record<string, unknown>): Promise<unknown> {
 }
 
 /**
- * `ags design open <id> [--artboard] [--page]`: marca o design como aberto no canvas da pasta ou da missão
- * dele. No modo chat abre a aba Design do painel direito com aquele design (fechando a tela cheia que
+ * `ags design open <id> [--artboard] [--page]`: marca o design no canvas da conversa ativa (ou no da
+ * missão, projeto ou comparação a que ela já pertence). No modo chat abre a aba Design do painel direito com aquele design (fechando a tela cheia que
  * estiver por cima); nas abas e no canvas, a tela cheia `/design/:id`.
  */
 async function handleDesignOpen(args: Record<string, unknown>): Promise<unknown> {

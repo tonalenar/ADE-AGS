@@ -38,9 +38,9 @@ describe("a barra só navega para rotas que existem", () => {
     expect(read("../../../app/router.tsx")).toMatch(/path: "\*", element: <NotFound \/>/);
   });
 
-  it('o "+" de um projeto nas Abas e no Canvas leva ao chat (modo ligado) ou ao início com a pasta (`/?cwd=`, que a HomePage lê)', () => {
+  it('Criar e o "+" do projeto usam o mesmo composer sem navegar para a Home', () => {
     const sidebar = read("../sidebar/AppSessionsSidebar.tsx");
-    expect(sidebar).toMatch(/onNewIn=\{\(cwd\) => \{[\s\S]*setShellMode\("chat"\); newConversationIn\(cwd\)[\s\S]*navigate\(`\/\?cwd=\$\{encodeURIComponent\(cwd\)\}`\)/);
-    expect(read("../../workspaces/HomePage.tsx")).toMatch(/params\.get\("cwd"\)/);
+    expect(sidebar).toContain("newConversationLocal();");
+    expect(sidebar).toContain("onNewIn={newConversationIn}");
   });
 });

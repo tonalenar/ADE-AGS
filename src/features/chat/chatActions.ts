@@ -72,8 +72,7 @@ export function newConversation(): void {
 /** Abre um rascunho no projeto da conversa ou aba que está em foco. */
 export function newConversationLocal(): void {
   const chat = useChatStore.getState();
-  const inChatShell = chatShellOn(useUiStore.getState());
-  const threadCwd = inChatShell && !chat.composing && chat.thread
+  const threadCwd = !chat.composing && chat.thread
     ? useStructured.getState().threads.find((thread) => thread.id === chat.thread)?.cwd
     : undefined;
   const tabs = useTabsStore.getState();

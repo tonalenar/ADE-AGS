@@ -12,6 +12,8 @@ vi.mock("@/features/missions/MissionsSection", () => ({ MissionsSection: () => <
 vi.mock("@/shared/brand/Pet", () => ({ usePetStatus: () => ({}), PetCard: () => <div data-testid="pet" /> }));
 
 import { useTabsStore } from "@/features/tabs/store";
+import { useChatStore } from "@/features/chat/store";
+import { useStructured } from "@/features/chat/structured/store";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
 import { AppSessionsSidebar } from "../sidebar/AppSessionsSidebar";
@@ -29,6 +31,9 @@ function Where() { where = useLocation().pathname; return null; }
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   where = "";
+  useChatStore.setState({ composing: false, composeFolder: null, thread: null });
+  useTabsStore.setState({ tabs: [], activeTabId: null });
+  useStructured.setState({ threads: [] });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -62,9 +67,30 @@ describe("a barra de sessões nas Abas e no Canvas", () => {
     expect(where).toBe("/workspace");
   });
 
-  it("nova conversa e adicionar projeto levam à tela inicial", async () => {
+  it("Criar abre o composer sem sair do modo ou da rota", async () => {
     await mount();
     await act(async () => { (host.querySelector("[aria-label='chat.sidebar.new']") as HTMLElement).click(); });
-    expect(where).toBe("/");
+    expect(where).toBe("/settings");
+    expect(useChatStore.getState().composing).toBe(true);
+    expect(useChatStore.getState().composeFolder).toBeNull();
+  });
+
+  it("Criar usa a pasta da conversa por protocolo ativa", async () => {
+    useChatStore.setState({ thread: "thread-1" });
+    useStructured.setState({ threads: [{ id: "thread-1", cwd: "/p/thread", state: "active" } as never] });
+    await mount();
+    await act(async () => { (host.querySelector("[aria-label='chat.sidebar.new']") as HTMLElement).click(); });
+    expect(where).toBe("/settings");
+    expect(useChatStore.getState()).toMatchObject({ composing: true, composeFolder: "/p/thread" });
+  });
+
+  it("o + do projeto abre o mesmo composer com a pasta escolhida", async () => {
+    await mount();
+    const add = host.querySelector("[aria-label='chat.sidebar.group.new']");
+    expect(add).not.toBeNull();
+    await act(async () => { (add as HTMLElement).click(); });
+    expect(where).toBe("/settings");
+    expect(useChatStore.getState().composing).toBe(true);
+    expect(useChatStore.getState().composeFolder).toBe("/p/ADE");
   });
 });

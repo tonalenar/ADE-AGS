@@ -3,7 +3,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath, type BrowserView } from "@/features/tabs/viewTabs";
 import { useUiStore } from "@/app/uiStore";
-import { boardKeyOfTab, useCanvasStore } from "@/features/canvas/store";
+import { boardKeyOfTab, useCanvasStore, windowModeKey, workModeFor } from "@/features/canvas/store";
 
 export type PreviewCommand = "refresh" | "focusUrl" | "zoomIn" | "zoomOut" | "resetZoom";
 
@@ -71,7 +71,7 @@ export function canToggleBrowserPreview(): boolean {
   const tabs = useTabsStore.getState();
   const activeTab = tabs.tabs.find((tab) => tab.id === tabs.activeTabId);
   if (!activeTab?.cwd) return false;
-  return useCanvasStore.getState().modes[boardKeyOfTab(activeTab)] !== "canvas";
+  return workModeFor(useCanvasStore.getState().modes, windowModeKey(), boardKeyOfTab(activeTab)) !== "canvas";
 }
 
 /** Alterna a prévia na conversa ou no workspace, reaproveitando uma vista pessoal existente. */

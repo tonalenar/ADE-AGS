@@ -31,7 +31,7 @@ import { activePreviewViewId, canToggleBrowserPreview, runPreviewCommand, toggle
 import { isAgentModelPickerTargetMounted, isComposerCommandAvailable, isFilePickerTargetMounted, isPromptStashTargetMounted, promptStashTargetLabel, runComposerCommand, toggleAgentModelPicker, toggleFilePicker, togglePromptStash } from "@/features/chat/composerCommands";
 import { useWorkspacesStore } from "@/features/workspaces/store";
 import { useFocusInside } from "@/shared/ui/useFocusInside";
-import { boardKeyOfTab, setWorkMode, useCanvasStore } from "@/features/canvas/store";
+import { boardKeyOfTab, setWorkMode, useWorkMode } from "@/features/canvas/store";
 import { openCompareDialog } from "@/features/compare/store";
 import { nextAppearanceMode, readAppearanceMode, setAppearanceMode } from "@/features/settings/appearanceMode";
 import { useBotToastStore } from "@/shared/brand/botToastStore";
@@ -212,7 +212,7 @@ function PaletteDialog() {
   const activeFileIsFavorite = !!activeFileFavoritePath && favoritePaths.includes(activeFileFavoritePath);
   const projectScripts = useMemo(() => loadChatProjectScripts(projectScriptCwd), [projectScriptCwd]);
   const canvasKey = activeTab ? boardKeyOfTab(activeTab) : null;
-  const canvasOn = useCanvasStore((s) => (canvasKey ? s.modes[canvasKey] === "canvas" : false));
+  const canvasOn = useWorkMode() === "canvas";
   const canFindConversation = activeTimelineConversationKey() !== null;
   const previewViewId = activePreviewViewId();
   const canTogglePreview = canToggleBrowserPreview();
