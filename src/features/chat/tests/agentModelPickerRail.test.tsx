@@ -7,9 +7,12 @@ const estado = vi.hoisted(() => ({
   accounts: [] as { accountId: string | null; name: string; label: string | null; loggedIn: boolean }[],
   identities: [] as Record<string, unknown>[],
   liveCalls: [] as { accountKey: string; force: boolean }[],
+  capable: [{ agentId: "claude-code", label: "Claude Code", envVar: "CLAUDE_CONFIG_DIR", installed: true }] as Record<string, unknown>[],
+  dialogs: [] as string[],
 }));
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: { accountKey: string; force: boolean }) => {
+    if (command === "account_capable_agents") return Promise.resolve(estado.capable);
     if (command === "claude_live_usage") {
       estado.liveCalls.push({ accountKey: args!.accountKey, force: args!.force });
       return Promise.resolve({ available: true, session: { percent: 55, resets: null }, week: null, weekModels: [], fetchedAt: 4_000_000_000, cached: false, problem: null });
@@ -29,6 +32,14 @@ vi.mock("@/features/runs/ipc", () => ({
     agents: [{ agentId: "claude-code", label: "Claude Code", installed: true, models: [], accounts: estado.accounts.map((a) => ({ ...a, models: [] })) }],
   }),
   refreshRosterModels: () => Promise.reject(new Error("não usado")),
+}));
+
+// O diálogo de nova conta tem um terminal de login (PTY): aqui basta saber para qual agente abriu.
+vi.mock("@/features/accounts/AddAccountDialog", () => ({
+  AddAccountDialog: ({ agentId, onClose }: { agentId: string; onClose: () => void }) => {
+    estado.dialogs.push(agentId);
+    return <div data-testid="add-account-dialog" data-agent={agentId}><button type="button" onClick={onClose}>fechar</button></div>;
+  },
 }));
 
 import { AgentModelPicker, type AgentModelValue } from "../AgentModelPicker";
@@ -61,6 +72,8 @@ beforeEach(() => {
   estado.identities = [];
   useAccountsStore.setState({ accounts: [], systemAccounts: [], loaded: false });
   estado.liveCalls = [];
+  estado.dialogs = [];
+  estado.capable = [{ agentId: "claude-code", label: "Claude Code", envVar: "CLAUDE_CONFIG_DIR", installed: true }];
   useUsageStore.setState({ claude: {}, codex: {}, antigravity: {}, busy: {} });
   onChange.mockReset();
   host = document.createElement("div");
@@ -173,5 +186,35 @@ describe("trilho do seletor com várias contas", () => {
     await openPicker();
     await openPicker();
     expect(estado.liveCalls).toEqual([]);
+  });
+
+  const botaoAdicionar = () => document.body.querySelector<HTMLButtonElement>("button[aria-label='chat.picker.addAccount']");
+  const dialogo = () => document.body.querySelector<HTMLElement>("[data-testid='add-account-dialog']");
+
+  it("o botão de nova conta abre o diálogo já com o agente da aba e fecha o seletor", async () => {
+    await mount(VALUE);
+    await openPicker();
+    await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); }); // a lista de agentes com conta chega
+    await click(botaoAdicionar()!);
+    expect(dialogo()?.dataset.agent).toBe("claude-code");
+    expect(document.body.querySelector("[role='dialog'][aria-label='chat.picker.title']")).toBeNull();
+    // Fechar o diálogo o desmonta.
+    await click(dialogo()!.querySelector("button")!);
+    expect(dialogo()).toBeNull();
+  });
+
+  it("não oferece nova conta numa conversa aberta nem para agente sem suporte a várias contas", async () => {
+    await mount(VALUE, false);
+    await openPicker();
+    await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
+    expect(botaoAdicionar()).toBeNull();
+    await act(async () => { root.unmount(); });
+    root = createRoot(host);
+    estado.capable = [];
+    useAccountsStore.setState({ loaded: false, capable: [] });
+    await mount(VALUE);
+    await openPicker();
+    await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
+    expect(botaoAdicionar()).toBeNull();
   });
 });

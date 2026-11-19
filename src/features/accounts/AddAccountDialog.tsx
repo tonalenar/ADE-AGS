@@ -10,6 +10,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import type { AgentAccount } from "@/features/accounts/types";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
 import { AccountColorPicker } from "@/features/accounts/AccountColorPicker";
+import { MultipleAccountsNote } from "@/features/accounts/MultipleAccountsNote";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { PanelBoundary } from "@/app/PanelBoundary";
@@ -182,6 +183,8 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
               {agent.envVar}
             </Badge>
           </div>
+
+          <MultipleAccountsNote agentId={agentId} agentLabel={agent.label} />
 
           <Input
             label={t("settings.accounts.add.name")}

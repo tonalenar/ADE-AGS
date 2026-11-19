@@ -6562,5 +6562,7 @@
   "settings.accounts.add.displayName": "Display name (optional)",
   "settings.accounts.add.color": "Badge color (optional)",
   "chat.picker.accountLoggedOut": "not signed in",
-  "chat.picker.accountLimitUsed": "{{percent}}% of limit used"
+  "chat.picker.accountLimitUsed": "{{percent}}% of limit used",
+  "accounts.multipleNote": "You already have a {{agent}} account connected. Each account has its own quota and its own login, and ADE does not add up or split limits between them. Check that your plan allows more than one account on the same machine.",
+  "chat.picker.addAccount": "Add a {{agent}} account"
 }
