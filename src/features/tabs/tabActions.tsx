@@ -69,7 +69,7 @@ const useTabActions = create<TabActionsState>(() => ({
 
 interface WizardFor {
   cwd: string;
-  title: string;
+  title?: string;
   skillIds?: string[];
   prelaunch?: PrelaunchStep[];
   prompt?: string;
@@ -307,10 +307,10 @@ export function TabDialogs() {
           const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch });
           // O terminal nasce no retângulo que a pessoa desenhou no canvas, se desenhou um.
           const placement = takePlacement();
-          // Com uma conversa ativa neste projeto, o terminal entra no canvas dela (no retângulo desenhado, se houve).
-          if (!joinActiveConversation(tabId, cwd, placement && !wizardFor ? placement.box : null) && placement && !wizardFor) {
-            canvasActions.placeNode(placement.key, tabId, placement.box);
-          }
+          // Uma abertura pelo canvas já escolheu o destino; conversa por protocolo também pode
+          // ser a ativa mesmo sem haver uma aba que sirva de contexto para `joinActiveConversation`.
+          if (placement) canvasActions.placeNode(placement.key, tabId, placement.box);
+          else joinActiveConversation(tabId, cwd, null);
           navigate("/workspace");
 
           // Los symlinks de las skills elegidas tienen que existir en el cwd ANTES de que

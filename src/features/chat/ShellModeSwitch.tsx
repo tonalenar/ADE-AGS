@@ -12,7 +12,7 @@ import { useStructured } from "./structured/store";
 type Choice = "chat" | WorkMode;
 
 /**
- * Chat, Abas ou Canvas. Abas e Canvas continuam sendo o modo de cada pasta (`WorkMode`); o chat é a
+ * Chat, Abas ou Canvas. Abas/Canvas são preferência da janela; o chat é a
  * casca da janela inteira. Some com o modo chat desligado: aí quem troca abas/canvas é o `ModeToggle`.
  */
 export function ShellModeSwitch({ className = "" }: { className?: string }) {
@@ -23,10 +23,10 @@ export function ShellModeSwitch({ className = "" }: { className?: string }) {
   const chat = useChatShell();
   const workMode = useWorkMode();
   const activeKey = useActiveBoardKey();
-  // Com uma conversa por protocolo na tela não há aba ativa: o canvas é o da pasta dela.
+  // Com uma conversa por protocolo na tela, a chave dela vence a aba que possa estar oculta.
   const selectedThread = useChatStore((s) => s.thread);
   const threadCwd = useStructured((s) => (selectedThread ? s.threads.find((th) => th.id === selectedThread)?.cwd ?? null : null));
-  const boardKey = canvasKeyFor(activeKey, threadCwd, folderBoardKey);
+  const boardKey = canvasKeyFor(activeKey, threadCwd, folderBoardKey, selectedThread ? `thread:${selectedThread}` : null);
   const hasTabs = useTabsStore((s) => s.tabs.length > 0);
   if (!enabled) return null;
 
@@ -39,13 +39,13 @@ export function ShellModeSwitch({ className = "" }: { className?: string }) {
     setShellMode("workspace");
     if (boardKey) setWorkMode(boardKey, choice);
     // Sem abas, o workspace manda de volta à inicial (ver `AppShell`).
-    navigate(hasTabs ? "/workspace" : "/");
+    navigate(hasTabs || !!selectedThread ? "/workspace" : "/");
   };
 
   const options: { value: Choice; label: string }[] = [
     { value: "chat", label: t("chat.mode.chat") },
     { value: "tabs", label: t("canvas.mode.tabs") },
-    // O canvas é por pasta: sem uma aba ativa não há canvas para abrir.
+    // Com uma conversa por protocolo, a chave vem do cwd e da ref dela.
     ...(boardKey ? [{ value: "canvas" as const, label: t("canvas.mode.canvas") }] : []),
   ];
 

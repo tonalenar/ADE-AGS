@@ -49,6 +49,9 @@ import { followAppBoot } from "@/app/splash";
 import { useFleetEvents } from "@/features/runs/useFleetEvents";
 import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
+import { useChatStore } from "@/features/chat/store";
+import { chatProjects } from "@/features/chat/chatModel";
+import { NewConversation } from "@/features/chat/NewConversation";
 
 /** Las rutas cuyas terminales siguen visibles (y vivas) por debajo de la pantalla. */
 const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/missions", "/squads", "/forge", "/settings", "/design"];
@@ -88,6 +91,9 @@ export function AppShell() {
   // Ponto de restauração dos arquivos a cada mensagem num agente, e a limpeza das abas fechadas.
   useTabCheckpointsCapture();
   const tabs = useTabsStore((s) => s.tabs);
+  const protocolThread = useChatStore((s) => s.thread);
+  const composing = useChatStore((s) => s.composing);
+  const composeFolder = useChatStore((s) => s.composeFolder);
   const setDetectedAgents = useTabsStore((s) => s.setDetectedAgents);
   const activateTab = useTabsStore((s) => s.activateTab);
   const hydrateFromBackend = useTabsStore((s) => s.hydrateFromBackend);
@@ -265,10 +271,10 @@ export function AppShell() {
   useEffect(() => {
     // Só depois de carregar as abas do banco: antes disso a lista está vazia por não ter chegado,
     // e voltar ao Home ali fazia a tela piscar (Home → workspace) a cada abertura.
-    if (hydrated && tabs.length === 0 && isWorkspace) {
+    if (hydrated && tabs.length === 0 && !protocolThread && isWorkspace) {
       navigate("/");
     }
-  }, [hydrated, tabs.length, isWorkspace, navigate]);
+  }, [hydrated, tabs.length, protocolThread, isWorkspace, navigate]);
 
   return (
     <div className={`flex flex-col h-screen overflow-hidden
@@ -340,6 +346,11 @@ export function AppShell() {
               TODAS las páginas, incluidas las que no lo necesitan. */}
           {/* No chat as telas cheias (Configurações, Missões…) abrem dentro da casca, no lugar da conversa. */}
           {chat && <PanelBoundary name="chat"><Suspense fallback={null}><ChatShell groups={groups} page={fullPage && !settingsRoute ? <Outlet context={{ groups } satisfies ShellOutletContext} /> : null} /></Suspense></PanelBoundary>}
+
+          {!chat && composing && <div className="absolute inset-0 z-50 flex min-w-0 flex-col bg-white dark:bg-surface">
+            <NewConversation projects={chatProjects(groups)} folder={composeFolder ?? activeTab?.cwd ?? null}
+              onFolder={(cwd) => useChatStore.setState({ composeFolder: cwd })} />
+          </div>}
 
           {!chat && !isWorkspace && !fullPage && (
             <div className="absolute inset-0 z-10 overflow-hidden">

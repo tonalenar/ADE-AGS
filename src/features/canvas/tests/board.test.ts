@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  addEdge, buildMissionTeam, emptyBoard, gridCell, neighbors, placeBelow, reconcile, removeEdge, removeEdgeBetween, toggleOrchestrator,
+  addEdge, buildMissionTeam, emptyBoard, moveSessionArtifacts, gridCell, neighbors, placeBelow, reconcile, removeEdge, removeEdgeBetween, toggleOrchestrator,
 } from "../board";
 import { GAP } from "../geometry";
 
@@ -30,6 +30,76 @@ describe("reconcile", () => {
     const b = reconcile(emptyBoard(), ["t1"]);
     const moved = { ...b, nodes: { t1: { x: 999, y: 999, w: 500, h: 300 } } };
     expect(reconcile(moved, ["t1", "t2"]).nodes.t1).toEqual({ x: 999, y: 999, w: 500, h: 300 });
+  });
+});
+
+describe("modo de trabalho por janela", () => {
+  it("a preferência nova vence o formato antigo por canvas e permanece ao mudar de conversa", async () => {
+    const { setWorkMode, useCanvasStore, workModeFor } = await import("../store");
+    useCanvasStore.setState({ modes: { "main|/p": "canvas" } });
+    expect(workModeFor(useCanvasStore.getState().modes, "@window:main", "main|/p#s:a")).toBe("canvas");
+    useCanvasStore.setState({ modes: { "main|/p#s:a": "canvas" } });
+    expect(workModeFor(useCanvasStore.getState().modes, "@window:main", "main|/p#s:a")).toBe("canvas");
+    setWorkMode("main|/p#s:a", "canvas");
+    setWorkMode("main|/p#s:b", "tabs");
+    expect(useCanvasStore.getState().modes["@window:main"]).toBe("tabs");
+    expect(useCanvasStore.getState().modes["main|/p#s:a"]).toBe("canvas");
+    expect(workModeFor(useCanvasStore.getState().modes, "@window:main", "main|/p#s:a")).toBe("tabs");
+  });
+});
+
+describe("migração da conversa para o canvas de sessão", () => {
+  it("move nó, nota exclusiva, corda, coroa, papel e marca: nada some, nada fica duplicado", () => {
+    const old = {
+      ...emptyBoard(),
+      nodes: { lead: { x: 10, y: 20, w: 500, h: 300 } },
+      notes: { "note-a": { name: "A", content: "regra", box: { x: 5, y: 6, w: 200, h: 100 } } },
+      edges: [{ id: "e1", a: "lead", b: "note-a" }],
+      orchestrators: ["lead"],
+      roles: { lead: "orquestrador" },
+      subagents: ["lead"],
+    };
+    const { source, target } = moveSessionArtifacts(old, emptyBoard(), "lead");
+    expect(target).toMatchObject({
+      nodes: { lead: old.nodes.lead },
+      notes: { "note-a": old.notes["note-a"] },
+      edges: old.edges,
+      orchestrators: ["lead"],
+      roles: { lead: "orquestrador" },
+      subagents: ["lead"],
+    });
+    expect(source).toMatchObject({ nodes: {}, notes: {}, edges: [], orchestrators: [], roles: {}, subagents: [] });
+  });
+
+  it("depois de mover, cortar a corda no canvas novo não deixa autorização para trás", () => {
+    const old = { ...emptyBoard(), nodes: { a: { x: 1, y: 2, w: 3, h: 4 } }, edges: [{ id: "e1", a: "a", b: "thread:x" }] };
+    const moved = moveSessionArtifacts(old, emptyBoard(), "a");
+    const cut = removeEdgeBetween(moved.target, "a", "thread:x");
+    // O backend autoriza por corda em QUALQUER canvas: nenhum dos dois pode ainda tê-la.
+    expect([...moved.source.edges, ...cut.edges].some((e) => e.a === "a" || e.b === "a")).toBe(false);
+  });
+
+  it("a nota que outra conversa também usa fica na pasta, com as cordas dela", () => {
+    const source = {
+      ...emptyBoard(),
+      nodes: { a: { x: 1, y: 2, w: 3, h: 4 }, b: { x: 5, y: 6, w: 7, h: 8 } },
+      notes: { "note-shared": { name: "N", content: "x", box: { x: 0, y: 0, w: 1, h: 1 } } },
+      edges: [{ id: "e1", a: "a", b: "note-shared" }, { id: "e2", a: "b", b: "note-shared" }],
+    };
+    const moved = moveSessionArtifacts(source, emptyBoard(), "a");
+    expect(moved.target.edges).toEqual([]);
+    expect(moved.target.notes).toEqual({});
+    expect(moved.source.notes).toEqual(source.notes);
+    expect(moved.source.edges.map((edge) => edge.id)).toEqual(["e1", "e2"]);
+    expect(moved.source.nodes).toEqual({ b: source.nodes.b });
+  });
+
+  it("sem nada da ref, devolve os mesmos objetos", () => {
+    const source = { ...emptyBoard(), nodes: { b: { x: 5, y: 6, w: 7, h: 8 } } };
+    const target = emptyBoard();
+    const moved = moveSessionArtifacts(source, target, "a");
+    expect(moved.source).toBe(source);
+    expect(moved.target).toBe(target);
   });
 });
 

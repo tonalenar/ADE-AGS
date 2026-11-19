@@ -47,6 +47,12 @@ export function DesignPanel({ details, reload, initial, onPickDesign, onClose }:
   const surface = useRef<HTMLDivElement>(null);
   const fail = useCallback((e: unknown) => AlertaToast(t("canvas.design.title"), String(e), "error", 6000), [t]);
 
+  useEffect(() => {
+    setDesignId(initial?.designId ?? null);
+    setEditing(initial?.editBoardId ?? null);
+    if (initial?.designId) setPageId(null);
+  }, [initial]);
+
   // O design em foco: o escolhido; se sumiu (excluído) ou ainda não há escolha, o mais recente com dono.
   const currentId = designId && designs.some((d) => d.id === designId) ? designId : defaultDesignId(designs, ownerTabs, missionIndex);
   const detail = details.find((d) => d.design.id === currentId) ?? null;

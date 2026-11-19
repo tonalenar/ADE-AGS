@@ -13,7 +13,7 @@ import { selectConversations } from "@/features/chat/unified/selectConversations
 import { useStructured } from "@/features/chat/structured/store";
 import { gridTabs } from "@/features/canvas/gridMode";
 import { useTeamIndex } from "@/features/chat/team/teamIndex";
-import { boardKeyOfTab, conversationOfKey, missionOfKey, useCanvasStore, useWorkMode, type WorkMode } from "@/features/canvas/store";
+import { boardKeyOfTab, conversationOfKey, missionOfKey, useCanvasStore, useWorkMode, windowModeKey, workModeFor, type WorkMode } from "@/features/canvas/store";
 import {
   activate, agentKey, allGroups, closeGroup, createLayout, findGroup, focusGroup as focusInTree, isAgentKey, keyId,
   moveItem, parseLayout, reconcile, resize, split, viewKey, type SplitSide, type WorkspaceLayout,
@@ -499,8 +499,8 @@ export function currentPlacements(): Placements {
   const view = views.find((v) => v.id === rawView);
   const activeViewId = view && comparablePath(view.cwd) === activeCwd ? view.id : null;
   const canvas = useCanvasStore.getState();
-  const key = active ? boardKeyOfTab(active, canvas.boards) : null;
-  const mode: WorkMode = key ? canvas.modes[key] ?? "tabs" : "tabs";
+  const key = canvas.activeThread?.key ?? (active ? boardKeyOfTab(active, canvas.boards) : null);
+  const mode: WorkMode = workModeFor(canvas.modes, windowModeKey(), key);
   const tabIds = key ? tabs.filter((t) => boardKeyOfTab(t, canvas.boards) === key).map((t) => t.id) : [];
   const team = teamGridRefs(selectConversations({ tabs, threads: useStructured.getState().threads, teams: useTeamIndex.getState().teams, boards: canvas.boards }), activeTabId);
   const grid = activeViewId != null ? null : gridTabs({ on: key ? !!canvas.grids[key] : false, mission: missionOfKey(key) ?? conversationOfKey(key), team, mode, tabIds });

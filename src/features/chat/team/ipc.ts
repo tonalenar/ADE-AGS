@@ -52,7 +52,7 @@ export interface TeamView {
   watchStall?: boolean;
   /** De onde o time nasceu. Ausente = backend antigo (`chat`). */
   origin?: TeamOrigin;
-  /** Onde mora a coroa no canvas (pasta, `#c:` ou `#m:`), quando se sabe. */
+  /** Onde mora a coroa no canvas (pasta, `#s:`, `#c:`, `#m:` ou `#cmp:`), quando se sabe. */
   boardKey?: string | null;
   /** A missão espelhada (só `origin = "mission"`). */
   missionId?: string | null;

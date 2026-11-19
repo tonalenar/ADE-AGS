@@ -21,18 +21,26 @@ describe("selectedRef: a seleção única", () => {
 });
 
 describe("homeBoardKey: onde a conversa mora", () => {
-  it("o canvas que já tem o nó dela", () => {
-    const boards = { "main|/a": withThreads(["thread:x"]), "main|/b": emptyBoard() };
-    expect(homeBoardKey("thread:x", { boards, cwd: "/b", cwdKey })).toBe("main|/a");
+  it("um canvas especial legado com o nó vence o canvas da pasta", () => {
+    const boards = { "main|/a#c:old": withThreads(["thread:x"]), "main|/b": emptyBoard() };
+    expect(homeBoardKey("thread:x", { boards, cwd: "/b", cwdKey })).toBe("main|/a#c:old");
   });
-  it("o canvas especial (missão) vence o da pasta", () => {
-    const boards = { "main|/a": withNodes(["t1"]), "main|/a#m:9": withNodes(["t1"]) };
-    expect(homeBoardKey("t1", { boards, cwd: "/a", cwdKey })).toBe("main|/a#m:9");
+  it("(a) missão/projeto/comparação existentes vencem time e sessão", () => {
+    for (const special of ["main|/a#m:9", "main|/a#c:project", "main|/a#cmp:run"]) {
+      const boards = { "main|/a#s:t1": withNodes(["t1"]), [special]: withNodes(["t1"]) };
+      expect(homeBoardKey("t1", { boards, cwd: "/a", teamBoardKey: "main|/a#s:lead", cwdKey })).toBe(special);
+    }
   });
-  it("sem nó, onde está a coroa do time", () => {
-    expect(homeBoardKey("thread:x", { boards: {}, cwd: "/b", teamBoardKey: "main|/a#c:1", cwdKey })).toBe("main|/a#c:1");
+  it("(b) a conversa integrante herda o canvas da coroa antes de uma sessão antiga", () => {
+    const boards = { "main|/b#s:thread:x": withThreads(["thread:x"]) };
+    expect(homeBoardKey("thread:x", { boards, cwd: "/b", teamBoardKey: "main|/a#s:lead", cwdKey })).toBe("main|/a#s:lead");
   });
-  it("sem nada, a pasta do cwd", () => {
-    expect(homeBoardKey("thread:x", { boards: {}, cwd: "/b", cwdKey })).toBe("main|/b");
+  it("(c) conserva uma sessão já existente", () => {
+    const boards = { "main|/b#s:thread:x": withThreads(["thread:x"]) };
+    expect(homeBoardKey("thread:x", { boards, cwd: "/b", cwdKey })).toBe("main|/b#s:thread:x");
+  });
+  it("(d) cria canvas próprios para duas conversas da mesma pasta", () => {
+    expect(homeBoardKey("thread:x", { boards: {}, cwd: "/b", cwdKey })).toBe("main|/b#s:thread:x");
+    expect(homeBoardKey("thread:y", { boards: {}, cwd: "/b", cwdKey })).toBe("main|/b#s:thread:y");
   });
 });

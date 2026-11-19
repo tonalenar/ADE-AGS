@@ -14,15 +14,18 @@ export interface UnifiedSources {
   tabs: Pick<Tab, "id" | "title" | "cwd" | "agentId" | "ptyId" | "openedAt">[];
   threads: Pick<ThreadRow, "id" | "agentId" | "cwd" | "title" | "state" | "updatedAt">[];
   teams: TeamView[];
-  boards: Record<string, Pick<Board, "nodes" | "roles">>;
+  boards: Record<string, Pick<Board, "nodes" | "threads" | "roles" | "edges">>;
+  cwdKey?: (cwd: string) => string;
 }
 
 // Os separadores das chaves dos canvas especiais (`canvas/store.ts`: MISSION_SEP, CONV_SEP, COMPARE_SEP).
 // Repetidos aqui para o seletor não puxar o store do canvas, que depende de quase todo o app.
 const MISSION_SEP = "#m:";
-const SPECIAL_SEPS = [MISSION_SEP, "#c:", "#cmp:"];
+// #s: é especial para encontrar o canvas da conversa, mas não cria escopo de time.
+const LEGACY_SPECIAL_SEPS = [MISSION_SEP, "#c:", "#cmp:"];
+const CANVAS_SCOPE_SEPS = [...LEGACY_SPECIAL_SEPS, "#s:"];
 
-const isSpecialKey = (key: string) => SPECIAL_SEPS.some((sep) => key.includes(sep));
+const isLegacySpecialKey = (key: string) => LEGACY_SPECIAL_SEPS.some((sep) => key.includes(sep));
 
 function missionOfKey(key: string | undefined): string | undefined {
   const at = key?.indexOf(MISSION_SEP) ?? -1;
@@ -33,9 +36,10 @@ function missionOfKey(key: string | undefined): string | undefined {
 function boardKeyByNode(boards: UnifiedSources["boards"]): Map<string, string> {
   const out = new Map<string, string>();
   for (const [key, board] of Object.entries(boards)) {
-    for (const ref of Object.keys(board.nodes)) {
+    if (!CANVAS_SCOPE_SEPS.some((sep) => key.includes(sep))) continue;
+    for (const ref of [...Object.keys(board.nodes), ...Object.keys(board.threads ?? {})]) {
       const have = out.get(ref);
-      if (!have || (isSpecialKey(key) && !isSpecialKey(have))) out.set(ref, key);
+      if (!have || (isLegacySpecialKey(key) && !isLegacySpecialKey(have))) out.set(ref, key);
     }
   }
   return out;
@@ -60,9 +64,18 @@ export function selectConversations(src: UnifiedSources): UnifiedConversation[] 
 
   const build = (base: Pick<UnifiedConversation, "ref" | "kind" | "agentId" | "cwd" | "title" | "starting" | "openedAt">): UnifiedConversation => {
     const slot = slots.get(base.ref);
-    const boardKey = slot?.team.boardKey || nodeBoard.get(base.ref) || undefined;
+    const folderKey = (src.cwdKey ?? ((cwd) => `main|${cwd}`))(base.cwd);
+    const teamBoard = slot ? ownerBoardKey(slot.team, nodeBoard, src.cwdKey) : undefined;
+    const knownRefs = new Set([...src.tabs.map((tab) => tab.id), ...src.threads.map((thread) => `thread:${thread.id}`)]);
+    const oldFolder = src.boards[folderKey];
+    const manualLegacyLink = !slot && !nodeBoard.has(base.ref) && oldFolder?.edges.some((edge) =>
+      (edge.a === base.ref && knownRefs.has(edge.b)) || (edge.b === base.ref && knownRefs.has(edge.a)));
+    const ownBoard = nodeBoard.get(base.ref);
+    const ownSpecial = ownBoard && isLegacySpecialKey(ownBoard) ? ownBoard : undefined;
+    const boardKey = ownSpecial || teamBoard || ownBoard || (manualLegacyLink ? folderKey : `${folderKey}#s:${base.ref}`);
     const missionId = slot?.team.missionId || missionOfKey(boardKey) || undefined;
-    const role = slot?.member?.role || nodeBoardRole(src.boards, boardKey, base.ref);
+    const role = slot?.member?.role || nodeBoardRole(src.boards, boardKey, base.ref)
+      || nodeBoardRole(src.boards, (src.cwdKey ?? ((cwd) => `main|${cwd}`))(base.cwd), base.ref);
     return {
       ...base,
       teamId: slot?.team.id,
@@ -82,6 +95,18 @@ export function selectConversations(src: UnifiedSources): UnifiedConversation[] 
     .filter((t) => t.state === "active")
     .map((t) => build({ ref: threadKey(t.id), kind: "protocol", agentId: t.agentId, cwd: t.cwd, title: t.title, starting: false, openedAt: t.updatedAt }));
   return [...threads, ...tabs].sort((a, b) => b.openedAt - a.openedAt);
+}
+
+/** O canvas da coroa é o dono; time vindo de um grupo manual mantém a chave de origem. */
+function ownerBoardKey(team: TeamView, nodeBoard: Map<string, string>, cwdKey?: (cwd: string) => string): string | undefined {
+  const stored = team.boardKey || undefined;
+  if (stored && isLegacySpecialKey(stored)) return stored;
+  const leadBoard = nodeBoard.get(team.orchestrator);
+  if (leadBoard && isLegacySpecialKey(leadBoard)) return leadBoard;
+  if (team.origin === "canvas" && stored && !stored.includes("#s:")) return stored;
+  if (leadBoard) return leadBoard;
+  if (stored?.includes("#s:")) return stored;
+  return `${stored ?? (cwdKey ?? ((cwd) => `main|${cwd}`))(team.cwd)}#s:${team.orchestrator}`;
 }
 
 function nodeBoardRole(boards: UnifiedSources["boards"], boardKey: string | undefined, ref: string): string | undefined {

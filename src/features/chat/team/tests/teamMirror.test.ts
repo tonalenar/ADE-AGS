@@ -19,7 +19,8 @@ function team(refs: [string, string, Partial<TeamMember>?][] = []): TeamView {
 function board(ids: string[]): Board {
   return { ...reconcile(emptyBoard(), ["lead", ...ids]), orchestrators: ["lead"] };
 }
-const KEY = "main|/repo";
+// Estes casos exercitam o espelho de uma equipe já migrada para o canvas da coroa.
+const KEY = "main|/repo#s:lead";
 const TABS = new Set(["lead", "a", "b", "c"]);
 const isAgentTab = (ref: string) => TABS.has(ref);
 
@@ -40,6 +41,7 @@ function fakeApi(boards: Record<string, Board>): CanvasApi {
     disconnectPair: (k, a, b) => { boards[k] = { ...get(k), edges: get(k).edges.filter((e) => !((e.a === a && e.b === b) || (e.a === b && e.b === a))) }; },
     toggleOrchestrator: (k, id) => { const b = get(k); boards[k] = { ...b, orchestrators: b.orchestrators.includes(id) ? b.orchestrators.filter((x) => x !== id) : [...b.orchestrators, id] }; },
     moveTerminals: () => undefined,
+    migrateSession: () => undefined,
     setRole: (k, id, role, subagent) => { boards[k] = setRole(get(k), id, role, subagent); },
   };
 }
@@ -69,6 +71,26 @@ describe("a projeção do canvas", () => {
   it("canvas de missão não espelha no time", () => {
     const boards = { "main|/repo#m:1": addEdge(board(["a"]), "lead", "a", "e1") };
     expect(projectCanvas(team(), boards, isAgentTab)).toBeNull();
+  });
+
+  it("a cópia antiga da pasta não concorre com o canvas #s: ativo do orquestrador", () => {
+    const t = team([["a", "qa"]]);
+    const archived = addEdge(board(["a"]), "lead", "a", "folder-edge");
+    const active = addEdge(board(["a"]), "lead", "a", "session-edge");
+    const boards = { "main|/repo": archived, [KEY]: active };
+    expect(projectCanvas(t, boards, isAgentTab)).toEqual({ a: { linked: true, role: null, subagent: false } });
+
+    const base = baselineOf(t, boards);
+    const withoutCrown = { ...boards, [KEY]: { ...active, orchestrators: [] } };
+    expect(plan(t, withoutCrown, base)).toEqual([{ kind: "unlead", teamId: "t1" }]);
+  });
+
+  it("time promovido da pasta mantém esse canvas como dono mesmo com uma cópia #s:", () => {
+    const folder = "main|/repo";
+    const t = { ...team([["a", "qa"]]), origin: "canvas" as const, boardKey: folder };
+    const archived = addEdge(board(["a"]), "lead", "a", "folder-edge");
+    const session = { ...board(["a"]), edges: [] };
+    expect(projectCanvas(t, { [folder]: archived, [KEY]: session }, isAgentTab)).toEqual({ a: { linked: true, role: null, subagent: false } });
   });
 });
 

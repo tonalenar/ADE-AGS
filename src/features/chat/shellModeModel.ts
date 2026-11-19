@@ -1,10 +1,8 @@
 /**
- * O seletor Chat | Abas | Canvas: a chave do canvas que ele abre. O canvas é por pasta; a aba ativa dá
- * a chave, mas com uma conversa por protocolo na tela (sem aba) não havia chave e o Canvas sumia do
- * seletor. Nesse caso vale a pasta da conversa. Pura.
+ * O seletor Chat | Abas | Canvas: a conversa por protocolo aberta vence a aba oculta; sua chave ativa
+ * preserva pertencimento a time ou canvas especial. Sem uma chave pronta, usa a sessão dela. Pura.
  */
-export function canvasKeyFor(activeBoardKey: string | null, threadCwd: string | null, keyOfFolder: (cwd: string) => string): string | null {
-  // A conversa por protocolo na tela é a que vale (a aba "ativa" pode ser outra, escondida).
-  if (threadCwd) return keyOfFolder(threadCwd);
+export function canvasKeyFor(activeBoardKey: string | null, threadCwd: string | null, keyOfFolder: (cwd: string) => string, threadRef?: string | null): string | null {
+  if (threadCwd) return activeBoardKey ?? (threadRef ? `${keyOfFolder(threadCwd)}#s:${threadRef}` : keyOfFolder(threadCwd));
   return activeBoardKey;
 }

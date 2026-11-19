@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { GRID_SLOT, gridColumns, gridPlacements, gridTabs, usableSlot } from "../gridMode";
-import { parseGrids } from "../store";
+import { missionOfKey, parseGrids } from "../store";
 
 describe("gridMode", () => {
   it("columnas casi cuadradas", () => {
@@ -29,6 +29,10 @@ describe("gridMode", () => {
     expect(parseGrids("no json")).toEqual({});
     expect(parseGrids("[1]")).toEqual({});
     expect(parseGrids(null)).toEqual({});
+  });
+  it("una chave #s: não dá missão nem aciona a grade", () => {
+    expect(missionOfKey("main|/repo#s:thread:abc")).toBeNull();
+    expect(gridTabs({ on: true, mission: missionOfKey("main|/repo#s:thread:abc"), mode: "tabs", tabIds: ["lead", "worker"] })).toBeNull();
   });
 
   describe("posicionamiento (regresión: quadro vazio)", () => {

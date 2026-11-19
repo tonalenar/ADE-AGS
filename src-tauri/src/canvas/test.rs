@@ -104,6 +104,21 @@ fn una_orquestadora_alcanza_a_todo_su_equipo() {
     assert!(reachable(&b, "lider").contains("b"));
 }
 
+#[test]
+fn una_chave_de_sessao_nao_cria_escopo_de_time() {
+    let mut board = Board::default();
+    board.nodes = serde_json::json!({ "lead": {}, "worker": {} });
+    board.edges.push(edge("e1", "lead", "worker"));
+    board.orchestrators.push("lead".into());
+    let all = Boards::from([("main|/repo#s:thread:abc".into(), board)]);
+
+    assert!(mission_of_tab(&all, "lead").is_none());
+    assert!(conversation_of_tab(&all, "lead").is_none());
+    assert!(team_scope_of_tab(&all, "lead").is_none());
+    // As cordas continuam sendo a autorização geral de peers.
+    assert!(reachable(&all, "lead").contains("worker"));
+}
+
 /// Estar en el equipo de una orquestadora no da su alcance: `a` sigue hablando solo con
 /// quien está conectada directamente.
 #[test]

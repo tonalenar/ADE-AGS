@@ -141,6 +141,62 @@ export function emptyBoard(): Board {
   return { nodes: {}, notes: {}, portals: {}, texts: {}, images: {}, folders: {}, drawings: [], threads: {}, roles: {}, subagents: [], edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
 }
 
+/**
+ * Leva para o canvas da conversa (`target`) o que é dela no canvas antigo (`source`): a caixa do nó, as cordas,
+ * a coroa, o papel, a marca de subagente e as notas e portais ligados só a ela. É um MOVIMENTO, não uma cópia: o
+ * backend autoriza pelas cordas e coroas de QUALQUER canvas (`canvas/mod.rs`, `linked`/`is_orchestrator`), então
+ * uma cópia deixada na pasta continuaria autorizando depois de a pessoa cortar a corda no canvas novo. Nada some:
+ * cada item sai de um canvas e entra no outro. A corda com uma nota ou um portal que outra conversa também usa
+ * fica na pasta, junto do objeto (sem ele no canvas novo, a corda ficaria sem ponta e o `reconcile` a tiraria).
+ * Pura; sem nada da `ref` na origem, devolve os mesmos objetos.
+ */
+export function moveSessionArtifacts(source: Board, target: Board, ref: string): { source: Board; target: Board } {
+  const touches = (edge: CanvasEdge) => edge.a === ref || edge.b === ref;
+  const other = (edge: CanvasEdge) => (edge.a === ref ? edge.b : edge.a);
+  const local = (id: string) => id in source.notes || id in source.portals;
+  const mine = source.edges.filter(touches);
+  const hasRole = Object.prototype.hasOwnProperty.call(source.roles, ref);
+  if (!(ref in source.nodes) && !(ref in source.threads) && mine.length === 0 && !hasRole
+    && !source.orchestrators.includes(ref) && !source.subagents.includes(ref)) return { source, target };
+
+  // Nota ou portal ligado só a esta conversa vai com ela; o compartilhado fica, com a corda.
+  const exclusive = new Set(mine.map(other).filter((id) => local(id)
+    && source.edges.filter((edge) => edge.a === id || edge.b === id).every(touches)));
+  const moving = mine.filter((edge) => !local(other(edge)) || exclusive.has(other(edge)));
+  const movingIds = new Set(moving.map((edge) => edge.id));
+  const same = (x: CanvasEdge, y: CanvasEdge) => (x.a === y.a && x.b === y.b) || (x.a === y.b && x.b === y.a);
+
+  const pick = <T,>(from: Record<string, T>, ids: Iterable<string>) =>
+    Object.fromEntries([...ids].filter((id) => id in from).map((id) => [id, from[id]!]));
+  const drop = <T,>(from: Record<string, T>, ids: Set<string>) =>
+    Object.fromEntries(Object.entries(from).filter(([id]) => !ids.has(id)));
+  const self = new Set([ref]);
+
+  const nextTarget: Board = {
+    ...target,
+    nodes: ref in source.nodes && !(ref in target.nodes) ? { ...target.nodes, [ref]: source.nodes[ref]! } : target.nodes,
+    threads: ref in source.threads && !(ref in target.threads) ? { ...target.threads, [ref]: source.threads[ref]! } : target.threads,
+    notes: { ...pick(source.notes, exclusive), ...target.notes },
+    portals: { ...pick(source.portals, exclusive), ...target.portals },
+    edges: [...target.edges, ...moving.filter((edge) => !target.edges.some((have) => same(have, edge)))],
+    roles: hasRole && !Object.prototype.hasOwnProperty.call(target.roles, ref) ? { ...target.roles, [ref]: source.roles[ref]! } : target.roles,
+    orchestrators: source.orchestrators.includes(ref) && !target.orchestrators.includes(ref) ? [...target.orchestrators, ref] : target.orchestrators,
+    subagents: source.subagents.includes(ref) && !target.subagents.includes(ref) ? [...target.subagents, ref] : target.subagents,
+  };
+  const nextSource: Board = {
+    ...source,
+    nodes: drop(source.nodes, self),
+    threads: drop(source.threads, self),
+    notes: drop(source.notes, exclusive),
+    portals: drop(source.portals, exclusive),
+    edges: source.edges.filter((edge) => !movingIds.has(edge.id)),
+    roles: drop(source.roles, self),
+    orchestrators: source.orchestrators.filter((id) => id !== ref),
+    subagents: source.subagents.filter((id) => id !== ref),
+  };
+  return { source: nextSource, target: nextTarget };
+}
+
 /** O prefixo do id de uma conversa por protocolo no canvas (o mesmo de `chat/structured/model.ts`). */
 export const THREAD_REF_PREFIX = "thread:";
 

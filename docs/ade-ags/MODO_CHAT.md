@@ -19,6 +19,31 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
 - O composer cola a mensagem na TUI e envia (`pasteIntoTab`).
 - A sidebar lista os agentes abertos da janela (sem os terminais de shell), os mais novos primeiro.
 
+## Canvas por conversa
+
+Abas e Canvas são uma preferência da janela: trocar de conversa mantém o modo escolhido. Cada sessão TUI usa
+`<chave-da-pasta>#s:<id-da-aba>`; cada conversa por protocolo usa `<chave-da-pasta>#s:thread:<id>`.
+Uma ref já presente em missão, comparação ou canvas de projeto legado `#c:` continua ali. Integrantes de time
+seguem o canvas do orquestrador. Se o time foi promovido de um canvas de pasta, ele continua dono daquele
+grupo manual. Uma sessão já criada permanece no seu canvas.
+
+Na primeira ativação, a conversa que estava no canvas da pasta **muda** para o canvas de sessão com o que é
+dela: posição, cordas, coroa, papel, marca de subagente e as notas e portais ligados só a ela
+(`moveSessionArtifacts` em `canvas/board.ts`). É movimento, não cópia: o backend autoriza `ags peers` pelas cordas
+e coroas de **qualquer** canvas (`canvas/mod.rs`, `linked`/`is_orchestrator`), então uma cópia deixada na pasta
+continuaria autorizando depois de a pessoa cortar a corda no canvas novo. Nada some: cada item sai de um canvas e
+entra no outro, e o destino grava antes da origem. Uma nota ou portal que outra conversa também usa fica na pasta,
+com as cordas dele. Quando duas conversas tinham uma corda manual entre si na pasta, ambas continuam juntas ali.
+A migração só roda depois de a lista de times chegar do backend: antes disso não se sabe quem é integrante (e vai
+para o canvas do orquestrador), e a conversa antiga fica na pasta. O painel legado de conversas de projeto não
+puxa automaticamente essas sessões nem grupos ligados da pasta para `#c:`.
+
+O separador `#s:` identifica apenas a sessão: não cria escopo de time, missão nem grade. Criar conversa no
+workspace e no Canvas usa o mesmo composer de Chat sem sair para a Home nem trocar o modo Abas/Canvas. Designs
+abertos pela CLI ficam associados ao canvas da conversa ativa; se ele ainda não estiver carregado, a preferência
+é gravada para quando abrir. A ferramenta Terminal no canvas cria a aba na pasta da conversa ativa e a coloca
+naquele canvas.
+
 ## Timeline, permissões e painel (caminho A)
 
 - **A conversa é lida do transcript do agente** (Claude Code e Codex), o mesmo arquivo que o canal estruturado já acompanha.

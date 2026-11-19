@@ -83,7 +83,7 @@ pub struct PromoteInput {
     pub cwd: String,
     #[serde(default)]
     pub title: String,
-    /// A chave do quadro onde a coroa mora (pasta ou `#c:`; o quadro de missão `#m:` não se promove).
+    /// A chave do quadro onde a coroa mora (pasta, `#s:` ou `#c:`; missão `#m:` não se promove).
     #[serde(default)]
     pub board_key: Option<String>,
     #[serde(default)]

@@ -20,6 +20,8 @@ As barras dos painéis iOS do chat reúnem ações e zoom abaixo do aparelho; o 
 
 Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações → Modo chat. `Chat | Abas | Canvas` e Ctrl+Shift+L alternam. Detalhes em [MODO_CHAT.md](./MODO_CHAT.md).
 
+- **Canvas por conversa:** `#s:<ref>` separa sessões TUI e por protocolo; modo Abas/Canvas por janela; a migração move a conversa da pasta para o canvas próprio com cordas, coroa e papel (sem cópia que continue autorizando). Criar conversa mantém o modo atual e o design aberto segue a conversa ativa. Ver [MODO_CHAT.md](./MODO_CHAT.md#canvas-por-conversa).
+
 - **Conversas por TUI:** cada uma é uma aba de agente, lida do transcript numa timeline; o terminal fica numa gaveta, sem remontar.
 - **Conversas por protocolo:** o Codex (`codex app-server`) e o Claude Code (`claude -p` em stream-json, com o modo Plano) falam direto com o app, com aprovações e perguntas no chat.
 - **Fast e esforços especiais no chat:** o caminho estruturado passa Fast por turno: Codex recebe `serviceTier: fast`; Claude recebe `fastMode` em `--settings`, combinada com os hooks temporários do ai-memory. `ultracode` e `ultrathink` continuam vindo do catálogo e adapter já existentes. Fast só aparece nos modelos compatíveis. O usuário confirmou `fastMode` e `ultracode` no Claude Code 2.1.322; esta alteração não executou as CLIs.

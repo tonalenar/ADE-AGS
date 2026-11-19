@@ -9,12 +9,12 @@ import { useLocalAcpStore } from "@/features/agents/localAcpStore";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
-import { newConversationIn, reopenFolder } from "../chatActions";
+import { newConversationLocal, newConversationIn, reopenFolder } from "../chatActions";
 import { chatProjects, conversationCards, type ChatProject } from "../chatModel";
 import { ChatSidebar } from "../ChatSidebar";
 import { useFolderDiffs } from "../ChatShell";
 import { startChatLive } from "../liveStore";
-import { addSurface } from "../store";
+import { addSurface, useChatStore } from "../store";
 import { startQueueRunner } from "../queueRunner";
 import { startStructured, useStructured } from "../structured/store";
 import { threadCards } from "../structured/model";
@@ -61,12 +61,9 @@ export function AppSessionsSidebar({ groups, width }: { groups: RepoGroup[]; wid
     <ChatSidebar cards={cards} projects={projects} closed={closed} diffs={diffs} selectedId={selected} width={width}
       showHeader={false} showFooter={false}
       onCollapse={() => undefined}
-      onNew={() => navigate("/")} onAddProject={() => navigate("/")}
-      // O "+" de um projeto: com o modo chat ligado leva à tela de conversa nova (no chat) já nessa pasta; sem ele, ao início com a pasta escolhida.
-      onNewIn={(cwd) => {
-        if (chatMode) { setShellMode("chat"); newConversationIn(cwd); }
-        else navigate(`/?cwd=${encodeURIComponent(cwd)}`);
-      }}
+      onNew={() => { useChatStore.setState({ composeFolder: null }); newConversationLocal(); }} onAddProject={() => navigate("/")}
+      // O mesmo composer do chat abre sobre o workspace, sem trocar a preferência de modo.
+      onNewIn={newConversationIn}
       onOpened={() => navigate("/workspace")}
       // As pranchetas moram no painel do modo chat: nas Abas e no Canvas a linha leva para lá (e some com o modo chat desligado).
       onArtifacts={chatMode ? () => { setShellMode("chat"); addSurface("design"); } : null}

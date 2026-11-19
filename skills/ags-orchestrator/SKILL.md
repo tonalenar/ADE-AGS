@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.85.0
+version: 1.86.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -735,8 +735,11 @@ ags design view [<designId>]                       # what the person is looking 
 
 - **Open it when it is ready.** `ags design open` shows the Design screen: in chat mode, the
   Design tab of the right panel; with tabs or the canvas, the full screen. It also puts the
-  design on the canvas of its folder or mission. Designs stay off the canvas until someone opens
-  them: `design create` and artboard updates open nothing, the person only gets a notice.
+  design on the active conversation's canvas (`#s:`), unless that conversation already belongs
+  to a mission, project-conversation or comparison canvas. The camera moves to the opened frame.
+  If no canvas is loaded yet, the open request is remembered for when it is. Designs stay off
+  the canvas until someone opens them: `design create` and artboard updates open nothing, the
+  person only gets a notice.
 - **Read the view before editing "this", "here", "the selected one".** `ags design view`
   (no id: the most recently opened design) returns `mode` (`canvas`/`focused`), the page,
   `visibleArtboards`, `selectedArtboards`, the picked elements in `selected`

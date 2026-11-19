@@ -4,6 +4,7 @@ import type { Tab } from "@/features/tabs/types";
 import {
   CONV_SEP,
   activeAgentWork,
+  canAdoptIntoProjectConversation,
   conversationBoardKey,
   conversationIdOfKey,
   conversationTitle,
@@ -88,6 +89,13 @@ describe("chaves do canvas", () => {
     expect(isConversationKey("win|C:/p#m:m1")).toBe(false);
     expect(isConversationKey("win|C:/p#c:")).toBe(false);
     expect(isConversationKey(null)).toBe(false);
+  });
+
+  it("canvas de pasta, sessão, missão, projeto e comparação não entram em projeto automaticamente", () => {
+    const folder = "main|/p";
+    for (const key of [folder, `${folder}#s:a`, `${folder}#m:m1`, `${folder}#c:c1`, `${folder}#cmp:run`]) {
+      expect(canAdoptIntoProjectConversation(key, folder)).toBe(false);
+    }
   });
 
   it("a chave de conversa tem id reconhecível de volta", () => {

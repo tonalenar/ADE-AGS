@@ -5,6 +5,7 @@ import { boardKey, missionBoardKey, useCanvasStore } from "../../store";
 import type { Design, DesignDetail } from "../designApi";
 import { openDesignOnCanvases } from "../openOnCanvas";
 import { useOpenDesignsStore } from "../openStore";
+import { useTabsStore } from "@/features/tabs/store";
 
 const fake = vi.hoisted(() => ({ get: vi.fn() }));
 
@@ -21,6 +22,7 @@ describe("ags design open marca o design como aberto no canvas dele", () => {
     fake.get.mockReset();
     useOpenDesignsStore.setState({ open: {} });
     useCanvasStore.setState({ boards: {} });
+    useTabsStore.setState({ tabs: [], activeTabId: null });
   });
 
   it("design de missão entra no canvas da missão, e não no da pasta", async () => {
@@ -40,11 +42,22 @@ describe("ags design open marca o design como aberto no canvas dele", () => {
     expect(useOpenDesignsStore.getState().open).toEqual({ [folder]: ["d2"] });
   });
 
-  it("missão sem canvas nesta janela: nada muda", async () => {
+  it("design aberto pela CLI acompanha o canvas da conversa ativa, mesmo sem canvas carregado", async () => {
+    useTabsStore.setState({
+      tabs: [{ id: "tab-a", cwd: "C:\\proj", agentId: "claude-code" } as never],
+      activeTabId: "tab-a",
+    });
+    fake.get.mockResolvedValue(detail("d-active"));
+    const key = boardKey("C:\\proj") + "#s:tab-a";
+    expect(await openDesignOnCanvases("d-active")).toEqual([key]);
+    expect(useOpenDesignsStore.getState().open).toEqual({ [key]: ["d-active"] });
+  });
+
+  it("missão ainda sem canvas é lembrada para quando abrir", async () => {
     useCanvasStore.setState({ boards: { [boardKey("C:\\proj")]: emptyBoard() } });
     fake.get.mockResolvedValue(detail("d3", { missionId: "m9" }));
-    expect(await openDesignOnCanvases("d3")).toEqual([]);
-    expect(useOpenDesignsStore.getState().open).toEqual({});
+    expect(await openDesignOnCanvases("d3")).toEqual([missionBoardKey("C:\\proj", "m9")]);
+    expect(useOpenDesignsStore.getState().open).toEqual({ [missionBoardKey("C:\\proj", "m9")]: ["d3"] });
   });
 
   it("design sem pasta nem missão não tem canvas onde abrir", async () => {

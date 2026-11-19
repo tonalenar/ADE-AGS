@@ -60,7 +60,9 @@ interface TeamState {
 
 export const useTeamStore = create<TeamState>(() => ({ teams: [], missionTeams: [], loaded: false, feeds: {}, targets: {}, told: {}, sendErrors: {}, adding: {} }));
 // A grade das Abas lê a lista daqui, sem depender deste módulo (ver `teamIndex.ts`).
-useTeamStore.subscribe((state, prev) => { if (state.teams !== prev.teams) useTeamIndex.setState({ teams: state.teams }); });
+useTeamStore.subscribe((state, prev) => {
+  if (state.teams !== prev.teams || state.loaded !== prev.loaded) useTeamIndex.setState({ teams: state.teams, loaded: state.loaded });
+});
 
 let started = false;
 
@@ -135,6 +137,20 @@ export function syncTeamCanvas(team: TeamView, opts: { removed?: string[]; disso
       const tab = tabs.find((t) => t.id === ref);
       return tab ? boardKeyOfTab(tab) : null;
     },
+    sourceKeyOfRef: (ref) => {
+      const boards = useCanvasStore.getState().boards;
+      const special = Object.entries(boards).find(([key, board]) => ["#m:", "#c:", "#cmp:"].some((sep) => key.includes(sep))
+        && (ref in board.nodes || ref in board.threads))?.[0];
+      if (special) return special;
+      const session = Object.entries(boards).find(([key, board]) => key.includes("#s:")
+        && (ref in board.nodes || ref in board.threads))?.[0];
+      if (session) return session;
+      const cwd = ref.startsWith("thread:")
+        ? useStructured.getState().threads.find((thread) => threadKey(thread.id) === ref)?.cwd
+        : tabs.find((tab) => tab.id === ref)?.cwd;
+      const folder = cwd ? boardKey(cwd) : null;
+      return folder && (ref in (boards[folder]?.nodes ?? {}) || ref in (boards[folder]?.threads ?? {})) ? folder : null;
+    },
     folderKey: boardKey,
     roleLabel: (role) => i18n.t(`chat.team.roles.${role}`, { defaultValue: role }),
     ...opts,
@@ -155,6 +171,7 @@ export function syncTeamCanvas(team: TeamView, opts: { removed?: string[]; disso
       disconnectPair: canvasActions.disconnectPair,
       toggleOrchestrator: canvasActions.toggleOrchestrator,
       moveTerminals: canvasActions.moveTerminals,
+      migrateSession: canvasActions.moveSessionFrom,
       setRole: canvasActions.setRole,
     });
   } finally {
@@ -214,7 +231,7 @@ function promoteAgents(): PromoteAgent[] {
 }
 
 /**
- * Coroa que a pessoa pôs num canvas de pasta ou de espaço (`#c:`) e que não lidera time: vira time do chat.
+ * Coroa que a pessoa pôs num canvas de pasta, sessão (`#s:`) ou espaço (`#c:`) e que não lidera time: vira time do chat.
  * Só linhas no banco (`chat_team_promote`): não abre aba, PTY nem worktree, e o canvas não é reescrito (a linha
  * de base do time novo já nasce adotada).
  */
