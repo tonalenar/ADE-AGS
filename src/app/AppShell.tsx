@@ -9,7 +9,8 @@ import type { Tab } from "@/features/tabs/types";
 import { initTabsPersistence, waitForHydration } from "@/features/tabs/persistence";
 import { SideHead } from "@/app/SideHead";
 import { ActivityRail, RAIL_COMPACT_W, RAIL_EXPANDED_W } from "@/app/ActivityRail";
-import { boardKeyOfTab, initCanvasSync, setWorkMode } from "@/features/canvas/store";
+import { boardKeyOfTab, initCanvasSync, setWorkMode, useWorkMode } from "@/features/canvas/store";
+import { composerLayout } from "@/app/composerLayout";
 import { startSelectionSync } from "@/features/chat/unified/selectionActions";
 import { initOrchestratorAnnouncements } from "@/features/canvas/orchestratorAnnounce";
 import { useSessionCheckpoints } from "@/features/sessions/useSessionCheckpoints";
@@ -49,7 +50,8 @@ import { followAppBoot } from "@/app/splash";
 import { useFleetEvents } from "@/features/runs/useFleetEvents";
 import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
-import { useChatStore } from "@/features/chat/store";
+import { setComposing, useChatStore } from "@/features/chat/store";
+import { useTranslation } from "react-i18next";
 import { chatProjects } from "@/features/chat/chatModel";
 import { NewConversation } from "@/features/chat/NewConversation";
 
@@ -86,6 +88,7 @@ function toFrontendTab(row: RestoredTabRow): Tab {
 }
 
 export function AppShell() {
+  const { t } = useTranslation();
   useFileDropToTerminal();
   useSessionCheckpoints();
   // Ponto de restauração dos arquivos a cada mensagem num agente, e a limpeza das abas fechadas.
@@ -103,6 +106,8 @@ export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const isWorkspace = location.pathname === "/workspace";
+  const workMode = useWorkMode();
+  const floatingComposer = composerLayout(workMode, isWorkspace) === "floating";
   // Skills y Marketplace se pintan ENCIMA en vez de reemplazar el centro: la regla del
   // entorno es que nada tape el trabajo. Las rutas no cambian — adentro se sigue
   // navegando igual (el detalle de una skill, los repos del marketplace).
@@ -347,10 +352,24 @@ export function AppShell() {
           {/* No chat as telas cheias (Configurações, Missões…) abrem dentro da casca, no lugar da conversa. */}
           {chat && <PanelBoundary name="chat"><Suspense fallback={null}><ChatShell groups={groups} page={fullPage && !settingsRoute ? <Outlet context={{ groups } satisfies ShellOutletContext} /> : null} /></Suspense></PanelBoundary>}
 
-          {!chat && composing && <div className="absolute inset-0 z-50 flex min-w-0 flex-col bg-white dark:bg-surface">
+          {!chat && composing && !floatingComposer && <div className="absolute inset-0 z-50 flex min-w-0 flex-col bg-white dark:bg-surface">
             <NewConversation projects={chatProjects(groups)} folder={composeFolder ?? activeTab?.cwd ?? null}
               onFolder={(cwd) => useChatStore.setState({ composeFolder: cwd })} />
           </div>}
+
+          {/* No Canvas o compositor flutua: o quadro continua visível atrás e o nó da conversa
+              nova aparece nele ao enviar. Clicar fora ou Esc fecha. */}
+          {!chat && composing && floatingComposer && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/10 dark:bg-black/30"
+              onMouseDown={(e) => { if (e.target === e.currentTarget) setComposing(false); }}
+              onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setComposing(false); } }}>
+              <div role="dialog" aria-modal="true" aria-label={t("chat.new.title")}
+                className="flex h-[min(560px,85%)] w-[min(880px,100%)] min-w-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-white/10 dark:bg-surface">
+                <NewConversation projects={chatProjects(groups)} folder={composeFolder ?? activeTab?.cwd ?? null}
+                  onFolder={(cwd) => useChatStore.setState({ composeFolder: cwd })} />
+              </div>
+            </div>
+          )}
 
           {!chat && !isWorkspace && !fullPage && (
             <div className="absolute inset-0 z-10 overflow-hidden">
