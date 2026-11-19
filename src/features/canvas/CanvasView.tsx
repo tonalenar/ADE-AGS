@@ -71,7 +71,7 @@ import { CanvasSchedulesPanel } from "./CanvasSchedulesPanel";
 import { RoleEditDialog } from "./RoleEditDialog";
 import { applyTabRole } from "./applyRole";
 import type { AgentRoleChoice } from "./agentRole";
-import { boardKeyOfTab, canvasActions, compareOfKey, missionOfKey, useActiveBoardKey, useCanvasStore } from "./store";
+import { boardKeyOfTab, canvasActions, compareOfKey, missionOfKey, useActiveBoardKey, useCanvasActive, useCanvasStore } from "./store";
 import { usePortalViewLifetime } from "./portalLifetime";
 import { ThreadNode, type ThreadFlowNode } from "./ThreadNode";
 import { selectConversation } from "@/features/chat/unified/selectionActions";
@@ -207,15 +207,24 @@ function CanvasInner() {
 
   const tabs = useMemo(() => (key ? allTabs.filter((t) => boardKeyOfTab(t) === key) : []), [allTabs, key]);
 
+  const canvasActive = useCanvasActive();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
+    if (!canvasActive) return;
     const el = wrapRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setSize({ width: el.clientWidth, height: el.clientHeight }));
+    const measure = () => {
+      const width = el.clientWidth;
+      const height = el.clientHeight;
+      setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [canvasActive]);
 
   // La vista se lleva en estado local (cambia en cada cuadro del paneo) y se guarda al soltar.
   const [vp, setVpRaw] = useState<Viewport>(() => safeViewport(board.viewport));
@@ -262,12 +271,14 @@ function CanvasInner() {
     setVpRaw((prev) => (viewportNeedsRender(prev, view) || Math.abs(prev.zoom - view.zoom) >= 0.001 ? view : prev));
   }, [publishLiveRects, publishDesktopRects]);
   useEffect(() => {
+    if (!canvasActive) return;
     publishDesktopRects(vpRef.current);
-  }, [publishDesktopRects]);
+  }, [canvasActive, publishDesktopRects]);
   useEffect(() => () => { useCanvasStore.setState({ desktopRects: {} }); }, []);
   useEffect(() => {
+    if (!canvasActive) return;
     publishLiveRects(vpRef.current);
-  }, [live, publishLiveRects]);
+  }, [canvasActive, live, publishLiveRects]);
 
   useEffect(() => () => canvasActions.setLiveRects({}), []);
 
@@ -942,6 +953,7 @@ function CanvasInner() {
 
 const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const { t } = useTranslation();
+  const canvasActive = useCanvasActive();
   const { tab, box, live, links, orchestrator, role, subagent, onFocus, onClose, onToggleOrchestrator, onSetRole } = data;
   const [editingRole, setEditingRole] = useState(false);
   // Fechar um terminal derruba o agente: pede um segundo clique (e desarma sozinho se ninguém confirmar).
@@ -986,7 +998,7 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
           onDoubleClick={() => onFocus(tab.id)}
           title={t("canvas.focusHint")}
         >
-          <NodeStatus tabId={tab.id} />
+          <NodeStatus tabId={tab.id} active={canvasActive} />
           <span className="flex min-w-0 flex-1 flex-col">
             <span title={tab.title.split(" — ")[0]} className="truncate text-[15px] leading-5 font-semibold tracking-[-0.1px] text-gray-900 dark:text-[#f5f5f7]">{tab.title.split(" — ")[0]}</span>
             <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-[14px] text-gray-500 dark:text-white/60" title={tab.title}>
@@ -1053,7 +1065,7 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
 
         {/* Al 100 % la terminal viva está encima de este hueco. Alejado, una vista previa. */}
         <div className="relative flex-1 min-h-0">
-          {!live && <Preview tabId={tab.id} rows={Math.max(4, Math.floor((box.h - HEADER_H) / 15))} onOpen={() => onFocus(tab.id)} />}
+          {!live && <Preview tabId={tab.id} rows={Math.max(4, Math.floor((box.h - HEADER_H) / 15))} active={canvasActive} onOpen={() => onFocus(tab.id)} />}
         </div>
       </div>
     </div>
@@ -1073,10 +1085,10 @@ function rolePill(role: string): string {
 }
 
 /** A bolinha de status do terminal: verde enquanto o agente escreve, cinza parado. */
-function NodeStatus({ tabId }: { tabId: string }) {
+function NodeStatus({ tabId, active = true }: { tabId: string; active?: boolean }) {
   const on = useSyncExternalStore(
-    (cb) => useAgentActivity.subscribe(cb),
-    () => activeTabIds().includes(tabId),
+    (cb) => (active ? useAgentActivity.subscribe(cb) : () => {}),
+    () => (active ? activeTabIds().includes(tabId) : false),
     () => false,
   );
   return (
@@ -1104,17 +1116,30 @@ function CrownIcon({ className }: { className?: string }) {
 }
 
 /** Las últimas líneas de la terminal, como texto: escalan con el zoom sin romper nada. */
-function Preview({ tabId, rows, onOpen }: { tabId: string; rows: number; onOpen: () => void }) {
+function Preview({ tabId, rows, active = true, onOpen }: { tabId: string; rows: number; active?: boolean; onOpen: () => void }) {
   const { t } = useTranslation();
-  const [lines, setLines] = useState<string[]>(() => screenOf(tabId, null, rows)?.lines ?? []);
+  const [lines, setLines] = useState<string[]>(() => (active ? screenOf(tabId, null, rows)?.lines ?? [] : []));
   useEffect(() => {
+    if (!active) return;
     const read = () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       setLines(screenOf(tabId, null, rows)?.lines ?? []);
     };
-    read();
-    return useAgentActivity.subscribe(read);
-  }, [tabId, rows]);
+    let unsub: (() => void) | undefined;
+    const sync = () => {
+      unsub?.();
+      unsub = undefined;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      read();
+      unsub = useAgentActivity.subscribe(read);
+    };
+    sync();
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", sync);
+    return () => {
+      unsub?.();
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", sync);
+    };
+  }, [tabId, rows, active]);
 
   return (
     <>
@@ -1289,6 +1314,7 @@ function NoteIcon({ className }: { className?: string }) {
 const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<PortalFlowNode>) {
   const { t } = useTranslation();
   const key = useActiveBoardKey();
+  const canvasActive = useCanvasActive();
   const { id, cwd, portal, links } = data;
   const [armed, setArmed] = useState(false);
   const handle = "ade-port z-10! w-3! h-3! border-2! border-white! dark:border-surface! bg-sky-400! dark:bg-sky-300!";
@@ -1433,7 +1459,7 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
         <div className="nodrag nowheel nopan relative flex-1 min-h-0">
           {view && (
             <Suspense fallback={null}>
-              <PortalBody view={view} active={selected} device={device} />
+              <PortalBody view={view} active={selected} surfaceActive={canvasActive} device={device} />
             </Suspense>
           )}
         </div>
@@ -1451,8 +1477,8 @@ function hostOf(url: string): string {
 }
 
 /** El navegador dentro del portal. `memo`: mover o redimensionar el nodo no lo toca. */
-const PortalBody = memo(function PortalBody({ view, active, device }: { view: BrowserView; active: boolean; device: DeviceSpec | null }) {
-  return <BrowserTab view={view} active={active} device={device} />;
+const PortalBody = memo(function PortalBody({ view, active, surfaceActive, device }: { view: BrowserView; active: boolean; surfaceActive: boolean; device: DeviceSpec | null }) {
+  return <BrowserTab view={view} active={active} surfaceActive={surfaceActive} device={device} />;
 });
 
 // ── Conexión: ver `cords.tsx` (cordas, ímã y raio) ────────────────────

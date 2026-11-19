@@ -16,7 +16,7 @@ const TOOL = "cc-t flex h-[26px] w-[26px] shrink-0 items-center justify-center r
 import { loadChatHistory } from "./chatHistory";
 import { unreadOf, useUnreadStore, type ChatJump } from "./chatUnread";
 import { appendToDraft } from "@/features/terminal/terminalExcerpt";
-import { useActiveBoardKey, boardKeyOfTab, conversationOfKey, missionOfKey, useCanvasStore } from "./store";
+import { useActiveBoardKey, boardKeyOfTab, conversationOfKey, missionOfKey, useCanvasActive, useCanvasStore } from "./store";
 import { useTerminalPrompts } from "./useTerminalPrompts";
 import { TeamFeed, TeamFilterBar, useMissionApprovals, useTeamFeed, useTeamMessages } from "./TeamFeed";
 import { useRouteSuggestion, withTarget } from "./routeSuggestion";
@@ -100,14 +100,15 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
   // Uma conversa de projeto com o time montado (canvas `#c:`) tem o mesmo chat da equipe de uma missão.
   const missionId = missionOfKey(key);
   const conversationId = conversationOfKey(key);
+  const canvasActive = useCanvasActive();
   const teamScope = missionId ?? (conversationId ? `c:${conversationId}` : null);
   const teamView = teamScope !== null && (tabId === null || tabId === TEAM);
-  const teamMessages = useTeamMessages(teamScope);
+  const teamMessages = useTeamMessages(teamScope, canvasActive);
   const teamApprovals = useMissionApprovals(missionId);
   const [notes, setNotes] = useState<UserNote[]>([]);
   // Os pedidos de permissão que os TUIs dos agentes mostram nos terminais chegam aqui para aprovar ou recusar.
   const promptTabs = useMemo(() => agents.map((a) => ({ id: a.id, name: a.title.split(" — ")[0] })), [agents]);
-  const terminalPrompts = useTerminalPrompts(promptTabs, teamScope !== null);
+  const terminalPrompts = useTerminalPrompts(promptTabs, teamScope !== null && canvasActive);
   const teamFeed = useTeamFeed(teamScope, teamMessages, teamApprovals, notes, terminalPrompts);
   useEffect(() => setNotes([]), [teamScope]);
   const orchestratorIds = useCanvasStore((s) => (key ? s.boards[key]?.orchestrators : undefined));

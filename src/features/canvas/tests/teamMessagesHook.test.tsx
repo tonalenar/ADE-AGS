@@ -21,9 +21,13 @@ const msg = (id: number): TeamMessage => ({ id, missionId: "m", atMs: id, kind: 
 let host: HTMLDivElement;
 let root: Root;
 let seen: TeamMessage[] = [];
-function Probe() { seen = useTeamMessages("m"); return null; }
-beforeEach(() => { vi.useFakeTimers(); invoke.mockReset(); handlers.length = 0; host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); });
+function Probe({ enabled = true }: { enabled?: boolean }) { seen = useTeamMessages("m", enabled); return null; }
+function hide(hidden: boolean) {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+beforeEach(() => { vi.useFakeTimers(); invoke.mockReset(); handlers.length = 0; seen = []; hide(false); host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); });
+afterEach(() => { act(() => root.unmount()); host.remove(); hide(false); vi.useRealTimers(); });
 
 describe("useTeamMessages", () => {
   it("duas leituras ao mesmo tempo não repetem mensagens: uma em voo, a outra reexecuta com o último id", async () => {
@@ -40,5 +44,33 @@ describe("useTeamMessages", () => {
     // mesmo que o backend repita linhas, o feed não duplica
     await act(async () => { resolvers[1]([msg(2), msg(3)]); });
     expect(seen.map((m) => m.id)).toEqual([1, 2, 3]);
+  });
+
+  it("pausa com enabled=false ou aba oculta sem perder mensagens e lê na hora ao retomar", async () => {
+    invoke.mockResolvedValueOnce([msg(1)]).mockResolvedValue([]);
+    await act(async () => { root.render(<Probe enabled />); });
+    expect(seen.map((m) => m.id)).toEqual([1]);
+
+    // Pausa por enabled=false (ex.: canvas escondido)
+    invoke.mockClear();
+    await act(async () => { root.render(<Probe enabled={false} />); });
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(seen.map((m) => m.id)).toEqual([1]);
+
+    // Retoma com leitura imediata usando o afterId anterior
+    invoke.mockResolvedValueOnce([msg(2)]);
+    await act(async () => { root.render(<Probe enabled />); });
+    expect(invoke).toHaveBeenCalledWith("mission_messages", { missionId: "m", afterId: 1 });
+    expect(seen.map((m) => m.id)).toEqual([1, 2]);
+
+    // Pausa com document.visibilityState=hidden e retoma no visibilitychange
+    invoke.mockClear();
+    await act(async () => { hide(true); });
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(invoke).not.toHaveBeenCalled();
+
+    await act(async () => { hide(false); });
+    expect(invoke).toHaveBeenCalledWith("mission_messages", { missionId: "m", afterId: 2 });
   });
 });

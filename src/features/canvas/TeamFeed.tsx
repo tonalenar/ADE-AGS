@@ -14,18 +14,21 @@ import { answerTerminalPrompt } from "./useTerminalPrompts";
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 
 /** As mensagens entre os agentes da missão: lê o histórico e acompanha as novas (`cc-peer-message`). */
-export function useTeamMessages(missionId: string | null): TeamMessage[] {
+export function useTeamMessages(missionId: string | null, enabled = true): TeamMessage[] {
   const [messages, setMessages] = useState<TeamMessage[]>([]);
   const last = useRef(0);
   useEffect(() => {
     setMessages([]);
     last.current = 0;
-    if (!missionId) return;
+  }, [missionId]);
+  useEffect(() => {
+    if (!missionId || !enabled) return;
     let alive = true;
     // Uma leitura por vez: duas em voo usariam o mesmo `afterId` e trariam as mesmas linhas.
     let inflight = false;
     let again = false;
     const pull = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       if (inflight) { again = true; return; }
       inflight = true;
       invoke<TeamMessage[]>("mission_messages", { missionId, afterId: last.current })
@@ -40,20 +43,32 @@ export function useTeamMessages(missionId: string | null): TeamMessage[] {
           if (again && alive) { again = false; pull(); }
         });
     };
-    pull();
     let delayed: ReturnType<typeof setTimeout> | undefined;
+    let timer: number | undefined;
+    const resume = () => {
+      if (timer !== undefined) window.clearInterval(timer);
+      timer = undefined;
+      if (delayed !== undefined) clearTimeout(delayed);
+      delayed = undefined;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      pull();
+      timer = window.setInterval(pull, 5000);
+    };
     const off = listen("cc-peer-message", () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       if (delayed !== undefined) clearTimeout(delayed);
       delayed = setTimeout(pull, 150);
     });
-    const timer = window.setInterval(pull, 5000);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", resume);
+    resume();
     return () => {
       alive = false;
       if (delayed !== undefined) clearTimeout(delayed);
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearInterval(timer);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", resume);
       void off.then((fn) => fn());
     };
-  }, [missionId]);
+  }, [missionId, enabled]);
   return messages;
 }
 

@@ -16,6 +16,7 @@ import { RING_COLORS, Ring } from "./Ring";
 import { agyTopPercent } from "./antigravityQuota";
 import { UsageBoard } from "./UsageBoard";
 import { refreshAllUsage, startUsagePolling, useUsageStore } from "./usageStore";
+import { useCanvasActive } from "./store";
 
 /** Qué panel está abierto sobre la barra. Uno a la vez: todos nacen en el mismo lugar. */
 export type DockPanel = "layers" | "map" | "chat" | "routines" | "design";
@@ -159,10 +160,12 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump]);
   const unreadTotal = useUnreadStore((s) => Object.values(s.unread).reduce((n, by) => n + unreadOf(by), 0));
+  const canvasActive = useCanvasActive();
   // Mede a barra para os painéis de cima terem a mesma largura dela.
   const dockRef = useRef<HTMLDivElement>(null);
   const dockWidth = useDockWidth((s) => s.width);
   useEffect(() => {
+    if (!canvasActive) return;
     const el = dockRef.current;
     if (!el) return;
     const publish = () => useDockWidth.getState().setWidth(Math.round(el.getBoundingClientRect().width));
@@ -171,14 +174,14 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
     const observer = new ResizeObserver(publish);
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [canvasActive]);
   const sameWidth = dockWidth > 0 ? { width: dockWidth } : undefined;
   const vigiaOn = useVigiaSwitch((s) => s.enabled);
   const toggleVigia = useVigiaSwitch((s) => s.toggle);
   const automationPaused = useAutomation(hasPaused);
   useEffect(() => ensureAutomation(), []);
   const accountSig = accounts.map((a) => a.id).join("|");
-  useEffect(() => startUsagePolling(accounts), [accountSig]); // ids: troca de conta, não identidade do array
+  useEffect(() => startUsagePolling(accounts, canvasActive), [accountSig, canvasActive]); // ids: troca de conta, não identidade do array
   const [usageOpen, setUsageOpen] = useState(readUsageOpen);
   useEffect(() => writeUsageOpen(usageOpen), [usageOpen]);
   const toggleUsage = () => setUsageOpen((v) => !v);

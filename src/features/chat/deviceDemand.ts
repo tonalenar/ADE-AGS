@@ -51,12 +51,17 @@ const ANDROID: readonly DeviceToolId[] = [
   "back", "home", "recents", "rotate", "screenshot", "keyboard", "volume", "logcat", "power", "startAvd",
 ];
 
+/** O workspace está à vista na rota `/workspace` (sem confundir com `/workspaces`, `/settings`…). */
+export function isWorkspaceRoute(pathname: string): boolean {
+  return pathname === "/workspace" || pathname.startsWith("/workspace/");
+}
+
 /**
  * O canvas fica montado atrás do chat para não perder navegadores. Isso não abre o aparelho:
  * busca, conexão e espelho esperam o canvas na tela, ou o painel que a pessoa abriu.
  */
-export function canvasDeviceEngaged(workMode: string, chatShell: boolean): boolean {
-  return workMode === "canvas" && !chatShell;
+export function canvasDeviceEngaged(workMode: string, chatShell: boolean, pathname = "/workspace"): boolean {
+  return workMode === "canvas" && !chatShell && isWorkspaceRoute(pathname);
 }
 
 /** Lista, sessão e quadros só com a superfície aberta. iOS no Windows ou no Linux nem chega a consultar. */

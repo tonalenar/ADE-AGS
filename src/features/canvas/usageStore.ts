@@ -183,7 +183,11 @@ function stopUsagePolling(): void {
  * pantalla el barrido no sigue. Tampoco corre con la página oculta. El primer pase no
  * fuerza Codex ni Antigravity: si SQLite todavía es fresco, no nace un proceso.
  */
-export function startUsagePolling(accounts: AgentAccount[]): () => void {
+export function startUsagePolling(accounts: AgentAccount[], active = true): () => void {
+  if (!active) {
+    stopUsagePolling();
+    return () => {};
+  }
   const sig = accounts.map((a) => a.id).join("|");
   if (sig === running && timer !== undefined) return () => {};
   stopUsagePolling();
