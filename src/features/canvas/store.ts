@@ -97,6 +97,12 @@ export function missionOfKey(key: string | null): string | null {
   return key && at >= 0 ? key.slice(at + MISSION_SEP.length) : null;
 }
 
+/** Os canvas da missão `missionId` que existem nesta janela. */
+export function missionBoardKeysOf(missionId: string): string[] {
+  const prefix = `${windowLabel}|`;
+  return Object.keys(useCanvasStore.getState().boards).filter((k) => k.startsWith(prefix) && missionOfKey(k) === missionId);
+}
+
 /**
  * La clave del canvas de una tab: el de su misión si algún canvas de misión de esta ventana
  * la tiene como nodo, si no el de su carpeta. La pertenencia a una misión vive en su canvas
