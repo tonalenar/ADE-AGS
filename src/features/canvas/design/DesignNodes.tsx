@@ -1,5 +1,7 @@
 import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
 import { type Node, type NodeProps } from "@xyflow/react";
+import { useTranslation } from "react-i18next";
+import { Button, CloseIcon } from "neogestify-ui-components";
 
 import { BoardCard } from "./BoardCard";
 import type { Artboard } from "./designApi";
@@ -10,17 +12,19 @@ export interface DesignActions {
   onApprove: (board: Artboard) => void;
   onReject: (board: Artboard) => void;
   onChoose: (board: Artboard, pick: { selector: string; text: string }) => void;
+  /** Recolhe o design do canvas (o X da moldura). */
+  onClose: (designId: string) => void;
   editing: string | null;
 }
 const NOOP = () => {};
-export const DesignActionsContext = createContext<DesignActions>({ onEdit: NOOP, onApprove: NOOP, onReject: NOOP, onChoose: NOOP, editing: null });
+export const DesignActionsContext = createContext<DesignActions>({ onEdit: NOOP, onApprove: NOOP, onReject: NOOP, onChoose: NOOP, onClose: NOOP, editing: null });
 
 export const BOARD_NODE_PREFIX = "design-board:";
 export const FRAME_NODE_PREFIX = "design-frame:";
 export const isDesignNodeId = (id: string) => id.startsWith(BOARD_NODE_PREFIX) || id.startsWith(FRAME_NODE_PREFIX);
 
 export interface DesignBoardData extends Record<string, unknown> { board: Artboard; comments: number; groupKey: string }
-export interface DesignFrameData extends Record<string, unknown> { title: string; w: number; h: number }
+export interface DesignFrameData extends Record<string, unknown> { title: string; w: number; h: number; designId: string }
 export type DesignBoardFlowNode = Node<DesignBoardData, "designBoard">;
 export type DesignFrameFlowNode = Node<DesignFrameData, "designFrame">;
 
@@ -65,11 +69,19 @@ export const DesignBoardNode = memo(function DesignBoardNode({ data }: NodeProps
   );
 });
 
-/** A moldura "Design - <título>/<página>" que agrupa as pranchetas de uma página. Não recebe o mouse. */
+/** A moldura "Design - <título>/<página>" que agrupa as pranchetas de uma página. O mouse passa por ela; só o X a recebe. */
 export const DesignFrameNode = memo(function DesignFrameNode({ data }: NodeProps<DesignFrameFlowNode>) {
+  const { t } = useTranslation();
+  const actions = useContext(DesignActionsContext);
   return (
     <div className="pointer-events-none rounded-xl border-2 border-dashed border-accent-500/40 bg-accent-500/[0.04]" style={{ width: data.w, height: data.h }}>
-      <div title={data.title} className="px-4 pt-2 text-[13px] font-semibold text-accent-700 dark:text-accent-300 truncate">{data.title}</div>
+      <div className="flex items-center gap-1 px-4 pt-2">
+        <div title={data.title} className="min-w-0 flex-1 truncate text-[13px] font-semibold text-accent-700 dark:text-accent-300">{data.title}</div>
+        <Button variant="custom" aria-label={t("canvas.design.close")} title={t("canvas.design.close")} onClick={() => actions.onClose(data.designId)}
+          className="nodrag pointer-events-auto cc-t w-5 h-5 flex items-center justify-center rounded text-accent-700/70 hover:bg-accent-500/15 dark:text-accent-300">
+          <CloseIcon className="w-2.5 h-2.5" />
+        </Button>
+      </div>
     </div>
   );
 });

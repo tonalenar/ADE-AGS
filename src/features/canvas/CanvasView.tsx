@@ -63,7 +63,8 @@ import {
   type DesignActions, type DesignBoardFlowNode, type DesignFrameFlowNode,
 } from "./design/DesignNodes";
 import { resolveOwner } from "./design/owner";
-import { freeOrigin, layoutGroups, positionsToSave } from "./design/scope";
+import { freeOrigin, layoutGroups, openDetails, positionsToSave } from "./design/scope";
+import { closeDesignOn, openDesignOn, useOpenDesignsStore } from "./design/openStore";
 import { useScopedDesigns } from "./design/useScopedDesigns";
 import { useCliOutdatedNotice } from "./cliStatus";
 import { useMissionIndex } from "@/features/missions/groups";
@@ -528,13 +529,17 @@ function CanvasInner() {
   const missionIndex = useMissionIndex();
   useCliOutdatedNotice();
   const design = useScopedDesigns({ cwd: portalCwd || null, missionId: missionOfKey(key) });
+  // Só aparecem os designs abertos neste canvas (ver `openStore.ts`): os demais não têm nó.
+  const openDesignIds = useOpenDesignsStore((s) => (key ? s.open[key] : undefined));
+  const openSet = useMemo(() => new Set(openDesignIds ?? []), [openDesignIds]);
   const boardRef = useRef(board);
   boardRef.current = board;
   // El origen se fija al aparecer los diseños: si siguiera a las terminales, la zona saltaría al arrastrar una.
+  // Al abrir uno se fija de nuevo, para que no caiga encima de lo que se agregó después.
   const designOrigin = useMemo(() => freeOrigin(boardRef.current),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [key, design.details.length]);
-  const groups = useMemo(() => layoutGroups(design.details, designOrigin), [design.details, designOrigin]);
+    [key, design.details.length, openDesignIds]);
+  const groups = useMemo(() => layoutGroups(openDetails(design.details, openSet), designOrigin), [design.details, designOrigin, openSet]);
   // Posición mientras se arrastra una prancheta (se graba al soltar).
   const [dragPos, setDragPos] = useState<Record<string, { x: number; y: number }>>({});
   const designNodes = useMemo<FlowNode[]>(() => groups.flatMap((g) => {
@@ -542,7 +547,7 @@ function CanvasInner() {
     const frame: DesignFrameFlowNode = {
       id: FRAME_NODE_PREFIX + g.key, type: "designFrame", position: { x: g.frame.x, y: g.frame.y }, zIndex: -1,
       draggable: false, selectable: false, focusable: false, deletable: false,
-      data: { title: t("canvas.design.frame", { name: g.title }), w: g.frame.w, h: g.frame.h },
+      data: { title: t("canvas.design.frame", { name: g.title }), w: g.frame.w, h: g.frame.h, designId: g.designId },
     };
     const boards = g.boards.map((p): DesignBoardFlowNode => ({
       id: BOARD_NODE_PREFIX + p.board.id, type: "designBoard", position: dragPos[p.board.id] ?? { x: p.x, y: p.y },
@@ -561,6 +566,7 @@ function CanvasInner() {
   const [designFocus, setDesignFocus] = useState<{ designId?: string; editBoardId?: string } | null>(null);
   const openFocus = (initial: { designId?: string; editBoardId?: string } | null) => {
     design.markSeen();
+    if (initial?.designId) openDesignOn(key, initial.designId);
     setDesignFocus(initial ?? {});
     setPanel("design");
   };
@@ -577,9 +583,10 @@ function CanvasInner() {
         const d = designOf(b);
         if (d) void chooseOnBoard({ t, board: b, design: d.design, owner: resolveOwner(d.design, ownerTabs, missionIndex), pick, reload: design.reload });
       },
+      onClose: (designId) => closeDesignOn(key, designId),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [design.details, design.reload, ownerTabs, missionIndex, t]);
+  }, [design.details, design.reload, ownerTabs, missionIndex, t, key]);
   /** Al soltar una prancheta: graba x/y (relativos a su página) y las hermanas que estaban apiladas. */
   const onDesignDragStop = (_: unknown, node: Node) => {
     if (!node.id.startsWith(BOARD_NODE_PREFIX)) return;
@@ -895,7 +902,7 @@ function CanvasInner() {
         {compareOfKey(key) && <ComparisonBar comparisonId={compareOfKey(key)!} />}
         {panel === "routines" && <CanvasSchedulesPanel onClose={() => setPanel(null)} />}
         {panel === "design" && design.details.length > 0 && (
-          <DesignPanel details={design.details} reload={design.reload} initial={designFocus} onClose={() => { setPanel(null); setDesignFocus(null); }} />
+          <DesignPanel details={design.details} reload={design.reload} initial={designFocus} onPickDesign={(designId) => openDesignOn(key, designId)} onClose={() => { setPanel(null); setDesignFocus(null); }} />
         )}
         {design.loadError && (
           <div role="alert" className="pointer-events-auto absolute right-3 bottom-[7.5rem] flex items-center gap-2 rounded-lg border border-amber-500/40

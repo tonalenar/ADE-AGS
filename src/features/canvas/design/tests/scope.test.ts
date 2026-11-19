@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { emptyBoard } from "../../board";
 import type { Artboard, Design, DesignDetail } from "../designApi";
-import { AREA_GAP, designsForBoard, freeOrigin, layoutGroups, positionsToSave } from "../scope";
+import { BOARD_GAP } from "../layout";
+import { AREA_GAP, designsForBoard, freeOrigin, layoutGroups, openDetails, positionsToSave } from "../scope";
 
 const design = (id: string, over: Partial<Design> = {}): Design => ({ id, workspace: "C:\\proj", missionId: null, ownerTabId: null, title: id, status: "draft", ...over });
 const board = (id: string, x = 0, y = 0, pageId = "p1"): Artboard => ({ id, pageId, title: id, html: "", width: 400, height: 300, x, y, version: 1, status: "draft" });
@@ -60,5 +61,19 @@ describe("freshDesigns", () => {
   it("só os que ainda não eram conhecidos", () => {
     expect(freshDesigns(new Set(["a"]), [design("a"), design("b")]).map((d) => d.id)).toEqual(["b"]);
     expect(freshDesigns(new Set(["a"]), [design("a")])).toEqual([]);
+  });
+});
+
+describe("openDetails", () => {
+  const all = [detail(design("d1"), [board("a")]), detail(design("d2"), [board("b")]), detail(design("d3"), [board("c")])];
+  it("só os designs abertos, na ordem da lista", () => {
+    expect(openDetails(all, new Set(["d3", "d1"])).map((d) => d.design.id)).toEqual(["d1", "d3"]);
+  });
+  it("nenhum aberto, nenhum design no canvas", () => {
+    expect(openDetails(all, new Set<string>())).toEqual([]);
+  });
+  it("fechar um do meio não deixa buraco: a moldura seguinte sobe", () => {
+    const [first, second] = layoutGroups(openDetails(all, new Set(["d1", "d3"])), { x: 0, y: 0 });
+    expect(second.frame.y).toBe(first.frame.y + first.frame.h + BOARD_GAP);
   });
 });
