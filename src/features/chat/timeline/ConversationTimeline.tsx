@@ -1,3 +1,4 @@
+import { settleAnchorSpace } from "./anchorSpace";
 import { applyToolCallVisibility } from "./toolCallVisibility";
 import { isCompacting } from "../autocompact/model";
 import { useChatPrefs } from "../chatPrefs";
@@ -215,6 +216,8 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   // Ao enviar, deixa o pedido perto do topo como no T3 e segura a âncora enquanto a resposta cabe na janela.
   const anchorTurn = useRef<string | null>(null);
   const [anchorSpace, setAnchorSpace] = useState(0);
+  // Os espaços já aplicados na âncora atual (ver `settleAnchorSpace`).
+  const anchorSeen = useRef<{ key: string | null; values: number[] }>({ key: null, values: [] });
   const holdTurnAnchorRef = useRef<(el: HTMLDivElement) => boolean>(() => false);
   // A rolagem suave que esta tela mandou ainda não foi interrompida pela pessoa (ver `onScroll`).
   const following = useRef(false);
@@ -267,8 +270,11 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     // Dá espaço no fim para o pedido ficar perto do topo mesmo antes de a resposta ter altura.
     const maxTopWithoutAnchor = Math.max(0, el.scrollHeight - el.clientHeight - anchorSpace);
     const requiredSpace = Math.max(0, desiredTop - maxTopWithoutAnchor);
-    if (Math.abs(anchorSpace - requiredSpace) > 2) {
-      setAnchorSpace(requiredSpace);
+    if (anchorSeen.current.key !== activeKey) anchorSeen.current = { key: activeKey, values: [] };
+    const nextSpace = settleAnchorSpace(anchorSpace, requiredSpace, anchorSeen.current.values);
+    if (nextSpace !== null) {
+      anchorSeen.current.values.push(nextSpace);
+      setAnchorSpace(nextSpace);
       return true;
     }
     if (Math.abs(el.scrollTop - desiredTop) > 2) {
