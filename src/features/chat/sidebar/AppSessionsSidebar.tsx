@@ -1,4 +1,5 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { applyProjectGrouping, buildRepoIndex, useProjectGrouping } from "./projectGrouping";
 import { useNavigate } from "react-router-dom";
 
@@ -14,6 +15,7 @@ import { chatProjects, conversationCards, type ChatProject } from "../chatModel"
 import { ChatSidebar } from "../ChatSidebar";
 import { useFolderDiffs } from "../ChatShell";
 import { startChatLive } from "../liveStore";
+import { pickProjectFolder } from "../NewConversation";
 import { addSurface, useChatStore } from "../store";
 import { startQueueRunner } from "../queueRunner";
 import { startStructured, useStructured } from "../structured/store";
@@ -27,6 +29,7 @@ import { useSelectedRef } from "../unified/useConversations";
  * barra vem sem os dois; as missões e o pet, que só estes modos têm, entram no alto e embaixo.
  */
 export function AppSessionsSidebar({ groups, width }: { groups: RepoGroup[]; width: number }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const threads = useStructured((s) => s.threads);
   const detected = useTabsStore((s) => s.detectedAgents);
@@ -41,6 +44,11 @@ export function AppSessionsSidebar({ groups, width }: { groups: RepoGroup[]; wid
   useEffect(() => startStructured(), []);
   useEffect(() => startQueueRunner(), []);
   useEffect(() => { if (!localProvidersLoaded) void loadLocalProviders().catch(console.error); }, [localProvidersLoaded, loadLocalProviders]);
+  const addProject = useCallback(async () => {
+    const picked = await pickProjectFolder(t("home.dialogTitle"));
+    if (!picked) return;
+    newConversationIn(picked);
+  }, [t]);
   const projectGrouping = useProjectGrouping();
   const cards = useMemo(() => {
     const labelOf = (id: string) => detected.find((a) => a.id === id)?.label ?? localProviders.find((a) => a.id === id)?.label ?? id;
@@ -61,7 +69,8 @@ export function AppSessionsSidebar({ groups, width }: { groups: RepoGroup[]; wid
     <ChatSidebar cards={cards} projects={projects} closed={closed} diffs={diffs} selectedId={selected} width={width}
       showHeader={false} showFooter={false}
       onCollapse={() => undefined}
-      onNew={() => { useChatStore.setState({ composeFolder: null }); newConversationLocal(); }} onAddProject={() => navigate("/")}
+      onNew={() => { useChatStore.setState({ composeFolder: null }); newConversationLocal(); }}
+      onAddProject={() => { void addProject(); }}
       // O mesmo composer do chat abre sobre o workspace, sem trocar a preferência de modo.
       onNewIn={newConversationIn}
       onOpened={() => navigate("/workspace")}

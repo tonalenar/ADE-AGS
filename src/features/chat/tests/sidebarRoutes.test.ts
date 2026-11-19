@@ -38,9 +38,11 @@ describe("a barra só navega para rotas que existem", () => {
     expect(read("../../../app/router.tsx")).toMatch(/path: "\*", element: <NotFound \/>/);
   });
 
-  it('Criar e o "+" do projeto usam o mesmo composer sem navegar para a Home', () => {
+  it('Criar, Projetos e o "+" do projeto usam o mesmo composer sem navegar para a Home', () => {
     const sidebar = read("../sidebar/AppSessionsSidebar.tsx");
     expect(sidebar).toContain("newConversationLocal();");
     expect(sidebar).toContain("onNewIn={newConversationIn}");
+    expect(sidebar).toContain("pickProjectFolder");
+    expect(sidebar).not.toMatch(/navigate\("\/"\)/);
   });
 });
