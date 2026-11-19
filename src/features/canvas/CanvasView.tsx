@@ -78,11 +78,21 @@ import { usePortalViewLifetime } from "./portalLifetime";
 import { ThreadNode, type ThreadFlowNode } from "./ThreadNode";
 import { selectConversation } from "@/features/chat/unified/selectionActions";
 import { useSelectedRef } from "@/features/chat/unified/useConversations";
-import { threadIdOf } from "@/features/chat/structured/model";
+import { useChatLive, type TabTurn } from "@/features/chat/liveStore";
+import { threadIdOf, type ThreadLive } from "@/features/chat/structured/model";
 import { useStructured } from "@/features/chat/structured/store";
 import { ComparisonBar } from "@/features/compare/ComparisonBar";
 import { openCompareDialog } from "@/features/compare/store";
 import { cleanPreviewLines } from "./previewText";
+import { SubagentCardNode, type SubagentCardFlowNode } from "./SubagentCardNode";
+import {
+  buildEphemeralSubagents, EMPTY_EPHEMERAL_SUBAGENTS, isEphemeralEdgeId, isEphemeralSubagentNodeId,
+  type EphemeralSubagentCard,
+} from "./subagentsModel";
+import { useBoardHarnessTasks } from "./useBoardHarnessTasks";
+
+const EMPTY_LIVE: Record<string, ThreadLive> = {};
+const EMPTY_TURNS: Record<string, TabTurn> = {};
 
 /** Avisa o agente quando a pessoa liga uma corda entre ele e um navegador do canvas. */
 function announcePortal(key: string, a: string, b: string): void {
@@ -129,7 +139,7 @@ interface PortalNodeData extends Record<string, unknown> {
 }
 
 type PortalFlowNode = Node<PortalNodeData, "portal">;
-type FlowNode = AgentFlowNode | ThreadFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode | FolderFlowNode | DesignBoardFlowNode | DesignFrameFlowNode;
+type FlowNode = AgentFlowNode | ThreadFlowNode | SubagentCardFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode | FolderFlowNode | DesignBoardFlowNode | DesignFrameFlowNode;
 
 // El navegador pesa más de un megabyte: se baja con el primer portal, no con el canvas.
 const BrowserTab = lazy(() => import("@/features/browser/BrowserTab").then((m) => ({ default: m.BrowserTab })));
@@ -184,6 +194,8 @@ const agentSig = (n: AgentFlowNode) =>
     n.data.links, n.data.orchestrator, n.data.role, n.data.subagent].join("|");
 const threadSig = (n: ThreadFlowNode) =>
   [n.id, n.position.x, n.position.y, n.width, n.height, n.selected, n.data.links, n.data.orchestrator, n.data.role, n.data.subagent].join("|");
+const subagentCardSig = (n: SubagentCardFlowNode) =>
+  [n.id, n.data.card.title, n.data.card.subtitle, n.data.card.status, n.data.card.kind, n.data.card.openRef, boxSig(n.data.card.box)].join("|");
 const noteSig = (n: NoteFlowNode) => [
   n.id, n.data.note.name, boxSig(n.data.note.box), n.selected, n.data.links, n.data.note.content,
   n.data.stack.map((s) => s.id + s.name).join(","), n.data.others.map((o) => o.id + o.name).join(","),
@@ -551,6 +563,49 @@ function CanvasInner() {
   const noteNodes = useStable(rawNoteNodes, noteSig);
   const portalNodes = useStable(rawPortalNodes, portalSig);
 
+  // Subagentes internos em execução, tarefas delegadas do harness e conversas filhas (`parentRef`):
+  // cartões compactos e cordas pontilhadas efêmeros pendurados no nó pai, sem persistir em `canvas.json`.
+  const structuredLive = useStructured((s) => (canvasActive ? s.live : EMPTY_LIVE));
+  const tabTurns = useChatLive((s) => (canvasActive ? s.turn : EMPTY_TURNS));
+  const boardThreadIds = useMemo(
+    () => Object.keys(board.threads).flatMap((ref) => { const id = threadIdOf(ref); return id ? [id] : []; }),
+    [board.threads],
+  );
+  const harnessTasks = useBoardHarnessTasks(boardThreadIds, canvasActive);
+  const ephemeralSubagents = useMemo(
+    () => (!canvasActive
+      ? EMPTY_EPHEMERAL_SUBAGENTS
+      : buildEphemeralSubagents({ board, threads: liveThreadIds, structuredLive, tabTurns, harnessTasks })),
+    [canvasActive, board, liveThreadIds, structuredLive, tabTurns, harnessTasks],
+  );
+  const focusNodeRef = useRef(focusNode);
+  focusNodeRef.current = focusNode;
+  const onSubagentCardClick = useCallback((card: EphemeralSubagentCard) => {
+    if (card.openRef) {
+      selectConversation(card.openRef);
+      return;
+    }
+    if (threadIdOf(card.parentRef)) {
+      selectConversation(card.parentRef);
+      return;
+    }
+    focusNodeRef.current(card.parentRef);
+  }, []);
+  const rawSubagentNodes: SubagentCardFlowNode[] = useMemo(() => ephemeralSubagents.cards.map((card) => ({
+    id: card.id,
+    type: "subagentCard" as const,
+    position: { x: card.box.x, y: card.box.y },
+    width: card.box.w,
+    height: card.box.h,
+    draggable: false,
+    selectable: false,
+    focusable: false,
+    deletable: false,
+    connectable: false,
+    data: { card, onClick: onSubagentCardClick },
+  })), [ephemeralSubagents.cards, onSubagentCardClick]);
+  const subagentNodes = useStable(rawSubagentNodes, subagentCardSig);
+
   // Las pranchetas de diseño de este canvas: nodos en una zona libre, a la derecha de lo que ya hay.
   const ownerTabs = useMemo(() => allTabs.map((tab) => ({ id: tab.id, title: tab.title })), [allTabs]);
   const missionIndex = useMissionIndex();
@@ -585,8 +640,8 @@ function CanvasInner() {
   }), [groups, dragPos, design.details, t]);
 
   const nodes: FlowNode[] = useMemo(
-    () => [...designNodes, ...imageNodes, ...folderNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...threadNodes, ...textNodes],
-    [designNodes, imageNodes, folderNodes, noteNodes, portalNodes, agentNodes, threadNodes, textNodes],
+    () => [...designNodes, ...imageNodes, ...folderNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...threadNodes, ...subagentNodes, ...textNodes],
+    [designNodes, imageNodes, folderNodes, noteNodes, portalNodes, agentNodes, threadNodes, subagentNodes, textNodes],
   );
 
   // El modo de foco (solo el diseño) y a qué abre: el aviso, el botón EDITAR de un nodo o el último diseño.
@@ -636,7 +691,7 @@ function CanvasInner() {
   // La punta en una nota tapada se dibuja en la del frente de su pila.
   const edges: Edge[] = useMemo(() => {
     const seen = new Set<string>();
-    return board.edges.filter((e) => boxOf(board, e.a) && boxOf(board, e.b)).flatMap((e) => {
+    const persisted = board.edges.filter((e) => boxOf(board, e.a) && boxOf(board, e.b)).flatMap((e) => {
       const source = shownNote(board, e.a);
       const target = shownNote(board, e.b);
       const pair = [source, target].sort().join("|");
@@ -649,11 +704,26 @@ function CanvasInner() {
       return [{ id: e.id, source, target, sourceHandle, targetHandle, type: "link", selected: e.id === selectedEdge,
         data: { color: cordColor(e.id), hovered: e.id === hoveredEdge } } as Edge];
     });
-  }, [board, selectedEdge, hoveredEdge]);
+    const ephemeral: Edge[] = ephemeralSubagents.edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.sourceHandle,
+      targetHandle: e.targetHandle,
+      type: "link",
+      selectable: false,
+      focusable: false,
+      deletable: false,
+      reconnectable: false,
+      data: { color: cordColor(e.id), ephemeral: true },
+    }));
+    return [...persisted, ...ephemeral];
+  }, [board, selectedEdge, hoveredEdge, ephemeralSubagents.edges]);
 
   const onNodesChange = (changes: NodeChange<FlowNode>[]) => {
     if (!key) return;
     for (const c of changes) {
+      if ("id" in c && isEphemeralSubagentNodeId(c.id)) continue;
       if ("id" in c && isDesignNodeId(c.id)) {
         if (c.type === "position" && c.position && c.id.startsWith(BOARD_NODE_PREFIX)) {
           const pos = c.position;
@@ -827,6 +897,7 @@ function CanvasInner() {
   const onEdgesChange = (changes: EdgeChange[]) => {
     if (!key) return;
     for (const c of changes) {
+      if ("id" in c && isEphemeralEdgeId(c.id)) continue;
       if (c.type === "remove") canvasActions.disconnect(key, c.id);
       else if (c.type === "select") setSelectedEdge((cur) => (c.selected ? c.id : cur === c.id ? null : cur));
     }
@@ -834,6 +905,7 @@ function CanvasInner() {
 
   const onConnect = (c: Connection) => {
     if (!key || !c.source || !c.target) return;
+    if (isEphemeralSubagentNodeId(c.source) || isEphemeralSubagentNodeId(c.target)) return;
     canvasActions.connect(key, c.source, c.target);
     announceToOrchestrators(key, [c.source, c.target]);
     announcePortal(key, c.source, c.target);
@@ -844,11 +916,13 @@ function CanvasInner() {
 
   // Puxar a ponta: soltar numa alça reconecta; soltar no vazio desconecta.
   const onReconnectStart = (_: unknown, edge: Edge) => {
+    if (isEphemeralEdgeId(edge.id)) return;
     reconnected.current = false;
     wrapRef.current?.style.setProperty("--cord-magnet", cordColor(edge.id));
   };
   const onReconnect = (old: Edge, c: Connection) => {
-    if (!key || !c.source || !c.target) return;
+    if (!key || !c.source || !c.target || isEphemeralEdgeId(old.id)) return;
+    if (isEphemeralSubagentNodeId(c.source) || isEphemeralSubagentNodeId(c.target)) return;
     reconnected.current = true;
     const same = (old.source === c.source && old.target === c.target) || (old.source === c.target && old.target === c.source);
     if (same) return;
@@ -859,6 +933,7 @@ function CanvasInner() {
     flashNode(c.target, cordColor(old.id));
   };
   const onReconnectEnd = (_: unknown, edge: Edge) => {
+    if (isEphemeralEdgeId(edge.id)) return;
     wrapRef.current?.style.removeProperty("--cord-magnet");
     if (!reconnected.current && key) canvasActions.disconnect(key, edge.id);
     reconnected.current = false;
@@ -905,9 +980,13 @@ function CanvasInner() {
         onReconnectStart={onReconnectStart}
         onReconnect={onReconnect}
         onReconnectEnd={onReconnectEnd}
-        onEdgeMouseEnter={(_, e) => setHoveredEdge(e.id)}
-        onEdgeMouseLeave={(_, e) => setHoveredEdge((cur) => (cur === e.id ? null : cur))}
-        onEdgeContextMenu={(ev, e) => { ev.preventDefault(); setEdgeMenu({ id: e.id, x: ev.clientX, y: ev.clientY }); }}
+        onEdgeMouseEnter={(_, e) => { if (!isEphemeralEdgeId(e.id)) setHoveredEdge(e.id); }}
+        onEdgeMouseLeave={(_, e) => { if (!isEphemeralEdgeId(e.id)) setHoveredEdge((cur) => (cur === e.id ? null : cur)); }}
+        onEdgeContextMenu={(ev, e) => {
+          if (isEphemeralEdgeId(e.id)) return;
+          ev.preventDefault();
+          setEdgeMenu({ id: e.id, x: ev.clientX, y: ev.clientY });
+        }}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} />
         <DrawingLayer strokes={board.drawings} live={liveStroke} erasing={tool === "erase"}
@@ -1500,5 +1579,5 @@ const PortalOrDevice = memo(function PortalOrDevice(props: NodeProps<PortalFlowN
     : <PortalNode {...props} />;
 });
 
-const NODE_TYPES = { designBoard: DesignBoardNode, designFrame: DesignFrameNode, agent: AgentNode, thread: ThreadNode, note: NoteNode, portal: PortalOrDevice, text: TextNode, image: ImageNode, folder: FolderNode };
+const NODE_TYPES = { designBoard: DesignBoardNode, designFrame: DesignFrameNode, agent: AgentNode, thread: ThreadNode, subagentCard: SubagentCardNode, note: NoteNode, portal: PortalOrDevice, text: TextNode, image: ImageNode, folder: FolderNode };
 const EDGE_TYPES = { link: CordEdge };

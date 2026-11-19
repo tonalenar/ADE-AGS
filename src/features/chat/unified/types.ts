@@ -33,6 +33,8 @@ export interface UnifiedConversation {
   lead: boolean;
   /** Marcado como subagente: só executa o que o orquestrador envia. */
   subagent: boolean;
+  /** A conversa pai (`tab.id` ou `thread:<id>`), quando nasceu como conversa filha ou lateral. */
+  parentRef?: string;
   /** Sem PTY ainda: o agente está subindo (só `pty`). */
   starting: boolean;
   /** Quando abriu (aba) ou foi mexida por último (protocolo), em segundos; ordena a lista. */

@@ -114,6 +114,22 @@ describe("selectConversations", () => {
     const tm = team("T", "gone", [member("T", "thread:gone", "x")]);
     expect(selectConversations(src({ teams: [tm] }))).toEqual([]);
   });
+
+  it("conversa filha (parentRef) expõe parentRef e herda o boardKey do pai quando não está num time", () => {
+    const parentBoard = "main|/p#m:m1";
+    const out = selectConversations(src({
+      threads: [
+        thread("parent"),
+        thread("child", { parentRef: "thread:parent" }),
+      ],
+      boards: {
+        [parentBoard]: { ...emptyBoard(), threads: { "thread:parent": { x: 0, y: 0, w: 600, h: 400 } } },
+      },
+    }));
+    const by = Object.fromEntries(out.map((c) => [c.ref, c]));
+    expect(by["thread:parent"]?.boardKey).toBe(parentBoard);
+    expect(by["thread:child"]).toMatchObject({ parentRef: "thread:parent", boardKey: parentBoard });
+  });
 });
 
 describe("helpers", () => {
