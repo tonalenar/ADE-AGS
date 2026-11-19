@@ -17,21 +17,22 @@ pub fn simulator_devices() -> Result<Vec<Device>, String> {
     ops::devices()
 }
 
-/// Liga o aparelho (sem persist: desliga junto com a ADE). `light` = o iOS na prioridade baixa.
+/// Liga o aparelho (sem persist: desliga junto com a ADE). `light` = modo leve; `light_max` = modo máximo.
 #[tauri::command(async)]
-pub fn simulator_boot(app: AppHandle, udid: String, light: Option<bool>) -> Result<(), String> {
-    ops::boot(&udid, light.unwrap_or(true))?;
+pub fn simulator_boot(app: AppHandle, udid: String, light: Option<bool>, light_max: Option<bool>) -> Result<(), String> {
+    let level = super::slim::Level::from_flags(light.unwrap_or(true), light_max.unwrap_or(false));
+    ops::boot(&udid, level)?;
     ops::forget_orientation(&udid);
     lifecycle::booted(&app, &udid, true);
     Ok(())
 }
 
 /// As preferências do ciclo de vida (ver `lifecycle`): hibernar depois de `hibernate_minutes` fora de vista
-/// (0 = nunca), um aparelho por vez e o modo leve.
+/// (0 = nunca), um aparelho por vez, modo leve e modo máximo.
 #[tauri::command]
-pub fn simulator_settings(app: AppHandle, hibernate_minutes: u32, single: bool, light: bool) {
+pub fn simulator_settings(app: AppHandle, hibernate_minutes: u32, single: bool, light: bool, light_max: Option<bool>) {
     let hibernate_after = (hibernate_minutes > 0).then(|| Duration::from_secs(u64::from(hibernate_minutes) * 60));
-    lifecycle::set_settings(&app, lifecycle::Settings { hibernate_after, single, light });
+    lifecycle::set_settings(&app, lifecycle::Settings { hibernate_after, single, light, light_max: light_max.unwrap_or(false) });
 }
 
 /// As telas abertas: qual aparelho cada uma mostra e se está à vista agora. O mesmo aparelho pode estar em

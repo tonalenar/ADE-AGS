@@ -12,6 +12,7 @@ import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "
 export function DevicesSection() {
   const { t } = useTranslation();
   const light = useSimulatorPrefs((s) => s.light);
+  const lightMax = useSimulatorPrefs((s) => s.lightMax);
   const single = useSimulatorPrefs((s) => s.single);
   const hibernateMin = useSimulatorPrefs((s) => s.hibernateMin);
   const set = useSimulatorPrefs((s) => s.set);
@@ -20,6 +21,7 @@ export function DevicesSection() {
       <SettingsSection title={t("settings.devices.ios")}>
         <SettingsGroup>
           <SettingsToggleRow label={t("simulator.lightShort")} description={t("simulator.light")} checked={light} onChange={(next) => set({ light: next })} />
+          <SettingsToggleRow label={t("simulator.lightMaxShort")} description={t("simulator.lightMaxHint")} checked={light && lightMax} disabled={!light} onChange={(next) => set({ lightMax: next })} />
           <SettingsToggleRow label={t("simulator.single")} description={t("settings.devices.singleHint")} checked={single} onChange={(next) => set({ single: next })} />
           <SettingsRow label={t("simulator.hibernate")} hint={t("settings.devices.hibernateHint")}>
             <PopupSelect value={String(hibernateMin)} onChange={(e) => set({ hibernateMin: Number(e.target.value) })}>

@@ -31,14 +31,17 @@ pub fn devices() -> Result<Vec<Device>, String> {
 /// Liga e espera a tela existir. No modo leve, com o aparelho desligado, sobe sem os serviços pesados do iOS
 /// (`simulator::slim`: o arquivo original volta logo que a tela existe). A prioridade fica normal enquanto à
 /// vista e só baixa quando a tela sai de vista (`lifecycle`).
-pub fn boot(udid: &str, light: bool) -> Result<(), String> {
+pub fn boot(udid: &str, level: Option<crate::simulator::slim::Level>) -> Result<(), String> {
     let dev = device::find(udid)?;
-    let slimmed = light && device::state(&dev) == model::STATE_SHUTDOWN && match slim::apply(udid) {
-        Ok(_) => true,
-        Err(e) => {
-            eprintln!("[simulator] modo leve sem a lista de serviços: {e}");
-            false
-        }
+    let slimmed = match level {
+        Some(level) if device::state(&dev) == model::STATE_SHUTDOWN => match slim::apply(udid, level) {
+            Ok(_) => true,
+            Err(e) => {
+                eprintln!("[simulator] modo leve sem a lista de serviços: {e}");
+                false
+            }
+        },
+        _ => false,
     };
     let ready = device::boot(&dev).and_then(|()| screen::lcd(&dev, SCREEN_WAIT).map(|_| ()));
     if slimmed {

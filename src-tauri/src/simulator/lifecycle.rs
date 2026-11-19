@@ -30,11 +30,19 @@ pub struct Settings {
     pub hibernate_after: Option<Duration>,
     pub single: bool,
     pub light: bool,
+    pub light_max: bool,
+}
+
+impl Settings {
+    /// Nível de serviços desligados no boot, conforme `light` e `light_max`.
+    pub fn slim_level(&self) -> Option<super::slim::Level> {
+        super::slim::Level::from_flags(self.light, self.light_max)
+    }
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { hibernate_after: Some(Duration::from_secs(10 * 60)), single: true, light: true }
+        Settings { hibernate_after: Some(Duration::from_secs(10 * 60)), single: true, light: true, light_max: false }
     }
 }
 
@@ -158,6 +166,11 @@ pub fn set_settings(app: &AppHandle, new: Settings) {
     }
 }
 
+/// Nível atual de modo leve nas preferências sincronizadas do simulador.
+pub fn slim_level() -> Option<super::slim::Level> {
+    settings().lock().map(|s| s.slim_level()).unwrap_or(Some(super::slim::Level::Light))
+}
+
 fn emit(udid: &str, state: &str, reason: &str) {
     if let Some(app) = APP.get() {
         let _ = app.emit("simulator-state", json!({ "udid": udid, "state": state, "reason": reason }));
@@ -166,7 +179,7 @@ fn emit(udid: &str, state: &str, reason: &str) {
 
 /// Desliga um aparelho marcado para hibernar. Confere a marca sob a trava logo antes do desligamento: se uma tela ou
 /// um agente chegou depois da marca, o aparelho fica como está. Se chegou durante o desligamento, religa.
-fn hibernate_marked(udid: &str, reason: &str, light: bool) {
+fn hibernate_marked(udid: &str, reason: &str, level: Option<super::slim::Level>) {
     let confirmed = usage().lock().map(|map| confirm_hibernation(&map, udid)).unwrap_or(false);
     if !confirmed {
         return;
@@ -183,7 +196,7 @@ fn hibernate_marked(udid: &str, reason: &str, light: bool) {
     };
     let reopen = usage().lock().map(|mut map| finish_hibernation(&mut map, udid, off)).unwrap_or(false);
     if reopen {
-        match ops::boot(udid, light) {
+        match ops::boot(udid, level) {
             Ok(()) => emit(udid, "booted", "reopened"),
             Err(e) => eprintln!("[simulator] não religuei {udid}, que foi pedido durante o desligamento: {e}"),
         }
@@ -192,13 +205,13 @@ fn hibernate_marked(udid: &str, reason: &str, light: bool) {
 
 /// Desliga um aparelho por economia (a regra "um por vez"), pela mesma marca e confirmação do monitor.
 fn hibernate(udid: &str, reason: &str) {
-    let light = settings().lock().map(|s| s.light).unwrap_or(true);
+    let level = slim_level();
     if let Ok(mut map) = usage().lock() {
         if let Some(u) = map.get_mut(udid) {
             u.hibernating = true;
         }
     }
-    hibernate_marked(udid, reason, light);
+    hibernate_marked(udid, reason, level);
 }
 
 /// A ADE acabou de ligar `udid` (`from_screen`: pela tela, não por um agente). Com "um por vez", hiberna os outros.
@@ -362,7 +375,7 @@ fn monitor() {
             // Decide com o uso de agora (sob a trava), não com uma cópia de antes do desligamento anterior.
             let claimed = usage().lock().map(|mut map| claim_due(&mut map, &udid, now, current.hibernate_after)).unwrap_or(false);
             if claimed {
-                hibernate_marked(&udid, "hibernated", current.light);
+                hibernate_marked(&udid, "hibernated", current.slim_level());
             } else {
                 apply_priority(&udid, false);
             }
