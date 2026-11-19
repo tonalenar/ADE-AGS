@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { addEdge, copySessionArtifacts, emptyBoard, reconcile, setRole, type Board } from "@/features/canvas/board";
+import { addEdge, moveSessionArtifacts, emptyBoard, reconcile, setRole, type Board } from "@/features/canvas/board";
 
 import type { TeamMember, TeamView } from "../ipc";
 import { canvasPlan, leadBoardKey, runCanvasPlan, type CanvasApi, type CanvasInput } from "../teamCanvas";
@@ -33,7 +33,7 @@ function fakeApi(boards: Record<string, Board>): CanvasApi & { boards: () => Rec
       boards[to] = { ...tb, nodes };
       boards[from] = { ...f, nodes: rest };
     },
-    copySession: (from, to, id) => { boards[to] = copySessionArtifacts(get(from), get(to), id); },
+    migrateSession: (from, to, id) => { const moved = moveSessionArtifacts(get(from), get(to), id); boards[to] = moved.target; boards[from] = moved.source; },
     setRole: (k, id, role, subagent) => {
       const b = get(k);
       const others = b.subagents.filter((x) => x !== id);
@@ -53,9 +53,9 @@ describe("o time no canvas", () => {
     const tabs = { lead: "main|/repo", ui: "main|/wt" };
     const ops = canvasPlan(input(t, boards, tabs));
     expect(ops).toEqual([
-      { kind: "copy", from: "main|/repo", to: "main|/repo#s:lead", ids: ["lead"] },
+      { kind: "migrate", from: "main|/repo", to: "main|/repo#s:lead", ids: ["lead"] },
       { kind: "crown", key: "main|/repo#s:lead", id: "lead" },
-      { kind: "copy", from: "main|/wt", to: "main|/repo#s:lead", ids: ["ui"] },
+      { kind: "migrate", from: "main|/wt", to: "main|/repo#s:lead", ids: ["ui"] },
       { kind: "connect", key: "main|/repo#s:lead", a: "lead", b: "ui" },
       { kind: "role", key: "main|/repo#s:lead", id: "ui", label: "FRONTEND", subagent: false },
       { kind: "connect", key: "main|/repo#s:lead", a: "lead", b: "thread:x" },
@@ -67,13 +67,14 @@ describe("o time no canvas", () => {
     expect(lead.orchestrators).toEqual(["lead"]);
     expect(Object.keys(lead.nodes).sort()).toEqual(["lead", "ui"]);
     expect(lead.edges.map((e) => e.b)).toEqual(["ui", "thread:x"]);
-    expect(Object.keys(boards["main|/repo"]!.nodes)).toEqual(["lead"]);
-    expect(Object.keys(boards["main|/wt"]!.nodes)).toEqual(["ui"]);
+    // Movidos, não copiados: a pasta e o worktree não ficam com um segundo nó deles.
+    expect(Object.keys(boards["main|/repo"]!.nodes)).toEqual([]);
+    expect(Object.keys(boards["main|/wt"]!.nodes)).toEqual([]);
     // De novo: já está certo, nada a fazer.
     expect(canvasPlan(input(t, boards, tabs))).toEqual([]);
   });
 
-  it("copia um canvas próprio antigo do integrante para o do orquestrador sem apagar a origem", () => {
+  it("move o integrante do canvas próprio antigo para o do orquestrador, com papel e marca", () => {
     const leadKey = "main|/repo#s:lead";
     const memberKey = "main|/wt#s:ui";
     const source = setRole(withNodes(["ui"]), "ui", "QA", true);
@@ -81,9 +82,9 @@ describe("o time no canvas", () => {
     const tabs = { lead: leadKey, ui: leadKey };
     const t = team("lead", [["ui", "frontend"]]);
     const ops = canvasPlan(input(t, boards, tabs, { sourceKeyOfRef: (ref) => ref === "ui" ? memberKey : leadKey }));
-    expect(ops).toContainEqual({ kind: "copy", from: memberKey, to: leadKey, ids: ["ui"] });
+    expect(ops).toContainEqual({ kind: "migrate", from: memberKey, to: leadKey, ids: ["ui"] });
     runCanvasPlan(ops, fakeApi(boards));
-    expect(boards[memberKey]).toMatchObject({ nodes: { ui: source.nodes.ui }, roles: { ui: "QA" }, subagents: ["ui"] });
+    expect(boards[memberKey]).toMatchObject({ nodes: {}, roles: {}, subagents: [] });
     expect(boards[leadKey]).toMatchObject({ nodes: { ui: source.nodes.ui }, edges: [{ a: "lead", b: "ui" }] });
   });
 
@@ -130,7 +131,7 @@ describe("o time no canvas", () => {
     expect(boards[key]).toMatchObject({ edges: [{ id: "e1", a: "lead", b: "ui" }], orchestrators: ["lead"], roles: { ui: "FRONTEND" } });
   });
 
-  it("copia o cartão de um integrante por protocolo para a sessão do orquestrador", () => {
+  it("move o cartão de um integrante por protocolo para a sessão do orquestrador", () => {
     const leadKey = "main|/repo#s:thread:lead";
     const memberKey = "main|/other#s:thread:member";
     const box = { x: 12, y: 34, w: 460, h: 540 };
@@ -138,9 +139,9 @@ describe("o time no canvas", () => {
     const boards: Record<string, Board> = { [memberKey]: source };
     const t = team("thread:lead", [["thread:member", "qa"]]);
     const ops = canvasPlan(input(t, boards, {}, { sourceKeyOfRef: (ref) => ref === "thread:member" ? memberKey : null }));
-    expect(ops).toContainEqual({ kind: "copy", from: memberKey, to: leadKey, ids: ["thread:member"] });
+    expect(ops).toContainEqual({ kind: "migrate", from: memberKey, to: leadKey, ids: ["thread:member"] });
     runCanvasPlan(ops, fakeApi(boards));
-    expect(boards[memberKey]!.threads["thread:member"]).toEqual(box);
+    expect(boards[memberKey]!.threads["thread:member"]).toBeUndefined();
     expect(boards[leadKey]!.threads["thread:member"]).toEqual(box);
     expect(boards[leadKey]!.edges).toContainEqual({ id: "thread:lead-thread:member", a: "thread:lead", b: "thread:member" });
   });
@@ -162,11 +163,13 @@ describe("o time no canvas", () => {
     const boards: Record<string, Board> = { "main|/repo": { ...addEdge(addEdge(withNodes(["lead", "a", "b"]), "lead", "a", "1"), "lead", "b", "2"), orchestrators: ["lead"] } };
     const t = team("lead", [["a", "qa"]]);
     const api = fakeApi(boards);
+    // O backend autoriza por corda e coroa em QUALQUER canvas: a conferência olha todos.
+    const edges = () => Object.values(boards).flatMap((board) => board.edges);
     runCanvasPlan(canvasPlan(input(t, boards, { lead: "main|/repo", a: "main|/repo", b: "main|/repo" }, { removed: ["b"] })), api);
-    expect(boards["main|/repo"]!.edges.map((e) => e.b)).toEqual(["a"]);
+    expect(edges().map((e) => [e.a, e.b].sort().join("-"))).toEqual(["a-lead"]);
     runCanvasPlan(canvasPlan(input(t, boards, { lead: "main|/repo", a: "main|/repo" }, { dissolve: true })), api);
-    expect(boards["main|/repo"]!.edges).toEqual([]);
-    expect(boards["main|/repo"]!.orchestrators).toEqual([]);
+    expect(edges()).toEqual([]);
+    expect(Object.values(boards).flatMap((board) => board.orchestrators)).toEqual([]);
   });
 
   it("espelha o subagente do time no canvas, liga e desliga", () => {

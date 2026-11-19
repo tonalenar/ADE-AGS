@@ -5,6 +5,7 @@ import type { TeamView } from "./ipc";
 /**
  * A lista de times, num store sem dependências: o `teamStore` a copia para cá. A grade das Abas
  * (`canvas/gridMode.ts`, no caminho do layout) lê daqui e não puxa o `teamStore` inteiro, que
- * depende de quase todo o app.
+ * depende de quase todo o app. `loaded`: a lista já veio do backend. Antes disso não se sabe quem é de time,
+ * e o canvas não migra nenhuma conversa antiga para o canvas próprio (ver `boardKeyOfTab`).
  */
-export const useTeamIndex = create<{ teams: TeamView[] }>(() => ({ teams: [] }));
+export const useTeamIndex = create<{ teams: TeamView[]; loaded: boolean }>(() => ({ teams: [], loaded: false }));

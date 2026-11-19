@@ -27,11 +27,16 @@ Uma ref já presente em missão, comparação ou canvas de projeto legado `#c:` 
 seguem o canvas do orquestrador. Se o time foi promovido de um canvas de pasta, ele continua dono daquele
 grupo manual. Uma sessão já criada permanece no seu canvas.
 
-Na primeira ativação, nós da pasta ganham uma cópia no canvas de sessão, incluindo posição, papel, marca de
-subagente, coroa e notas com cordas exclusivas. O quadro da pasta fica guardado. Quando duas conversas tinham
-uma corda manual entre si na pasta, ambas continuam juntas ali. A migração nunca remove uma aresta que o backend
-usa para autorizar `ags peers`. O painel legado de conversas de projeto não puxa automaticamente essas sessões nem
-grupos ligados da pasta para `#c:`.
+Na primeira ativação, a conversa que estava no canvas da pasta **muda** para o canvas de sessão com o que é
+dela: posição, cordas, coroa, papel, marca de subagente e as notas e portais ligados só a ela
+(`moveSessionArtifacts` em `canvas/board.ts`). É movimento, não cópia: o backend autoriza `ags peers` pelas cordas
+e coroas de **qualquer** canvas (`canvas/mod.rs`, `linked`/`is_orchestrator`), então uma cópia deixada na pasta
+continuaria autorizando depois de a pessoa cortar a corda no canvas novo. Nada some: cada item sai de um canvas e
+entra no outro, e o destino grava antes da origem. Uma nota ou portal que outra conversa também usa fica na pasta,
+com as cordas dele. Quando duas conversas tinham uma corda manual entre si na pasta, ambas continuam juntas ali.
+A migração só roda depois de a lista de times chegar do backend: antes disso não se sabe quem é integrante (e vai
+para o canvas do orquestrador), e a conversa antiga fica na pasta. O painel legado de conversas de projeto não
+puxa automaticamente essas sessões nem grupos ligados da pasta para `#c:`.
 
 O separador `#s:` identifica apenas a sessão: não cria escopo de time, missão nem grade. Criar conversa no
 workspace e no Canvas usa o mesmo composer de Chat sem sair para a Home nem trocar o modo Abas/Canvas. Designs

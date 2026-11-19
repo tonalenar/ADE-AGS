@@ -11,7 +11,7 @@ import { useTeamIndex } from "@/features/chat/team/teamIndex";
 import {
   FOLDER_PREFIX, IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addFolder, addImage, addNote, addPortal,
   addStroke, addText, addThreadNode, removeThreadNode, removeFolder, updateFolder,
-  copySessionArtifacts, emptyBoard, placeInNextGridCell, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
+  emptyBoard, moveSessionArtifacts, placeInNextGridCell, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
   buildMissionTeam, setRole, removeStroke, removeText, toggleOrchestrator, moveTerminals, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
   type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
 } from "./board";
@@ -127,6 +127,9 @@ export function boardKeyOfTab(tab: { id: string; cwd: string }, boards: Record<s
   }
   const folder = boardKey(tab.cwd);
   const old = boards[folder];
+  // Sem a lista de times ainda não se sabe se a aba é integrante (e vai para o canvas do orquestrador) ou
+  // não: a conversa antiga fica na pasta até saber, para não ser levada ao canvas errado e lá ficar.
+  if (!useTeamIndex.getState().loaded && old && hasSessionArtifacts(old, tab.id)) return folder;
   const liveRefs = new Set(useTabsStore.getState().tabs.map((item) => item.id));
   const team = useTeamIndex.getState().teams.find((item) => item.orchestrator === tab.id || item.members.some((member) => member.member === tab.id));
   // Times promovidos a partir de um canvas de pasta já eram um conjunto manual autorizado:
@@ -158,6 +161,12 @@ export function boardKeyOfTab(tab: { id: string; cwd: string }, boards: Record<s
   const existingSession = Object.entries(boards).find(([key, board]) => key.startsWith(prefix)
     && key.includes(SESSION_SEP) && tab.id in board.nodes)?.[0];
   return existingSession ?? sessionBoardKey(tab.cwd, tab.id);
+}
+
+/** A ref tem algo no canvas `board` (nó, cartão, corda, coroa, papel ou marca de subagente)? */
+export function hasSessionArtifacts(board: Board, ref: string): boolean {
+  return ref in board.nodes || ref in board.threads || board.orchestrators.includes(ref) || board.subagents.includes(ref)
+    || Object.prototype.hasOwnProperty.call(board.roles, ref) || board.edges.some((edge) => edge.a === ref || edge.b === ref);
 }
 
 /** La misión a la que pertenece una tab (la de su canvas), o `null` si es una tab suelta. */
@@ -257,11 +266,8 @@ export const canvasActions = {
   focusDesktop: (key: string, id: string) => useCanvasStore.setState({ desktopFocus: { key, id, nonce: ++desktopFocusSequence } }),
   /** Dá um cartão à conversa por protocolo `ref` no canvas `key` (num lugar livre; já tendo, não muda nada). */
   addThread: (key: string, ref: string) => updateBoard(key, (b) => addThreadNode(b, ref)),
-  /** Migra de forma aditiva a caixa e os metadados exclusivos de uma ref antiga para a sessão. */
-  copySessionFrom: (fromKey: string, toKey: string, ref: string) => {
-    const source = useCanvasStore.getState().boards[fromKey];
-    if (source) updateBoard(toKey, (target) => copySessionArtifacts(source, target, ref));
-  },
+  /** Leva a ref do canvas antigo para o da sessão (ver `moveSessionArtifacts`): o destino grava antes da origem. */
+  moveSessionFrom: (fromKey: string, toKey: string, ref: string) => moveSession(fromKey, toKey, ref),
   removeThread: (key: string, ref: string) => updateBoard(key, (b) => removeThreadNode(b, ref)),
   /** Pede ao canvas `key` que centre e destaque `ref` (a conversa escolhida fora dele). */
   focusRef: (key: string, ref: string) => useCanvasStore.setState({ focus: { key, ref, nonce: ++focusSequence } }),
@@ -448,6 +454,19 @@ export async function flushCanvasSavesForClose(): Promise<void> {
 
 // ── Sincronización con las tabs ─────────────────────────────────────
 
+/** Move a ref do canvas `fromKey` para `toKey`. O destino grava primeiro: no meio, a corda existe nos dois, nunca em nenhum. */
+function moveSession(fromKey: string, toKey: string, ref: string): void {
+  // Antes de o canvas.json chegar não há o que mover: a cópia em memória ainda não é a do disco.
+  if (!useCanvasStore.getState().loaded) return;
+  const boards = useCanvasStore.getState().boards;
+  const source = boards[fromKey];
+  if (!source) return;
+  const moved = moveSessionArtifacts(source, boards[toKey] ?? emptyBoard(), ref);
+  if (moved.source === source) return;
+  updateBoard(toKey, () => moved.target);
+  updateBoard(fromKey, () => moved.source);
+}
+
 /** Pone cada canvas de esta ventana al día con sus tabs abiertas. */
 function syncBoards(): void {
   const { tabs, hydrated } = useTabsStore.getState();
@@ -455,32 +474,19 @@ function syncBoards(): void {
   // nodos y las conexiones guardadas.
   if (!hydrated) return;
   const byKey = new Map<string, string[]>();
-  // O canvas de pasta vira um snapshot durável quando uma aba passa para qualquer canvas próprio.
-  // Assim nenhuma corda, coroa ou marca antiga é apagada durante a reconciliação.
-  const sourceSnapshots = new Set<string>();
   const boards = useCanvasStore.getState().boards;
   for (const tab of tabs) {
     const key = boardKeyOfTab(tab, boards);
     byKey.set(key, [...(byKey.get(key) ?? []), tab.id]);
-    // A migração para #s: copia o que pertence à ref. Se ela já pertence a um canvas especial,
-    // permanece lá; em ambos os casos a pasta antiga continua como snapshot intacto.
-    const sourceKey = boardKey(tab.cwd);
-    const source = boards[sourceKey];
-    const hasSourceArtifacts = source && (tab.id in source.nodes || source.orchestrators.includes(tab.id)
-      || source.subagents.includes(tab.id) || Object.prototype.hasOwnProperty.call(source.roles, tab.id)
-      || source.edges.some((edge) => edge.a === tab.id || edge.b === tab.id));
-    if (key !== sourceKey && hasSourceArtifacts) {
-      sourceSnapshots.add(sourceKey);
-      if (key.includes(SESSION_SEP)) {
-        const target = useCanvasStore.getState().boards[key] ?? emptyBoard();
-        const nextTarget = copySessionArtifacts(source, target, tab.id);
-        if (nextTarget !== target) updateBoard(key, () => nextTarget);
-      }
-    }
+    // A conversa que sai da pasta para o canvas próprio (ou o do orquestrador) leva o que é dela: nó, cordas,
+    // coroa, papel e marca. Sem isso, o `reconcile` da pasta tiraria coroa e papel, e as cordas que ficassem lá
+    // continuariam autorizando depois de cortadas no canvas novo.
+    const folder = boardKey(tab.cwd);
+    const source = boards[folder];
+    if (key !== folder && key.includes(SESSION_SEP) && source && hasSessionArtifacts(source, tab.id)) moveSession(folder, key, tab.id);
   }
   const keys = new Set([...byKey.keys(), ...Object.keys(boards).filter((k) => k.startsWith(`${windowLabel}|`))]);
   for (const key of keys) {
-    if (sourceSnapshots.has(key)) continue;
     const current = useCanvasStore.getState().boards[key] ?? emptyBoard();
     const next = reconcile(current, byKey.get(key) ?? [], tabs.map((t) => t.id));
     if (next !== current || !(key in boards)) updateBoard(key, () => next, false);
@@ -530,7 +536,10 @@ export function initCanvasSync(label: string): () => void {
       }
       pendingUpdates.clear();
       useCanvasStore.setState({ boards: merged, loaded: true, loadError: null, saveError: null });
-      unsub = useTabsStore.subscribe(syncBoards);
+      const offTabs = useTabsStore.subscribe(syncBoards);
+      // A lista de times chegou ou mudou: quem é integrante vai para o canvas do orquestrador (ver `boardKeyOfTab`).
+      const offTeams = useTeamIndex.subscribe((state, prev) => { if (state.teams !== prev.teams || state.loaded !== prev.loaded) syncBoards(); });
+      unsub = () => { offTabs(); offTeams(); };
       syncBoards();
       for (const key of changed) scheduleSave(key);
     })

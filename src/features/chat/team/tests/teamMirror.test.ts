@@ -41,7 +41,7 @@ function fakeApi(boards: Record<string, Board>): CanvasApi {
     disconnectPair: (k, a, b) => { boards[k] = { ...get(k), edges: get(k).edges.filter((e) => !((e.a === a && e.b === b) || (e.a === b && e.b === a))) }; },
     toggleOrchestrator: (k, id) => { const b = get(k); boards[k] = { ...b, orchestrators: b.orchestrators.includes(id) ? b.orchestrators.filter((x) => x !== id) : [...b.orchestrators, id] }; },
     moveTerminals: () => undefined,
-    copySession: () => undefined,
+    migrateSession: () => undefined,
     setRole: (k, id, role, subagent) => { boards[k] = setRole(get(k), id, role, subagent); },
   };
 }

@@ -60,7 +60,9 @@ interface TeamState {
 
 export const useTeamStore = create<TeamState>(() => ({ teams: [], missionTeams: [], loaded: false, feeds: {}, targets: {}, told: {}, sendErrors: {}, adding: {} }));
 // A grade das Abas lê a lista daqui, sem depender deste módulo (ver `teamIndex.ts`).
-useTeamStore.subscribe((state, prev) => { if (state.teams !== prev.teams) useTeamIndex.setState({ teams: state.teams }); });
+useTeamStore.subscribe((state, prev) => {
+  if (state.teams !== prev.teams || state.loaded !== prev.loaded) useTeamIndex.setState({ teams: state.teams, loaded: state.loaded });
+});
 
 let started = false;
 
@@ -169,7 +171,7 @@ export function syncTeamCanvas(team: TeamView, opts: { removed?: string[]; disso
       disconnectPair: canvasActions.disconnectPair,
       toggleOrchestrator: canvasActions.toggleOrchestrator,
       moveTerminals: canvasActions.moveTerminals,
-      copySession: canvasActions.copySessionFrom,
+      migrateSession: canvasActions.moveSessionFrom,
       setRole: canvasActions.setRole,
     });
   } finally {

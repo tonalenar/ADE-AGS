@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  addEdge, buildMissionTeam, copySessionArtifacts, emptyBoard, gridCell, neighbors, placeBelow, reconcile, removeEdge, removeEdgeBetween, toggleOrchestrator,
+  addEdge, buildMissionTeam, emptyBoard, moveSessionArtifacts, gridCell, neighbors, placeBelow, reconcile, removeEdge, removeEdgeBetween, toggleOrchestrator,
 } from "../board";
 import { GAP } from "../geometry";
 
@@ -48,8 +48,8 @@ describe("modo de trabalho por janela", () => {
   });
 });
 
-describe("migração aditiva para canvas de sessão", () => {
-  it("copia nó, nota exclusiva, corda, coroa, papel e marca sem alterar o canvas antigo", () => {
+describe("migração da conversa para o canvas de sessão", () => {
+  it("move nó, nota exclusiva, corda, coroa, papel e marca: nada some, nada fica duplicado", () => {
     const old = {
       ...emptyBoard(),
       nodes: { lead: { x: 10, y: 20, w: 500, h: 300 } },
@@ -59,8 +59,8 @@ describe("migração aditiva para canvas de sessão", () => {
       roles: { lead: "orquestrador" },
       subagents: ["lead"],
     };
-    const next = copySessionArtifacts(old, emptyBoard(), "lead");
-    expect(next).toMatchObject({
+    const { source, target } = moveSessionArtifacts(old, emptyBoard(), "lead");
+    expect(target).toMatchObject({
       nodes: { lead: old.nodes.lead },
       notes: { "note-a": old.notes["note-a"] },
       edges: old.edges,
@@ -68,20 +68,38 @@ describe("migração aditiva para canvas de sessão", () => {
       roles: { lead: "orquestrador" },
       subagents: ["lead"],
     });
-    expect(old).toMatchObject({ nodes: { lead: old.nodes.lead }, edges: [{ id: "e1" }], orchestrators: ["lead"], roles: { lead: "orquestrador" }, subagents: ["lead"] });
+    expect(source).toMatchObject({ nodes: {}, notes: {}, edges: [], orchestrators: [], roles: {}, subagents: [] });
   });
 
-  it("não copia uma nota compartilhada nem uma corda para outra conversa", () => {
+  it("depois de mover, cortar a corda no canvas novo não deixa autorização para trás", () => {
+    const old = { ...emptyBoard(), nodes: { a: { x: 1, y: 2, w: 3, h: 4 } }, edges: [{ id: "e1", a: "a", b: "thread:x" }] };
+    const moved = moveSessionArtifacts(old, emptyBoard(), "a");
+    const cut = removeEdgeBetween(moved.target, "a", "thread:x");
+    // O backend autoriza por corda em QUALQUER canvas: nenhum dos dois pode ainda tê-la.
+    expect([...moved.source.edges, ...cut.edges].some((e) => e.a === "a" || e.b === "a")).toBe(false);
+  });
+
+  it("a nota que outra conversa também usa fica na pasta, com as cordas dela", () => {
     const source = {
       ...emptyBoard(),
       nodes: { a: { x: 1, y: 2, w: 3, h: 4 }, b: { x: 5, y: 6, w: 7, h: 8 } },
       notes: { "note-shared": { name: "N", content: "x", box: { x: 0, y: 0, w: 1, h: 1 } } },
-      edges: [{ id: "e1", a: "a", b: "note-shared" }, { id: "e2", a: "b", b: "note-shared" }, { id: "e3", a: "a", b: "b" }],
+      edges: [{ id: "e1", a: "a", b: "note-shared" }, { id: "e2", a: "b", b: "note-shared" }],
     };
-    const next = copySessionArtifacts(source, emptyBoard(), "a");
-    expect(next.edges).toEqual([]);
-    expect(next.notes).toEqual({});
-    expect(source.edges.map((edge) => edge.id)).toEqual(["e1", "e2", "e3"]);
+    const moved = moveSessionArtifacts(source, emptyBoard(), "a");
+    expect(moved.target.edges).toEqual([]);
+    expect(moved.target.notes).toEqual({});
+    expect(moved.source.notes).toEqual(source.notes);
+    expect(moved.source.edges.map((edge) => edge.id)).toEqual(["e1", "e2"]);
+    expect(moved.source.nodes).toEqual({ b: source.nodes.b });
+  });
+
+  it("sem nada da ref, devolve os mesmos objetos", () => {
+    const source = { ...emptyBoard(), nodes: { b: { x: 5, y: 6, w: 7, h: 8 } } };
+    const target = emptyBoard();
+    const moved = moveSessionArtifacts(source, target, "a");
+    expect(moved.source).toBe(source);
+    expect(moved.target).toBe(target);
   });
 });
 

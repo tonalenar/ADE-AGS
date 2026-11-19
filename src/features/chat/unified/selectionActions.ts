@@ -1,4 +1,4 @@
-import { boardKey, boardKeyOfTab, canvasActions, sessionBoardKey, useCanvasStore } from "@/features/canvas/store";
+import { boardKey, boardKeyOfTab, canvasActions, hasSessionArtifacts, sessionBoardKey, useCanvasStore } from "@/features/canvas/store";
 import { activationListeners, useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 
@@ -28,8 +28,8 @@ function threadBoard(ref: string): string {
       : storedSpecial ?? leadSpecial ?? storedCanvasBoard ?? leadHomeBoard
     : undefined;
   let key = homeBoardKey(ref, { boards, cwd: row?.cwd ?? "", teamBoardKey, cwdKey: boardKey });
-  // Na primeira ativação, uma conversa por protocolo que já tinha cartão no canvas da pasta
-  // recebe uma cópia no novo canvas. A origem e suas cordas permanecem intactas.
+  // Na primeira ativação, uma conversa por protocolo que já tinha cartão no canvas da pasta vai para o novo
+  // canvas com as cordas, a coroa e o papel dela (movidos, não copiados: ver `moveSessionArtifacts`).
   const sourceKey = row ? boardKey(row.cwd) : null;
   const source = sourceKey ? boards[sourceKey] : undefined;
   const conversationRefs = new Set([
@@ -41,8 +41,8 @@ function threadBoard(ref: string): string {
   if (legacyConversationLink && sourceKey && key.includes("#s:") && !boards[key]?.threads[ref]) {
     // Uma ligação de conversa montada à mão na pasta mantém o grupo no canvas legado.
     key = sourceKey;
-  } else if (sourceKey && source?.threads[ref] && key !== sourceKey) {
-    canvasActions.copySessionFrom(sourceKey, key, ref);
+  } else if (sourceKey && source && key !== sourceKey && key.includes("#s:") && useTeamIndex.getState().loaded && hasSessionArtifacts(source, ref)) {
+    canvasActions.moveSessionFrom(sourceKey, key, ref);
   }
   return key;
 }
