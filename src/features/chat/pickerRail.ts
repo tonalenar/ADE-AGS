@@ -1,4 +1,5 @@
 import { accountDisplayLabel, shouldShowAccountBadge } from "@/features/accounts/accountIdentity";
+import { accountRefFromWire, accountRefToWire, type AccountRef } from "@/features/accounts/accountRef";
 import type { AgentAccount } from "@/features/accounts/types";
 import type { Roster } from "@/features/runs/types";
 
@@ -10,14 +11,17 @@ import type { Roster } from "@/features/runs/types";
 export const RAIL_FAVORITES = "fav";
 const SEP = "::";
 
-export const railKeyOf = (agentId: string, account: string | null): string =>
-  account ? `${agentId}${SEP}${account}` : agentId;
+export function railKeyOf(ref: AccountRef): string {
+  const wire = accountRefToWire(ref);
+  return wire ? `${ref.agentId}${SEP}${wire}` : ref.agentId;
+}
 
-export function parseRailKey(key: string): { tab: string; account: string | null } {
-  if (key === RAIL_FAVORITES) return { tab: RAIL_FAVORITES, account: null };
+/** `ref` é a escolha de conta do agente da aba; `null` só nos favoritos, que não têm um agente só. */
+export function parseRailKey(key: string): { tab: string; ref: AccountRef | null } {
+  if (key === RAIL_FAVORITES) return { tab: RAIL_FAVORITES, ref: null };
   const at = key.indexOf(SEP);
-  if (at < 0) return { tab: key, account: null };
-  return { tab: key.slice(0, at), account: key.slice(at + SEP.length) || null };
+  const tab = at < 0 ? key : key.slice(0, at);
+  return { tab, ref: accountRefFromWire(tab, at < 0 ? null : key.slice(at + SEP.length)) };
 }
 
 export interface RailItem {
@@ -71,7 +75,7 @@ export function buildRail(
       const showBadge = perAccount && shouldShowAccountBadge(who, everyone);
       const shown = who.displayName?.trim() || (source.accountId ? source.email ?? badgeLabel : badgeLabel);
       return {
-        key: railKeyOf(agent.id, source.accountId),
+        key: railKeyOf(accountRefFromWire(agent.id, source.accountId)),
         agentId: agent.id,
         accountId: source.accountId,
         name: multiple || showBadge ? `${agent.label} · ${shown}` : agent.label,

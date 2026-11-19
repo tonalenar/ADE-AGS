@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 
+import { isPoolValue, poolNameOf } from "@/features/accounts/poolRef";
+
 export type PoolStrategy = "least_used" | "round_robin" | "sticky";
 
 export const STRATEGIES: PoolStrategy[] = ["least_used", "round_robin", "sticky"];
@@ -18,12 +20,8 @@ export interface Pool {
   failover: boolean;
 }
 
-/** Donde iría una cuenta, un pool se pide así. */
-export const POOL_PREFIX = "pool:";
-
-export const poolValue = (name: string) => `${POOL_PREFIX}${name}`;
-export const isPoolValue = (value: string | undefined): value is string => !!value && value.toLowerCase().startsWith(POOL_PREFIX);
-export const poolNameOf = (value: string) => value.slice(POOL_PREFIX.length).trim();
+// O valor serializado de um pool vive em `poolRef.ts` (sem Tauri); reexportado aqui por quem já importa daqui.
+export { POOL_PREFIX, isPoolValue, poolNameOf, poolValue } from "@/features/accounts/poolRef";
 
 interface PoolsState {
   pools: Pool[];

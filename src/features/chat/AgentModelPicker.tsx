@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import { AccountBadge } from "@/features/accounts/AccountBadge";
+import { accountRefFromWire, accountRefToWire, sameAccountRef, selectedAccountId, type AccountRef } from "@/features/accounts/accountRef";
 import { poolValue, usePools } from "@/features/accounts/pools";
 import { useAccountsStore } from "@/features/accounts/store";
 import { DEFAULT_EFFORTS } from "@/features/canvas/tabTuning";
@@ -93,10 +94,9 @@ function useRoster(enabled: boolean, open = false): { roster: Roster | null; upd
   return { roster, update };
 }
 
-function catalogOf(roster: Roster | null, agentId: string | null, account: string | null): RosterModel[] {
+function catalogOf(roster: Roster | null, agentId: string | null, account: AccountRef | null): RosterModel[] {
   const agent = roster?.agents.find((a) => a.agentId === agentId);
-  const pool = account?.startsWith("pool:") ?? false;
-  return modelsForAccount(agent, pool ? null : account, pool);
+  return modelsForAccount(agent, selectedAccountId(account), account?.kind === "pool");
 }
 
 function providerCatalogOf(config: ProviderRuntimeConfig | null | undefined): RosterModel[] {
@@ -106,7 +106,7 @@ function providerCatalogOf(config: ProviderRuntimeConfig | null | undefined): Ro
   }));
 }
 
-function pickerCatalogOf(roster: Roster | null, agentId: string | null, account: string | null, currentAgentId: string | null, providerConfig?: ProviderRuntimeConfig | null): RosterModel[] {
+function pickerCatalogOf(roster: Roster | null, agentId: string | null, account: AccountRef | null, currentAgentId: string | null, providerConfig?: ProviderRuntimeConfig | null): RosterModel[] {
   if (agentId?.startsWith("local-acp-")) return agentId === currentAgentId ? providerCatalogOf(providerConfig) : [];
   return catalogOf(roster, agentId, account);
 }
@@ -199,8 +199,8 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   const [popoverPosition, setPopoverPosition] = useState<PickerPosition | null>(null);
   const { roster, update: updateRoster } = useRoster(true, open);
   // O trilho tem um ícone por agente e, havendo mais de uma conta, um por conta: a chave junta os dois.
-  const [railKey, setRailKey] = useState<string>(() => value.agentId ? railKeyOf(value.agentId, showAccount ? value.account || null : null) : agents[0]?.id ?? RAIL_FAVORITES);
-  const { tab, account: railAccount } = parseRailKey(railKey);
+  const [railKey, setRailKey] = useState<string>(() => value.agentId ? railKeyOf(accountRefFromWire(value.agentId, showAccount ? value.account : null)) : agents[0]?.id ?? RAIL_FAVORITES);
+  const { tab, ref: railRef } = parseRailKey(railKey);
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState<string[]>(loadFavorites);
   const [comparePicks, setComparePicks] = useState<PickerComparePick[]>([]);
@@ -220,10 +220,11 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   const principalLabel = t("accounts.principalName");
   const rail = useMemo(() => buildRail(agents, roster, identities, principalLabel, showAccount), [agents, roster, identities, principalLabel, showAccount]);
   // Na aba de um agente a conta é a do ícone escolhido; nos favoritos, só o agente atual mantém a sua.
-  const accountForAgent = (agentId: string): string | null =>
-    showAccount && tab !== RAIL_FAVORITES && agentId === tab ? railAccount : agentId === value.agentId ? value.account : null;
+  const accountForAgent = (agentId: string): AccountRef | null =>
+    showAccount && tab !== RAIL_FAVORITES && agentId === tab ? railRef : agentId === value.agentId ? accountRefFromWire(agentId, value.account) : null;
   const opencodeAccount = accountForAgent("opencode");
-  const current = pickerCatalogOf(roster, agent?.id ?? null, value.account, value.agentId, providerConfig);
+  const opencodeAccountId = selectedAccountId(opencodeAccount);
+  const current = pickerCatalogOf(roster, agent?.id ?? null, agent ? accountRefFromWire(agent.id, value.account) : null, value.agentId, providerConfig);
   // O modelo salvo pode ser um alias (`opus`): a tela mostra a linha que ele resolve, com o nome e a versão dela.
   const selectedModel = findModel(current, value.model)
     ?? (value.model === null ? findModel(current, "opus") : undefined)
@@ -309,13 +310,13 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   useEffect(() => {
     if (!open || tabAgent?.id !== "opencode") return;
     let alive = true;
-    refreshRosterModels("opencode", opencodeAccount && !opencodeAccount.startsWith("pool:") ? opencodeAccount : null)
+    refreshRosterModels("opencode", opencodeAccountId)
       .then((next) => { if (alive) updateRoster(next); })
       .catch(() => undefined);
     return () => { alive = false; };
-  }, [open, tabAgent?.id, opencodeAccount]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir ou trocar de aba
+  }, [open, tabAgent?.id, opencodeAccountId]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir ou trocar de aba
 
-  useEffect(() => { if (open && agent) setRailKey(railKeyOf(agent.id, showAccount ? value.account || null : null)); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir
+  useEffect(() => { if (open && agent) setRailKey(railKeyOf(accountRefFromWire(agent.id, showAccount ? value.account : null))); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir
 
   useEffect(() => {
     if (!open) return;
@@ -344,7 +345,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
       : tabAgent ? ofAgent(tabAgent) : [];
     const q = query.trim().toLowerCase();
     return q ? base.filter((r) => `${r.label} ${r.model ?? ""}`.toLowerCase().includes(q)) : base;
-  }, [agents, roster, tab, railAccount, tabAgent, favorites, query, value.agentId, value.account, providerConfig, t]);
+  }, [agents, roster, tab, railRef, tabAgent, favorites, query, value.agentId, value.account, providerConfig, t]);
 
   const toggleFav = (r: Row) => {
     if (!r.model) return;
@@ -367,7 +368,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
       model: r.model,
       effort,
       fast: fastCapabilityAvailable && speed?.fast === true && selected?.fastSupported === true,
-      account,
+      account: accountRefToWire(account),
     };
     setComparePicks((current) => {
       const index = current.findIndex((item) => item.agentId === pick.agentId && item.model === pick.model && item.account === pick.account);
@@ -499,7 +500,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                 const RIcon = agentIcon(r.agent.id, r.agent.command);
                 // Na aba de uma conta, o visto só vale se a conta do ícone é a que está em uso.
                 const selected = r.agent.id === agent.id && r.model === (selectedModel?.id ?? value.model)
-                  && (!showAccount || tab === RAIL_FAVORITES || (railAccount ?? null) === (value.account || null));
+                  && (!showAccount || tab === RAIL_FAVORITES || sameAccountRef(railRef, accountRefFromWire(agent.id, value.account), agent.id));
                 const startAvailability = readHarnessCapability(harnessSurface, matrixProviderForAgent(r.agent.id) ?? "", "start");
                 const fav = !!r.model && favorites.includes(favKey(r.agent.id, r.model));
                 const compareIndex = comparePicks.findIndex((pick) => pick.agentId === r.agent.id && pick.model === r.model);
@@ -520,7 +521,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                         const nextCatalog = pickerCatalogOf(roster, r.agent.id, account, value.agentId, providerConfig);
                         const nextEfforts = effortsOf(r.agent.id, r.model, nextCatalog, value.agentId, providerConfig);
                         const effort = !providerModelChanged && sameAgent && (value.effort === null || nextEfforts.includes(value.effort)) ? value.effort : null;
-                        onChange({ agentId: r.agent.id, model: r.model, effort, account });
+                        onChange({ agentId: r.agent.id, model: r.model, effort, account: accountRefToWire(account) });
                         const nextModel = findModel(nextCatalog, r.model)
                           ?? (r.model === null ? findModel(nextCatalog, "opus") : undefined);
                         const fastAvailable = readHarnessCapability(harnessSurface, matrixProviderForAgent(r.agent.id) ?? "", "fast_mode").support === "supported";
@@ -615,11 +616,11 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
               {showAccount && <>
                 <span>{t("chat.picker.account")}</span>
                 {tabAgent && (
-                  <PopupSelect value={(tab === RAIL_FAVORITES ? (tabAgent.id === value.agentId ? value.account : null) : railAccount) ?? ""} aria-label={t("chat.picker.account")}
+                  <PopupSelect value={accountRefToWire(tab === RAIL_FAVORITES ? (tabAgent.id === value.agentId ? accountRefFromWire(tabAgent.id, value.account) : null) : railRef) ?? ""} aria-label={t("chat.picker.account")}
                     onChange={(e) => {
-                      const next = e.target.value || null;
-                      if (tab !== RAIL_FAVORITES) setRailKey(railKeyOf(tabAgent.id, next));
-                      onChange({ agentId: tabAgent.id, model: tabAgent.id === value.agentId ? value.model : null, effort: tabAgent.id === value.agentId ? value.effort : null, account: next });
+                      const next = accountRefFromWire(tabAgent.id, e.target.value);
+                      if (tab !== RAIL_FAVORITES) setRailKey(railKeyOf(next));
+                      onChange({ agentId: tabAgent.id, model: tabAgent.id === value.agentId ? value.model : null, effort: tabAgent.id === value.agentId ? value.effort : null, account: accountRefToWire(next) });
                     }}
                     className="max-w-36 text-chat-caption">
                     <option value="">{identities.find((i) => i.id === `system:${tabAgent.id}`)?.displayName?.trim() || t("accounts.system")}</option>
@@ -667,7 +668,7 @@ export function EffortMenu({ agentId, model, account, value, onChange, disabled 
   const { open, setOpen, ref } = usePopover();
   const { roster } = useRoster(reasoningEffortSupported(agentId), open);
   if (!reasoningEffortSupported(agentId)) return null;
-  const efforts = effortChoices(agentId, model, catalogOf(roster, agentId, account));
+  const efforts = effortChoices(agentId, model, catalogOf(roster, agentId, agentId ? accountRefFromWire(agentId, account) : null));
   const label = (e: string) => t(`chat.effort.${e}`, { defaultValue: e });
   return (
     <div ref={ref} className="relative -ml-1.5">

@@ -117,4 +117,16 @@ describe("trilho do seletor com várias contas", () => {
     await click(defaultRow());
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ account: "a1" }));
   });
+
+  it("um pool escolhido continua sendo um pool: nenhum ícone de conta fica marcado e o valor segue como pool:<nome>", async () => {
+    estado.accounts = [SYSTEM, TRABALHO];
+    await mount({ ...VALUE, account: "pool:time" });
+    await openPicker();
+    expect(tabs().every((t) => t.getAttribute("aria-selected") === "false")).toBe(true);
+    // Mesmo assim um ícone fica na ordem de tabulação.
+    expect(tabs().filter((t) => t.tabIndex === 0)).toHaveLength(1);
+    expect(defaultRow().getAttribute("aria-selected")).toBe("true");
+    await click(defaultRow());
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ account: "pool:time" }));
+  });
 });
