@@ -21,12 +21,12 @@ vi.mock("../nativeSurface", async (importOriginal) => {
   const original = await importOriginal<typeof import("../nativeSurface")>();
   return { ...original, coversOf: (...args: Parameters<typeof original.coversOf>) => { coversSpy(); return original.coversOf(...args); } };
 });
-const placedPlaces: Array<{ visible: boolean; cornerRadius?: number; visibleRect?: unknown }> = [];
+const placedPlaces: Array<{ visible: boolean; cornerRadius?: number; rect?: unknown; visibleRect?: unknown }> = [];
 const closed: string[] = [];
 vi.mock("../realBrowser", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../realBrowser")>()),
   realBrowserOpen: (id: string, _url: string, place: { cornerRadius?: number }) => { opened.push(id); openedPlaces.push(place); return Promise.resolve(); },
-  realBrowserPlace: (_id: string, place: { visible: boolean; cornerRadius?: number; visibleRect?: unknown }) => { placedVisibility.push(place.visible); placedPlaces.push(place); return Promise.resolve(); },
+  realBrowserPlace: (_id: string, place: { visible: boolean; cornerRadius?: number; rect?: unknown; visibleRect?: unknown }) => { placedVisibility.push(place.visible); placedPlaces.push(place); return Promise.resolve(); },
   realBrowserClose: (id: string) => { closed.push(id); return Promise.resolve(); },
 }));
 
@@ -213,5 +213,61 @@ describe("vista do navegador nativo", () => {
     const view = useViewTabsStore.getState().views.find((v) => v.id === "p-1");
     expect(view).toMatchObject({ kind: "browser", cwd: "/projeto", browserProfileId: "trabalho" });
     expect(useViewTabsStore.getState().activeViewId).toBe("p-1");
+  });
+
+  it("dorme_sem_pedir_quadros_quando_escondida_e_acorda_ao_reaparecer", async () => {
+    let clock = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => (clock += 100));
+    let visible = false;
+    vi.spyOn(HTMLElement.prototype, "checkVisibility").mockImplementation(() => visible);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => (
+      visible
+        ? { x: 10, y: 20, left: 10, top: 20, width: 400, height: 300, right: 410, bottom: 320, toJSON: () => ({}) } as DOMRect
+        : { x: 0, y: 0, left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0, toJSON: () => ({}) } as DOMRect
+    ));
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    render();
+    await act(async () => undefined);
+    // Envia os 2 lugares vazios seguidos e deve parar de agendar requestAnimationFrame.
+    await act(async () => { frames.shift()?.(0); });
+    await act(async () => { frames.shift()?.(0); });
+    expect(placedPlaces.filter((p) => p.visibleRect === null)).toHaveLength(2);
+    expect(frames).toHaveLength(0);
+
+    // Ao voltar a ficar visível (mudança de estilo num ancestral), acorda e reposiciona no lugar certo.
+    visible = true;
+    await act(async () => { host.style.visibility = "visible"; });
+    expect(frames.length).toBeGreaterThan(0);
+    await act(async () => { frames.shift()?.(0); });
+    const last = placedPlaces[placedPlaces.length - 1];
+    expect(last?.visibleRect).toEqual({ x: 0, y: 0, width: 400, height: 300 });
+    expect(last?.rect).toEqual({ x: 10, y: 20, width: 400, height: 300 });
+  });
+
+  it("surfaceActive_false_manda_dois_lugares_vazios_e_dorme_ate_voltar_a_true", async () => {
+    let clock = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => (clock += 100));
+    vi.spyOn(HTMLElement.prototype, "checkVisibility").mockReturnValue(true);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 5, y: 15, left: 5, top: 15, width: 400, height: 300, right: 405, bottom: 315, toJSON: () => ({}) } as DOMRect);
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    render({ surfaceActive: false });
+    await act(async () => undefined);
+    await act(async () => { frames.shift()?.(0); });
+    await act(async () => { frames.shift()?.(0); });
+    expect(placedPlaces.filter((p) => p.visibleRect === null)).toHaveLength(2);
+    expect(frames).toHaveLength(0);
+
+    render({ surfaceActive: true });
+    await act(async () => undefined);
+    expect(frames.length).toBeGreaterThan(0);
+    await act(async () => { frames.shift()?.(0); });
+    const last = placedPlaces[placedPlaces.length - 1];
+    expect(last?.visibleRect).toEqual({ x: 0, y: 0, width: 400, height: 300 });
   });
 });

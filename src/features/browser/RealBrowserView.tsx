@@ -17,7 +17,7 @@ const PLACE_SYNC_INTERVAL_MS = 32;
  * `url` só vale na abertura: depois quem navega é `realBrowserNavigate` (a barra, os botões, os agentes). A URL que
  * a página informa vai para `onUrl` e nunca volta como navegação.
  */
-export function RealBrowserView({ viewId, url, zoom, script, profileId = "default", projectPath = "", floatingPreview = false, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError }: {
+export function RealBrowserView({ viewId, url, zoom, script, profileId = "default", projectPath = "", floatingPreview = false, surfaceActive = true, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError }: {
   viewId: string;
   url: string;
   /** O zoom da página (1 = 100%), o mesmo dos botões de zoom do navegador. */
@@ -30,6 +30,8 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
   projectPath?: string;
   /** A vista continua montada e o host nativo habilita clique para reabrir o painel. */
   floatingPreview?: boolean;
+  /** `false` quando o container pai (ex.: canvas ou aba por trás de modal) está fora de cena. */
+  surfaceActive?: boolean;
   onUrl: (url: string) => void;
   onTitle?: (title: string) => void;
   onLoading?: (loading: boolean) => void;
@@ -51,14 +53,19 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     floatingRect ? { x: floatingRect.left, y: floatingRect.top, width: floatingRect.width, height: floatingRect.height } : null,
   );
   const screenRadius = useContext(NativeCornerRadius);
-  const latest = useRef({ zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom, screenRadius, projectPath });
-  latest.current = { zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom, screenRadius, projectPath };
+  const latest = useRef({ zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom, screenRadius, projectPath, surfaceActive });
+  latest.current = { zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom, screenRadius, projectPath, surfaceActive };
+  const wakeRef = useRef<(() => void) | null>(null);
 
   // A pílula da miniatura não fica presa visível de uma miniatura para a próxima.
   useEffect(() => {
     if (!floatingPreview) setChatBrowserMiniHover(viewId, false);
     return () => setChatBrowserMiniHover(viewId, false);
   }, [floatingPreview, viewId]);
+
+  useEffect(() => {
+    wakeRef.current?.();
+  }, [zoom, floatingPreview, miniZoom, screenRadius, surfaceActive]);
 
   useEffect(() => {
     const el = box.current;
@@ -73,6 +80,9 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     let placeInFlight = false;
     let lastPlaceAt = Number.NEGATIVE_INFINITY;
     let lastRect: Box | null = null;
+    let emptyPlaces = 0;
+    let lastEmpty = false;
+    let dirty = false;
     // Entrar com o mouse sobre um elemento novo muda o que está por cima da página: a cobertura é medida de novo.
     const invalidateCovers = () => { coveredAt = Number.NEGATIVE_INFINITY; };
     document.addEventListener("pointerenter", invalidateCovers, true);
@@ -82,7 +92,7 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       const now = performance.now();
       // Outra aba por cima (`display:none`/`visibility:hidden`) ou a janela minimizada: a página some, mas continua
       // desenhando para as fotos dos agentes.
-      const shown = document.visibilityState !== "hidden" && rect.width > 1 && rect.height > 1
+      const shown = latest.current.surfaceActive && document.visibilityState !== "hidden" && rect.width > 1 && rect.height > 1
         && el.checkVisibility({ visibilityProperty: true, opacityProperty: true });
       const rectChanged = !lastRect || rect.x !== lastRect.x || rect.y !== lastRect.y || rect.width !== lastRect.width || rect.height !== lastRect.height;
       if (shown && (rectChanged || now - coveredAt > COVER_MS)) {
@@ -102,35 +112,73 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       };
     };
 
-    // Sem área à vista (escondida: outra aba, a canvas do modo Abas), o nativo só esconde no segundo lugar vazio
-    // seguido (ver `empty_clip_visibility`). Por isso o lugar vazio vai duas vezes e depois a vista se cala.
-    let emptyPlaces = 0;
-    const tick = () => {
-      if (opened) {
-        const place = measure();
-        const now = performance.now();
-        const empty = place.visibleRect === null;
-        const due = !samePlace(sent, place) || (empty && emptyPlaces < 2);
-        if (due && !placeInFlight && now - lastPlaceAt >= PLACE_SYNC_INTERVAL_MS) {
-          sent = place;
-          lastPlaceAt = now;
-          emptyPlaces = empty ? emptyPlaces + 1 : 0;
-          placeInFlight = true;
-          realBrowserPlace(viewId, place).catch(() => undefined).finally(() => { placeInFlight = false; });
-        }
-      }
+    const schedule = () => {
+      if (closed || frame !== 0) return;
       frame = requestAnimationFrame(tick);
+    };
+    const sleeping = () => emptyPlaces >= 2 && lastEmpty;
+    const wake = () => {
+      if (closed || !opened) return;
+      // Com o pai inativo e os 2 lugares vazios já enviados, eventos de layout não trazem a página de volta.
+      if (sleeping() && !latest.current.surfaceActive) return;
+      dirty = true;
+      schedule();
+    };
+    wakeRef.current = wake;
+
+    // Sem área à vista (escondida: outra aba, a canvas do modo Abas), o nativo só esconde no segundo lugar vazio
+    // seguido (ver `empty_clip_visibility`). Por isso o lugar vazio vai duas vezes e depois o laço dorme.
+    const tick = () => {
+      frame = 0;
+      if (closed || !opened) return;
+      dirty = false;
+      const place = measure();
+      const now = performance.now();
+      const empty = place.visibleRect === null;
+      lastEmpty = empty;
+      const due = !samePlace(sent, place) || (empty && emptyPlaces < 2);
+      if (due && !placeInFlight && now - lastPlaceAt >= PLACE_SYNC_INTERVAL_MS) {
+        sent = place;
+        lastPlaceAt = now;
+        emptyPlaces = empty ? emptyPlaces + 1 : 0;
+        placeInFlight = true;
+        realBrowserPlace(viewId, place)
+          .catch(() => undefined)
+          .finally(() => {
+            placeInFlight = false;
+            if (!closed && (dirty || !empty || emptyPlaces < 2)) schedule();
+          });
+      }
+      if (empty && emptyPlaces >= 2 && samePlace(sent, place)) return;
+      schedule();
     };
 
     sent = measure();
+    lastEmpty = sent.visibleRect === null;
     // A partição é escolhida na abertura: trocar a pasta da vista depois não recria a página.
     realBrowserOpen(viewId, url || "about:blank", sent, script, profileId, latest.current.projectPath)
       .then(() => {
-        if (closed) realBrowserClose(viewId).catch(() => undefined);
+        if (closed) {
+          realBrowserClose(viewId).catch(() => undefined);
+          return;
+        }
         opened = true;
+        schedule();
       })
       .catch((e) => latest.current.onError(String(e)));
-    frame = requestAnimationFrame(tick);
+
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(wake) : null;
+    ro?.observe(el);
+    const io = typeof IntersectionObserver !== "undefined" ? new IntersectionObserver(wake, { threshold: [0, 0.01] }) : null;
+    io?.observe(el);
+    const mo = typeof MutationObserver !== "undefined" ? new MutationObserver(wake) : null;
+    if (mo) {
+      for (let cur: HTMLElement | null = el; cur; cur = cur.parentElement) {
+        mo.observe(cur, { attributes: true, attributeFilter: ["style", "class", "hidden"] });
+      }
+    }
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("resize", wake);
 
     const mine = <T extends { id: string }>(fn: (payload: T) => void) => (e: { payload: T }) => {
       if (e.payload.id === viewId) fn(e.payload);
@@ -150,6 +198,12 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     const onBlur = () => closeAppPopovers();
     window.addEventListener("blur", onBlur);
     return () => {
+      wakeRef.current = null;
+      ro?.disconnect();
+      io?.disconnect();
+      mo?.disconnect();
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("resize", wake);
       window.removeEventListener("blur", onBlur);
       document.removeEventListener("pointerenter", invalidateCovers, true);
       closed = true;

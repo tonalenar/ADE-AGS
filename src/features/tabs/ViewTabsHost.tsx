@@ -139,7 +139,7 @@ export function ViewTabsHost() {
             <Suspense fallback={null}>
               {view.kind === "file" && <FileTab view={view} active={shown && onWorkspace} focused={focused} />}
               {view.kind === "diff" && <DiffTab view={view} active={shown && onWorkspace} />}
-              {view.kind === "browser" && <BrowserTab view={view} active={focused} floatingPreview={floatingPreview} />}
+              {view.kind === "browser" && <BrowserTab view={view} active={focused} surfaceActive={shown && onWorkspace} floatingPreview={floatingPreview} />}
               {view.kind === "desktop" && <GeminiDesktopTab view={view} active={shown && onWorkspace} canvas={mode === "canvas"} />}
             </Suspense>
           </div>
