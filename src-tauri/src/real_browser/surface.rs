@@ -181,3 +181,26 @@ pub(super) fn open_step(exists: bool, attached: bool) -> OpenStep {
         (false, _) => OpenStep::Create,
     }
 }
+
+/// Estado do último `native::place` salvo por `id` para reaplicar zoom e geometria quando a emulação muda.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct NativePlace {
+    pub rect: [i32; 4],
+    pub parts: Vec<[i32; 4]>,
+    pub radius: f64,
+    pub click_to_expand: bool,
+    pub visible: bool,
+}
+
+impl NativePlace {
+    pub fn new(rect: [i32; 4], parts: Vec<[i32; 4]>, radius: f64, click_to_expand: bool, visible: bool) -> Self {
+        Self { rect, parts, radius, click_to_expand, visible }
+    }
+}
+
+/// Compara a plataforma já aplicada na vista com a plataforma solicitada para evitar recarregar à toa.
+/// Vista sem entrada no mapa está no estado inicial de mesa (`None`).
+pub(super) fn same_emulated_platform(stored: Option<Option<&str>>, requested: Option<&str>) -> bool {
+    stored.flatten() == requested
+}
+
