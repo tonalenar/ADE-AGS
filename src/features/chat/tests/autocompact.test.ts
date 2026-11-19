@@ -62,6 +62,26 @@ describe("medidor de contexto", () => {
     expect(meterTone(83, 83)).toBe("over");
   });
 
+  it("depois de compactar, o medidor mostra os tokens de depois, não o último uso de antes", () => {
+    const items: TimelineItem[] = [usage(876_000, 1_000_000), compaction("done", 2, { contextTokens: 876_000, tokens: 27_000 })];
+    expect(contextUsageOf(items, "claude-code")).toMatchObject({ used: 27_000, window: 1_000_000, windowKnown: true });
+  });
+
+  it("um uso novo depois da compactação volta a ser a medida", () => {
+    const items: TimelineItem[] = [usage(876_000, 1_000_000), compaction("done", 2, { contextTokens: 876_000, tokens: 27_000 }), usage(40_000, 1_000_000)];
+    expect(contextUsageOf(items, "claude-code")?.used).toBe(40_000);
+  });
+
+  it("compactação concluída sem os tokens de depois não deixa o uso de antes no medidor", () => {
+    const items: TimelineItem[] = [usage(876_000, 1_000_000), compaction("done", 2, { contextTokens: 876_000 })];
+    expect(contextUsageOf(items, "claude-code")).toBeNull();
+  });
+
+  it("compactação em andamento ou com erro mantém a medida atual", () => {
+    expect(contextUsageOf([usage(90_000, 200_000), compaction("running", 2, { contextTokens: 90_000 })], "claude-code")?.used).toBe(90_000);
+    expect(contextUsageOf([usage(90_000, 200_000), compaction("error", 2, { output: "falhou" })], "claude-code")?.used).toBe(90_000);
+  });
+
   it("abrevia os tokens", () => {
     expect([compactTokens(950), compactTokens(182_400), compactTokens(1_000_000), compactTokens(1_250_000)]).toEqual(["950", "182k", "1M", "1.25M"]);
   });
