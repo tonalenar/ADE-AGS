@@ -6,13 +6,14 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(), send: vi.fn(), listener: undefined as undefined | ((e: { payload: { kind: string; fromTabId: string; toTabId: string | null; text: string; atMs: number } }) => void),
   state: "active" as "active" | "saved",
   idleSince: 91_000,
+  key: "w|repo#c:conv1",
 }));
 vi.mock("react", () => ({ useEffect: (effect: () => unknown) => effect() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: (_event: string, listener: typeof mocks.listener) => { mocks.listener = listener; return Promise.resolve(() => {}); } }));
 vi.mock("@/features/canvas/store", () => ({
-  useCanvasStore: { getState: () => ({ boards: { "w|repo#c:conv1": { orchestrators: ["lead"], edges: [], nodes: {} } } }) },
-  boardKeyOfTab: () => "w|repo#c:conv1",
+  useCanvasStore: { getState: () => ({ boards: { [mocks.key]: { orchestrators: ["lead"], edges: [], nodes: {} } } }) },
+  boardKeyOfTab: () => mocks.key,
   conversationOfKey: (key: string | null) => key?.split("#c:")[1] ?? null,
 }));
 vi.mock("@/features/canvas/orchestratorNotice", () => ({ linkedPeers: () => ["back"] }));
@@ -85,6 +86,7 @@ describe("Vigia numa conversa de projeto", () => {
     localStorage.clear();
     mocks.state = "active";
     mocks.idleSince = 91_000;
+    mocks.key = "w|repo#c:conv1";
     mocks.invoke.mockImplementation(() => Promise.resolve([]));
   });
   afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -94,6 +96,13 @@ describe("Vigia numa conversa de projeto", () => {
     await vigiaTick();
     expect(commands()).not.toContain("vigia_check");
     expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it("#s: não vira uma conversa de equipe para o Vigia", async () => {
+    mocks.key = "w|repo#s:thread:abc";
+    const { vigiaTick } = await import("../vigia");
+    await vigiaTick();
+    expect(commands()).not.toContain("vigia_check");
   });
 
   it("com tarefa delegada, consulta o modelo só pelo integrante (o Orquestrador espera o usuário)", async () => {

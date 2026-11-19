@@ -23,7 +23,7 @@ export interface UnifiedConversation {
   teamId?: string;
   /** O papel no time ou no canvas. Vazio para quem não tem. */
   role?: string;
-  /** Onde mora a coroa/o nó: a chave do canvas (pasta, `#c:`, `#m:` ou `#cmp:`), quando se sabe. */
+  /** Onde mora a coroa/o nó: a chave do canvas (pasta, `#s:`, `#c:`, `#m:` ou `#cmp:`), quando se sabe. */
   boardKey?: string;
   /** A missão a que pertence (pelo time espelhado ou pelo canvas `#m:`). */
   missionId?: string;

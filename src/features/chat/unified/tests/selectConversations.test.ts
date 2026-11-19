@@ -47,12 +47,20 @@ describe("selectConversations", () => {
   });
 
   it("integrante e orquestrador carregam time, papel, origem e coroa", () => {
-    const tm = team("T", "t1", [member("T", "t2", "Revisor"), member("T", "thread:a", "Apoio", { subagent: true })], { origin: "canvas", boardKey: "main|/p" });
+    const tm = team("T", "t1", [member("T", "t2", "Revisor"), member("T", "thread:a", "Apoio", { subagent: true })], { origin: "canvas", boardKey: "main|/p#s:t1" });
     const out = selectConversations(src({ tabs: [tab("t1"), tab("t2")], threads: [thread("a")], teams: [tm] }));
     const by = Object.fromEntries(out.map((c) => [c.ref, c]));
-    expect(by.t1).toMatchObject({ teamId: "T", lead: true, origin: "canvas", boardKey: "main|/p" });
-    expect(by.t2).toMatchObject({ teamId: "T", role: "Revisor", lead: false, subagent: false });
-    expect(by["thread:a"]).toMatchObject({ teamId: "T", role: "Apoio", subagent: true, kind: "protocol" });
+    expect(by.t1).toMatchObject({ teamId: "T", lead: true, origin: "canvas", boardKey: "main|/p#s:t1" });
+    expect(by.t2).toMatchObject({ teamId: "T", role: "Revisor", lead: false, subagent: false, boardKey: "main|/p#s:t1" });
+    expect(by["thread:a"]).toMatchObject({ teamId: "T", role: "Apoio", subagent: true, kind: "protocol", boardKey: "main|/p#s:t1" });
+  });
+
+  it("time promovido da pasta mantém todos no canvas manual de origem", () => {
+    const folder = "main|/p";
+    const legacy = { ...board(["t1", "t2"]), edges: [{ id: "e1", a: "t1", b: "t2" }], orchestrators: ["t1"] };
+    const tm = team("T", "t1", [member("T", "t2", "Revisor")], { origin: "canvas", boardKey: folder });
+    const out = selectConversations(src({ tabs: [tab("t1"), tab("t2")], teams: [tm], boards: { [folder]: legacy } }));
+    expect(out.map((c) => c.boardKey)).toEqual([folder, folder]);
   });
 
   it("time sem origem (backend antigo) é do chat", () => {
@@ -70,15 +78,25 @@ describe("selectConversations", () => {
     const boards = { "main|/p": board(["t9"]), "main|/p#m:m7": board(["t1"]) };
     const by = Object.fromEntries(selectConversations(src({ tabs: [tab("t1"), tab("t9")], boards })).map((c) => [c.ref, c]));
     expect(by.t1).toMatchObject({ boardKey: "main|/p#m:m7", missionId: "m7" });
-    expect(by.t9).toMatchObject({ boardKey: "main|/p" });
+    expect(by.t9).toMatchObject({ boardKey: "main|/p#s:t9" });
     expect(by.t9!.missionId).toBeUndefined();
   });
 
-  it("canvas especial (#m:, #c:) vence o da pasta quando a aba está nos dois", () => {
-    const boards = { "main|/p": board(["t1"]), "main|/p#c:c1": board(["t1"]) };
+  it("canvas legado especial (#m:, #c:) vence o da sessão e o da pasta", () => {
+    const boards = { "main|/p#s:t1": board(["t1"]), "main|/p": board(["t1"]), "main|/p#c:c1": board(["t1"]) };
     const [c] = selectConversations(src({ tabs: [tab("t1")], boards }));
     expect(c!.boardKey).toBe("main|/p#c:c1");
     expect(c!.missionId).toBeUndefined();
+  });
+
+  it("o pertencimento especial do integrante vence o canvas de sessão do time", () => {
+    const leadKey = "main|/p#s:t1";
+    const memberKey = "main|/p#c:legacy";
+    const tm = team("T", "t1", [member("T", "t2", "R")], { boardKey: leadKey });
+    const out = selectConversations(src({ tabs: [tab("t1"), tab("t2")], teams: [tm], boards: {
+      [leadKey]: board(["t1"]), [memberKey]: board(["t2"]),
+    } }));
+    expect(Object.fromEntries(out.map((c) => [c.ref, c.boardKey]))).toEqual({ t1: leadKey, t2: memberKey });
   });
 
   it("o papel do board vale quando o time não diz", () => {

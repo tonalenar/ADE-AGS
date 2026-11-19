@@ -3,13 +3,13 @@
  * autoriza o `ags peer tell/ask` entre eles (o backend lê as cordas, `canvas/mod.rs::reachable`): o
  * time não abre outro canal, cria as mesmas ligações de uma missão.
  *
- * Abas de agente do time vão para o canvas do orquestrador (quando ele é uma aba), para aparecerem
- * juntas como cartões ligados por cordas. Uma conversa por protocolo não tem nó: a corda dela fica no
- * canvas da pasta (`board.ts::reconcile` a mantém) e vale só para o `peer`.
+ * As abas e conversas por protocolo do time aparecem no canvas do orquestrador, com cartões e cordas.
+ * Canvases especiais legados preservam seus membros e arestas; canvases de sessão recebem cópias
+ * aditivas para manter a autorização e o layout que já existiam.
  *
  * `canvasPlan` é puro (os testes leem o plano); `applyTeamCanvas` executa com o `canvasActions`.
  */
-import { emptyBoard, type Board } from "@/features/canvas/board";
+import { copySessionArtifacts, emptyBoard, type Board } from "@/features/canvas/board";
 
 import type { TeamView } from "./ipc";
 import { isThreadRef } from "./teamModel";
@@ -18,6 +18,7 @@ export type CanvasOp =
   | { kind: "crown"; key: string; id: string }
   | { kind: "uncrown"; key: string; id: string }
   | { kind: "move"; from: string; to: string; ids: string[] }
+  | { kind: "copy"; from: string; to: string; ids: string[] }
   | { kind: "connect"; key: string; a: string; b: string }
   | { kind: "disconnect"; key: string; a: string; b: string }
   | { kind: "role"; key: string; id: string; label: string; subagent: boolean };
@@ -27,6 +28,8 @@ export interface CanvasInput {
   boards: Record<string, Board>;
   /** A chave do canvas de uma aba aberta (`boardKeyOfTab`), ou `null` se ela não está aberta. */
   keyOfTab: (ref: string) => string | null;
+  /** O canvas próprio atual da ref, antes de aplicar o canvas da equipe; usado para cópia aditiva. */
+  sourceKeyOfRef?: (ref: string) => string | null;
   /** A chave do canvas de uma pasta (`boardKey`). */
   folderKey: (cwd: string) => string;
   /** O nome do papel no nó. */
@@ -48,10 +51,26 @@ function keysWithEdge(boards: Record<string, Board>, a: string, b: string): stri
   return Object.entries(boards).filter(([, board]) => hasEdge(board, a, b)).map(([key]) => key);
 }
 
-/** Onde mora a corda do time: o canvas do orquestrador (a aba) ou o da pasta (conversa por protocolo). Pura. */
-export function leadBoardKey(input: Pick<CanvasInput, "team" | "keyOfTab" | "folderKey">): string {
+/** Onde mora a corda do time: o canvas especial existente ou a sessão do orquestrador. Pura. */
+export function leadBoardKey(input: Pick<CanvasInput, "team" | "boards" | "keyOfTab" | "folderKey">): string {
   const { team } = input;
-  return (!isThreadRef(team.orchestrator) && input.keyOfTab(team.orchestrator)) || input.folderKey(team.cwd);
+  const stored = team.boardKey || "";
+  const own = !isThreadRef(team.orchestrator) ? input.keyOfTab(team.orchestrator) : null;
+  const separators = ["#m:", "#c:", "#cmp:"];
+  const specialBoard = Object.entries(input.boards).find(([key, board]) => separators.some((sep) => key.includes(sep))
+    && (team.orchestrator in board.nodes || team.orchestrator in board.threads))?.[0];
+  if (specialBoard) return specialBoard;
+  const storedSpecial = separators.some((sep) => stored.includes(sep)) ? stored : null;
+  if (storedSpecial) return storedSpecial;
+  if (team.origin === "canvas" && stored && !stored.includes("#s:")) return stored;
+  if (own?.includes("#s:")) return own;
+  const existingSession = Object.entries(input.boards).find(([key, board]) => key.includes("#s:")
+    && (team.orchestrator in board.nodes || team.orchestrator in board.threads))?.[0];
+  if (existingSession) return existingSession;
+  if (isThreadRef(team.orchestrator)) {
+    return stored.includes("#s:") ? stored : `${stored || input.folderKey(team.cwd)}#s:${team.orchestrator}`;
+  }
+  return `${stored && !stored.includes("#s:") ? stored : own || input.folderKey(team.cwd)}#s:${team.orchestrator}`;
 }
 
 /** O que mudar no canvas para ele refletir o time. Vazio = já está certo. Pura. */
@@ -76,21 +95,38 @@ export function canvasPlan(input: CanvasInput): CanvasOp[] {
   }
 
   const leadBoard = boards[leadKey] ?? emptyBoard();
+  const leadSourceKey = input.sourceKeyOfRef?.(lead) ?? (isThreadRef(lead) ? input.folderKey(team.cwd) : input.keyOfTab(lead));
+  const leadSource = leadSourceKey ? boards[leadSourceKey] : undefined;
+  if (leadSourceKey && leadSourceKey !== leadKey && leadKey.includes("#s:") && leadSource
+    && copySessionArtifacts(leadSource, leadBoard, lead) !== leadBoard) {
+    ops.push({ kind: "copy", from: leadSourceKey, to: leadKey, ids: [lead] });
+  }
   if (!Object.values(boards).some((b) => b.orchestrators.includes(lead))) ops.push({ kind: "crown", key: leadKey, id: lead });
 
   for (const m of team.members) {
     const ref = m.member;
     let nodeKey = leadKey;
+    const sourceKey = input.sourceKeyOfRef?.(ref) ?? (!isThreadRef(ref) ? input.keyOfTab(ref) : null);
+    const sourceBoard = sourceKey ? boards[sourceKey] : undefined;
+    const specialSource = !!sourceKey && [MISSION_SEP, "#c:", "#cmp:"].some((sep) => sourceKey.includes(sep));
+    if (isThreadRef(ref) && sourceKey && sourceKey !== leadKey && leadKey.includes("#s:") && sourceBoard && !specialSource
+      && copySessionArtifacts(sourceBoard, leadBoard, ref) !== leadBoard) {
+      ops.push({ kind: "copy", from: sourceKey, to: leadKey, ids: [ref] });
+    }
     if (!isThreadRef(ref)) {
       const own = input.keyOfTab(ref);
       // Aba fechada: sem nó nem corda (o `reconcile` tiraria). Volta quando ela abrir.
       if (own === null) continue;
-      nodeKey = own;
       // Junto do orquestrador, para o canvas mostrar o time. Quem é de uma missão fica nela.
-      if (!isThreadRef(lead) && own !== leadKey && !own.includes(MISSION_SEP) && ref in (boards[own]?.nodes ?? {})) {
-        ops.push({ kind: "move", from: own, to: leadKey, ids: [ref] });
+      const source = sourceKey ?? own;
+      const special = [MISSION_SEP, "#c:", "#cmp:"].some((sep) => own.includes(sep) || source.includes(sep));
+      const sourceBoard = boards[source];
+      const canCopy = !!sourceBoard && copySessionArtifacts(sourceBoard, leadBoard, ref) !== leadBoard;
+      if (!special && source !== leadKey && canCopy) {
+        if (leadKey.includes("#s:")) ops.push({ kind: "copy", from: source, to: leadKey, ids: [ref] });
+        else ops.push({ kind: "move", from: source, to: leadKey, ids: [ref] });
         nodeKey = leadKey;
-      }
+      } else nodeKey = special ? own : leadKey;
     }
     const linked = hasEdge(leadBoard, lead, ref) || (nodeKey !== leadKey && hasEdge(boards[nodeKey], lead, ref))
       || ops.some((op) => op.kind === "move" && op.ids.includes(ref) && hasEdge(boards[op.from], lead, ref));
@@ -116,6 +152,7 @@ export interface CanvasApi {
   disconnectPair: (key: string, a: string, b: string) => void;
   toggleOrchestrator: (key: string, id: string) => void;
   moveTerminals: (from: string, to: string, ids: string[]) => void;
+  copySession: (from: string, to: string, id: string) => void;
   setRole: (key: string, id: string, role: string | null, subagent: boolean) => void;
 }
 
@@ -133,6 +170,10 @@ export function runCanvasPlan(ops: CanvasOp[], api: CanvasApi): string[] {
       }
       case "move":
         api.moveTerminals(op.from, op.to, op.ids);
+        touched.add(op.from).add(op.to);
+        break;
+      case "copy":
+        for (const id of op.ids) api.copySession(op.from, op.to, id);
         touched.add(op.from).add(op.to);
         break;
       case "connect":

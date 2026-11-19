@@ -11,6 +11,11 @@ import { SHELL_AGENT_ID, type Tab } from "@/features/tabs/types";
 /** Separa a chave do canvas da carpeta (ou da missão) do id da conversa. */
 export const CONV_SEP = "#c:";
 
+/** Canvas com escopo próprio não é reaproveitado como conversa de projeto automaticamente. */
+export function canAdoptIntoProjectConversation(key: string, folderKey: string): boolean {
+  return key !== folderKey && !["#m:", CONV_SEP, "#cmp:", "#s:"].some((sep) => key.includes(sep));
+}
+
 /** Limite de terminais de uma conversa ao ler o que foi guardado. */
 const MAX_TERMINALS = 24;
 /** Limite de conexões de uma conversa ao ler o que foi guardado. */

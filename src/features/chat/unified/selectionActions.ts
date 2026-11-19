@@ -1,4 +1,4 @@
-import { boardKey, boardKeyOfTab, canvasActions, useCanvasStore } from "@/features/canvas/store";
+import { boardKey, boardKeyOfTab, canvasActions, sessionBoardKey, useCanvasStore } from "@/features/canvas/store";
 import { activationListeners, useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 
@@ -14,7 +14,37 @@ function threadBoard(ref: string): string {
   const id = threadIdOf(ref);
   const row = useStructured.getState().threads.find((t) => t.id === id);
   const team = useTeamIndex.getState().teams.find((t) => t.orchestrator === ref || t.members.some((m) => m.member === ref));
-  return homeBoardKey(ref, { boards: useCanvasStore.getState().boards, cwd: row?.cwd ?? "", teamBoardKey: team?.boardKey || undefined, cwdKey: boardKey });
+  const lead = team?.orchestrator;
+  const leadThread = lead ? useStructured.getState().threads.find((t) => `thread:${t.id}` === lead) : undefined;
+  const leadTab = lead ? useTabsStore.getState().tabs.find((t) => t.id === lead) : undefined;
+  const boards = useCanvasStore.getState().boards;
+  const leadCwd = leadThread?.cwd ?? team?.cwd ?? row?.cwd ?? "";
+  const storedSpecial = team?.boardKey && ["#m:", "#c:", "#cmp:"].some((sep) => team.boardKey!.includes(sep)) ? team.boardKey : undefined;
+  const storedCanvasBoard = team?.origin === "canvas" ? team.boardKey ?? undefined : undefined;
+  const leadHomeBoard = lead ? homeBoardKey(lead, { boards, cwd: leadCwd, sessionBoardKey: sessionBoardKey(leadCwd, lead), cwdKey: boardKey }) : undefined;
+  const leadSpecial = leadHomeBoard && ["#m:", "#c:", "#cmp:"].some((sep) => leadHomeBoard.includes(sep)) ? leadHomeBoard : undefined;
+  const teamBoardKey = lead
+    ? leadTab ? boardKeyOfTab(leadTab, boards)
+      : storedSpecial ?? leadSpecial ?? storedCanvasBoard ?? leadHomeBoard
+    : undefined;
+  let key = homeBoardKey(ref, { boards, cwd: row?.cwd ?? "", teamBoardKey, cwdKey: boardKey });
+  // Na primeira ativação, uma conversa por protocolo que já tinha cartão no canvas da pasta
+  // recebe uma cópia no novo canvas. A origem e suas cordas permanecem intactas.
+  const sourceKey = row ? boardKey(row.cwd) : null;
+  const source = sourceKey ? boards[sourceKey] : undefined;
+  const conversationRefs = new Set([
+    ...useTabsStore.getState().tabs.map((tab) => tab.id),
+    ...useStructured.getState().threads.map((thread) => "thread:" + thread.id),
+  ]);
+  const legacyConversationLink = !team && source?.edges.some((edge) =>
+    (edge.a === ref && conversationRefs.has(edge.b)) || (edge.b === ref && conversationRefs.has(edge.a)));
+  if (legacyConversationLink && sourceKey && key.includes("#s:") && !boards[key]?.threads[ref]) {
+    // Uma ligação de conversa montada à mão na pasta mantém o grupo no canvas legado.
+    key = sourceKey;
+  } else if (sourceKey && source?.threads[ref] && key !== sourceKey) {
+    canvasActions.copySessionFrom(sourceKey, key, ref);
+  }
+  return key;
 }
 
 /** Mantém `activeThread` do canvas em dia com a conversa por protocolo aberta, venha a abertura de onde vier. */

@@ -141,6 +141,50 @@ export function emptyBoard(): Board {
   return { nodes: {}, notes: {}, portals: {}, texts: {}, images: {}, folders: {}, drawings: [], threads: {}, roles: {}, subagents: [], edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
 }
 
+/** Copia para uma sessão o que pertence exclusivamente à ref no canvas antigo, sem alterar a origem. */
+export function copySessionArtifacts(source: Board, target: Board, ref: string): Board {
+  const box = source.nodes[ref];
+  const threadBox = source.threads[ref];
+  if (!box && !threadBox) return target;
+  const noteIds = new Set(source.edges
+    .filter((edge) => edge.a === ref || edge.b === ref)
+    .map((edge) => edge.a === ref ? edge.b : edge.a)
+    .filter((id) => id.startsWith(NOTE_PREFIX)));
+  const exclusiveNotes = [...noteIds].filter((id) =>
+    source.edges.filter((edge) => edge.a === id || edge.b === id).every((edge) => edge.a === ref || edge.b === ref));
+  const noteSet = new Set(exclusiveNotes);
+  const copiedEdges = source.edges.filter((edge) =>
+    (edge.a === ref && noteSet.has(edge.b)) || (edge.b === ref && noteSet.has(edge.a)));
+  const nodes = box && !(ref in target.nodes) ? { ...target.nodes, [ref]: box } : target.nodes;
+  const threads = threadBox && !(ref in target.threads) ? { ...target.threads, [ref]: threadBox } : target.threads;
+  const copiedNotes = exclusiveNotes.filter((id) => source.notes[id] && !(id in target.notes));
+  const notes = copiedNotes.length ? { ...target.notes, ...Object.fromEntries(copiedNotes.map((id) => [id, source.notes[id]!])) } : target.notes;
+  const edges = copiedEdges.filter((edge) => !target.edges.some((other) =>
+    (other.a === edge.a && other.b === edge.b) || (other.a === edge.b && other.b === edge.a)));
+  const nextEdges = edges.length ? [...target.edges, ...edges] : target.edges;
+  const roles = Object.prototype.hasOwnProperty.call(source.roles, ref) && !Object.prototype.hasOwnProperty.call(target.roles, ref)
+    ? { ...target.roles, [ref]: source.roles[ref]! }
+    : target.roles;
+  const orchestrators = source.orchestrators.includes(ref) && !target.orchestrators.includes(ref)
+    ? [...target.orchestrators, ref]
+    : target.orchestrators;
+  const subagents = source.subagents.includes(ref) && !target.subagents.includes(ref)
+    ? [...target.subagents, ref]
+    : target.subagents;
+  if (nodes === target.nodes && threads === target.threads && notes === target.notes && nextEdges === target.edges
+    && roles === target.roles && orchestrators === target.orchestrators && subagents === target.subagents) return target;
+  return {
+    ...target,
+    nodes,
+    threads,
+    notes,
+    edges: nextEdges,
+    roles,
+    orchestrators,
+    subagents,
+  };
+}
+
 /** O prefixo do id de uma conversa por protocolo no canvas (o mesmo de `chat/structured/model.ts`). */
 export const THREAD_REF_PREFIX = "thread:";
 

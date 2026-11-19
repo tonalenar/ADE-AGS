@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { addEdge, emptyBoard, reconcile, setRole, type Board } from "@/features/canvas/board";
+import { addEdge, copySessionArtifacts, emptyBoard, reconcile, setRole, type Board } from "@/features/canvas/board";
 
 import type { TeamMember, TeamView } from "../ipc";
-import { canvasPlan } from "../teamCanvas";
+import { canvasPlan, runCanvasPlan, type CanvasApi } from "../teamCanvas";
 import { missionRefsOf, projectCanvas, promotePlan, reversePlan, type PromoteAgent } from "../teamMirror";
 
 const KEY = "main|/repo";
@@ -148,12 +148,30 @@ describe("coroa tirada: só o papel de orquestrador", () => {
 describe("idempotência: promover e espelhar de volta não deixa nada a fazer", () => {
   it("promotePlan -> time criado -> canvasPlan, reversePlan e promotePlan vazios", () => {
     const b = setRole(addEdge(addEdge(crowned(["a", "b"]), "lead", "a", "e1"), "lead", "b", "e2"), "a", "QA", true);
-    const boards = { [KEY]: b };
+    const boards: Record<string, Board> = { [KEY]: b };
     const [op] = promotePlan(boards, [], AGENTS, { roleIdOf: ID_OF });
     // O que `chat_team_promote` grava.
     const created = team(op!.orchestrator.ref, op!.members.map((m) => member(m.member, m.role, { subagent: m.subagent })));
     const label = (role: string) => role.toUpperCase();
-    expect(canvasPlan({ team: created, boards, keyOfTab: () => KEY, folderKey: () => KEY, roleLabel: label })).toEqual([]);
+    const sessionKey = `${KEY}#s:lead`;
+    const first = canvasPlan({ team: created, boards, keyOfTab: (ref) => (ref in (boards[sessionKey]?.nodes ?? {}) ? sessionKey : KEY), folderKey: () => KEY, roleLabel: label });
+    expect(first.some((item) => item.kind === "copy" && item.to === sessionKey)).toBe(true);
+    const api: CanvasApi = {
+      boards: () => boards,
+      connect: (key, a, b) => { boards[key] = addEdge(boards[key] ?? emptyBoard(), a, b); },
+      disconnectPair: (key, a, b) => { boards[key] = { ...(boards[key] ?? emptyBoard()), edges: (boards[key] ?? emptyBoard()).edges.filter((edge) => !((edge.a === a && edge.b === b) || (edge.a === b && edge.b === a))) }; },
+      toggleOrchestrator: (key, id) => {
+        const board = boards[key] ?? emptyBoard();
+        boards[key] = { ...board, orchestrators: board.orchestrators.includes(id) ? board.orchestrators.filter((item) => item !== id) : [...board.orchestrators, id] };
+      },
+      moveTerminals: () => undefined,
+      copySession: (from, to, id) => { boards[to] = copySessionArtifacts(boards[from] ?? emptyBoard(), boards[to] ?? emptyBoard(), id); },
+      setRole: (key, id, role, subagent) => { boards[key] = setRole(boards[key] ?? emptyBoard(), id, role, subagent); },
+    };
+    runCanvasPlan(first, api);
+    // A origem fica guardada com a autorização anterior; o destino passa a ter a mesma equipe.
+    expect(boards[KEY]).toMatchObject({ edges: b.edges, orchestrators: ["lead"], roles: { a: "QA" }, subagents: ["a"] });
+    expect(canvasPlan({ team: created, boards, keyOfTab: (ref) => (ref in (boards[sessionKey]?.nodes ?? {}) ? sessionKey : KEY), folderKey: () => KEY, roleLabel: label })).toEqual([]);
     const baselines = { t1: projectCanvas(created, boards, isAgentTab)! };
     expect(reversePlan({ teams: [created], boards, baselines, isAgentTab, roleIdOf: ID_OF })).toEqual([]);
     expect(promotePlan(boards, [created], AGENTS, { roleIdOf: ID_OF })).toEqual([]);

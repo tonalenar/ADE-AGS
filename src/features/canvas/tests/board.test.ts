@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  addEdge, buildMissionTeam, emptyBoard, gridCell, neighbors, placeBelow, reconcile, removeEdge, removeEdgeBetween, toggleOrchestrator,
+  addEdge, buildMissionTeam, copySessionArtifacts, emptyBoard, gridCell, neighbors, placeBelow, reconcile, removeEdge, removeEdgeBetween, toggleOrchestrator,
 } from "../board";
 import { GAP } from "../geometry";
 
@@ -30,6 +30,58 @@ describe("reconcile", () => {
     const b = reconcile(emptyBoard(), ["t1"]);
     const moved = { ...b, nodes: { t1: { x: 999, y: 999, w: 500, h: 300 } } };
     expect(reconcile(moved, ["t1", "t2"]).nodes.t1).toEqual({ x: 999, y: 999, w: 500, h: 300 });
+  });
+});
+
+describe("modo de trabalho por janela", () => {
+  it("a preferência nova vence o formato antigo por canvas e permanece ao mudar de conversa", async () => {
+    const { setWorkMode, useCanvasStore, workModeFor } = await import("../store");
+    useCanvasStore.setState({ modes: { "main|/p": "canvas" } });
+    expect(workModeFor(useCanvasStore.getState().modes, "@window:main", "main|/p#s:a")).toBe("canvas");
+    useCanvasStore.setState({ modes: { "main|/p#s:a": "canvas" } });
+    expect(workModeFor(useCanvasStore.getState().modes, "@window:main", "main|/p#s:a")).toBe("canvas");
+    setWorkMode("main|/p#s:a", "canvas");
+    setWorkMode("main|/p#s:b", "tabs");
+    expect(useCanvasStore.getState().modes["@window:main"]).toBe("tabs");
+    expect(useCanvasStore.getState().modes["main|/p#s:a"]).toBe("canvas");
+    expect(workModeFor(useCanvasStore.getState().modes, "@window:main", "main|/p#s:a")).toBe("tabs");
+  });
+});
+
+describe("migração aditiva para canvas de sessão", () => {
+  it("copia nó, nota exclusiva, corda, coroa, papel e marca sem alterar o canvas antigo", () => {
+    const old = {
+      ...emptyBoard(),
+      nodes: { lead: { x: 10, y: 20, w: 500, h: 300 } },
+      notes: { "note-a": { name: "A", content: "regra", box: { x: 5, y: 6, w: 200, h: 100 } } },
+      edges: [{ id: "e1", a: "lead", b: "note-a" }],
+      orchestrators: ["lead"],
+      roles: { lead: "orquestrador" },
+      subagents: ["lead"],
+    };
+    const next = copySessionArtifacts(old, emptyBoard(), "lead");
+    expect(next).toMatchObject({
+      nodes: { lead: old.nodes.lead },
+      notes: { "note-a": old.notes["note-a"] },
+      edges: old.edges,
+      orchestrators: ["lead"],
+      roles: { lead: "orquestrador" },
+      subagents: ["lead"],
+    });
+    expect(old).toMatchObject({ nodes: { lead: old.nodes.lead }, edges: [{ id: "e1" }], orchestrators: ["lead"], roles: { lead: "orquestrador" }, subagents: ["lead"] });
+  });
+
+  it("não copia uma nota compartilhada nem uma corda para outra conversa", () => {
+    const source = {
+      ...emptyBoard(),
+      nodes: { a: { x: 1, y: 2, w: 3, h: 4 }, b: { x: 5, y: 6, w: 7, h: 8 } },
+      notes: { "note-shared": { name: "N", content: "x", box: { x: 0, y: 0, w: 1, h: 1 } } },
+      edges: [{ id: "e1", a: "a", b: "note-shared" }, { id: "e2", a: "b", b: "note-shared" }, { id: "e3", a: "a", b: "b" }],
+    };
+    const next = copySessionArtifacts(source, emptyBoard(), "a");
+    expect(next.edges).toEqual([]);
+    expect(next.notes).toEqual({});
+    expect(source.edges.map((edge) => edge.id)).toEqual(["e1", "e2", "e3"]);
   });
 });
 

@@ -66,7 +66,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             conn.execute(&format!("ALTER TABLE chat_team ADD COLUMN {column} INTEGER NOT NULL DEFAULT {default}"), [])?;
         }
     }
-    // De onde o time nasceu (`chat`, `canvas` ou `mission`), onde mora a coroa dele (`board_key`: pasta, `#c:` ou
+    // De onde o time nasceu (`chat`, `canvas` ou `mission`), onde mora a coroa dele (`board_key`: pasta, `#s:`, `#c:` ou
     // `#m:`) e a missão espelhada (`mission_id`, só `origin = 'mission'`). Aditivas e protegidas por `has_column`:
     // as linhas antigas ficam `origin = 'chat'`, nada se apaga e o user_version não sobe.
     for (column, ddl) in [
@@ -312,7 +312,7 @@ pub struct TeamRow {
     pub watch_stall: bool,
     /// De onde o time nasceu: [`ORIGIN_CHAT`], [`ORIGIN_CANVAS`] ou [`ORIGIN_MISSION`].
     pub origin: String,
-    /// Onde mora a coroa dele no canvas (a chave do quadro: pasta, `#c:` ou `#m:`), quando se sabe.
+    /// Onde mora a coroa dele no canvas (a chave do quadro: pasta, `#s:`, `#c:` ou `#m:`), quando se sabe.
     pub board_key: Option<String>,
     /// A missão que a linha espelha (só `origin = 'mission'`).
     pub mission_id: Option<String>,

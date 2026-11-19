@@ -311,7 +311,7 @@ describe("a qué misión pertenece una pestaña", () => {
     const boards = { [key]: buildMissionTeam(emptyBoard(), "lead", [{ tabId: "m1" }]) };
     expect(boardKeyOfTab({ id: "lead", cwd: "C:/p/app" }, boards)).toBe(key);
     expect(boardKeyOfTab({ id: "m1", cwd: "C:/p/app" }, boards)).toBe(key);
-    expect(boardKeyOfTab({ id: "suelta", cwd: "C:/p/app" }, boards)).toBe(boardKey("C:/p/app"));
+    expect(boardKeyOfTab({ id: "suelta", cwd: "C:/p/app" }, boards)).toBe(boardKey("C:/p/app") + "#s:suelta");
     expect(missionOfTab({ id: "m1", cwd: "C:/p/app" }, boards)).toBe("m-1");
     expect(missionOfTab({ id: "suelta", cwd: "C:/p/app" }, boards)).toBeNull();
   });

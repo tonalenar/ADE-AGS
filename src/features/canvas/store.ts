@@ -6,11 +6,12 @@ import { useChatShell } from "@/app/uiStore";
 import { canvasDeviceEngaged } from "@/features/chat/deviceDemand";
 import { useTabsStore } from "@/features/tabs/store";
 import { comparablePath } from "@/features/tabs/viewTabs";
+import { useTeamIndex } from "@/features/chat/team/teamIndex";
 
 import {
   FOLDER_PREFIX, IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addFolder, addImage, addNote, addPortal,
   addStroke, addText, addThreadNode, removeThreadNode, removeFolder, updateFolder,
-  emptyBoard, placeInNextGridCell, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
+  copySessionArtifacts, emptyBoard, placeInNextGridCell, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
   buildMissionTeam, setRole, removeStroke, removeText, toggleOrchestrator, moveTerminals, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
   type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
 } from "./board";
@@ -20,9 +21,9 @@ import { buildComparisonBoard, type ComparisonNode } from "@/features/compare/la
 export type WorkMode = "tabs" | "canvas";
 
 interface CanvasState {
-  /** Un canvas por ventana y carpeta de proyecto (ver `boardKey`). */
+  /** Canvases de carpeta y de conversa (ver `boardKey` y `sessionBoardKey`). */
   boards: Record<string, Board>;
-  /** Qué vista usa cada carpeta. Preferencia de esta máquina: va a `localStorage`. */
+  /** Preferência de vista por janela, com entradas antigas por canvas mantidas para leitura. */
   modes: Record<string, WorkMode>;
   /** Misiones (por clave de canvas) cuya vista de abas muestra todos los panes lado a lado. Individual por misión; a `localStorage`. */
   grids: Record<string, boolean>;
@@ -77,6 +78,17 @@ export function conversationOfKey(key: string | null): string | null {
 
 /** O que separa a pasta da comparação de modelos na chave do seu canvas (ver `features/compare`). */
 const COMPARE_SEP = "#cmp:";
+/** Separador de canvases de uma conversa individual. Não define escopo de time no backend. */
+export const SESSION_SEP = "#s:";
+
+export function sessionBoardKey(cwd: string, ref: string): string {
+  return `${boardKey(cwd)}${SESSION_SEP}${ref}`;
+}
+
+export function sessionRefOfKey(key: string | null): string | null {
+  const at = key?.indexOf(SESSION_SEP) ?? -1;
+  return key && at >= 0 ? key.slice(at + SESSION_SEP.length) : null;
+}
 
 /** A chave do canvas de uma comparação de modelos: o da pasta escolhida, com a comparação colada. */
 export function compareBoardKey(cwd: string, comparisonId: string): string {
@@ -106,18 +118,46 @@ export function missionBoardKeysOf(missionId: string): string[] {
   return Object.keys(useCanvasStore.getState().boards).filter((k) => k.startsWith(prefix) && missionOfKey(k) === missionId);
 }
 
-/**
- * La clave del canvas de una tab: el de su misión si algún canvas de misión de esta ventana
- * la tiene como nodo, si no el de su carpeta. La pertenencia a una misión vive en su canvas
- * (que ya se guarda), así que sobrevive a reiniciar sin tocar la tabla de tabs.
- */
+/** O canvas da aba: especial legado, time, sessão existente ou a sessão própria. */
 export function boardKeyOfTab(tab: { id: string; cwd: string }, boards: Record<string, Board> = useCanvasStore.getState().boards): string {
   const prefix = `${windowLabel}|`;
   for (const [key, board] of Object.entries(boards)) {
-    // O canvas de uma missão ou de uma conversa de projeto: a aba pertence ao em que é um nó.
+    // Primeiro, pertencimento explícito a um canvas especial legado.
     if (key.startsWith(prefix) && (key.includes(MISSION_SEP) || key.includes(CONV_SEP) || key.includes(COMPARE_SEP)) && tab.id in board.nodes) return key;
   }
-  return boardKey(tab.cwd);
+  const folder = boardKey(tab.cwd);
+  const old = boards[folder];
+  const liveRefs = new Set(useTabsStore.getState().tabs.map((item) => item.id));
+  const team = useTeamIndex.getState().teams.find((item) => item.orchestrator === tab.id || item.members.some((member) => member.member === tab.id));
+  // Times promovidos a partir de um canvas de pasta já eram um conjunto manual autorizado:
+  // mantenha a pasta como dona para todos, em vez de separar os integrantes na migração.
+  if (team?.origin === "canvas" && team.boardKey === folder) return folder;
+  // Ligações manuais entre conversas mantêm o grupo na pasta. Outros times seguem a coroa
+  // e copiam aditivamente as autorizações para o canvas do orquestrador.
+  if (!team && old?.edges?.some((edge) =>
+    (edge.a === tab.id && (liveRefs.has(edge.b) || edge.b.startsWith("thread:")))
+    || (edge.b === tab.id && (liveRefs.has(edge.a) || edge.a.startsWith("thread:"))))) return folder;
+  if (team?.orchestrator && team.orchestrator !== tab.id) {
+    const leadRef = team.orchestrator;
+    const leadBoard = Object.entries(boards).find(([key, board]) => key.startsWith(prefix)
+      && (key.includes(MISSION_SEP) || key.includes(CONV_SEP) || key.includes(COMPARE_SEP))
+      && (leadRef in board.nodes || leadRef in board.threads))?.[0];
+    if (leadBoard) return leadBoard;
+    const storedSpecial = team.boardKey && (team.boardKey.includes(MISSION_SEP) || team.boardKey.includes(CONV_SEP) || team.boardKey.includes(COMPARE_SEP))
+      ? team.boardKey
+      : null;
+    if (storedSpecial) return storedSpecial;
+    const leadSession = Object.entries(boards).find(([key, board]) => key.startsWith(prefix)
+      && sessionRefOfKey(key) === leadRef && (leadRef in board.nodes || leadRef in board.threads))?.[0];
+    if (leadSession) return leadSession;
+    const lead = useTabsStore.getState().tabs.find((item) => item.id === leadRef);
+    return sessionBoardKey(lead?.cwd ?? team.cwd, leadRef);
+  }
+  // Uma aba também pode ter sido colocada no canvas #s: de uma conversa por protocolo. Esse
+  // nó explícito define o pertencimento, mesmo que o canvas próprio da aba já tenha sido criado.
+  const existingSession = Object.entries(boards).find(([key, board]) => key.startsWith(prefix)
+    && key.includes(SESSION_SEP) && tab.id in board.nodes)?.[0];
+  return existingSession ?? sessionBoardKey(tab.cwd, tab.id);
 }
 
 /** La misión a la que pertenece una tab (la de su canvas), o `null` si es una tab suelta. */
@@ -133,7 +173,23 @@ export function useActiveBoardKey(): string | null {
 
 export function useWorkMode(): WorkMode {
   const key = useActiveBoardKey();
-  return useCanvasStore((s) => (key ? s.modes[key] ?? "tabs" : "tabs"));
+  const windowKey = windowModeKey();
+  return useCanvasStore((s) => workModeFor(s.modes, windowKey, key));
+}
+
+export function windowModeKey(): string {
+  return `@window:${windowLabel}`;
+}
+
+/** A entrada por canvas é o formato antigo; só serve de fallback até existir preferência da janela. */
+export function workModeFor(modes: Record<string, WorkMode>, windowKey: string, board: string | null): WorkMode {
+  if (modes[windowKey]) return modes[windowKey];
+  if (!board) return "tabs";
+  if (modes[board]) return modes[board];
+  const separators = [MISSION_SEP, CONV_SEP, COMPARE_SEP, SESSION_SEP];
+  const at = separators.map((sep) => board.indexOf(sep)).filter((index) => index >= 0).sort((a, b) => a - b)[0];
+  const folder = at === undefined ? null : board.slice(0, at);
+  return (folder ? modes[folder] : undefined) ?? "tabs";
 }
 
 /** `true` quando o canvas está visível: modo `"canvas"`, sem o chat por cima e na rota `/workspace`. */
@@ -170,8 +226,9 @@ export function parseGrids(raw: string | null): Record<string, boolean> {
   }
 }
 
-export function setWorkMode(key: string, mode: WorkMode): void {
-  const modes = { ...useCanvasStore.getState().modes, [key]: mode };
+export function setWorkMode(_key: string, mode: WorkMode): void {
+  const windowKey = windowModeKey();
+  const modes = { ...useCanvasStore.getState().modes, [windowKey]: mode };
   useCanvasStore.setState({ modes, liveRects: {}, desktopRects: {} });
   try {
     localStorage.setItem(MODES_KEY, JSON.stringify(modes));
@@ -200,6 +257,11 @@ export const canvasActions = {
   focusDesktop: (key: string, id: string) => useCanvasStore.setState({ desktopFocus: { key, id, nonce: ++desktopFocusSequence } }),
   /** Dá um cartão à conversa por protocolo `ref` no canvas `key` (num lugar livre; já tendo, não muda nada). */
   addThread: (key: string, ref: string) => updateBoard(key, (b) => addThreadNode(b, ref)),
+  /** Migra de forma aditiva a caixa e os metadados exclusivos de uma ref antiga para a sessão. */
+  copySessionFrom: (fromKey: string, toKey: string, ref: string) => {
+    const source = useCanvasStore.getState().boards[fromKey];
+    if (source) updateBoard(toKey, (target) => copySessionArtifacts(source, target, ref));
+  },
   removeThread: (key: string, ref: string) => updateBoard(key, (b) => removeThreadNode(b, ref)),
   /** Pede ao canvas `key` que centre e destaque `ref` (a conversa escolhida fora dele). */
   focusRef: (key: string, ref: string) => useCanvasStore.setState({ focus: { key, ref, nonce: ++focusSequence } }),
@@ -301,7 +363,7 @@ export const canvasActions = {
     updateBoard(toKey, () => moved.to);
     updateBoard(fromKey, () => moved.from);
     const modes = useCanvasStore.getState().modes;
-    if (!(toKey in modes) && modes[fromKey]) setWorkMode(toKey, modes[fromKey]);
+    if (!(windowModeKey() in modes) && modes[fromKey]) setWorkMode(toKey, modes[fromKey]);
   },
   /** O que o terminal é: papel (`null` = o orquestrador decide) e se é subagente. */
   setRole: (key: string, tabId: string, role: string | null, subagent: boolean) =>
@@ -393,14 +455,33 @@ function syncBoards(): void {
   // nodos y las conexiones guardadas.
   if (!hydrated) return;
   const byKey = new Map<string, string[]>();
+  // O canvas de pasta vira um snapshot durável quando uma aba passa para qualquer canvas próprio.
+  // Assim nenhuma corda, coroa ou marca antiga é apagada durante a reconciliação.
+  const sourceSnapshots = new Set<string>();
   const boards = useCanvasStore.getState().boards;
   for (const tab of tabs) {
     const key = boardKeyOfTab(tab, boards);
     byKey.set(key, [...(byKey.get(key) ?? []), tab.id]);
+    // A migração para #s: copia o que pertence à ref. Se ela já pertence a um canvas especial,
+    // permanece lá; em ambos os casos a pasta antiga continua como snapshot intacto.
+    const sourceKey = boardKey(tab.cwd);
+    const source = boards[sourceKey];
+    const hasSourceArtifacts = source && (tab.id in source.nodes || source.orchestrators.includes(tab.id)
+      || source.subagents.includes(tab.id) || Object.prototype.hasOwnProperty.call(source.roles, tab.id)
+      || source.edges.some((edge) => edge.a === tab.id || edge.b === tab.id));
+    if (key !== sourceKey && hasSourceArtifacts) {
+      sourceSnapshots.add(sourceKey);
+      if (key.includes(SESSION_SEP)) {
+        const target = useCanvasStore.getState().boards[key] ?? emptyBoard();
+        const nextTarget = copySessionArtifacts(source, target, tab.id);
+        if (nextTarget !== target) updateBoard(key, () => nextTarget);
+      }
+    }
   }
   const keys = new Set([...byKey.keys(), ...Object.keys(boards).filter((k) => k.startsWith(`${windowLabel}|`))]);
   for (const key of keys) {
-    const current = boards[key] ?? emptyBoard();
+    if (sourceSnapshots.has(key)) continue;
+    const current = useCanvasStore.getState().boards[key] ?? emptyBoard();
     const next = reconcile(current, byKey.get(key) ?? [], tabs.map((t) => t.id));
     if (next !== current || !(key in boards)) updateBoard(key, () => next, false);
   }

@@ -34,6 +34,8 @@ export type ReverseOp =
 
 const MISSION_SEP = "#m:";
 const COMPARE_SEP = "#cmp:";
+const CONVERSATION_SEP = "#c:";
+const SESSION_SEP = "#s:";
 
 /** O canvas de uma missão (`#m:`) ou de uma comparação (`#cmp:`): outra equipe, fora do espelho do chat. */
 const outsideChat = (key: string) => key.includes(MISSION_SEP) || key.includes(COMPARE_SEP);
@@ -52,8 +54,29 @@ export function missionRefsOf(boards: Record<string, Board>): Set<string> {
   return out;
 }
 
-/** Os canvases em que o orquestrador está coroado (o de missão é de outra equipe e fica de fora). */
+/** O canvas ativo do time. Snapshots aditivos da pasta não concorrem com a sessão do orquestrador. */
+function ownerBoard(team: TeamView, boards: Record<string, Board>): [string, Board] | null {
+  const storedKey = team.boardKey ?? "";
+  const stored = storedKey ? boards[storedKey] : undefined;
+  // A chave persistida preserva o canvas dono, inclusive grupos manuais promovidos da pasta.
+  if (stored && !outsideChat(storedKey)) return [storedKey, stored];
+
+  const containsLead = (board: Board) => team.orchestrator in board.nodes || team.orchestrator in board.threads;
+  const project = Object.entries(boards).find(([key, board]) => key.includes(CONVERSATION_SEP) && containsLead(board));
+  if (project) return project;
+
+  const session = Object.entries(boards).find(([key, board]) => {
+    const at = key.lastIndexOf(SESSION_SEP);
+    return at >= 0 && key.slice(at + SESSION_SEP.length) === team.orchestrator && containsLead(board);
+  });
+  if (session) return session;
+  return null;
+}
+
+/** O canvas em que mora a coroa do time; o de missão/comparação é de outra equipe. */
 function crownedBoards(team: TeamView, boards: Record<string, Board>): Board[] {
+  const owner = ownerBoard(team, boards);
+  if (owner) return owner[1].orchestrators.includes(team.orchestrator) ? [owner[1]] : [];
   return Object.entries(boards)
     .filter(([key, board]) => !outsideChat(key) && !!team.orchestrator && board.orchestrators.includes(team.orchestrator))
     .map(([, board]) => board);
@@ -116,7 +139,10 @@ export function reversePlan(input: ReverseInput): ReverseOp[] {
     if (!base) continue;
     if (!now) {
       // Estava coroado e não está mais, a conversa segue aberta e a coroa não foi para outro canvas: a pessoa a tirou.
-      const crownedAnywhere = Object.values(input.boards).some((b) => !!team.orchestrator && b.orchestrators.includes(team.orchestrator));
+      const owner = ownerBoard(team, input.boards);
+      const crownedAnywhere = owner
+        ? owner[1].orchestrators.includes(team.orchestrator)
+        : Object.values(input.boards).some((b) => !!team.orchestrator && b.orchestrators.includes(team.orchestrator));
       if (team.orchestrator && !crownedAnywhere && isOpen(team.orchestrator)) ops.push({ kind: "unlead", teamId: team.id });
       continue;
     }

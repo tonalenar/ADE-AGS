@@ -70,6 +70,8 @@ beforeEach(async () => {
   teamStore.useTeamStore.setState({ teams: [team as unknown as TeamView], loaded: true, feeds: {}, targets: {}, told: {}, adding: {} });
   teamStore.startTeams();
   await teamStore.syncTeamCanvas(team as unknown as TeamView);
+  // O time de chat passa a morar na sessão do orquestrador; o quadro da pasta fica como legado intacto.
+  KEY = canvas.sessionBoardKey("/repo", "lead");
   backend.calls = [];
 });
 afterEach(() => { vi.useRealTimers(); });

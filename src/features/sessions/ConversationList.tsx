@@ -8,11 +8,12 @@ import { useMissionIndex } from "@/features/missions/groups";
 import { useTabsStore } from "@/features/tabs/store";
 import { openNewAgentWith } from "@/features/tabs/tabActions";
 import { comparablePath } from "@/features/tabs/viewTabs";
-import { boardKeyOfTab, useCanvasStore } from "@/features/canvas/store";
+import { boardKey, boardKeyOfTab, useCanvasStore } from "@/features/canvas/store";
 
 import { CanvasConversations } from "./CanvasConversations";
 import { adoptLooseTabs, startConversation } from "./conversationFlow";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
+import { canAdoptIntoProjectConversation } from "./conversationModel";
 import { sameProject, useConversationsStore } from "./conversationsStore";
 import { useConversationUi } from "./conversationUi";
 
@@ -51,7 +52,7 @@ export function ConversationList({ cwd, groupCwds, projectKey: rawKey, workspace
   const loose = useMemo(
     () => (hydrated && canvasLoaded ? tabs : [])
       .filter((tab) => tab.agentId !== SHELL_AGENT_ID && !missionOf[tab.id] && folders.has(comparablePath(tab.cwd)))
-      .filter((tab) => !boardKeyOfTab(tab, boards).includes("#c:"))
+      .filter((tab) => canAdoptIntoProjectConversation(boardKeyOfTab(tab, boards), boardKey(tab.cwd)))
       .map((tab) => tab.id),
     [hydrated, canvasLoaded, tabs, missionOf, folders, boards],
   );

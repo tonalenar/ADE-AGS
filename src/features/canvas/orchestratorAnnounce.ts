@@ -31,7 +31,7 @@ export function announceToOrchestrators(key: string, ids: string[]): void {
 }
 
 /** Liga o aviso automático: a cada mudança nos canvases desta janela, avisa quem precisa. Missões ficam de
- *  fora (o líder da missão recebe o próprio briefing). Devolve o desligar. */
+ *  fora (o líder da missão recebe o próprio briefing); canvases #s: com time continuam no aviso. */
 export function initOrchestratorAnnouncements(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const check = () => {
