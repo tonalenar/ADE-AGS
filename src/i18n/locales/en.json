@@ -6030,6 +6030,8 @@
   "chat.attach.lightbox.flattenMarks": "Flatten markup",
   "chat.attach.lightbox.openVideo": "Play {{name}}",
   "chat.attach.lightbox.videoError": "Could not play this video here.",
+  "chat.attach.lightbox.videoRetry": "Try again",
+  "chat.attach.lightbox.videoErrorCode": "Player code: {{code}} (4 = unsupported format or file, 3 = decode error, 2 = network).",
   "chat.attach.lightbox.captureFrame": "Capture frame as image",
   "chat.attach.lightbox.attachResult": "Attach resulting image to composer",
   "chat.attach.lightbox.open": "Open",

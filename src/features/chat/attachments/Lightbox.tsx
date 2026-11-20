@@ -14,6 +14,7 @@ import { ArrowToolIcon, BlurToolIcon, ClipboardToolIcon, CommentToolIcon, Ellips
 import { setImageContext } from "./imageContext";
 import { backgroundRemovalAvailable, removeImageBackground, saveAnnotatedCopy } from "./ipc";
 import { useImagePreview } from "./useImagePreview";
+import { useVideoRetry } from "./useVideoRetry";
 import { isVideoFile, prepareVideoFirstFrame, videoMediaSrc } from "./videoMedia";
 
 export interface LightboxImage {
@@ -56,7 +57,8 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   const current = images[index]!;
   const isVideo = current.kind === "video" || isVideoFile(current.name) || isVideoFile(current.path);
   const { src: loadedSrc, missing } = useImagePreview(current.path, isVideo ? (current.preview ?? current.path) : current.preview);
-  const [videoError, setVideoError] = useState(false);
+  const videoRetry = useVideoRetry(current.path);
+  const videoError = videoRetry.failed;
   const [editedSrc, setEditedSrc] = useState<string | null>(null);
   const src = editedSrc ?? loadedSrc;
   const [natural, setNatural] = useState<{ width: number; height: number }>({ width: 1, height: 1 });
@@ -111,7 +113,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   }, []);
 
   useEffect(() => {
-    setEditedSrc(null); setVideoError(false); setZoom(1); setOffset({ x: 0, y: 0 }); setMarks([]); setEraseStrokes([]); setPast([]); setFuture([]); setComments([]); setCommentSelection(null);
+    setEditedSrc(null); setZoom(1); setOffset({ x: 0, y: 0 }); setMarks([]); setEraseStrokes([]); setPast([]); setFuture([]); setComments([]); setCommentSelection(null);
     setTool("select"); setSelectedMark(null); setCommentDraft(null); setTextDraft(null); setDraft(null); setNotice(null); setFilter(isVideo ? "video" : "image");
   }, [current.path, isVideo]);
 
@@ -539,15 +541,19 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
           </div> : isVideo ? <div className="flex max-h-full max-w-full flex-col items-center gap-3">{videoError ? (
             <div role="alert" className="flex max-w-md flex-col items-center gap-3 rounded-2xl border border-gray-200/70 bg-surface-1/90 px-6 py-5 text-center shadow-xl dark:border-white/10 dark:bg-gray-900/90">
               <p className="m-0 text-sm text-gray-800 dark:text-gray-100">{t("chat.attach.lightbox.videoError")}</p>
-              {!isInlineImage(current.path) && (
-                <button type="button" className={surfaceButton} onClick={() => { void openPath(current.path).catch(console.error); }}>
-                  {t("chat.attach.lightbox.openDefault")}
-                </button>
-              )}
+              {videoRetry.code !== null && <p className="m-0 text-xs text-gray-500 dark:text-white/50">{t("chat.attach.lightbox.videoErrorCode", { code: videoRetry.code })}</p>}
+              <div className="flex items-center gap-2">
+                <button type="button" className={surfaceButton} onClick={videoRetry.retry}>{t("chat.attach.lightbox.videoRetry")}</button>
+                {!isInlineImage(current.path) && (
+                  <button type="button" className={surfaceButton} onClick={() => { void openPath(current.path).catch(console.error); }}>
+                    {t("chat.attach.lightbox.openDefault")}
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
-            <video key={current.path} ref={videoRef} src={videoMediaSrc(current.path)} controls playsInline preload="metadata"
-              onLoadedMetadata={() => setVideoError(false)} onError={() => setVideoError(true)}
+            <video key={`${current.path}#${videoRetry.reloadKey}`} ref={videoRef} src={videoMediaSrc(current.path)} controls playsInline preload="metadata"
+              onLoadedMetadata={videoRetry.onLoaded} onError={videoRetry.onError}
               className="max-h-[calc(100vh-16rem)] max-w-[calc(100vw-12rem)] rounded-lg shadow-2xl" />
           )}<div className="flex items-center gap-1 rounded-full border border-gray-200/70 bg-surface-1/80 p-1 shadow dark:border-white/10 dark:bg-gray-900/80"><button type="button" className={surfaceButton} onClick={() => stepVideoFrame(-1)} aria-label={t("chat.attach.lightbox.framePrevious")} title={t("chat.attach.lightbox.framePrevious")}>−1</button><button type="button" className={surfaceButton} onClick={() => stepVideoFrame(1)} aria-label={t("chat.attach.lightbox.frameNext")} title={t("chat.attach.lightbox.frameNext")}>+1</button><label className="flex items-center gap-1 px-2 text-xs">{t("chat.attach.lightbox.speed")}<select aria-label={t("chat.attach.lightbox.speed")} defaultValue="1" className="rounded-md bg-transparent px-1 py-1" onChange={(event) => { if (videoRef.current) videoRef.current.playbackRate = Number(event.target.value); }}><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><button type="button" className={surfaceButton} onClick={toggleVideoFullscreen} aria-label={t("chat.attach.lightbox.fullscreen")} title={t("chat.attach.lightbox.fullscreen")}><MaximizeIcon className="h-4 w-4" /></button><button type="button" className={surfaceButton} onClick={() => { captureFrame(); }}>{t("chat.attach.lightbox.captureFrame")}</button></div></div> : <p className="text-sm text-gray-500 dark:text-white/60">{missing ? t("chat.attach.missing") : t("chat.attach.loading")}</p>}
           {images.length > 1 && <button type="button" onClick={() => goVisible(1)} disabled={visibleMedia.findIndex((item) => item.path === current.path) < 0 || visibleMedia.findIndex((item) => item.path === current.path) === visibleMedia.length - 1} aria-label={t("chat.attach.lightbox.next")} className="absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-gray-900/10 p-3 hover:bg-gray-900/20 disabled:opacity-30 dark:bg-white/10"><ChevronRightIcon className="h-5 w-5" /></button>}

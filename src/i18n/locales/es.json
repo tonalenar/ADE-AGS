@@ -6030,6 +6030,8 @@
   "chat.attach.lightbox.flattenMarks": "Aplanar marcas",
   "chat.attach.lightbox.openVideo": "Reproducir {{name}}",
   "chat.attach.lightbox.videoError": "No se pudo reproducir este vídeo aquí.",
+  "chat.attach.lightbox.videoRetry": "Reintentar",
+  "chat.attach.lightbox.videoErrorCode": "Código del reproductor: {{code}} (4 = formato o archivo no compatible, 3 = error de decodificación, 2 = red).",
   "chat.attach.lightbox.captureFrame": "Capturar fotograma como imagen",
   "chat.attach.lightbox.attachResult": "Adjuntar imagen resultante al compositor",
   "chat.attach.lightbox.open": "Abrir",
