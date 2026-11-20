@@ -7,8 +7,8 @@ import type { TimelineItem } from "@/features/chat/timeline/types";
 
 /** A chave em `settings` (a mesma que o backend lê). */
 export const AUTOCOMPACT_SETTING = "chat.autocompact";
-/** O limiar padrão (% da janela): o ponto em que o Claude Code compacta sozinho numa janela de 200k. */
-export const DEFAULT_PCT = 83;
+/** O limiar padrão (% da janela). Decisão do usuário em 19/11/2026: 50% (antes ~83%); vale para todos os agentes. */
+export const DEFAULT_PCT = 50;
 export const MIN_PCT = 50;
 export const MAX_PCT = 95;
 /** Uma compactação «em curso» que não termina deixa de segurar a fila depois disto (como o backend). */

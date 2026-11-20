@@ -28,9 +28,9 @@ use super::store;
 
 /// A configuração, em `settings`: `{"enabled":true,"agents":{"codex":{"enabled":true,"thresholdPct":80}}}`.
 pub const SETTING: &str = "chat.autocompact";
-/// O limiar padrão (% da janela): o ponto em que o Claude Code compacta sozinho numa janela de 200k
-/// (200k − 33k de reserva = 83,5%). Vale para todos os agentes que a ADE compacta.
-pub const DEFAULT_PCT: u8 = 83;
+/// O limiar padrão (% da janela). Decisão do usuário em 19/11/2026: 50% (antes ~83%, o ponto em que o Claude Code
+/// compacta numa janela de 200k). Vale para todos os agentes, inclusive o Claude Code.
+pub const DEFAULT_PCT: u8 = 50;
 pub const MIN_PCT: u8 = 50;
 pub const MAX_PCT: u8 = 95;
 /// A reserva que o Claude Code deixa antes do fim da janela (a janela de auto-compact menos isto é o ponto em que ele
@@ -255,17 +255,20 @@ fn claude_native_auto_for(db: &DbConnection, row: &store::ThreadRow) -> bool {
     claude_native_auto_on(std::fs::read_to_string(path).ok().as_deref(), env_disabled)
 }
 
-/// A janela de auto-compact que a ADE passa ao Claude Code da conversa quando a pessoa escolheu um limiar em % para
-/// ele (e o autocompact está ligado). `None` = não mexer: o padrão do Claude (≈ o mesmo limiar padrão), ou os tokens que
+/// O limiar em % que a ADE passa ao Claude Code: o escolhido pela pessoa ou o padrão (50%). `None` com o autocompact
+/// desligado (global ou do agente): aí a ADE não mexe no limite do Claude.
+pub fn claude_launch_pct(cfg: &Config) -> Option<u8> {
+    cfg.enabled_for("claude-code").then(|| cfg.effective_pct("claude-code"))
+}
+
+/// A janela de auto-compact que a ADE passa ao Claude Code da conversa quando o autocompact está ligado (limiar
+/// escolhido ou o padrão de 50%). `None` = não mexer: autocompact desligado, ou os tokens que
 /// a pessoa fixou em `chat.claude_auto_compact_windows`, que continuam valendo antes. Também `None` quando a janela do
 /// modelo não é conhecida (sem `[1m]` no modelo e sem um `result` anterior com a janela): converter % em tokens com a
 /// janela errada faria o Claude compactar cedo demais.
 pub fn claude_launch_window(db: &DbConnection, row: &store::ThreadRow) -> Option<u32> {
     let cfg = config(db);
-    if !cfg.enabled_for("claude-code") {
-        return None;
-    }
-    let pct = cfg.explicit_pct("claude-code")?;
+    let pct = claude_launch_pct(&cfg)?;
     let known = db
         .lock()
         .ok()

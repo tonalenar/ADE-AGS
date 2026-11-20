@@ -9,11 +9,18 @@ A §2.3 do `AGENTS.md` dizia "Só o usuário … faz purge/compact". Ela vem da 
 
 Por isso o `AGENTS.md` passou a distinguir os dois: purge/compact **da memória** é só do usuário; a compactação **de contexto** acontece só quando o usuário a deixou ligada, e o agente nunca a liga nem muda o limiar por conta própria (a configuração só se altera pela tela).
 
+## Padrão de 50% (decisão do usuário, 19/11/2026)
+O usuário pediu que o limiar padrão passasse de ~83% para **50%**, e que o padrão valesse **também para o Claude Code**. Antes, sem um % escolhido, a ADE não passava limite ao Claude, que usa o dele e numa janela de 1M só compacta bem acima de 83%.
+- `DEFAULT_PCT` = 50 no Rust (`conversa/autocompact.rs`) e no front (`autocompact/model.ts`); a marca do medidor de contexto usa o mesmo valor.
+- Claude Code (conversa estruturada): `claude_launch_pct` devolve o % escolhido ou o padrão quando o autocompact está ligado; o limite chega por `autoCompactWindow`, só se a janela do modelo é conhecida (`[1m]` ou `result` anterior). Sem janela conhecida, a ADE não mexe. Os tokens fixados em Compactação automática do Claude Code continuam valendo primeiro.
+- Codex: usa o padrão pelo caminho que já existia (a ADE pede `thread/compact/start` ao fim do turno). Terminais (PTY): continuam sem digitação da ADE; o env `CLAUDE_CODE_AUTO_COMPACT_WINDOW` do PTY só vem dos tokens fixados pela pessoa (a janela do modelo não é conhecida ali).
+- A pessoa continua podendo mudar o limiar e ligar/desligar em Configurações → Chat → Autocompact de contexto. Nenhum agente altera isso, e a ADE nunca digita `/compact` num terminal.
+
 ## Como funciona (modelo do T3 Code e do Claude Code)
 - **Medida:** tokens usados ÷ janela do modelo, lidos dos eventos de uso de cada agente.
-- **Limiar:** padrão de 83% da janela, o ponto em que o Claude Code compacta sozinho numa janela de 200k (200k − 33k de reserva = 83,5%). Configurável de 50% a 95% por agente.
+- **Limiar:** padrão de **50%** da janela (ver «Padrão de 50%» abaixo). Configurável de 50% a 95% por agente.
 - **Quando:** só ao **fim do turno**. Nunca no meio de um turno, nunca com pedido (aprovação, pergunta) pendente, e a mesma ponta de contexto só é tentada uma vez. A medida de antes da última compactação não dispara de novo.
-- **Quem compacta:** o comando **nativo** do agente. Se o agente já compacta sozinho (Claude Code), a ADE **não duplica**: garante o limite da sessão (a janela de auto-compact calculada do limiar, só quando a pessoa escolheu um % e a janela do modelo é conhecida) e reflete os eventos dele. Se a flag de auto-compact dele estiver desligada (`autoCompactEnabled: false` no `.claude.json` ou `DISABLE_AUTO_COMPACT` no ambiente), a ADE assume e manda o `/compact`.
+- **Quem compacta:** o comando **nativo** do agente. Se o agente já compacta sozinho (Claude Code), a ADE **não duplica**: garante o limite da sessão (a janela de auto-compact calculada do limiar, escolhido ou padrão, quando o autocompact está ligado e a janela do modelo é conhecida) e reflete os eventos dele. Se a flag de auto-compact dele estiver desligada (`autoCompactEnabled: false` no `.claude.json` ou `DISABLE_AUTO_COMPACT` no ambiente), a ADE assume e manda o `/compact`.
 - **Na linha do tempo:** "Compactando contexto…" enquanto roda e "Contexto compactado 182k → 42k tokens" no fim (só o "antes" quando o agente não informa o "depois"), com o gatilho (pelo agente, a seu pedido, autocompact da ADE). O composer ganha o medidor de contexto, com a marca do limiar.
 - **Mensagens durante a compactação** vão para a fila do composer (e `Busy` para o envio direto e a fila entre agentes) e saem quando o aviso fecha.
 - **Agente sem medida de contexto ou sem compactação pelo protocolo** fica desligado, com o motivo na tela. Nada é inventado.

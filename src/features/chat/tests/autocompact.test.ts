@@ -11,7 +11,11 @@ const compaction = (status: TimelineItem["status"], at: number, extra: Partial<T
   ({ kind: "notice", id: "n:compaction:1", label: "compaction", status, text: "auto", at, ...extra });
 
 describe("configuração do autocompact", () => {
-  it("nasce ligado, com o limiar padrão do Claude Code", () => {
+  it("o limiar padrão é 50% (decisão do usuário, 19/11/2026)", () => {
+    expect(DEFAULT_PCT).toBe(50);
+  });
+
+  it("nasce ligado, com o limiar padrão", () => {
     const cfg = parseAutoCompactConfig(null);
     expect(cfg.enabled).toBe(true);
     expect(autoCompactEnabledFor(cfg, "codex")).toBe(true);
