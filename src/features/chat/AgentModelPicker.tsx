@@ -4,7 +4,9 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { agentIcon } from "@/features/agents/agentIcons";
+import { PanelBoundary } from "@/app/PanelBoundary";
 import { AccountBadge } from "@/features/accounts/AccountBadge";
+import { AddAccountDialog } from "@/features/accounts/AddAccountDialog";
 import { accountRefFromWire, accountRefToWire, sameAccountRef, selectedAccountId, type AccountRef } from "@/features/accounts/accountRef";
 import { poolValue, usePools } from "@/features/accounts/pools";
 import { useAccountsStore } from "@/features/accounts/store";
@@ -18,7 +20,7 @@ import type { AgentInfo } from "@/features/tabs/types";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { matrixProviderForAgent, readHarnessCapability, useHarnessCapability, type HarnessSurface } from "./harnessCapabilities";
 
-import { CheckIcon, SearchIcon, StarIcon, ZapIcon } from "./chatIcons";
+import { CheckIcon, PlusIcon, SearchIcon, StarIcon, ZapIcon } from "./chatIcons";
 import { AccessMenu } from "./AccessMenu";
 import { reasoningEffortSupported, type ChatAccess, type ProviderRuntimeConfig } from "./chatModel";
 import { usePopover } from "./usePopover";
@@ -231,6 +233,10 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   const pools = usePools(tabAgent?.id ?? null);
   const accountsLoaded = useAccountsStore((s) => s.loaded);
   const createdAccounts = useAccountsStore((s) => s.accounts);
+  const capableAgents = useAccountsStore((s) => s.capable);
+  // O agente para o qual o diálogo de nova conta está aberto. Fica aqui, e não dentro do popover, para
+  // o login continuar vivo quando o seletor fecha.
+  const [addingFor, setAddingFor] = useState<string | null>(null);
   const systemAccounts = useAccountsStore((s) => s.systemAccounts);
   // Nome de exibição e cor das contas vêm da loja de contas; o roster só sabe quais existem e se têm login.
   useEffect(() => {
@@ -452,6 +458,8 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
 
   // Exatamente um item do trilho entra na ordem de tabulação: o da chave atual, ou (se a chave é um
   // pool ou uma conta que sumiu) o primeiro do agente.
+  // Nova conta: só numa aba de agente que aceita várias contas e onde a conta pode ser escolhida aqui.
+  const canAddAccount = showAccount && tab !== RAIL_FAVORITES && !!tabAgent && capableAgents.some((c) => c.agentId === tabAgent.id);
   const railKeys = [RAIL_FAVORITES, ...rail.map((item) => item.key)];
   const railFocusKey = railKeys.includes(railKey) ? railKey : rail.find((item) => item.agentId === tab)?.key ?? RAIL_FAVORITES;
 
@@ -475,8 +483,9 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
             overflow-hidden bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
             shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_20px_52px_-20px_rgba(0,0,0,0.55)]`}>
           <div className={`flex flex-1 min-h-0 ${hasFooter ? "rounded-t-lg" : "rounded-lg"} overflow-hidden`}>
+          <div className="w-14 shrink-0 flex flex-col bg-gray-50/60 dark:bg-white/[0.01]">
           <div role="tablist" aria-label={t("chat.picker.agents")} onKeyDown={onAgentTabKeyDown}
-            className="w-14 shrink-0 flex flex-col items-center gap-1.5 p-2 cc-scroll-hidden bg-gray-50/60 dark:bg-white/[0.01]">
+            className="flex-1 min-h-0 flex flex-col items-center gap-1.5 p-2 cc-scroll-hidden">
             <RailButton value={RAIL_FAVORITES} tabIndex={railFocusKey === RAIL_FAVORITES ? 0 : -1} label={t("chat.picker.favorites")} on={tab === RAIL_FAVORITES} onClick={() => setRailKey(RAIL_FAVORITES)}>
               <StarIcon filled className="w-5 h-5 text-amber-500" />
             </RailButton>
@@ -506,6 +515,16 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                 </RailButton>
               );
             })}
+          </div>
+          {canAddAccount && tabAgent && (
+            <div className="shrink-0 flex justify-center pb-2">
+              <button type="button" onClick={() => { setAddingFor(tabAgent.id); setOpen(false); }}
+                aria-label={t("chat.picker.addAccount", { agent: tabAgent.label })} title={t("chat.picker.addAccount", { agent: tabAgent.label })}
+                className="w-9 h-9 flex items-center justify-center rounded-md border border-dashed border-gray-300 dark:border-white/20 text-gray-500 dark:text-white/45 hover:bg-gray-200/50 dark:hover:bg-white/10 hover:text-gray-800 dark:hover:text-white">
+                <PlusIcon className="w-4 h-4" />
+              </button>
+            </div>
+          )}
           </div>
 
           <div className="flex-1 min-w-0 flex flex-col border-l border-gray-200 dark:border-white/[0.08] bg-gray-50/80 dark:bg-white/[0.01]">
@@ -684,6 +703,11 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
           )}
         </div>,
         document.body,
+      )}
+      {addingFor && (
+        <PanelBoundary name="adicionar-conta-seletor">
+          <AddAccountDialog agentId={addingFor} onClose={() => setAddingFor(null)} />
+        </PanelBoundary>
       )}
     </div>
   );
