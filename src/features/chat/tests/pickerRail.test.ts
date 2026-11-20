@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { accountRefFromWire, principalRef } from "@/features/accounts/accountRef";
 import { buildRail, parseRailKey, railKeyOf } from "@/features/chat/pickerRail";
 import type { AgentAccount } from "@/features/accounts/types";
 import type { Roster, RosterAccount } from "@/features/runs/types";
@@ -21,16 +22,16 @@ const identity = (id: string, agentId: string, name: string, over: Partial<Agent
 const AGENTS = [{ id: "claude-code", label: "Claude Code" }, { id: "codex", label: "Codex" }];
 
 describe("chave do trilho", () => {
-  it("sem conta a chave é o id do agente; com conta, agente e conta", () => {
-    expect(railKeyOf("claude-code", null)).toBe("claude-code");
-    expect(railKeyOf("claude-code", "abc")).toBe("claude-code::abc");
-    expect(railKeyOf("claude-code", "pool:time")).toBe("claude-code::pool:time");
+  it("sem conta a chave é o id do agente; com conta ou pool, agente e escolha", () => {
+    expect(railKeyOf(principalRef("claude-code"))).toBe("claude-code");
+    expect(railKeyOf(accountRefFromWire("claude-code", "abc"))).toBe("claude-code::abc");
+    expect(railKeyOf(accountRefFromWire("claude-code", "pool:time"))).toBe("claude-code::pool:time");
   });
-  it("lê de volta o que escreveu", () => {
-    expect(parseRailKey("fav")).toEqual({ tab: "fav", account: null });
-    expect(parseRailKey("codex")).toEqual({ tab: "codex", account: null });
-    expect(parseRailKey("claude-code::abc")).toEqual({ tab: "claude-code", account: "abc" });
-    expect(parseRailKey("claude-code::pool:time")).toEqual({ tab: "claude-code", account: "pool:time" });
+  it("lê de volta o que escreveu, como AccountRef", () => {
+    expect(parseRailKey("fav")).toEqual({ tab: "fav", ref: null });
+    expect(parseRailKey("codex")).toEqual({ tab: "codex", ref: principalRef("codex") });
+    expect(parseRailKey("claude-code::abc")).toEqual({ tab: "claude-code", ref: accountRefFromWire("claude-code", "abc") });
+    expect(parseRailKey("claude-code::pool:time")).toEqual({ tab: "claude-code", ref: { kind: "pool", agentId: "claude-code", pool: "time" } });
   });
 });
 
