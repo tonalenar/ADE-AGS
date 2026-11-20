@@ -16,6 +16,8 @@ interface AccountsState {
   health: Record<string, AccountHealth | "checking">;
   checkHealth: (accountId: string) => Promise<AccountHealth>;
   remove: (id: string, deleteFiles: boolean) => Promise<void>;
+  /** Nome de exibição e cor do selo; recarrega a lista para todos os lugares verem. */
+  setIdentity: (accountId: string, displayName: string | null, accentColor: string | null) => Promise<void>;
 }
 
 export const useAccountsStore = create<AccountsState>()((set, get) => ({
@@ -62,6 +64,11 @@ export const useAccountsStore = create<AccountsState>()((set, get) => ({
 
   remove: async (id, deleteFiles) => {
     await ipc.deleteAccount(id, deleteFiles);
+    await get().load();
+  },
+
+  setIdentity: async (accountId, displayName, accentColor) => {
+    await ipc.accountIdentitySet(accountId, displayName, accentColor);
     await get().load();
   },
 }));

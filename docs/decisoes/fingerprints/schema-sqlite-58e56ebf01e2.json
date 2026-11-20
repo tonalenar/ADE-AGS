@@ -1,0 +1,10 @@
+{
+  "alvo": "schema-sqlite",
+  "sha256": "58e56ebf01e290e1f1939f22eeda5466e7a0b528ab8a3db4ec05e9e117f55b90",
+  "data": "2026-11-19",
+  "motivo": "colunas display_name e accent_color em agent_accounts, aditivas (padrão NULL) com has_column",
+  "semPerdaDeDados": true,
+  "arquivos": [
+    "src-tauri/src/database/schema.rs"
+  ]
+}

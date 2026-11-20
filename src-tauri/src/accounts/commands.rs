@@ -172,6 +172,8 @@ pub async fn create_agent_account(
             kind: AccountKind::Login,
             base_url: None,
             key_hint: None,
+            display_name: None,
+            accent_color: None,
         })
         .ok_or_else(|| "No se pudo leer la cuenta recién creada".to_string())
     })
@@ -267,6 +269,8 @@ pub async fn create_agent_api_key_account(
         kind: AccountKind::ApiKey,
         base_url,
         key_hint: Some(hint),
+        display_name: None,
+        accent_color: None,
     })
     .ok_or_else(|| "No se pudo leer la cuenta recién creada".to_string())
 }
@@ -335,11 +339,39 @@ pub async fn system_accounts(
             .collect();
         if let Ok(conn) = db.lock() {
             label_from_identity(&conn, &mut accounts);
+            for account in accounts.iter_mut() {
+                let identity = super::identity::load_system_identity(&conn, &account.agent_id);
+                account.display_name = identity.display_name;
+                account.accent_color = identity.accent_color;
+            }
         }
         accounts
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// Muda o nome que a pessoa vê e a cor do selo de uma conta, inclusive a principal
+/// (`system:<agente>`). Texto vazio volta ao padrão. Não mexe na pasta nem no login.
+#[tauri::command]
+pub async fn account_identity_set(
+    account_id: String,
+    display_name: Option<String>,
+    accent_color: Option<String>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<super::identity::AccountIdentity, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        super::identity::set_identity(
+            &conn,
+            &account_id,
+            display_name.as_deref(),
+            accent_color.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Las cuentas cuya TUI no deja el mail en un archivo legible (Codex) muestran el de la
@@ -373,5 +405,8 @@ pub fn system_account(agent_id: &str) -> Option<AgentAccount> {
         kind: AccountKind::Login,
         base_url: None,
         key_hint: None,
+        // A identidade da conta principal vem da configuração (ver `system_accounts`).
+        display_name: None,
+        accent_color: None,
     })
 }

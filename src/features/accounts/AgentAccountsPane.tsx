@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  AddIcon, Avatar, Badge, Button, EmptyState, InfoIcon, Input, Tooltip, TrashIcon, UserIcon,
+  AddIcon, Badge, Button, EditIcon, EmptyState, InfoIcon, Input, Tooltip, TrashIcon, UserIcon,
 } from "neogestify-ui-components";
 
 import { accountFormMode } from "@/features/agents/accountConnect";
@@ -11,6 +11,9 @@ import type {
 } from "@/features/accounts/types";
 import { accountLimitsGet, accountLimitsSet, accountUsageSummary } from "@/features/accounts/ipc";
 import { loadLimitsFor, loadLimitsTolerant, parseLimitsForm, type LimitsLoad } from "@/features/accounts/limits";
+import { AccountBadge } from "@/features/accounts/AccountBadge";
+import { AccountIdentityDialog } from "@/features/accounts/AccountIdentityDialog";
+import { accountDisplayLabel } from "@/features/accounts/accountIdentity";
 import { AddAccountDialog } from "@/features/accounts/AddAccountDialog";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
 import { AppDialog } from "@/shared/ui/AppDialog";
@@ -173,40 +176,46 @@ function LimitsDialog({ account, onClose, onSaved }: {
   );
 }
 
-function AccountRow({ account, usage, limits, onLogin, onDelete, onLimits }: {
+function AccountRow({ account, usage, limits, onLogin, onDelete, onLimits, onIdentity }: {
   account: AgentAccount;
   usage?: AccountUsageSummary;
   limits?: AccountLimits;
   onLogin: () => void;
   onDelete?: () => void;
   onLimits: () => void;
+  onIdentity: () => void;
 }) {
   const { t } = useTranslation();
   const checkHealth = useAccountsStore((s) => s.checkHealth);
   const checking = useAccountsStore((s) => s.health[account.id] === "checking");
   const byKey = account.kind === "api_key";
+  const title = accountDisplayLabel(account, t("accounts.principalName"));
 
   return (
     <div className="cc-t group flex items-center gap-3 px-3 min-h-12 py-1.5 rounded-lg
       bg-white dark:bg-white/4
       hover:bg-gray-50 dark:hover:bg-white/6">
 
-      {/* Iniciales en vez del logo de la TUI: en una lista de cuentas del MISMO servicio,
-          repetir su logo en cada fila no distingue nada. El nombre sí — y de paso el
-          Avatar deriva de él un color estable por cuenta. El punto de estado dice si
-          tiene sesión iniciada. */}
-      <Avatar
-        name={account.name}
-        size="sm"
-        shape="square"
-        status={account.loggedIn ? "online" : "offline"}
-      />
+      {/* Selo de iniciais em vez do logo da TUI: numa lista de contas do MESMO serviço,
+          repetir o logo em cada linha não distingue nada. Cor e nome são da pessoa (ver
+          `AccountIdentityDialog`). O ponto de estado diz se há sessão iniciada. */}
+      <span className="relative shrink-0">
+        <AccountBadge label={title} accentColor={account.accentColor} size="md" />
+        <span
+          aria-hidden
+          className={`absolute -right-0.5 -bottom-0.5 w-2 h-2 rounded-full border border-white dark:border-surface
+            ${account.loggedIn ? "bg-emerald-500" : "bg-gray-400"}`}
+        />
+      </span>
 
       <div className="flex flex-col gap-0.5 min-w-0 flex-1">
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="truncate text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">
-            {account.name}
+            {title}
           </span>
+          {title !== account.name && !account.id.startsWith("system:") && (
+            <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35">{account.name}</span>
+          )}
           {byKey && (
             <Badge variant="info" size="sm" className="shrink-0">
               {t("settings.accounts.add.mode.apiKey")}
@@ -246,6 +255,18 @@ function AccountRow({ account, usage, limits, onLogin, onDelete, onLimits }: {
         <Button variant="outline" size="sm" onClick={onLimits}>
           {t("settings.accounts.limits.btn")}
         </Button>
+        <Tooltip content={t("settings.accounts.identity.btn")} placement="bottom">
+          <Button variant="icon"
+            onClick={onIdentity}
+            aria-label={t("settings.accounts.identity.btn")}
+            className="cc-t flex items-center justify-center w-7 h-7 rounded-md shrink-0
+              text-gray-400 dark:text-white/35
+              hover:text-gray-700 dark:hover:text-white
+              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
+          >
+            <EditIcon className="w-3.5 h-3.5" />
+          </Button>
+        </Tooltip>
         {/* Una cuenta por API key no tiene login que rehacer: se cambia la key creando
             otra cuenta. */}
         {!byKey && <Button
@@ -287,6 +308,7 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
   // Um segundo clique em "Remover" enquanto o primeiro ainda corre não pode disparar outra remoção.
   const removing = useRef(false);
   const [limitsFor, setLimitsFor] = useState<AgentAccount | null>(null);
+  const [identityFor, setIdentityFor] = useState<AgentAccount | null>(null);
   const [error, setError] = useState("");
 
   const rows = useMemo(
@@ -369,6 +391,7 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
             limits={limits[account.id]}
             onLogin={() => setLoginFor(account)}
             onLimits={() => setLimitsFor(account)}
+            onIdentity={() => setIdentityFor(account)}
           />
         ))}
         {rows.length === 0 ? (
@@ -398,6 +421,7 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
               onLogin={() => setLoginFor(account)}
               onDelete={() => setDeleting(account)}
               onLimits={() => setLimitsFor(account)}
+              onIdentity={() => setIdentityFor(account)}
             />
           ))
         )}
@@ -410,6 +434,10 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
           onClose={() => setLimitsFor(null)}
           onSaved={(next) => setLimits((prev) => ({ ...prev, [limitsFor.id]: next }))}
         />
+      )}
+
+      {identityFor && (
+        <AccountIdentityDialog account={identityFor} onClose={() => setIdentityFor(null)} />
       )}
 
       {error && (

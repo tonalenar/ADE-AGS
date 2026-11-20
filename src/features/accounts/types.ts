@@ -20,6 +20,16 @@ export interface AgentAccount {
   baseUrl: string | null;
   /** Los últimos caracteres de la key, para reconocerla. Nunca la key. */
   keyHint: string | null;
+  /** Nome que a pessoa vê (o `name` é o da pasta). `null` = o padrão. Opcional: respostas antigas não o trazem. */
+  displayName?: string | null;
+  /** Nome de um token da paleta (`green`…), nunca um hex. Ver `accountIdentity.ts`. */
+  accentColor?: string | null;
+}
+
+/** Ver `accounts::identity::AccountIdentity`. */
+export interface AccountIdentity {
+  displayName: string | null;
+  accentColor: string | null;
 }
 
 /** Ver `accounts::health::AccountHealth`. */

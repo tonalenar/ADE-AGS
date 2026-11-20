@@ -659,3 +659,137 @@ fn a_frota_nao_oferece_contas_do_antigravity() {
     assert!(!caps.accounts);
     assert!(caps.headless);
 }
+
+// ── Identidade visual da conta (nome de exibição e cor) ──────────
+
+fn banco_com_conta() -> crate::database::DbConnection {
+    let db: crate::database::DbConnection =
+        std::sync::Arc::new(std::sync::Mutex::new(crate::database::test_db()));
+    db.lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at) VALUES ('a1', 'claude-code', 'trabalho', '/nao/existe', 0)",
+            [],
+        )
+        .unwrap();
+    db
+}
+
+#[test]
+fn nome_de_exibicao_e_aparado_e_vazio_limpa() {
+    use super::identity::normalize_display_name;
+    assert_eq!(normalize_display_name(Some("  Pessoal  ")).unwrap().as_deref(), Some("Pessoal"));
+    assert_eq!(normalize_display_name(Some("   ")).unwrap(), None);
+    assert_eq!(normalize_display_name(None).unwrap(), None);
+    // Aceita acento e espaço: não é o nome da pasta.
+    assert!(normalize_display_name(Some("Conta do João (trabalho)")).is_ok());
+}
+
+#[test]
+fn nome_de_exibicao_recusa_longo_e_caractere_de_controle() {
+    use super::identity::normalize_display_name;
+    assert!(normalize_display_name(Some(&"a".repeat(41))).is_err());
+    assert!(normalize_display_name(Some("a\nb")).is_err());
+    assert!(normalize_display_name(Some("a\u{0}b")).is_err());
+}
+
+#[test]
+fn a_cor_so_aceita_nome_de_token_da_paleta() {
+    use super::identity::normalize_accent;
+    assert_eq!(normalize_accent(Some(" green ")).unwrap().as_deref(), Some("green"));
+    assert_eq!(normalize_accent(Some("")).unwrap(), None);
+    assert_eq!(normalize_accent(None).unwrap(), None);
+    for ruim in ["#ff0000", "ff0000", "var(--color-red-500)", "chartreuse", "RED"] {
+        assert!(normalize_accent(Some(ruim)).is_err(), "deveria recusar {ruim:?}");
+    }
+}
+
+#[test]
+fn renomear_e_colorir_uma_conta_nao_mexe_no_nome_da_pasta() {
+    use super::identity::set_identity;
+    let db = banco_com_conta();
+    let conn = db.lock().unwrap();
+    let id = set_identity(&conn, "a1", Some("Trabalho"), Some("orange")).unwrap();
+    assert_eq!(id.display_name.as_deref(), Some("Trabalho"));
+    assert_eq!(id.accent_color.as_deref(), Some("orange"));
+    let (name, dir, display, accent): (String, String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT name, dir, display_name, accent_color FROM agent_accounts WHERE id = 'a1'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!((name.as_str(), dir.as_str()), ("trabalho", "/nao/existe"));
+    assert_eq!(display.as_deref(), Some("Trabalho"));
+    assert_eq!(accent.as_deref(), Some("orange"));
+    // Limpar volta ao padrão (NULL), sem apagar a conta.
+    set_identity(&conn, "a1", None, None).unwrap();
+    let nulos: (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT display_name, accent_color FROM agent_accounts WHERE id = 'a1'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(nulos, (None, None));
+}
+
+#[test]
+fn identidade_de_conta_inexistente_e_erro() {
+    use super::identity::set_identity;
+    let db = banco_com_conta();
+    let conn = db.lock().unwrap();
+    assert!(set_identity(&conn, "nao-existe", Some("X"), None).is_err());
+}
+
+#[test]
+fn a_conta_principal_guarda_a_identidade_em_configuracao_sem_criar_linha() {
+    use super::identity::{load_system_identity, set_identity};
+    let db = banco_com_conta();
+    let conn = db.lock().unwrap();
+    let antes: i64 = conn.query_row("SELECT COUNT(*) FROM agent_accounts", [], |r| r.get(0)).unwrap();
+    assert_eq!(load_system_identity(&conn, "claude-code").display_name, None);
+    set_identity(&conn, "system:claude-code", Some("Principal"), Some("blue")).unwrap();
+    let lida = load_system_identity(&conn, "claude-code");
+    assert_eq!(lida.display_name.as_deref(), Some("Principal"));
+    assert_eq!(lida.accent_color.as_deref(), Some("blue"));
+    // Outro agente não herda.
+    assert_eq!(load_system_identity(&conn, "codex").display_name, None);
+    let depois: i64 = conn.query_row("SELECT COUNT(*) FROM agent_accounts", [], |r| r.get(0)).unwrap();
+    assert_eq!(antes, depois, "a conta principal não vira linha da tabela");
+    set_identity(&conn, "system:claude-code", None, None).unwrap();
+    assert_eq!(load_system_identity(&conn, "claude-code").display_name, None);
+}
+
+#[test]
+fn identidade_da_conta_principal_de_agente_sem_perfil_e_erro() {
+    use super::identity::set_identity;
+    let db = banco_com_conta();
+    let conn = db.lock().unwrap();
+    assert!(set_identity(&conn, "system:gemini-cli", Some("X"), None).is_err());
+}
+
+#[test]
+fn identidade_corrompida_na_configuracao_vira_padrao() {
+    use super::identity::{load_system_identity, system_identity_key};
+    let db = banco_com_conta();
+    let conn = db.lock().unwrap();
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, 'lixo{')",
+        [system_identity_key("claude-code")],
+    )
+    .unwrap();
+    let id = load_system_identity(&conn, "claude-code");
+    assert_eq!((id.display_name, id.accent_color), (None, None));
+}
+
+#[test]
+fn a_lista_de_contas_traz_a_identidade() {
+    use super::identity::set_identity;
+    let db = banco_com_conta();
+    set_identity(&db.lock().unwrap(), "a1", Some("Trabalho"), Some("cyan")).unwrap();
+    let contas = super::commands::list_accounts(&db).unwrap();
+    assert_eq!(contas.len(), 1);
+    assert_eq!(contas[0].display_name.as_deref(), Some("Trabalho"));
+    assert_eq!(contas[0].accent_color.as_deref(), Some("cyan"));
+}

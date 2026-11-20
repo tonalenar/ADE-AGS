@@ -9,6 +9,7 @@ import { useAccountsStore } from "@/features/accounts/store";
 import { useTabsStore } from "@/features/tabs/store";
 import type { AgentAccount } from "@/features/accounts/types";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
+import { AccountColorPicker } from "@/features/accounts/AccountColorPicker";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { PanelBoundary } from "@/app/PanelBoundary";
@@ -42,7 +43,10 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
   const create = useAccountsStore((s) => s.create);
   const createWithApiKey = useAccountsStore((s) => s.createWithApiKey);
   const checkHealth = useAccountsStore((s) => s.checkHealth);
+  const setIdentity = useAccountsStore((s) => s.setIdentity);
   const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [color, setColor] = useState<string | null>(null);
   const [mode, setMode] = useState<"login" | "api_key">(initialMode);
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -60,19 +64,33 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
   const usingKey = showKey && (form === "api-key" || mode === "api_key");
   const canCreate = !!agent && form !== "blocked" && !!name.trim() && !taken && (!usingKey || apiKey.trim().length > 0);
 
+  // Nome de exibição e cor são opcionais e só enfeite: se gravar falhar, a conta já existe e
+  // dá para personalizá-la depois, então o erro não trava o fluxo.
+  const applyIdentity = async (accountId: string) => {
+    if (!displayName.trim() && !color) return;
+    try {
+      await setIdentity(accountId, displayName.trim() || null, color);
+    } catch {
+      // Ver acima.
+    }
+  };
+
   const handleCreate = async () => {
     setBusy(true);
     setError("");
     try {
       if (usingKey) {
         const account = await createWithApiKey(agentId, name.trim(), apiKey.trim(), baseUrl.trim() || null);
+        await applyIdentity(account.id);
         // La lista ya la muestra; la verificación corre en segundo plano y su resultado
         // aparece en la fila (ver `AgentAccountsPane`).
         void checkHealth(account.id);
         onClose();
         return;
       }
-      setCreated(await create(agentId, name.trim()));
+      const account = await create(agentId, name.trim());
+      await applyIdentity(account.id);
+      setCreated(account);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -181,6 +199,20 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
             error={taken ? t("settings.accounts.add.taken") : undefined}
             helperText={t("settings.accounts.add.nameHelper", { envVar: agent.envVar })}
           />
+
+          <Input
+            label={t("settings.accounts.add.displayName")}
+            value={displayName}
+            maxLength={40}
+            onChange={(e) => setDisplayName(e.target.value)}
+            variant="outline"
+          />
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-gray-700 dark:text-gray-300">
+              {t("settings.accounts.add.color")}
+            </span>
+            <AccountColorPicker value={color} onChange={setColor} label={t("settings.accounts.add.color")} />
+          </div>
 
           {showKey && showLogin && (
             <div className="flex gap-1.5" role="radiogroup">
