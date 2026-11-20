@@ -148,3 +148,49 @@ fn o_protocolo_asset_e_a_csp_permitem_reproduzir_videos_locais() {
         assert!(csp.contains("http://asset.localhost"), "{directive} deve liberar http://asset.localhost");
     }
 }
+
+/// O escopo REAL do `tauri.conf.json`, aplicado pelo mesmo `Scope` que o protocolo `asset` do Tauri usa, libera
+/// as extensões de vídeo em qualquer caixa (`.MP4` das gravações do iPhone, `.MOV`) e nunca o resto.
+#[test]
+fn o_escopo_asset_do_conf_libera_videos_em_qualquer_caixa_e_so_videos() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let conf: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("tauri.conf.json")).unwrap()).unwrap();
+    let escopo = &conf["app"]["security"]["assetProtocol"]["scope"];
+    let lista = |chave: &str| -> Vec<std::path::PathBuf> {
+        escopo[chave].as_array().unwrap().iter().map(|v| std::path::PathBuf::from(v.as_str().unwrap())).collect()
+    };
+    let fs_scope = tauri::utils::config::FsScope::Scope {
+        allow: lista("allow"),
+        deny: lista("deny"),
+        require_literal_leading_dot: escopo["requireLiteralLeadingDot"].as_bool(),
+    };
+    let app = tauri::test::mock_app();
+    let scope = tauri::scope::fs::Scope::new(&app, &fs_scope).unwrap();
+
+    let base = std::env::temp_dir().join(format!("ade-escopo-asset-{}", std::process::id()));
+    let criar = |rel: &str| {
+        let p = base.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, b"x").unwrap();
+        p
+    };
+    for rel in [
+        "Downloads/ScreenRecording_11-18-2026 14-04-11_1.MP4",
+        "Movies/ADE AGS/gravacao.mp4",
+        "Movies/ADE AGS/tela.mov",
+        ".t3/anexos/clipe.webm",
+        "x/Clipe.Mov",
+        "x/Clipe.M4V",
+        "x/Clipe.mp4",
+        "x/clipe.m4v",
+    ] {
+        let p = criar(rel);
+        assert!(scope.is_allowed(&p), "{rel} deveria estar no escopo do protocolo asset");
+    }
+    for rel in ["x/senha.txt", "x/foto.png", "x/segredo.mkv"] {
+        let p = criar(rel);
+        assert!(!scope.is_allowed(&p), "{rel} não pode estar no escopo do protocolo asset");
+    }
+    let _ = std::fs::remove_dir_all(&base);
+}

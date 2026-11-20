@@ -30,6 +30,7 @@ import { DropOverlay } from "../attachments/DropOverlay";
 import { insideCwd } from "../attachments/openAttachment";
 import { messageFor, threadMessage, tuiMessage } from "../attachments/send";
 import { stepIndex } from "../attachments/Lightbox";
+import { VIDEO_RETRY_DELAYS_MS } from "../attachments/useVideoRetry";
 import { useChatFileDrop } from "../attachments/useChatFileDrop";
 import { pathsFromUriList } from "../attachments/useAttachments";
 import { attachmentBlock, type Attachment } from "../attachments/attachModel";
@@ -335,12 +336,49 @@ describe("vídeos no chat e no visualizador", () => {
     expect(dialog()!.querySelector("video")).not.toBeNull();
   });
 
-  it("Lightbox mostra aviso e ação para abrir no app padrão se o vídeo falhar ao carregar", async () => {
-    await act(async () => { root.render(<AttachmentStrip items={[VIDEO]} />); });
-    await click(Array.from(host.querySelectorAll("button")).find((b) => b.getAttribute("aria-label") === 'chat.attach.lightbox.openVideo{"name":"demo.mov"}') ?? null);
-    const player = dialog()!.querySelector("video") as HTMLVideoElement;
-    expect(player).not.toBeNull();
-    await act(async () => { player.dispatchEvent(new Event("error")); });
-    expect(dialog()!.querySelector("[role=alert]")?.textContent).toContain("chat.attach.lightbox.videoError");
+  it("Lightbox tenta carregar de novo antes de desistir e só então mostra o aviso com as ações", async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => { root.render(<AttachmentStrip items={[VIDEO]} />); });
+      await click(Array.from(host.querySelectorAll("button")).find((b) => b.getAttribute("aria-label") === 'chat.attach.lightbox.openVideo{"name":"demo.mov"}') ?? null);
+      const player = () => dialog()!.querySelector("video") as HTMLVideoElement;
+      const first = player();
+      expect(first).not.toBeNull();
+      // Arquivo ainda sendo gravado: a 1ª carga falha, mas o aviso não aparece e o <video> é recriado.
+      await act(async () => { first.dispatchEvent(new Event("error")); });
+      expect(dialog()!.querySelector("[role=alert]")).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(VIDEO_RETRY_DELAYS_MS[0]!); });
+      expect(player()).not.toBe(first);
+      await act(async () => { player().dispatchEvent(new Event("error")); });
+      await act(async () => { vi.advanceTimersByTime(VIDEO_RETRY_DELAYS_MS[1]!); });
+      expect(dialog()!.querySelector("[role=alert]")).toBeNull();
+      // Esgotou as tentativas: aviso com "Tentar de novo" e "Abrir no app padrão".
+      await act(async () => { player().dispatchEvent(new Event("error")); });
+      const alert = dialog()!.querySelector("[role=alert]");
+      expect(alert?.textContent).toContain("chat.attach.lightbox.videoError");
+      expect(alert?.textContent).toContain("chat.attach.lightbox.openDefault");
+      const retry = Array.from(alert!.querySelectorAll("button")).find((b) => b.textContent === "chat.attach.lightbox.videoRetry");
+      expect(retry).toBeDefined();
+      // "Tentar de novo" recria o <video> e some com o aviso; agora ele carrega.
+      await click(retry!);
+      expect(dialog()!.querySelector("[role=alert]")).toBeNull();
+      await act(async () => { player().dispatchEvent(new Event("loadedmetadata")); });
+      expect(dialog()!.querySelector("[role=alert]")).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("a miniatura do vídeo também tenta de novo antes de cair para o nome do arquivo", async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => { root.render(<AttachmentStrip items={[VIDEO]} />); });
+      for (const delay of VIDEO_RETRY_DELAYS_MS) {
+        await act(async () => { host.querySelector("video")!.dispatchEvent(new Event("error")); });
+        expect(host.querySelector("video")).not.toBeNull();
+        await act(async () => { vi.advanceTimersByTime(delay); });
+      }
+      await act(async () => { host.querySelector("video")!.dispatchEvent(new Event("error")); });
+      expect(host.querySelector("video")).toBeNull();
+      expect(host.textContent).toContain("demo.mov");
+    } finally { vi.useRealTimers(); }
   });
 });
