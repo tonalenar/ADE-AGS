@@ -23,7 +23,7 @@ fn gate() -> Gate {
         enabled: true,
         mechanism: Mechanism::AdeCommand,
         native_on: false,
-        threshold_pct: 83,
+        threshold_pct: 83, // limiar explícito do teste, independe do padrão
         usage: Some(usage(170_000, 200_000, 10)),
         last_compaction_at: None,
         working: false,
@@ -386,4 +386,21 @@ fn o_codex_informa_o_contexto_da_ultima_chamada_e_a_janela_do_modelo() {
     assert_eq!((item.context_tokens, item.context_window), (Some(120_000), Some(258_000)));
     let u = usage_of(&item, "codex", None).unwrap();
     assert_eq!(percent(u.used, u.window).map(|p| p.round() as u64), Some(47));
+}
+
+#[test]
+fn o_limiar_padrao_e_50_e_vale_tambem_para_o_claude() {
+    assert_eq!(DEFAULT_PCT, 50);
+    // Sem limiar escolhido, o Claude recebe o padrão; com limiar escolhido, o da pessoa.
+    let cfg = parse_config(None);
+    assert_eq!(claude_launch_pct(&cfg), Some(50));
+    let cfg = parse_config(Some(r#"{"enabled":true,"agents":{"claude-code":{"thresholdPct":70}}}"#));
+    assert_eq!(claude_launch_pct(&cfg), Some(70));
+    // Desligado (global ou do agente): a ADE não mexe no limite do Claude.
+    let cfg = parse_config(Some(r#"{"enabled":false}"#));
+    assert_eq!(claude_launch_pct(&cfg), None);
+    let cfg = parse_config(Some(r#"{"enabled":true,"agents":{"claude-code":{"enabled":false}}}"#));
+    assert_eq!(claude_launch_pct(&cfg), None);
+    // 50% de uma janela de 1M, com a reserva do Claude Code.
+    assert_eq!(claude_window_setting(50, 1_000_000), 533_000);
 }

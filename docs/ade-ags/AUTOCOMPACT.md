@@ -24,10 +24,10 @@ Quando o contexto de uma conversa passa do limiar, ao fim do turno a ADE pede ao
 5. Uma compactação que não termina deixa de segurar a conversa depois de 10 min (`ACTIVE_TTL_MS`).
 
 ## Configuração
-`settings` `chat.autocompact`: `{"enabled":true,"agents":{"codex":{"enabled":true,"thresholdPct":80}}}`. Padrão: ligado, 83%, de 50% a 95%. Só a tela altera. O limite em tokens por perfil do Claude Code (Compactação automática do Claude Code) continua valendo e vence o limiar em %.
+`settings` `chat.autocompact`: `{"enabled":true,"agents":{"codex":{"enabled":true,"thresholdPct":80}}}`. Padrão: ligado, 50% (decisão do usuário em 19/11/2026; antes 83%), de 50% a 95%. Só a tela altera. O limite em tokens por perfil do Claude Code (Compactação automática do Claude Code) continua valendo e vence o limiar em %.
 
 ## Limites conhecidos
 - Medida do Codex precisa do `modelContextWindow` do app-server; sem ele não há medidor nem disparo.
-- O limiar em % vira a janela de auto-compact do Claude Code só quando a janela do modelo é conhecida (`[1m]` no modelo ou um `result` anterior da conversa); senão vale o padrão do Claude (≈ o mesmo 83%).
+- O limiar em % vira a janela de auto-compact do Claude Code só quando a janela do modelo é conhecida (`[1m]` no modelo ou um `result` anterior da conversa); senão vale o padrão do próprio Claude (~83%), porque converter % em tokens com a janela errada o faria compactar cedo demais. O padrão de 50% também é passado ao Claude quando a pessoa não escolheu um %.
 - Terminais: nunca digitados pela ADE (ver a decisão).
 - A tabela da tela não cobre o Gemini CLI na prática (CLI não instalada aqui); ele compacta sozinho (`/compress`).
