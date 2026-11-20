@@ -4,7 +4,9 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { agentIcon } from "@/features/agents/agentIcons";
+import { AccountBadge } from "@/features/accounts/AccountBadge";
 import { poolValue, usePools } from "@/features/accounts/pools";
+import { useAccountsStore } from "@/features/accounts/store";
 import { DEFAULT_EFFORTS } from "@/features/canvas/tabTuning";
 import type { PickDraft } from "@/features/compare/types";
 import { getRoster, refreshRosterModels } from "@/features/runs/ipc";
@@ -18,6 +20,7 @@ import { CheckIcon, SearchIcon, StarIcon, ZapIcon } from "./chatIcons";
 import { AccessMenu } from "./AccessMenu";
 import { reasoningEffortSupported, type ChatAccess, type ProviderRuntimeConfig } from "./chatModel";
 import { usePopover } from "./usePopover";
+import { buildRail, parseRailKey, railKeyOf, RAIL_FAVORITES } from "./pickerRail";
 
 const MAX_COMPARE_PICKS = 6;
 const PICKER_GAP = 8;
@@ -195,7 +198,9 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   const { open, setOpen, ref } = usePopover();
   const [popoverPosition, setPopoverPosition] = useState<PickerPosition | null>(null);
   const { roster, update: updateRoster } = useRoster(true, open);
-  const [tab, setTab] = useState<string | "fav">(value.agentId ?? agents[0]?.id ?? "fav");
+  // O trilho tem um ícone por agente e, havendo mais de uma conta, um por conta: a chave junta os dois.
+  const [railKey, setRailKey] = useState<string>(() => value.agentId ? railKeyOf(value.agentId, showAccount ? value.account || null : null) : agents[0]?.id ?? RAIL_FAVORITES);
+  const { tab, account: railAccount } = parseRailKey(railKey);
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState<string[]>(loadFavorites);
   const [comparePicks, setComparePicks] = useState<PickerComparePick[]>([]);
@@ -204,6 +209,20 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   useHarnessCapability(harnessSurface, matrixProviderForAgent(tabAgent?.id), "start");
   const fastCapability = useHarnessCapability(harnessSurface, matrixProviderForAgent(agent?.id), "fast_mode");
   const pools = usePools(tabAgent?.id ?? null);
+  const accountsLoaded = useAccountsStore((s) => s.loaded);
+  const createdAccounts = useAccountsStore((s) => s.accounts);
+  const systemAccounts = useAccountsStore((s) => s.systemAccounts);
+  // Nome de exibição e cor das contas vêm da loja de contas; o roster só sabe quais existem e se têm login.
+  useEffect(() => {
+    if (!accountsLoaded) useAccountsStore.getState().load().catch(() => undefined);
+  }, [accountsLoaded]);
+  const identities = useMemo(() => [...systemAccounts, ...createdAccounts], [systemAccounts, createdAccounts]);
+  const principalLabel = t("accounts.principalName");
+  const rail = useMemo(() => buildRail(agents, roster, identities, principalLabel, showAccount), [agents, roster, identities, principalLabel, showAccount]);
+  // Na aba de um agente a conta é a do ícone escolhido; nos favoritos, só o agente atual mantém a sua.
+  const accountForAgent = (agentId: string): string | null =>
+    showAccount && tab !== RAIL_FAVORITES && agentId === tab ? railAccount : agentId === value.agentId ? value.account : null;
+  const opencodeAccount = accountForAgent("opencode");
   const current = pickerCatalogOf(roster, agent?.id ?? null, value.account, value.agentId, providerConfig);
   // O modelo salvo pode ser um alias (`opus`): a tela mostra a linha que ele resolve, com o nome e a versão dela.
   const selectedModel = findModel(current, value.model)
@@ -290,13 +309,13 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   useEffect(() => {
     if (!open || tabAgent?.id !== "opencode") return;
     let alive = true;
-    refreshRosterModels("opencode", value.agentId === "opencode" && value.account && !value.account.startsWith("pool:") ? value.account : null)
+    refreshRosterModels("opencode", opencodeAccount && !opencodeAccount.startsWith("pool:") ? opencodeAccount : null)
       .then((next) => { if (alive) updateRoster(next); })
       .catch(() => undefined);
     return () => { alive = false; };
-  }, [open, tabAgent?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir ou trocar de aba
+  }, [open, tabAgent?.id, opencodeAccount]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir ou trocar de aba
 
-  useEffect(() => { if (open && agent) setTab(agent.id); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir
+  useEffect(() => { if (open && agent) setRailKey(railKeyOf(agent.id, showAccount ? value.account || null : null)); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir
 
   useEffect(() => {
     if (!open) return;
@@ -318,14 +337,14 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   const rows: Row[] = useMemo(() => {
     const ofAgent = (a: AgentInfo): Row[] => [
       { agent: a, model: null, label: t("chat.model.default") },
-      ...pickerCatalogOf(roster, a.id, a.id === value.agentId ? value.account : null, value.agentId, providerConfig).map((m) => ({ agent: a, model: m.id, label: m.label || m.id })),
+      ...pickerCatalogOf(roster, a.id, accountForAgent(a.id), value.agentId, providerConfig).map((m) => ({ agent: a, model: m.id, label: m.label || m.id })),
     ];
     const base = tab === "fav"
       ? agents.flatMap(ofAgent).filter((r) => r.model && favorites.includes(favKey(r.agent.id, r.model)))
       : tabAgent ? ofAgent(tabAgent) : [];
     const q = query.trim().toLowerCase();
     return q ? base.filter((r) => `${r.label} ${r.model ?? ""}`.toLowerCase().includes(q)) : base;
-  }, [agents, roster, tab, tabAgent, favorites, query, value.agentId, value.account, providerConfig, t]);
+  }, [agents, roster, tab, railAccount, tabAgent, favorites, query, value.agentId, value.account, providerConfig, t]);
 
   const toggleFav = (r: Row) => {
     if (!r.model) return;
@@ -336,7 +355,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   };
 
   const toggleComparePick = (r: Row) => {
-    const account = r.agent.id === value.agentId ? value.account : null;
+    const account = accountForAgent(r.agent.id);
     const catalog = pickerCatalogOf(roster, r.agent.id, account, value.agentId, providerConfig);
     const nextEfforts = effortsOf(r.agent.id, r.model, catalog, value.agentId, providerConfig);
     const effort = r.agent.id === agent?.id && (value.effort === null || nextEfforts.includes(value.effort)) ? value.effort : null;
@@ -362,14 +381,14 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
     const delta = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
     const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
     const focused = (event.target as HTMLElement).closest<HTMLButtonElement>('[role="tab"]');
-    const currentValue = focused?.dataset.tabValue ?? tab;
+    const currentValue = focused?.dataset.tabValue ?? railKey;
     const index = buttons.findIndex((button) => button.dataset.tabValue === currentValue);
     if (index < 0 || buttons.length === 0) return;
     const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : delta ? (index + delta + buttons.length) % buttons.length : -1;
     if (nextIndex < 0) return;
     event.preventDefault();
     const next = buttons[nextIndex];
-    setTab(next.dataset.tabValue ?? "fav");
+    setRailKey(next.dataset.tabValue ?? RAIL_FAVORITES);
     next.focus();
   };
 
@@ -389,6 +408,11 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
     next.focus();
     next.scrollIntoView({ block: "nearest" });
   };
+
+  // Exatamente um item do trilho entra na ordem de tabulação: o da chave atual, ou (se a chave é um
+  // pool ou uma conta que sumiu) o primeiro do agente.
+  const railKeys = [RAIL_FAVORITES, ...rail.map((item) => item.key)];
+  const railFocusKey = railKeys.includes(railKey) ? railKey : rail.find((item) => item.agentId === tab)?.key ?? RAIL_FAVORITES;
 
   if (!agent) return <span className="px-2 text-chat-note text-gray-400 dark:text-white/40">{t("chat.agent.none")}</span>;
   const Icon = agentIcon(agent.id, agent.command);
@@ -412,15 +436,23 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
           <div className={`flex flex-1 min-h-0 ${hasFooter ? "rounded-t-lg" : "rounded-lg"} overflow-hidden`}>
           <div role="tablist" aria-label={t("chat.picker.agents")} onKeyDown={onAgentTabKeyDown}
             className="w-14 shrink-0 flex flex-col items-center gap-1.5 p-2 cc-scroll-hidden bg-gray-50/60 dark:bg-white/[0.01]">
-            <RailButton value="fav" tabIndex={tab === "fav" ? 0 : -1} label={t("chat.picker.favorites")} on={tab === "fav"} onClick={() => setTab("fav")}>
+            <RailButton value={RAIL_FAVORITES} tabIndex={railFocusKey === RAIL_FAVORITES ? 0 : -1} label={t("chat.picker.favorites")} on={tab === RAIL_FAVORITES} onClick={() => setRailKey(RAIL_FAVORITES)}>
               <StarIcon filled className="w-5 h-5 text-amber-500" />
             </RailButton>
             <span aria-hidden="true" className="w-5 h-px my-0.5 bg-gray-200 dark:bg-white/10" />
-            {agents.map((a) => {
-              const AIcon = agentIcon(a.id, a.command);
+            {rail.map((item) => {
+              const info = agents.find((a) => a.id === item.agentId);
+              if (!info) return null;
+              const AIcon = agentIcon(info.id, info.command);
+              // Uma conta sem login não roda: o ícone fica apagado e o nome avisa.
+              const label = item.loggedIn ? item.name : `${item.name} (${t("chat.picker.accountLoggedOut")})`;
               return (
-                <RailButton key={a.id} value={a.id} tabIndex={tab === a.id ? 0 : -1} label={a.label} on={tab === a.id} onClick={() => setTab(a.id)}>
-                  <AIcon className="w-6 h-6" />
+                <RailButton key={item.key} value={item.key} tabIndex={railFocusKey === item.key ? 0 : -1} label={label} on={railKey === item.key} onClick={() => setRailKey(item.key)}>
+                  <AIcon className={`w-6 h-6 ${item.loggedIn ? "" : "opacity-45"}`} />
+                  {item.showBadge && (
+                    <AccountBadge label={item.badgeLabel} accentColor={item.accentColor} size="sm"
+                      className="absolute -right-0.5 -bottom-0.5 ring-1 ring-white dark:ring-surface-raised" />
+                  )}
                 </RailButton>
               );
             })}
@@ -465,7 +497,9 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                 const prevGroup = i > 0 && rows[i - 1].agent.id === "opencode" ? rows[i - 1].model?.split("/")[0] : undefined;
                 const showGroup = !!group && (i === 0 || prevGroup !== group || !rows[i - 1].model?.includes("/"));
                 const RIcon = agentIcon(r.agent.id, r.agent.command);
-                const selected = r.agent.id === agent.id && r.model === (selectedModel?.id ?? value.model);
+                // Na aba de uma conta, o visto só vale se a conta do ícone é a que está em uso.
+                const selected = r.agent.id === agent.id && r.model === (selectedModel?.id ?? value.model)
+                  && (!showAccount || tab === RAIL_FAVORITES || (railAccount ?? null) === (value.account || null));
                 const startAvailability = readHarnessCapability(harnessSurface, matrixProviderForAgent(r.agent.id) ?? "", "start");
                 const fav = !!r.model && favorites.includes(favKey(r.agent.id, r.model));
                 const compareIndex = comparePicks.findIndex((pick) => pick.agentId === r.agent.id && pick.model === r.model);
@@ -481,7 +515,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                           return;
                         }
                         const sameAgent = r.agent.id === value.agentId;
-                        const account = sameAgent ? value.account : null;
+                        const account = accountForAgent(r.agent.id);
                         const providerModelChanged = sameAgent && r.agent.id.startsWith("local-acp-") && value.model !== r.model;
                         const nextCatalog = pickerCatalogOf(roster, r.agent.id, account, value.agentId, providerConfig);
                         const nextEfforts = effortsOf(r.agent.id, r.model, nextCatalog, value.agentId, providerConfig);
@@ -520,7 +554,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
               {tab === "fav" && rows.length === 0 && (
                 <p className="my-6 text-center text-chat-note text-gray-500 dark:text-white/45">{t("chat.picker.noFavorites")}</p>
               )}
-              {roster && tab === "opencode" && !query.trim() && catalogOf(roster, "opencode", value.agentId === "opencode" ? value.account : null).length === 0 && (
+              {roster && tab === "opencode" && !query.trim() && catalogOf(roster, "opencode", opencodeAccount).length === 0 && (
                 <p className="px-2 py-3 text-chat-note text-gray-500 dark:text-white/45">
                   {t("chat.picker.opencodeNone")} <code className="font-mono">opencode auth login</code>
                 </p>
@@ -581,12 +615,16 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
               {showAccount && <>
                 <span>{t("chat.picker.account")}</span>
                 {tabAgent && (
-                  <PopupSelect value={tabAgent.id === value.agentId ? value.account ?? "" : ""} aria-label={t("chat.picker.account")}
-                    onChange={(e) => onChange({ agentId: tabAgent.id, model: tabAgent.id === value.agentId ? value.model : null, effort: tabAgent.id === value.agentId ? value.effort : null, account: e.target.value || null })}
+                  <PopupSelect value={(tab === RAIL_FAVORITES ? (tabAgent.id === value.agentId ? value.account : null) : railAccount) ?? ""} aria-label={t("chat.picker.account")}
+                    onChange={(e) => {
+                      const next = e.target.value || null;
+                      if (tab !== RAIL_FAVORITES) setRailKey(railKeyOf(tabAgent.id, next));
+                      onChange({ agentId: tabAgent.id, model: tabAgent.id === value.agentId ? value.model : null, effort: tabAgent.id === value.agentId ? value.effort : null, account: next });
+                    }}
                     className="max-w-36 text-chat-caption">
-                    <option value="">{t("accounts.system")}</option>
+                    <option value="">{identities.find((i) => i.id === `system:${tabAgent.id}`)?.displayName?.trim() || t("accounts.system")}</option>
                     {(roster?.agents.find((a) => a.agentId === tabAgent.id)?.accounts ?? []).filter((a) => a.accountId !== null).map((a) => (
-                      <option key={a.accountId!} value={a.accountId!}>{a.label ?? a.name}</option>
+                      <option key={a.accountId!} value={a.accountId!}>{identities.find((i) => i.id === a.accountId)?.displayName?.trim() || a.label || a.name}</option>
                     ))}
                     {pools.map((p) => <option key={p.id} value={poolValue(p.name)}>{t("chat.picker.pool", { name: p.name })}</option>)}
                   </PopupSelect>

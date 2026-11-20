@@ -6560,5 +6560,6 @@
   "settings.accounts.identity.color": "Color del distintivo",
   "settings.accounts.identity.save": "Guardar",
   "settings.accounts.add.displayName": "Nombre visible (opcional)",
-  "settings.accounts.add.color": "Color del distintivo (opcional)"
+  "settings.accounts.add.color": "Color del distintivo (opcional)",
+  "chat.picker.accountLoggedOut": "sin sesión"
 }

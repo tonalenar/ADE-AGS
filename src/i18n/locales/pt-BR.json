@@ -6560,5 +6560,6 @@
   "settings.accounts.identity.color": "Cor do selo",
   "settings.accounts.identity.save": "Salvar",
   "settings.accounts.add.displayName": "Nome de exibição (opcional)",
-  "settings.accounts.add.color": "Cor do selo (opcional)"
+  "settings.accounts.add.color": "Cor do selo (opcional)",
+  "chat.picker.accountLoggedOut": "sem login"
 }
