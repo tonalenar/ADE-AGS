@@ -6,9 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const estado = vi.hoisted(() => ({
   accounts: [] as { accountId: string | null; name: string; label: string | null; loggedIn: boolean }[],
   identities: [] as Record<string, unknown>[],
+  liveCalls: [] as { accountKey: string; force: boolean }[],
 }));
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (command: string) => {
+  invoke: (command: string, args?: { accountKey: string; force: boolean }) => {
+    if (command === "claude_live_usage") {
+      estado.liveCalls.push({ accountKey: args!.accountKey, force: args!.force });
+      return Promise.resolve({ available: true, session: { percent: 55, resets: null }, week: null, weekModels: [], fetchedAt: 4_000_000_000, cached: false, problem: null });
+    }
     if (command === "list_agent_accounts") return Promise.resolve(estado.identities.filter((i) => !String(i.id).startsWith("system:")));
     if (command === "system_accounts") return Promise.resolve(estado.identities.filter((i) => String(i.id).startsWith("system:")));
     return Promise.resolve([]);
@@ -28,6 +33,7 @@ vi.mock("@/features/runs/ipc", () => ({
 
 import { AgentModelPicker, type AgentModelValue } from "../AgentModelPicker";
 import { useAccountsStore } from "@/features/accounts/store";
+import { useUsageStore } from "@/features/canvas/usageStore";
 
 const SYSTEM = { accountId: null, name: "Claude Code", label: null, loggedIn: true };
 const TRABALHO = { accountId: "a1", name: "trabalho", label: null, loggedIn: true };
@@ -54,6 +60,8 @@ beforeEach(() => {
   estado.accounts = [SYSTEM];
   estado.identities = [];
   useAccountsStore.setState({ accounts: [], systemAccounts: [], loaded: false });
+  estado.liveCalls = [];
+  useUsageStore.setState({ claude: {}, codex: {}, antigravity: {}, busy: {} });
   onChange.mockReset();
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -74,7 +82,8 @@ describe("trilho do seletor com várias contas", () => {
     estado.identities = [identidade("a1", { name: "trabalho", displayName: "Trabalho", accentColor: "orange" })];
     await mount(VALUE);
     await openPicker();
-    expect(tabs().map((t) => t.getAttribute("aria-label"))).toEqual(["Claude Code · accounts.principalName", "Claude Code · Trabalho"]);
+    // O percentual de limite, quando já chegou, vem depois do nome.
+    expect(tabs().map((t) => t.getAttribute("aria-label")!.split(" · chat.picker.accountLimitUsed")[0])).toEqual(["Claude Code · accounts.principalName", "Claude Code · Trabalho"]);
     const selo = tabs()[1].querySelector<HTMLElement>("[data-account-badge]")!;
     expect(selo.textContent).toBe("TR");
     expect(selo.style.backgroundColor).toContain("--color-orange-");
@@ -128,5 +137,41 @@ describe("trilho do seletor com várias contas", () => {
     expect(defaultRow().getAttribute("aria-selected")).toBe("true");
     await click(defaultRow());
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ account: "pool:time" }));
+  });
+
+  const leitura = (session: number) => ({ available: true, session: { percent: session, resets: null }, week: null, weekModels: [], fetchedAt: 4_000_000_000, cached: false, problem: null });
+
+  it("mostra a barra curta de limite de cada conta e o percentual no nome acessível", async () => {
+    estado.accounts = [SYSTEM, TRABALHO];
+    useUsageStore.setState({ claude: { "system:claude-code": leitura(12), a1: leitura(88) } });
+    await mount(VALUE);
+    await openPicker();
+    const barras = [...document.body.querySelectorAll<HTMLElement>("[data-limit-bar]")];
+    expect(barras.map((b) => b.dataset.limitBar)).toEqual(["12", "88"]);
+    expect(barras[1].firstElementChild!.getAttribute("style")).toContain("width: 88%");
+    expect(tabs()[1].getAttribute("aria-label")).toContain("chat.picker.accountLimitUsed");
+  });
+
+  it("com uma conta só não há barra nem consulta de cota", async () => {
+    useUsageStore.setState({ claude: { "system:claude-code": leitura(12) } });
+    await mount(VALUE);
+    await openPicker();
+    expect(document.body.querySelector("[data-limit-bar]")).toBeNull();
+    expect(estado.liveCalls).toEqual([]);
+  });
+
+  it("pede (sem forçar) a cota das contas que ainda não têm leitura, uma vez cada", async () => {
+    estado.accounts = [SYSTEM, TRABALHO];
+    estado.identities = [identidade("system:claude-code", { name: "Claude Code" }), identidade("a1", { name: "trabalho" })];
+    await mount(VALUE);
+    await openPicker();
+    await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); });
+    expect(estado.liveCalls.map((c) => c.force)).toEqual([false, false]);
+    expect(estado.liveCalls.map((c) => c.accountKey).sort()).toEqual(["a1", "system:claude-code"]);
+    // Com leitura guardada, abrir de novo não consulta.
+    estado.liveCalls = [];
+    await openPicker();
+    await openPicker();
+    expect(estado.liveCalls).toEqual([]);
   });
 });

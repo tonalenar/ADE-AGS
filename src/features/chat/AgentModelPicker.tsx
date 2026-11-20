@@ -8,6 +8,7 @@ import { AccountBadge } from "@/features/accounts/AccountBadge";
 import { accountRefFromWire, accountRefToWire, sameAccountRef, selectedAccountId, type AccountRef } from "@/features/accounts/accountRef";
 import { poolValue, usePools } from "@/features/accounts/pools";
 import { useAccountsStore } from "@/features/accounts/store";
+import { AGY_KEY, useUsageStore } from "@/features/canvas/usageStore";
 import { DEFAULT_EFFORTS } from "@/features/canvas/tabTuning";
 import type { PickDraft } from "@/features/compare/types";
 import { getRoster, refreshRosterModels } from "@/features/runs/ipc";
@@ -22,6 +23,8 @@ import { AccessMenu } from "./AccessMenu";
 import { reasoningEffortSupported, type ChatAccess, type ProviderRuntimeConfig } from "./chatModel";
 import { usePopover } from "./usePopover";
 import { buildRail, parseRailKey, railKeyOf, RAIL_FAVORITES } from "./pickerRail";
+import { LIMIT_FILL, limitPercentFor, shouldShowRailLimit, type UsageSnapshot } from "./pickerLimits";
+import { accountKeyOf, limitLevel } from "./summary/limitsModel";
 
 const MAX_COMPARE_PICKS = 6;
 const PICKER_GAP = 8;
@@ -38,6 +41,23 @@ interface PickerPosition {
 interface PickerComparePick extends PickDraft {
   /** A comparação existente não recebe credenciais de conta ou pool por escolha. */
   account: string | null;
+}
+
+/** Os agentes cuja cota a ADE mede (ver `LimitsCard`): só neles o trilho mostra a barra de limite. */
+const LIMIT_AGENTS = new Set(["claude-code", "codex", "antigravity"]);
+
+const NO_USAGE: UsageSnapshot = { claude: {}, codex: {}, antigravity: {}, agy: { usage: null, failed: false } };
+
+/**
+ * As leituras de cota que o trilho mostra. Com o seletor fechado devolve sempre as mesmas referências
+ * vazias, então o compositor não renderiza de novo a cada leitura nova do `useUsageStore`.
+ */
+function useRailUsage(open: boolean): UsageSnapshot {
+  const claude = useUsageStore((s) => (open ? s.claude : NO_USAGE.claude));
+  const codex = useUsageStore((s) => (open ? s.codex : NO_USAGE.codex));
+  const antigravity = useUsageStore((s) => (open ? s.antigravity : NO_USAGE.antigravity));
+  const agy = useUsageStore((s) => (open ? s.agy : NO_USAGE.agy));
+  return useMemo(() => ({ claude, codex, antigravity, agy }), [claude, codex, antigravity, agy]);
 }
 
 /** O agente tem esforço que vira flag? (o controle some nos outros) */
@@ -220,6 +240,26 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   const principalLabel = t("accounts.principalName");
   const rail = useMemo(() => buildRail(agents, roster, identities, principalLabel, showAccount), [agents, roster, identities, principalLabel, showAccount]);
   // Na aba de um agente a conta é a do ícone escolhido; nos favoritos, só o agente atual mantém a sua.
+  const usage = useRailUsage(open);
+  // Pede a cota das contas do agente da aba só quando a ADE ainda não tem nenhuma leitura delas (as leituras
+  // existentes são atualizadas pelo canvas e pelo Resumo); sem isso o seletor nunca dispararia uma consulta.
+  useEffect(() => {
+    if (!open || !showAccount) return;
+    const items = rail.filter((item) => item.agentId === tab);
+    if (items.length < 2) return;
+    const store = useUsageStore.getState();
+    for (const item of items) {
+      if (!item.loggedIn || !LIMIT_AGENTS.has(item.agentId)) continue;
+      const key = accountKeyOf(item.agentId, item.accountId);
+      if (item.agentId === "antigravity" && item.accountId === null) {
+        if (!store.agy.usage && !store.busy[AGY_KEY]) void store.refreshAgy(false);
+        continue;
+      }
+      const known = item.agentId === "claude-code" ? store.claude[key] : item.agentId === "codex" ? store.codex[key] : store.antigravity[key];
+      const account = identities.find((i) => i.id === key);
+      if (!known && !store.busy[key] && account) void store.refresh(account, false);
+    }
+  }, [open, showAccount, tab, rail, identities]);
   const accountForAgent = (agentId: string): AccountRef | null =>
     showAccount && tab !== RAIL_FAVORITES && agentId === tab ? railRef : agentId === value.agentId ? accountRefFromWire(agentId, value.account) : null;
   const opencodeAccount = accountForAgent("opencode");
@@ -446,13 +486,22 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
               if (!info) return null;
               const AIcon = agentIcon(info.id, info.command);
               // Uma conta sem login não roda: o ícone fica apagado e o nome avisa.
-              const label = item.loggedIn ? item.name : `${item.name} (${t("chat.picker.accountLoggedOut")})`;
+              const percent = open ? limitPercentFor(item, usage, Math.floor(Date.now() / 1000)) : null;
+              const showLimit = percent !== null && shouldShowRailLimit(item, rail, percent);
+              const named = item.loggedIn ? item.name : `${item.name} (${t("chat.picker.accountLoggedOut")})`;
+              const label = showLimit ? `${named} · ${t("chat.picker.accountLimitUsed", { percent })}` : named;
               return (
                 <RailButton key={item.key} value={item.key} tabIndex={railFocusKey === item.key ? 0 : -1} label={label} on={railKey === item.key} onClick={() => setRailKey(item.key)}>
                   <AIcon className={`w-6 h-6 ${item.loggedIn ? "" : "opacity-45"}`} />
                   {item.showBadge && (
                     <AccountBadge label={item.badgeLabel} accentColor={item.accentColor} size="sm"
                       className="absolute -right-0.5 -bottom-0.5 ring-1 ring-white dark:ring-surface-raised" />
+                  )}
+                  {showLimit && (
+                    // A barra curta do limite da conta: o texto do nome acessível já diz o percentual.
+                    <span aria-hidden="true" data-limit-bar={percent} className="absolute left-1.5 bottom-0.5 w-4 h-[3px] rounded-full overflow-hidden bg-gray-300/70 dark:bg-white/15">
+                      <span className={`block h-full rounded-full ${LIMIT_FILL[limitLevel(percent)]}`} style={{ width: `${percent}%` }} />
+                    </span>
                   )}
                 </RailButton>
               );
