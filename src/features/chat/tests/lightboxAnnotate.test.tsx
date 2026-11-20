@@ -205,3 +205,54 @@ describe("visualizador com marcações", () => {
     expect(dialog().querySelector("[role=status]")?.textContent).toContain("a-anotado.png");
   });
 });
+
+describe("fechar o visualizador", () => {
+  async function openWithClose(index = 0) {
+    const onClose = vi.fn();
+    await act(async () => { root.render(<Lightbox images={IMAGES} index={index} onIndex={() => undefined} onClose={onClose} />); });
+    await settle();
+    return onClose;
+  }
+  const escOnBody = () => act(async () => { document.body.focus(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+  const clickAt = (target: Element, from = { x: 5, y: 5 }, to = from) => act(async () => {
+    target.dispatchEvent(new MouseEvent("mousedown", { clientX: from.x, clientY: from.y, bubbles: true }));
+    target.dispatchEvent(new MouseEvent("click", { clientX: to.x, clientY: to.y, bubbles: true }));
+  });
+
+  it("Esc fecha mesmo com o foco fora do diálogo (depois de clicar no fundo)", async () => {
+    const onClose = await openWithClose();
+    await escOnBody();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("Esc com ferramenta escolhida volta à seleção antes de fechar", async () => {
+    const onClose = await openWithClose();
+    await act(async () => { button("chat.attach.lightbox.tool.rect").click(); });
+    await escOnBody();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(button("chat.attach.lightbox.tool.select").getAttribute("aria-pressed")).toBe("true");
+    await escOnBody();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("clicar no fundo fecha; clicar na imagem não", async () => {
+    const onClose = await openWithClose();
+    await clickAt(dialog().querySelector("img")!);
+    expect(onClose).not.toHaveBeenCalled();
+    await clickAt(dialog().querySelector("main")!);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("arrastar no fundo não fecha", async () => {
+    const onClose = await openWithClose();
+    await clickAt(dialog().querySelector("main")!, { x: 5, y: 5 }, { x: 80, y: 60 });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("no vídeo, clicar ao lado do player fecha", async () => {
+    const onClose = await openWithClose(2);
+    const column = dialog().querySelector("video")!.parentElement!;
+    await clickAt(column);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});

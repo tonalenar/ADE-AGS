@@ -120,9 +120,11 @@ describe("o visualizador (lightbox)", () => {
   it("clicar fora da imagem fecha; clicar na imagem não", async () => {
     await act(async () => { root.render(<AttachmentStrip items={IMAGES} />); });
     await click(host.querySelector("[aria-label='chat.attach.zoom{\"name\":\"a.png\"}']"));
-    await act(async () => { dialog()!.querySelector("img")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
+    // Fecha no clique completo (mousedown + click no fundo), para arrastar não fechar.
+    const press = (el: Element) => act(async () => { el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); el.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    await press(dialog()!.querySelector("img")!);
     expect(dialog()).not.toBeNull();
-    await act(async () => { dialog()!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
+    await press(dialog()!);
     expect(dialog()).toBeNull();
   });
 
