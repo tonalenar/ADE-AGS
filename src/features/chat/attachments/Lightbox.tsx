@@ -163,14 +163,41 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
     const next = visibleMedia[nextMediaIndex(Math.max(0, currentVisibleIndex), step, visibleMedia.length)];
     if (next) onIndex(images.findIndex((item) => item.path === next.path));
   };
+  /** Esc desfaz um passo (rascunho, ferramenta) e, sem nada pendente, fecha. */
+  const escapeRef = useRef<() => void>(() => undefined);
+  escapeRef.current = () => {
+    if (textDraft || commentDraft) { setTextDraft(null); setCommentDraft(null); setCommentSelection(null); return; }
+    if (tool !== "select") { setTool("select"); return; }
+    onClose();
+  };
+  // Ouvido na janela, na captura: depois de clicar no fundo ou no vídeo, o foco vai para o <body>
+  // e o onKeyDown do diálogo deixa de receber o Esc. A captura também impede que atalhos de Esc
+  // da tela de baixo (chat, canvas) reajam enquanto o visualizador está aberto.
+  useEffect(() => {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      // Em tela cheia, o Esc é do navegador: sai da tela cheia e o visualizador continua aberto.
+      if (document.fullscreenElement) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      escapeRef.current();
+    };
+    window.addEventListener("keydown", onEscape, true);
+    return () => window.removeEventListener("keydown", onEscape, true);
+  }, []);
+  /** Clique no fundo (fora da mídia, das barras e dos botões) fecha; arrastar para mover não fecha. */
+  const backdropDown = useRef<{ x: number; y: number } | null>(null);
+  const isBackdrop = (target: EventTarget | null) => target instanceof HTMLElement && target.dataset.lightboxBackdrop === "true";
+  const onBackdropMouseDown = (event: React.MouseEvent) => { backdropDown.current = isBackdrop(event.target) ? { x: event.clientX, y: event.clientY } : null; };
+  const onBackdropClick = (event: React.MouseEvent) => {
+    const start = backdropDown.current; backdropDown.current = null;
+    if (!start || !isBackdrop(event.target)) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 5) return;
+    onClose();
+  };
   const onKeyDown = (e: React.KeyboardEvent) => {
     const typing = ["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement).tagName);
-    if (e.key === "Escape") {
-      e.preventDefault(); e.stopPropagation();
-      if (textDraft || commentDraft) { setTextDraft(null); setCommentDraft(null); setCommentSelection(null); return; }
-      if (tool !== "select") { setTool("select"); return; }
-      onClose();
-    }
+    // O Esc é tratado na janela (escapeRef), para fechar mesmo sem foco dentro do diálogo.
+    if (e.key === "Escape") return;
     else if (typing && (e.key.startsWith("Arrow") || e.key.length === 1 || e.key === "Delete" || e.key === "Backspace")) return;
     else if ((e.key === "Delete" || e.key === "Backspace") && selectedMark !== null && marks[selectedMark]) {
       e.preventDefault(); commit({ marks: marks.filter((_, i) => i !== selectedMark) }); setSelectedMark(null);
@@ -480,7 +507,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
         const overImage = event.target instanceof HTMLElement && Boolean(event.target.closest("main")) && !isVideo;
         if (overImage || event.ctrlKey || event.metaKey) { event.preventDefault(); setZoom((value) => Math.min(4, Math.max(0.2, value - Math.sign(event.deltaY) * 0.08))); }
       }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      data-lightbox-backdrop="true" onMouseDown={onBackdropMouseDown} onClick={onBackdropClick}
       className="fixed inset-0 z-[10060] flex flex-col bg-surface-1/85 text-gray-900 backdrop-blur-xl dark:bg-gray-950/75 dark:text-white motion-reduce:transition-none">
       <header data-tauri-drag-region className={`z-10 flex h-[52px] shrink-0 items-center justify-between gap-3 border-b border-gray-200/60 bg-surface-1/60 pr-3 dark:border-white/10 dark:bg-gray-950/50 ${IS_MAC ? "pl-[84px]" : "pl-3"}`}>
         <label className="relative min-w-0">
@@ -513,7 +540,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
         </div>
       </header>
       <div className="relative flex min-h-0 flex-1">
-        <main className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden p-6 pb-24" onPointerDown={(event) => { if (zoom > 1 && (tool === "view" || tool === "select")) { const start = { x: event.clientX, y: event.clientY, offset }; const move = (e: PointerEvent) => setOffset({ x: start.offset.x + e.clientX - start.x, y: start.offset.y + e.clientY - start.y }); const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", up, { once: true }); } }}>
+        <main data-lightbox-backdrop="true" className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden p-6 pb-24" onPointerDown={(event) => { if (zoom > 1 && (tool === "view" || tool === "select")) { const start = { x: event.clientX, y: event.clientY, offset }; const move = (e: PointerEvent) => setOffset({ x: start.offset.x + e.clientX - start.x, y: start.offset.y + e.clientY - start.y }); const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", up, { once: true }); } }}>
           {images.length > 1 && <button type="button" onClick={() => goVisible(-1)} disabled={visibleMedia.findIndex((item) => item.path === current.path) <= 0} aria-label={t("chat.attach.lightbox.prev")} className="absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-gray-900/10 p-3 hover:bg-gray-900/20 disabled:opacity-30 dark:bg-white/10"><ChevronLeftIcon className="h-5 w-5" /></button>}
           {showingImage ? <div className="relative flex max-h-full max-w-full items-center justify-center" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}>
             <img ref={imageRef} src={src!} alt={current.name} draggable={false} onLoad={(event) => setNatural({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 })} className="max-h-[calc(100vh-13rem)] max-w-[calc(100vw-12rem)] select-none rounded-lg object-contain shadow-2xl" />
@@ -538,7 +565,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
             {textDraft && <form className="absolute" style={{ left: `${textDraft.at.x * 100}%`, top: `${textDraft.at.y * 100}%` }} onSubmit={(e) => { e.preventDefault(); submitText(); }}>
               <input autoFocus onFocus={(e) => e.currentTarget.select()} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setTextDraft(null); } }} value={textDraft.text} onChange={(e) => setTextDraft({ ...textDraft, text: e.target.value })} onBlur={submitText} aria-label={t("chat.attach.lightbox.textPrompt")} placeholder={t("chat.attach.lightbox.textPrompt")} className="min-w-40 rounded-md border border-white/20 bg-gray-950/80 px-2 py-1 font-semibold text-white outline-none" style={{ color: colorVar(color), fontSize: `${Math.max(14, Math.round(strokeWidth * (imageRef.current?.getBoundingClientRect().width ?? 600) * 7))}px` }} />
             </form>}
-          </div> : isVideo ? <div className="flex max-h-full max-w-full flex-col items-center gap-3">{videoError ? (
+          </div> : isVideo ? <div data-lightbox-backdrop="true" className="flex max-h-full max-w-full flex-col items-center gap-3">{videoError ? (
             <div role="alert" className="flex max-w-md flex-col items-center gap-3 rounded-2xl border border-gray-200/70 bg-surface-1/90 px-6 py-5 text-center shadow-xl dark:border-white/10 dark:bg-gray-900/90">
               <p className="m-0 text-sm text-gray-800 dark:text-gray-100">{t("chat.attach.lightbox.videoError")}</p>
               {videoRetry.code !== null && <p className="m-0 text-xs text-gray-500 dark:text-white/50">{t("chat.attach.lightbox.videoErrorCode", { code: videoRetry.code })}</p>}
