@@ -1,7 +1,7 @@
 //! Testes da superfície nativa do navegador (o Portal): o contrato do `Place` que chega do front e a lógica pura
 //! que decide o que mudou, o que a máscara desenha e quando a vista é escondida.
 
-use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, open_step, outline, rounded_parts, visibility_change, ClipState, CreationState, OpenStep, PathStep, PlaceChanges, PlaceState};
+use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, open_step, outline, rounded_parts, same_emulated_platform, visibility_change, ClipState, CreationState, NativePlace, OpenStep, PathStep, PlaceChanges, PlaceState};
 use super::{Place, Rect};
 use serde_json::json;
 
@@ -161,3 +161,23 @@ fn hit_holes_recorta_apenas_cliques_sem_abrir_buraco_visual() {
     assert_ne!(hit, vec![Rect { x: 0.0, y: 0.0, width: 400.0, height: 300.0 }]);
     assert_eq!(hit.len(), 4);
 }
+
+#[test]
+fn mesa_inicial_sem_registro_nao_recarrega_ao_confirmar_emulacao_mesa() {
+    // Sem registro prévio, a vista já está em modo mesa (`None`): pedir `None` não muda de plataforma.
+    assert!(same_emulated_platform(None, None));
+    assert!(same_emulated_platform(Some(None), None));
+    assert!(!same_emulated_platform(None, Some("ios")));
+    assert!(same_emulated_platform(Some(Some("ios")), Some("ios")));
+    assert!(!same_emulated_platform(Some(Some("ios")), None));
+    assert!(!same_emulated_platform(Some(Some("ios")), Some("android")));
+}
+
+#[test]
+fn native_place_preserva_visibilidade_oculta_na_emulacao() {
+    let saved = NativePlace::new([0, 0, 390, 844], vec![[0, 0, 390, 844]], vec![[0, 0, 390, 844]], 12.0, false, false);
+    assert!(!saved.visible);
+    let shown = NativePlace::new([0, 0, 390, 844], vec![[0, 0, 390, 844]], vec![[0, 0, 390, 844]], 12.0, false, true);
+    assert!(shown.visible);
+}
+

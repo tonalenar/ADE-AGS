@@ -511,7 +511,7 @@ function BrowserSurface({ cwd, owner, tab }: { cwd: string; owner: ViewOwner | n
     publishMeasuredChatBrowser(viewId, rectInShell(slotRef.current));
   }, [viewId]);
 
-  useLayoutEffect(() => measure());
+  useLayoutEffect(() => measure(), [measure]);
   useEffect(() => {
     const el = slotRef.current;
     if (!el) return;

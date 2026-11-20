@@ -209,6 +209,8 @@ struct PortalHostIvars {
     parts: RefCell<Vec<[f64; 4]>>,
     /// Miniatura (só informativo: o clique continua indo para a página).
     mini: Cell<bool>,
+    /// Camada de máscara reutilizada entre chamadas de `place` para evitar realocar e reatribuir `layer.mask`.
+    mask_layer: RefCell<Option<Retained<AnyObject>>>,
 }
 
 define_class!(
@@ -972,6 +974,35 @@ pub async fn cdp(app: &AppHandle, id: &str, method: &str, params: JsonValue) -> 
 
 static NEXT_CDP_ID: AtomicI32 = AtomicI32::new(1);
 
+/// Desliga animações implícitas da Core Animation durante atualizações síncronas de geometria/máscara.
+struct DisableActionsTransaction(Option<&'static objc2::runtime::AnyClass>);
+
+impl DisableActionsTransaction {
+    fn begin() -> Self {
+        let class = objc2::runtime::AnyClass::get(c"CATransaction");
+        if let Some(tx) = class {
+            // SAFETY: Executado na thread principal do AppKit dentro de `run_on_main_thread`; `begin` e
+            // `setDisableActions:` são métodos de classe estáveis da `CATransaction` pareados com `commit` no Drop.
+            unsafe {
+                let _: () = msg_send![tx, begin];
+                let _: () = msg_send![tx, setDisableActions: Bool::YES];
+            }
+        }
+        Self(class)
+    }
+}
+
+impl Drop for DisableActionsTransaction {
+    fn drop(&mut self) {
+        if let Some(tx) = self.0 {
+            // SAFETY: Pareado com o `CATransaction begin` feito no construtor na mesma thread principal.
+            unsafe {
+                let _: () = msg_send![tx, commit];
+            }
+        }
+    }
+}
+
 pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i32; 4]>, hit_parts: Vec<[i32; 4]>, corner_radius: f64, click_to_expand: bool, visible: bool) {
     let app = app.clone();
     let id = id.to_string();
@@ -980,10 +1011,14 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
         PORTALS.with(|portals| {
             if let Some(portal) = portals.borrow_mut().get_mut(&id) {
                 // Só o que mudou desde o último `place` é reaplicado: a posição, a máscara, o zoom e a repintura do CEF.
+                // SAFETY: `portal.host_view` é uma `ADEPortalHost` válida na thread principal; `superview` retorna referência autorretida segura.
                 let parent = unsafe { portal.host_view.superview() };
                 let zoom = effective_zoom(zoom, portal.last_place.as_ref().map(|state| state.zoom));
                 let next = PlaceState { frame: rect, parts: parts.clone(), radius: corner_radius, zoom };
                 let changes = diff_place(portal.last_place.as_ref(), &next);
+                let hidden_change = visibility_change(&mut portal.clip, parts.is_empty(), !visible);
+                let mutates_layers = changes.frame || (changes.mask && !parts.is_empty()) || hidden_change.is_some() || changes.resized;
+                let tx = mutates_layers.then(DisableActionsTransaction::begin);
                 if changes.frame {
                     portal.host_view.setFrame(parent.as_deref().map(|parent| frame_in_parent(parent, rect)).unwrap_or_else(|| view_frame(rect)));
                 }
@@ -992,7 +1027,7 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
                 }
                 // Só a transição de escondido para visível (ou o contrário) mexe na vista: um recorte vazio de um
                 // quadro não a esconde, e a desmontagem (`visible: false`) esconde na hora.
-                if let Some(hidden) = visibility_change(&mut portal.clip, parts.is_empty(), !visible) {
+                if let Some(hidden) = hidden_change {
                     portal.host_view.setHidden(hidden);
                 }
                 *portal.host_view.ivars().parts.borrow_mut() = hit_parts.iter().map(|[l, t, r, b]| [*l as f64, *t as f64, *r as f64, *b as f64]).collect();
@@ -1001,10 +1036,12 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
                     if changes.resized {
                         let child = host.window_handle() as *mut AnyObject;
                         if !child.is_null() {
+                            // SAFETY: `child` vem de `host.window_handle()` não nulo na thread principal e aponta para a `NSView` filha do CEF.
                             let view: &NSView = unsafe { &*child.cast() };
                             view.setFrame(view_frame([0, 0, rect[2], rect[3]]));
                         }
                     }
+                    drop(tx);
                     if changes.zoom { host.set_zoom_level(chrome_zoom_level(zoom)); }
                     if changes.resized { host.was_resized(); }
                 }
@@ -1022,25 +1059,47 @@ fn chrome_zoom_level(zoom: f64) -> f64 {
 
 /// Uma única `CAShapeLayer` recorta as partes e arredonda só os cantos externos da vista (tela do celular, miniatura).
 /// O arredondamento entra no próprio path: o Core Animation não aplica máscara de máscara, e o `cornerRadius` da layer
-/// da NSView não recorta a vista do CEF.
-fn apply_rect_mask(view: &NSView, width: i32, height: i32, parts: &[[i32; 4]], radius: f64) {
+/// da NSView não recorta a vista do CEF. Reutiliza a mesma instância guardada no host para não disparar flash ao trocar `layer.mask`.
+fn apply_rect_mask(view: &ADEPortalHost, width: i32, height: i32, parts: &[[i32; 4]], radius: f64) {
     if parts.is_empty() { return; }
     let (w, h) = (width.max(1) as f64, height.max(1) as f64);
     let radius = radius.min(w / 2.0).min(h / 2.0).max(0.0);
+    // SAFETY: Executado na thread principal; `CGPathCreateMutable` devolve um path válido (ou nulo) liberado ao fim com `CGPathRelease`.
     let path = unsafe { CGPathCreateMutable() };
     if path.is_null() { return; }
     for part in rounded_parts(width, height, parts, radius) {
+        // SAFETY: `path` é um `CGMutablePathRef` não nulo criado acima e ainda válido.
         unsafe { add_outline(path, &part) };
     }
-    let class = objc2::runtime::AnyClass::get(c"CAShapeLayer").expect("CAShapeLayer disponível no macOS");
-    let mask: *mut AnyObject = unsafe { msg_send![class, layer] };
-    let layer: *mut AnyObject = unsafe { msg_send![view, layer] };
+    let mut mask_slot = view.ivars().mask_layer.borrow_mut();
+    let mask_ptr = if let Some(existing) = mask_slot.as_ref() {
+        Retained::as_ptr(existing) as *mut AnyObject
+    } else {
+        let class = objc2::runtime::AnyClass::get(c"CAShapeLayer").expect("CAShapeLayer disponível no macOS");
+        // SAFETY: `[CAShapeLayer new]` retorna uma instância com +1 de retenção gerenciada por `Retained::from_raw`.
+        let raw: *mut AnyObject = unsafe { msg_send![class, new] };
+        let retained = unsafe { Retained::from_raw(raw) }.expect("CAShapeLayer alocado");
+        // SAFETY: `retained` vive na thread principal; `setGeometryFlipped:YES` alinha a origem do path com a DOM.
+        unsafe {
+            let _: () = msg_send![&*retained, setGeometryFlipped: Bool::YES];
+        }
+        let ptr = Retained::as_ptr(&retained) as *mut AnyObject;
+        *mask_slot = Some(retained);
+        ptr
+    };
+    // SAFETY: `view` e `mask_ptr` vivem na thread principal, `view.wantsLayer` é true desde `ADEPortalHost::new`
+    // e `path` permanece válido até `CGPathRelease`.
     unsafe {
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(w, h));
-        let _: () = msg_send![mask, setFrame: frame];
-        let _: () = msg_send![mask, setGeometryFlipped: Bool::YES];
-        let _: () = msg_send![mask, setPath: path];
-        let _: () = msg_send![layer, setMask: mask];
+        let _: () = msg_send![mask_ptr, setFrame: frame];
+        let _: () = msg_send![mask_ptr, setPath: path];
+        let layer: *mut AnyObject = msg_send![view, layer];
+        if !layer.is_null() {
+            let current_mask: *mut AnyObject = msg_send![layer, mask];
+            if current_mask != mask_ptr {
+                let _: () = msg_send![layer, setMask: mask_ptr];
+            }
+        }
         CGPathRelease(path);
     }
 }

@@ -83,22 +83,40 @@ export interface ContextUsage {
   windowKnown: boolean;
 }
 
+/** A janela de um uso: a do provedor, ou (só o Claude) a do modelo. `null` quando não há como saber. */
+function windowOf(source: TimelineItem | null, agentId: string, model: string | null | undefined, used: number): { window: number; windowKnown: boolean } | null {
+  if (source?.contextWindow && source.contextWindow > 0) return { window: source.contextWindow, windowKnown: true };
+  if (agentId !== "claude-code") return null;
+  const measured = source?.contextTokens ?? used;
+  const window = (model ?? "").toLowerCase().includes("[1m]") || measured > CLAUDE_WINDOW ? CLAUDE_WINDOW_1M : CLAUDE_WINDOW;
+  return { window, windowKnown: false };
+}
+
 /**
- * O contexto da conversa: o último item `usage` com a entrada de contexto. Sem a janela do provedor, o Claude usa a do
- * modelo (200k, ou 1M com `[1m]` ou se o uso já passou de 200k); outros agentes sem janela ficam sem medida (não se inventa).
+ * O contexto da conversa: o último evento de contexto. Se a última coisa foi uma compactação concluída, vale o «depois»
+ * que ela informou (sem ele, não há medida até o próximo uso: o de antes já não é o contexto). Compactação em andamento
+ * ou com erro não muda a medida. Sem a janela do provedor, o Claude usa a do modelo (200k, ou 1M com `[1m]` ou se o uso
+ * já passou de 200k); outros agentes sem janela ficam sem medida (não se inventa).
  */
 export function contextUsageOf(items: readonly TimelineItem[], agentId: string, model?: string | null): ContextUsage | null {
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const item = items[i];
+    const compaction = compactionOf(item);
+    if (compaction?.state === "done") {
+      if (!compaction.after || compaction.after <= 0) return null;
+      let source: TimelineItem | null = null;
+      for (let j = i - 1; j >= 0 && !source; j -= 1) {
+        if (items[j].kind === "usage" && items[j].contextTokens && (items[j].contextTokens ?? 0) > 0) source = items[j];
+      }
+      const window = windowOf(source, agentId, model, compaction.after);
+      if (!window) return null;
+      return { used: compaction.after, window: window.window, pct: Math.min(100, (compaction.after / window.window) * 100), windowKnown: window.windowKnown };
+    }
     if (item.kind !== "usage" || !item.contextTokens || item.contextTokens <= 0) continue;
     const used = item.contextTokens;
-    let window = item.contextWindow && item.contextWindow > 0 ? item.contextWindow : null;
-    const windowKnown = window !== null;
-    if (window === null && agentId === "claude-code") {
-      window = (model ?? "").toLowerCase().includes("[1m]") || used > CLAUDE_WINDOW ? CLAUDE_WINDOW_1M : CLAUDE_WINDOW;
-    }
-    if (window === null) return null;
-    return { used, window, pct: Math.min(100, (used / window) * 100), windowKnown };
+    const window = windowOf(item, agentId, model, used);
+    if (!window) return null;
+    return { used, window: window.window, pct: Math.min(100, (used / window.window) * 100), windowKnown: window.windowKnown };
   }
   return null;
 }
