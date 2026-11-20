@@ -431,7 +431,8 @@ pub fn real_browser_place(app: AppHandle, window: tauri::Window, id: String, pla
     let parts: Vec<[i32; 4]> = region(&place).into_iter().map(|r| native_rect(r, scale)).map(|[x, y, w, h]| [x, y, x + w, y + h]).collect();
     let radius = if cfg!(windows) { place.corner_radius * scale } else { place.corner_radius };
     let rect = native_rect(place.rect, scale);
-    let zoom = emulated_place(&app, &id, &place, (rect, parts.clone(), radius, place.click_to_expand));
+    let saved = surface::NativePlace::new(rect, parts.clone(), radius, place.click_to_expand, place.visible);
+    let zoom = emulated_place(&app, &id, &place, saved);
     native::place(&app, &id, rect, zoom, parts, radius, place.click_to_expand, place.visible);
     Ok(())
 }
@@ -445,12 +446,10 @@ struct Emulated {
     /// O último lugar visto (vale também antes da emulação ligar).
     last: Option<(f64, f64, f64)>,
     /// O último `native::place`, para reaplicar o zoom certo quando a emulação liga ou desliga.
-    native: Option<NativePlace>,
+    native: Option<surface::NativePlace>,
     /// O aparelho emulado agora (`None`: mesa). Só uma troca dele recarrega a página.
     platform: Option<String>,
 }
-
-type NativePlace = ([i32; 4], Vec<[i32; 4]>, f64, bool);
 
 fn emulated() -> &'static Mutex<HashMap<String, Emulated>> {
     static E: OnceLock<Mutex<HashMap<String, Emulated>>> = OnceLock::new();
@@ -473,7 +472,7 @@ fn device_metrics(width: f64, height: f64, zoom: f64, density: f64) -> (Value, (
 
 /// Guarda o lugar de `id`; com aparelho emulado, reenvia as medidas se mudaram e devolve o zoom que a vista nativa
 /// deve usar (1: a escala vem do CDP). Sem emulação, o zoom pedido.
-fn emulated_place(app: &AppHandle, id: &str, place: &Place, native: NativePlace) -> f64 {
+fn emulated_place(app: &AppHandle, id: &str, place: &Place, native: surface::NativePlace) -> f64 {
     let Ok(mut map) = emulated().lock() else { return place.zoom };
     let entry = map.entry(id.to_string()).or_default();
     entry.last = Some((place.rect.width, place.rect.height, place.zoom));
@@ -677,11 +676,13 @@ pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<S
     let mobile = profile.is_some();
     // Só a moldura mudou (Aparelho ⇄ Completo, ou o mesmo aparelho de novo): troca ao vivo, sem recarregar. Recarregar
     // só quando o aparelho (o user agent) muda; era isso que fazia a página piscar sem moldura a cada troca.
+    // Vista sem registro prévio já está em modo mesa (`None`), então `platform: None` inicial não recarrega nem reemula.
     let same_device = emulated().lock().ok()
-        .and_then(|map| map.get(&id).map(|entry| entry.platform.clone()))
-        .is_some_and(|last| last == platform);
+        .is_some_and(|map| surface::same_emulated_platform(map.get(&id).map(|entry| entry.platform.as_deref()), platform.as_deref()));
     if same_device {
-        set_device_chrome(&app, &id, platform.as_deref().filter(|_| mobile && chrome.is_some()), chrome.as_ref()).await;
+        if mobile || chrome.is_some() {
+            set_device_chrome(&app, &id, platform.as_deref().filter(|_| mobile && chrome.is_some()), chrome.as_ref()).await;
+        }
         return Ok(());
     }
     if let Ok(mut map) = emulated().lock() { map.entry(id.clone()).or_default().platform = platform.clone(); }
@@ -702,7 +703,9 @@ pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<S
             };
             native::cdp(&app, &id, "Emulation.setDeviceMetricsOverride", metrics).await?;
             // A vista sai do zoom: a escala agora vem do CDP.
-            if let Some((rect, parts, radius, click)) = placed { native::place(&app, &id, rect, 1.0, parts, radius, click, true); }
+            if let Some(saved) = placed {
+                native::place(&app, &id, saved.rect, 1.0, saved.parts, saved.radius, saved.click_to_expand, saved.visible);
+            }
         }
         None => {
             let restore = emulated().lock().ok().and_then(|mut map| {
@@ -711,7 +714,9 @@ pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<S
                 entry.sent = None;
                 Some((entry.native.clone()?, entry.last?.2))
             });
-            if let Some(((rect, parts, radius, click), zoom)) = restore { native::place(&app, &id, rect, zoom, parts, radius, click, true); }
+            if let Some((saved, zoom)) = restore {
+                native::place(&app, &id, saved.rect, zoom, saved.parts, saved.radius, saved.click_to_expand, saved.visible);
+            }
             native::cdp(&app, &id, "Emulation.setUserAgentOverride", json!({ "userAgent": "" })).await?;
             native::cdp(&app, &id, "Emulation.clearDeviceMetricsOverride", json!({})).await?;
         }

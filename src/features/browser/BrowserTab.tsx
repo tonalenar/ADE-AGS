@@ -322,8 +322,8 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
   const phoneActions = useRef<PhoneActions>({ back() {}, reload() {}, navigate() {}, newTab() {}, share() {}, desktop() {} });
   /** A vista nativa já existe (avisou a primeira URL): só então dá para mandar a emulação por CDP. */
   const [realReady, setRealReady] = useState(false);
-  /** O que já foi aplicado na vista nativa; começa como mesa, que é o padrão dela. */
-  const emulated = useRef<string>("null");
+  /** O que já foi aplicado na vista nativa; começa como mesa sem moldura, que é o padrão dela. */
+  const emulated = useRef<string>("null|false");
   /** Com o mockup de celular, a moldura (barra de status, vidro do Safari) vai dentro da página; no Completo, não. */
   const framedPhone = !!mobile && !!viewport && !isFillViewport(viewport) && isPhoneViewport(viewport) && !device;
   useEffect(() => {
@@ -390,6 +390,7 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
           setError(String(e));
           return String(e);
         }
+        shownUrl.current = url;
         updateView(view.id, { url, title: new URL(url).host });
       } else {
         updateView(view.id, { url, title: new URL(url).host, realChrome: true });
@@ -709,6 +710,7 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
       pageUrl.current = msg.payload.url;
       const shown = display(msg.payload.url);
       shownUrl.current = shown;
+      requestedUrl.current = shown;
       setAddress(shown);
       let host = shown;
       try { host = new URL(shown).host; } catch { /* se queda con la URL entera */ }
@@ -1295,6 +1297,10 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
               profileId={browserProfileId} projectPath={view.cwd} floatingPreview={floatingPreview} surfaceActive={surfaceActive} onError={setError}
               onUrl={(u) => {
                 setRealReady(true);
+                if (/^chrome-error:\/\//i.test(u)) return;
+                if (isBlankUrl(u) && requestedUrl.current && !isBlankUrl(requestedUrl.current)) return;
+                shownUrl.current = u;
+                requestedUrl.current = u;
                 setAddress(u);
                 try {
                   const title = new URL(u).host || u;
