@@ -324,3 +324,24 @@ fn v1_1_fields_are_additive_and_v1_payloads_serialize_unchanged() {
     assert_eq!(props["status"]["enum"], json!(["continue","complete","blocked"]));
     assert!(props["evidence"].is_object() && props["blockers"].is_object());
 }
+
+/// A API do Gemini só aceita `enum` de strings nas declarações de função: um `enum` numérico
+/// vira `enum[0]` vazio e a conversa nativa do Antigravity falha com INVALID_ARGUMENT (400).
+#[test]
+fn schema_so_tem_enum_de_strings_para_o_gemini() {
+    fn visit(value: &Value, path: &str) {
+        match value {
+            Value::Object(map) => {
+                if let Some(Value::Array(items)) = map.get("enum") {
+                    assert!(items.iter().all(Value::is_string), "enum não-string em {path}: {items:?}");
+                }
+                for (key, child) in map { visit(child, &format!("{path}.{key}")); }
+            }
+            Value::Array(items) => for (i, child) in items.iter().enumerate() { visit(child, &format!("{path}[{i}]")); },
+            _ => {}
+        }
+    }
+    visit(&schema(), "handoff");
+    let version = &schema()["properties"]["version"];
+    assert_eq!((version["minimum"].as_i64(), version["maximum"].as_i64()), (Some(1), Some(1)));
+}
