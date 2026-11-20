@@ -27,7 +27,7 @@ mod native {
     pub async fn cdp(_: &AppHandle, _: &str, _: &str, _: Value) -> Result<Value, String> {
         Err(NO.into())
     }
-    pub fn place(_: &AppHandle, _: &str, _: [i32; 4], _: f64, _: Vec<[i32; 4]>, _: f64, _: bool, _: bool) {}
+    pub fn place(_: &AppHandle, _: &str, _: [i32; 4], _: f64, _: Vec<[i32; 4]>, _: Vec<[i32; 4]>, _: f64, _: bool, _: bool) {}
     pub async fn navigate(_: &AppHandle, _: &str, _: String) -> Result<(), String> {
         Err(NO.into())
     }
@@ -88,6 +88,9 @@ pub struct Place {
     /// O que do app está por cima da página, dentro da parte à vista.
     #[serde(default)]
     pub holes: Vec<Rect>,
+    /// Recortes somente para `hitTest` (ex.: pílula invisível da miniatura), sem abrir buraco visual.
+    #[serde(default)]
+    pub hit_holes: Vec<Rect>,
     /// Miniatura: hoje só informa o nativo; o clique continua indo para a página.
     #[serde(default)]
     pub click_to_expand: bool,
@@ -401,6 +404,16 @@ pub fn region(place: &Place) -> Vec<Rect> {
     parts
 }
 
+/// A região que responde ao ponteiro (`hitTest`): parte visível menos buracos visuais e recortes somente de clique.
+pub fn hit_region(place: &Place) -> Vec<Rect> {
+    let mut parts = region(place);
+    for hole in &place.hit_holes {
+        parts = parts.into_iter().flat_map(|part| subtract(part, *hole)).collect();
+    }
+    parts.retain(|r| r.width > 0.0 && r.height > 0.0);
+    parts
+}
+
 /// `a` menos `b`: até quatro faixas (em cima, embaixo, à esquerda, à direita do pedaço de `b` dentro de `a`).
 fn subtract(a: Rect, b: Rect) -> Vec<Rect> {
     let (ax2, ay2, bx2, by2) = (a.x + a.width, a.y + a.height, b.x + b.width, b.y + b.height);
@@ -428,12 +441,16 @@ fn subtract(a: Rect, b: Rect) -> Vec<Rect> {
 #[tauri::command]
 pub fn real_browser_place(app: AppHandle, window: tauri::Window, id: String, place: Place) -> Result<(), String> {
     let scale = window.scale_factor().unwrap_or(1.0);
-    let parts: Vec<[i32; 4]> = region(&place).into_iter().map(|r| native_rect(r, scale)).map(|[x, y, w, h]| [x, y, x + w, y + h]).collect();
+    let to_native = |rects: Vec<Rect>| -> Vec<[i32; 4]> {
+        rects.into_iter().map(|r| native_rect(r, scale)).map(|[x, y, w, h]| [x, y, x + w, y + h]).collect()
+    };
+    let parts = to_native(region(&place));
+    let hit_parts = to_native(hit_region(&place));
     let radius = if cfg!(windows) { place.corner_radius * scale } else { place.corner_radius };
     let rect = native_rect(place.rect, scale);
-    let saved = surface::NativePlace::new(rect, parts.clone(), radius, place.click_to_expand, place.visible);
+    let saved = surface::NativePlace::new(rect, parts.clone(), hit_parts.clone(), radius, place.click_to_expand, place.visible);
     let zoom = emulated_place(&app, &id, &place, saved);
-    native::place(&app, &id, rect, zoom, parts, radius, place.click_to_expand, place.visible);
+    native::place(&app, &id, rect, zoom, parts, hit_parts, radius, place.click_to_expand, place.visible);
     Ok(())
 }
 
@@ -704,7 +721,7 @@ pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<S
             native::cdp(&app, &id, "Emulation.setDeviceMetricsOverride", metrics).await?;
             // A vista sai do zoom: a escala agora vem do CDP.
             if let Some(saved) = placed {
-                native::place(&app, &id, saved.rect, 1.0, saved.parts, saved.radius, saved.click_to_expand, saved.visible);
+                native::place(&app, &id, saved.rect, 1.0, saved.parts, saved.hit_parts, saved.radius, saved.click_to_expand, saved.visible);
             }
         }
         None => {
@@ -715,7 +732,7 @@ pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<S
                 Some((entry.native.clone()?, entry.last?.2))
             });
             if let Some((saved, zoom)) = restore {
-                native::place(&app, &id, saved.rect, zoom, saved.parts, saved.radius, saved.click_to_expand, saved.visible);
+                native::place(&app, &id, saved.rect, zoom, saved.parts, saved.hit_parts, saved.radius, saved.click_to_expand, saved.visible);
             }
             native::cdp(&app, &id, "Emulation.setUserAgentOverride", json!({ "userAgent": "" })).await?;
             native::cdp(&app, &id, "Emulation.clearDeviceMetricsOverride", json!({})).await?;
@@ -1028,7 +1045,7 @@ mod test {
 
     #[test]
     fn regiao_e_a_parte_a_vista_menos_o_que_esta_por_cima() {
-        let place = |visible_rect, holes| Place { rect: r(0.0, 0.0, 800.0, 600.0), zoom: 1.0, visible: true, visible_rect, holes, click_to_expand: false, corner_radius: 0.0 };
+        let place = |visible_rect, holes| Place { rect: r(0.0, 0.0, 800.0, 600.0), zoom: 1.0, visible: true, visible_rect, holes, hit_holes: vec![], click_to_expand: false, corner_radius: 0.0 };
         assert!(region(&place(None, vec![])).is_empty(), "fora de vista não aparece nada");
         assert_eq!(region(&place(Some(r(0.0, 0.0, 800.0, 300.0)), vec![])), vec![r(0.0, 0.0, 800.0, 300.0)]);
         // Um menu de 200×100 no canto de cima à direita.

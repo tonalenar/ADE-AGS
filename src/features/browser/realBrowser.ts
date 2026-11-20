@@ -31,6 +31,8 @@ export type Place = {
   visible: boolean;
   visibleRect: Box | null;
   holes: Box[];
+  /** Áreas apenas para pass-through de ponteiro (`hitTest`), sem abrir buraco visual no nativo. */
+  hitHoles?: Box[];
   clickToExpand?: boolean;
   cornerRadius?: number;
 };
@@ -44,6 +46,25 @@ export function intersect(a: Box, b: Box): Box | null {
   return right > x && bottom > y ? { x, y, width: right - x, height: bottom - y } : null;
 }
 
+/** `a` menos `b`: até quatro faixas ao redor da interseção. Pura. */
+export function subtractBox(a: Box, b: Box): Box[] {
+  const ax2 = a.x + a.width;
+  const ay2 = a.y + a.height;
+  const bx2 = b.x + b.width;
+  const by2 = b.y + b.height;
+  const ix = Math.max(a.x, b.x);
+  const iy = Math.max(a.y, b.y);
+  const ix2 = Math.min(ax2, bx2);
+  const iy2 = Math.min(ay2, by2);
+  if (ix >= ix2 || iy >= iy2) return [a];
+  const out: Box[] = [];
+  if (iy > a.y) out.push({ x: a.x, y: a.y, width: a.width, height: iy - a.y });
+  if (iy2 < ay2) out.push({ x: a.x, y: iy2, width: a.width, height: ay2 - iy2 });
+  if (ix > a.x) out.push({ x: a.x, y: iy, width: ix - a.x, height: iy2 - iy });
+  if (ix2 < ax2) out.push({ x: ix2, y: iy, width: ax2 - ix2, height: iy2 - iy });
+  return out;
+}
+
 /** `box` (na janela) relativo a `origin`. */
 export function relativeTo(box: Box, origin: Box): Box {
   return { x: box.x - origin.x, y: box.y - origin.y, width: box.width, height: box.height };
@@ -55,17 +76,28 @@ export function relativeTo(box: Box, origin: Box): Box {
  * `rect.width / layoutWidth` (o `getBoundingClientRect` já vem escalado; o `offsetWidth`, não): a página acompanha
  * com o zoom do WebView, para o Portal mostrar a mesma página em qualquer zoom do canvas. Pura.
  */
-export function placeOf(rect: Box, layoutWidth: number, pageZoom: number, clips: Box[], covers: Box[], shown: boolean): Place {
+export function placeOf(rect: Box, layoutWidth: number, pageZoom: number, clips: Box[], covers: Box[], shown: boolean, hitCovers: Box[] = []): Place {
   const canvasZoom = layoutWidth > 0 ? rect.width / layoutWidth : 1;
   let visible: Box | null = shown ? rect : null;
   for (const clip of clips) visible = visible && intersect(visible, clip);
-  const holes = visible ? covers.map((c) => intersect(c, visible!)).filter((c): c is Box => !!c).map((c) => relativeTo(c, rect)) : [];
+  const visualCovers = visible ? covers.map((c) => intersect(c, visible!)).filter((c): c is Box => !!c) : [];
+  let parts = visible ? [visible] : [];
+  for (const cover of visualCovers) {
+    parts = parts.flatMap((part) => subtractBox(part, cover)).filter((p) => p.width > 0 && p.height > 0);
+  }
+  // Quando overlays cobrem 100% da área visível, enviamos `visibleRect = null` para o nativo esconder de fato.
+  if (parts.length === 0) visible = null;
+  const holes = visible ? visualCovers.map((c) => relativeTo(c, rect)) : [];
+  const hitHoles = visible
+    ? hitCovers.map((c) => intersect(c, visible!)).filter((c): c is Box => !!c).map((c) => relativeTo(c, rect))
+    : [];
   return {
     rect,
     zoom: Math.round(canvasZoom * (pageZoom > 0 ? pageZoom : 1) * 1000) / 1000,
     visible: true,
     visibleRect: visible && relativeTo(visible, rect),
     holes,
+    ...(hitHoles.length > 0 ? { hitHoles } : {}),
     clickToExpand: false,
     cornerRadius: 0,
   };

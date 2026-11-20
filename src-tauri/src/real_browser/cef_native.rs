@@ -1003,7 +1003,7 @@ impl Drop for DisableActionsTransaction {
     }
 }
 
-pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i32; 4]>, corner_radius: f64, click_to_expand: bool, visible: bool) {
+pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i32; 4]>, hit_parts: Vec<[i32; 4]>, corner_radius: f64, click_to_expand: bool, visible: bool) {
     let app = app.clone();
     let id = id.to_string();
     let _ = app.run_on_main_thread(move || {
@@ -1030,7 +1030,7 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
                 if let Some(hidden) = hidden_change {
                     portal.host_view.setHidden(hidden);
                 }
-                *portal.host_view.ivars().parts.borrow_mut() = parts.iter().map(|[l, t, r, b]| [*l as f64, *t as f64, *r as f64, *b as f64]).collect();
+                *portal.host_view.ivars().parts.borrow_mut() = hit_parts.iter().map(|[l, t, r, b]| [*l as f64, *t as f64, *r as f64, *b as f64]).collect();
                 portal.host_view.ivars().mini.set(click_to_expand);
                 if let Some(host) = portal.browser.as_ref().and_then(Browser::host) {
                     if changes.resized {

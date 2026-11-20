@@ -50,6 +50,31 @@ describe("superfície nativa do navegador", () => {
     expect(useChatStore.getState().panel).toBe("browser");
   });
 
+  it("grip_do_pip_usa_hit_sem_hover_e_abre_buraco_visual_ao_exibir_controles", () => {
+    act(() => root.render(<BrowserFloatGrip viewId="browser-1" />));
+    const grip = host.querySelector<HTMLElement>("[data-browser-mini-controls]");
+    const button = host.querySelector<HTMLButtonElement>("button");
+    expect(grip?.getAttribute("data-over-webview")).toBe("hit");
+
+    act(() => { grip?.dispatchEvent(new PointerEvent("pointerover", { bubbles: true })); });
+    expect(grip?.getAttribute("data-over-webview")).toBe("");
+
+    act(() => { grip?.dispatchEvent(new PointerEvent("pointerout", { bubbles: true, relatedTarget: document.body })); });
+    expect(grip?.getAttribute("data-over-webview")).toBe("hit");
+
+    act(() => { useChatStore.setState({ browserMiniHover: { "browser-1": true } }); });
+    expect(grip?.getAttribute("data-over-webview")).toBe("");
+
+    act(() => { useChatStore.setState({ browserMiniHover: {} }); });
+    expect(grip?.getAttribute("data-over-webview")).toBe("hit");
+
+    act(() => { button?.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); });
+    expect(grip?.getAttribute("data-over-webview")).toBe("");
+
+    act(() => { button?.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: document.body })); });
+    expect(grip?.getAttribute("data-over-webview")).toBe("hit");
+  });
+
   it("miniatura_do_agente_usa_medida_real", () => {
     // Antes de o slot medir, não há origem: a miniatura não abre com um retângulo inventado.
     const measured = vi.fn();

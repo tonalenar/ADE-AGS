@@ -270,4 +270,36 @@ describe("vista do navegador nativo", () => {
     const last = placedPlaces[placedPlaces.length - 1];
     expect(last?.visibleRect).toEqual({ x: 0, y: 0, width: 400, height: 300 });
   });
+
+  it("dialog_open_esconde_superficie_e_fechar_dialog_acorda_view", async () => {
+    let clock = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => (clock += 200));
+    vi.spyOn(HTMLElement.prototype, "checkVisibility").mockReturnValue(true);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.tagName === "DIALOG") {
+        return { x: 0, y: 0, left: 0, top: 0, width: 1400, height: 900, right: 1400, bottom: 900, toJSON: () => ({}) } as DOMRect;
+      }
+      return { x: 10, y: 20, left: 10, top: 20, width: 400, height: 300, right: 410, bottom: 320, toJSON: () => ({}) } as DOMRect;
+    });
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    render({ floatingPreview: true });
+    await act(async () => undefined);
+
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "");
+    await act(async () => { document.body.appendChild(dialog); });
+
+    await act(async () => { frames.shift()?.(0); });
+    await act(async () => { frames.shift()?.(0); });
+    expect(placedPlaces.filter((p) => p.visibleRect === null)).toHaveLength(2);
+    expect(frames).toHaveLength(0);
+
+    await act(async () => { dialog.remove(); });
+    expect(frames.length).toBeGreaterThan(0);
+    await act(async () => { frames.shift()?.(0); });
+    expect(placedPlaces[placedPlaces.length - 1]?.visibleRect).toEqual({ x: 0, y: 0, width: 400, height: 300 });
+  });
 });

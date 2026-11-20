@@ -145,6 +145,24 @@ fn abrir_portal_em_preparo_aguarda_a_criacao() {
 }
 
 #[test]
+fn hit_holes_recorta_apenas_cliques_sem_abrir_buraco_visual() {
+    let place: Place = serde_json::from_value(json!({
+        "rect": { "x": 0.0, "y": 0.0, "width": 400.0, "height": 300.0 },
+        "zoom": 1.0,
+        "visible": true,
+        "visibleRect": { "x": 0.0, "y": 0.0, "width": 400.0, "height": 300.0 },
+        "holes": [],
+        "hitHoles": [{ "x": 290.0, "y": 10.0, "width": 100.0, "height": 36.0 }]
+    }))
+    .expect("place com hitHoles");
+
+    assert_eq!(super::region(&place), vec![Rect { x: 0.0, y: 0.0, width: 400.0, height: 300.0 }]);
+    let hit = super::hit_region(&place);
+    assert_ne!(hit, vec![Rect { x: 0.0, y: 0.0, width: 400.0, height: 300.0 }]);
+    assert_eq!(hit.len(), 4);
+}
+
+#[test]
 fn mesa_inicial_sem_registro_nao_recarrega_ao_confirmar_emulacao_mesa() {
     // Sem registro prévio, a vista já está em modo mesa (`None`): pedir `None` não muda de plataforma.
     assert!(same_emulated_platform(None, None));
@@ -157,9 +175,9 @@ fn mesa_inicial_sem_registro_nao_recarrega_ao_confirmar_emulacao_mesa() {
 
 #[test]
 fn native_place_preserva_visibilidade_oculta_na_emulacao() {
-    let saved = NativePlace::new([0, 0, 390, 844], vec![[0, 0, 390, 844]], 12.0, false, false);
+    let saved = NativePlace::new([0, 0, 390, 844], vec![[0, 0, 390, 844]], vec![[0, 0, 390, 844]], 12.0, false, false);
     assert!(!saved.visible);
-    let shown = NativePlace::new([0, 0, 390, 844], vec![[0, 0, 390, 844]], 12.0, false, true);
+    let shown = NativePlace::new([0, 0, 390, 844], vec![[0, 0, 390, 844]], vec![[0, 0, 390, 844]], 12.0, false, true);
     assert!(shown.visible);
 }
 

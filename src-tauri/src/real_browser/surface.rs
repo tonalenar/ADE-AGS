@@ -187,14 +187,16 @@ pub(super) fn open_step(exists: bool, attached: bool) -> OpenStep {
 pub(super) struct NativePlace {
     pub rect: [i32; 4],
     pub parts: Vec<[i32; 4]>,
+    /// Recorte só de cliques (sem buraco visual), aplicado à área que aceita eventos.
+    pub hit_parts: Vec<[i32; 4]>,
     pub radius: f64,
     pub click_to_expand: bool,
     pub visible: bool,
 }
 
 impl NativePlace {
-    pub fn new(rect: [i32; 4], parts: Vec<[i32; 4]>, radius: f64, click_to_expand: bool, visible: bool) -> Self {
-        Self { rect, parts, radius, click_to_expand, visible }
+    pub fn new(rect: [i32; 4], parts: Vec<[i32; 4]>, hit_parts: Vec<[i32; 4]>, radius: f64, click_to_expand: bool, visible: bool) -> Self {
+        Self { rect, parts, hit_parts, radius, click_to_expand, visible }
     }
 }
 

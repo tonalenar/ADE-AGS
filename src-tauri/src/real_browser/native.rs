@@ -391,7 +391,7 @@ pub async fn add_script(app: &AppHandle, id: &str, source: String) -> Result<(),
 
 /// Onde a janela do Portal fica (px físicos, relativos à janela do app), o zoom da página e o que dela aparece
 /// (retângulos em px físicos, relativos ao Portal; vazio = nada aparece, mas a página continua desenhando).
-pub fn place(app: &AppHandle, id: &str, bounds: [i32; 4], zoom: f64, parts: Vec<[i32; 4]>, corner_radius: f64, _click_to_expand: bool, visible: bool) {
+pub fn place(app: &AppHandle, id: &str, bounds: [i32; 4], zoom: f64, _visual_parts: Vec<[i32; 4]>, parts: Vec<[i32; 4]>, corner_radius: f64, _click_to_expand: bool, visible: bool) {
     with_portal_now(app, id, move |portal| unsafe {
         let [x, y, w, h] = bounds;
         let _ = SetWindowPos(portal.host, Some(HWND_TOP), x, y, w.max(1), h.max(1), SWP_NOACTIVATE);
