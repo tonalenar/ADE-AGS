@@ -39,14 +39,31 @@ export function forgetImage(path: string): void {
   cache.delete(path);
 }
 
+/**
+ * Quando tentar de novo uma imagem que não se leu. A resposta do agente cita o arquivo antes de a ferramenta terminar
+ * de gravá-lo (ou de copiá-lo para a pasta), então a primeira leitura falha por "não encontrado" ou "vazio" e o
+ * arquivo aparece segundos depois. Poucas tentativas, espaçadas: depois disso a imagem some de verdade.
+ */
+export const PREVIEW_RETRY_DELAYS_MS = [1500, 4000, 10000] as const;
+
 /** A prévia de uma imagem: a que já se tem (colada) ou a lida do caminho. `missing` = não está mais lá. */
 export function useImagePreview(path: string, known: string | null): { src: string | null; missing: boolean } {
   const [loaded, setLoaded] = useState<{ path: string; src: string | null } | null>(null);
   useEffect(() => {
     if (known) return;
     let alive = true;
-    void loadImage(path).then((src) => { if (alive) setLoaded({ path, src }); });
-    return () => { alive = false; };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const attempt = (n: number) => {
+      void loadImage(path).then((src) => {
+        if (!alive) return;
+        setLoaded({ path, src });
+        const delay = PREVIEW_RETRY_DELAYS_MS[n];
+        // Falhou: mostra "indisponível" já, mas confere de novo logo mais, caso o arquivo ainda estivesse sendo gravado.
+        if (src === null && delay !== undefined) timer = setTimeout(() => attempt(n + 1), delay);
+      });
+    };
+    attempt(0);
+    return () => { alive = false; if (timer !== undefined) clearTimeout(timer); };
   }, [path, known]);
   if (known) return { src: known, missing: false };
   if (!loaded || loaded.path !== path) return { src: null, missing: false };
