@@ -305,6 +305,7 @@ pub async fn delete_agent_account(
 
         if delete_files {
             if let Some(dir) = dir {
+                super::antigravity_home::cleanup_keychain_secret(std::path::Path::new(&dir));
                 std::fs::remove_dir_all(&dir).map_err(|e| {
                     format!("La cuenta se quitó, pero no se pudo borrar {dir}: {e}")
                 })?;

@@ -88,11 +88,13 @@ pub(super) fn system_marker_root(spec: &ProfileSpec, home: &Path, default_dir: &
 /// enteremos. El disco es la única fuente que no puede quedar desactualizada.
 pub(super) fn read_identity(dir: &Path, spec: &ProfileSpec) -> (bool, Option<String>) {
     // Marcadores que são a própria credencial (Antigravity): só se confere se existem e têm
-    // conteúdo, pelos metadados. O arquivo nunca é aberto.
+    // conteúdo, pelos metadados. O arquivo nunca é aberto. No macOS, o login da conta isolada
+    // vai para o chaveiro próprio da conta, então também checamos a presença de metadados nele.
     if !spec.presence_markers.is_empty() {
         let found = spec.presence_markers.iter().any(|m| {
             std::fs::metadata(dir.join(m)).map(|meta| meta.is_file() && meta.len() > 2).unwrap_or(false)
-        });
+        }) || (spec.agent_id == "antigravity"
+            && super::antigravity_home::has_keychain_credential(dir));
         return (found, None);
     }
     let marker = dir.join(spec.marker);
