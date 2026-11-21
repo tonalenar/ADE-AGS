@@ -66,7 +66,7 @@ O que **não** funciona: a opção de boot `disabled_jobs`. Nem o `simctl boot -
 
 O que funciona (`simulator/slim.rs`, descoberto pela ferramenta simslim): o `launchd_sim` lê, quando sobe, a lista de serviços desligados de `/private/var/tmp/com.apple.CoreSimulator.SimDevice.<UDID>/disabled.plist` (rótulo → `true`). No modo leve, com o aparelho desligado, a ADE:
 1. guarda o original (`disabled.ade-original.plist`);
-2. acrescenta 157 rótulos;
+2. acrescenta 156 rótulos (o `chronod` fica ligado: sem ele o `WidgetRenderer_Default` estoura o watchdog de 10 s e o macOS mostra um relatório de problema);
 3. liga o aparelho;
 4. espera a tela e os primeiros serviços do `launchd_sim`;
 5. devolve o original.
@@ -105,7 +105,7 @@ Desligar o ⚡ com o aparelho ligado devolve a prioridade normal na hora. Ligar 
 
 ### Exceções por categoria
 
-No menu **⋯ → Serviços do modo leve**, cada categoria mostra o que ela desliga. Marcar **manter ligado** exclui os serviços daquela categoria do `disabled.plist`; a mudança vale no próximo boot. A escolha fica salva pelo `cwd` do canvas (um por projeto) e, quando não há pasta de projeto, usa o padrão global. O comando de boot aceita a lista como parâmetro opcional (`exceptions`), junto com `light` e `lightMax`. No modo máximo, cada um dos 16 extras segue uma categoria (`slim::max_extra_category`: loja, web, MDM, conectividade, apps): manter "Loja" ligada mantém também StoreKit e App Store. O ADE guarda as exceções do último boot de cada aparelho (`lifecycle::remember_exceptions`) e o religamento depois de hibernar e o `ags device start` as reutilizam. Os 157 rótulos originais estão cobertos por `slim-labels.expected`; o teste confirma o conjunto, a contagem e a ausência de duplicatas.
+No menu **⋯ → Serviços do modo leve**, cada categoria mostra o que ela desliga. Marcar **manter ligado** exclui os serviços daquela categoria do `disabled.plist`; a mudança vale no próximo boot. A escolha fica salva pelo `cwd` do canvas (um por projeto) e, quando não há pasta de projeto, usa o padrão global. O comando de boot aceita a lista como parâmetro opcional (`exceptions`), junto com `light` e `lightMax`. No modo máximo, cada um dos 16 extras segue uma categoria (`slim::max_extra_category`: loja, web, MDM, conectividade, apps): manter "Loja" ligada mantém também StoreKit e App Store. O ADE guarda as exceções do último boot de cada aparelho (`lifecycle::remember_exceptions`) e o religamento depois de hibernar e o `ags device start` as reutilizam. Os 156 rótulos estão cobertos por `slim-labels.expected`; o teste confirma o conjunto, a contagem e a ausência de duplicatas.
 
 A tela recebe o que o iOS desenha. Com `ADE_SIMULATOR_FPS=1`, o log mostra a cada segundo:
 - quantos quadros chegaram à camada;

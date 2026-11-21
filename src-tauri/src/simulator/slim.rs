@@ -10,8 +10,8 @@
 //! 0,5 GB de memória comprimida no Mac. A tela inicial, o Safari (localhost) e os Ajustes funcionam.
 //!
 //! Ficam ligados de propósito: push, compras e App Store, Safari e universal links, `assistantd`, `gamed`
-//! e `sharingd` (sem eles o iOS fica tentando subir de novo). Ficam de fora: widgets e papel de parede
-//! animado, Siri e Intelligence, Spotlight, iCloud, Mail/Agenda/Contatos, família e Tempo de Uso, Saúde e
+//! e `sharingd` (sem eles o iOS fica tentando subir de novo). Ficam de fora: widgets (menos o `chronod`,
+//! que o `WidgetRenderer` espera) e papel de parede animado, Siri e Intelligence, Spotlight, iCloud, Mail/Agenda/Contatos, família e Tempo de Uso, Saúde e
 //! Fitness, análise de Fotos, Mapas/News/Tempo, iMessage e FaceTime, aparelhos por perto e telemetria.
 
 use std::path::PathBuf;
@@ -24,7 +24,9 @@ pub struct Category {
 
 /// Serviços agrupados pelos mesmos IDs usados pelo `simslim --except`.
 pub const LABELS: &[Category] = &[
-    Category { id: "widgets", labels: &["com.apple.PosterBoard", "com.apple.chronod", "com.apple.liveactivitiesd", "com.apple.navd"] },
+    // O `chronod` fica ligado: sem ele o `WidgetRenderer_Default` que a tela inicial abre espera até o
+    // watchdog do iOS matá-lo (10 s) e o macOS mostra um relatório de problema a cada boot leve.
+    Category { id: "widgets", labels: &["com.apple.PosterBoard", "com.apple.liveactivitiesd", "com.apple.navd"] },
     Category { id: "siri", labels: &[
         "com.apple.assistant_cdmd", "com.apple.assistant_service", "com.apple.siriactionsd", "com.apple.siriinferenced",
         "com.apple.siriknowledged", "com.apple.sirittsd", "com.apple.siri.context.service", "com.apple.siri.acousticsignature",
