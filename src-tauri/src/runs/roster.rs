@@ -651,6 +651,13 @@ fn include_claude_history(
     Ok(())
 }
 
+/// O roster inclui as contas de qualquer agente com perfil isolado (como Antigravity no macOS),
+/// para que o chat e os terminais possam listá-las. A Frota continua checando `capabilities.accounts`
+/// no roteamento para não atribuir contas a agentes cujo executor headless usa home temporário.
+pub(crate) fn includes_accounts_in_roster(adapter: &dyn crate::agents::AgentAdapter) -> bool {
+    adapter.capabilities().accounts || adapter.def().profile.is_some()
+}
+
 /// La foto de ahora. Bloquea: la primera vez (o con `refresh`) lanza procesos.
 pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
     let created = crate::accounts::list_accounts(db)?;
@@ -681,7 +688,7 @@ pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
             };
 
             let mut accounts = Vec::new();
-            if adapter.capabilities().accounts {
+            if includes_accounts_in_roster(adapter) {
                 let system = crate::accounts::system_account(def.id);
                 let rows = created.iter().filter(|a| a.agent_id == def.id);
                 for (account_id, account) in system

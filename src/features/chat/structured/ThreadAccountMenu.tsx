@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useAccountsStore } from "@/features/accounts/store";
 import { getRoster } from "@/features/runs/ipc";
 import type { Roster } from "@/features/runs/types";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
@@ -24,6 +25,9 @@ export function ThreadAccountMenu({ threadId, agentId, accountId, disabled = fal
   const [roster, setRoster] = useState<Roster | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const createdAccounts = useAccountsStore((s) => s.accounts);
+  const systemAccounts = useAccountsStore((s) => s.systemAccounts);
+  const identities = useMemo(() => [...systemAccounts, ...createdAccounts], [systemAccounts, createdAccounts]);
 
   // Contas nascem e morrem fora da tela: relê a cada troca de conta e quando o turno termina.
   useEffect(() => {
@@ -34,11 +38,16 @@ export function ThreadAccountMenu({ threadId, agentId, accountId, disabled = fal
 
   const agent = roster?.agents.find((a) => a.agentId === agentId);
   const now = Math.floor(Date.now() / 1000);
-  const accounts = useMemo(() => choosableAccounts(agent, now), [agent, now]);
-  if (!hasChoice(agent)) return null;
+  const choiceOptions = useMemo(
+    () => ({ currentAccountId: accountId, principalLabel: t("accounts.system"), identities }),
+    [accountId, identities, t],
+  );
+  const accounts = useMemo(() => choosableAccounts(agent, now, choiceOptions), [agent, now, choiceOptions]);
+  if (!hasChoice(agent, now, choiceOptions)) return null;
 
-  const nameOf = (value: string) => (value === "" ? t("accounts.system") : accounts.find((a) => a.value === value)?.name ?? value);
+  const nameOf = (value: string) => accounts.find((a) => a.value === value)?.name ?? (value === "" ? t("accounts.system") : value);
   const current = accounts.find((a) => a.value === (accountId ?? ""));
+  const expanded = asking !== null || !!error;
   const confirm = async () => {
     if (asking === null) return;
     const target = asking;
@@ -46,27 +55,30 @@ export function ThreadAccountMenu({ threadId, agentId, accountId, disabled = fal
     setError(await switchThreadAccount(threadId, target === "" ? null : target));
   };
 
-  // No rodapé do seletor de agente/modelo: «Conta» à esquerda, o seletor à direita; a confirmação e o erro descem
-  // para a linha de baixo.
+  // No rodapé do seletor de agente/modelo: em repouso fica alinhado à direita dos outros controles;
+  // com confirmação ou erro ocupa a linha inteira (`basis-full`) dentro da largura do popover sem quebrá-lo.
   return (
-    <div data-thread-account className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1.5 min-h-9 shrink-0 px-3 py-1.5 border-t border-gray-200 dark:border-white/[0.08] text-chat-caption text-gray-500 dark:text-white/45">
-      <span className="flex-1">{t("chat.account.label")}</span>
+    <div
+      data-thread-account=""
+      className={`flex flex-wrap items-center justify-end gap-x-2 gap-y-1.5 min-w-0 max-w-full text-chat-caption text-gray-500 dark:text-white/45 ${expanded ? "basis-full w-full pt-1.5 border-t border-gray-200 dark:border-white/[0.08]" : ""}`}
+    >
+      <span className={expanded ? "flex-1 min-w-0" : "shrink-0"}>{t("chat.account.label")}</span>
       <PopupSelect value={accountId ?? ""} disabled={disabled} aria-label={t("chat.account.label")} title={t("chat.account.label")}
         onChange={(e) => { setError(null); setAsking(e.target.value === (accountId ?? "") ? null : e.target.value); }}
         className="max-w-44 text-chat-caption">
         {accounts.map((a) => (
-          <option key={a.value} value={a.value}>{t("chat.account.option", { name: nameOf(a.value), state: t(`chat.account.state.${a.state}`) })}</option>
+          <option key={a.value} value={a.value}>{t("chat.account.option", { name: a.name, state: t(`chat.account.state.${a.state}`) })}</option>
         ))}
       </PopupSelect>
       {current?.state === "exhausted" && <span className="text-chat-caption text-red-600 dark:text-red-400">{t("chat.account.state.exhausted")}</span>}
       {asking !== null && (
-        <span role="alertdialog" className="w-full flex flex-wrap items-center justify-end gap-1.5 text-chat-caption text-gray-600 dark:text-white/60">
-          {t("chat.account.confirm", { name: nameOf(asking) })}
-          <button type="button" onClick={() => void confirm()} className="h-6 px-2 rounded-md border border-gray-200 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-white/[0.06]">{t("chat.account.confirmYes")}</button>
-          <button type="button" onClick={() => setAsking(null)} className="h-6 px-2 rounded-md border border-gray-200 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-white/[0.06]">{t("chat.account.confirmNo")}</button>
+        <span role="alertdialog" className="basis-full w-full min-w-0 flex flex-wrap items-center justify-end gap-1.5 text-chat-caption text-gray-600 dark:text-white/60 break-words">
+          <span className="min-w-0 break-words">{t("chat.account.confirm", { name: nameOf(asking) })}</span>
+          <button type="button" onClick={() => void confirm()} className="h-6 px-2 shrink-0 rounded-md border border-gray-200 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-white/[0.06]">{t("chat.account.confirmYes")}</button>
+          <button type="button" onClick={() => setAsking(null)} className="h-6 px-2 shrink-0 rounded-md border border-gray-200 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-white/[0.06]">{t("chat.account.confirmNo")}</button>
         </span>
       )}
-      {error && <span role="alert" className="w-full text-chat-caption text-red-600 dark:text-red-400 break-words">{error}</span>}
+      {error && <span role="alert" className="basis-full w-full min-w-0 text-chat-caption text-red-600 dark:text-red-400 break-words">{error}</span>}
     </div>
   );
 }

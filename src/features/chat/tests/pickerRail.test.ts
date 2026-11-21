@@ -115,4 +115,33 @@ describe("buildRail", () => {
     );
     expect(items.filter((i) => i.agentId === "claude-code").map((i) => i.loggedIn)).toEqual([true, false]);
   });
+
+  it("Antigravity com Principal e Kiro0 gera dois itens com selo curto", () => {
+    const agyAgents = [{ id: "antigravity", label: "Antigravity" }];
+    const items = buildRail(
+      agyAgents,
+      roster({ antigravity: [rosterAccount(null, "Antigravity"), rosterAccount("kiro", "Kiro0")] }),
+      [],
+      "Principal",
+    );
+    expect(items.map((i) => [i.key, i.showBadge, i.badgeLabel, i.name])).toEqual([
+      ["antigravity", true, "Principal", "Antigravity · Principal"],
+      ["antigravity::kiro", true, "Kiro0", "Antigravity · Kiro0"],
+    ]);
+  });
+
+  it("não duplica na trilha uma conta extra com o mesmo e-mail da principal", () => {
+    const items = buildRail(
+      AGENTS,
+      roster({
+        "claude-code": [
+          rosterAccount(null, "Claude Code", { label: "eristonalencaar@gmail.com" }),
+          rosterAccount("dup", "clone", { label: "eristonalencaar@gmail.com" }),
+        ],
+      }),
+      [],
+      "Principal",
+    );
+    expect(items.filter((i) => i.agentId === "claude-code").map((i) => i.key)).toEqual(["claude-code"]);
+  });
 });

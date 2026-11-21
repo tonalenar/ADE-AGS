@@ -187,63 +187,76 @@ function AccountRow({ account, usage, limits, onLogin, onDelete, onLimits, onIde
 }) {
   const { t } = useTranslation();
   const checkHealth = useAccountsStore((s) => s.checkHealth);
-  const checking = useAccountsStore((s) => s.health[account.id] === "checking");
+  const health = useAccountsStore((s) => s.health[account.id]);
+  const checking = health === "checking";
+  const verified = health && health !== "checking" ? health : null;
+  // A verificação da CLI é a fonte mais recente: nunca mostrar "Não conectado" junto com
+  // "Funcionando", nem duplicar o aviso de sem login quando o HealthBadge já o informa.
+  const effectiveLoggedIn = verified?.status === "ok"
+    ? true
+    : verified?.status === "not_logged_in" || verified?.status === "invalid"
+      ? false
+      : account.loggedIn;
+  const showDiskNotLoggedIn = !effectiveLoggedIn && (!verified || verified.status === "unknown");
+  const subtitle = account.label ?? verified?.email ?? (effectiveLoggedIn
+    ? t("settings.accounts.loggedIn")
+    : t("settings.accounts.pendingLogin"));
   const byKey = account.kind === "api_key";
   const title = accountDisplayLabel(account, t("accounts.principalName"));
 
   return (
-    <div className="cc-t group flex items-center gap-3 px-3 min-h-12 py-1.5 rounded-lg
+    <div className="cc-t group flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 min-h-12 py-2 rounded-lg
       bg-white dark:bg-white/4
       hover:bg-gray-50 dark:hover:bg-white/6">
 
-      {/* Selo de iniciais em vez do logo da TUI: numa lista de contas do MESMO serviço,
-          repetir o logo em cada linha não distingue nada. Cor e nome são da pessoa (ver
-          `AccountIdentityDialog`). O ponto de estado diz se há sessão iniciada. */}
-      <span className="relative shrink-0">
-        <AccountBadge label={title} accentColor={account.accentColor} size="md" />
-        <span
-          aria-hidden
-          className={`absolute -right-0.5 -bottom-0.5 w-2 h-2 rounded-full border border-white dark:border-surface
-            ${account.loggedIn ? "bg-emerald-500" : "bg-gray-400"}`}
-        />
-      </span>
+      <div className="flex items-center gap-3 min-w-0 flex-1 basis-56">
+        {/* Selo de iniciais em vez do logo da TUI: numa lista de contas do MESMO serviço,
+            repetir o logo em cada linha não distingue nada. Cor e nome são da pessoa (ver
+            `AccountIdentityDialog`). O ponto de estado diz se há sessão iniciada. */}
+        <span className="relative shrink-0">
+          <AccountBadge label={title} accentColor={account.accentColor} size="md" />
+          <span
+            aria-hidden
+            className={`absolute -right-0.5 -bottom-0.5 w-2 h-2 rounded-full border border-white dark:border-surface
+              ${effectiveLoggedIn ? "bg-emerald-500" : "bg-gray-400"}`}
+          />
+        </span>
 
-      <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="truncate text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">
-            {title}
-          </span>
-          {title !== account.name && !account.id.startsWith("system:") && (
-            <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35">{account.name}</span>
-          )}
-          {byKey && (
-            <Badge variant="info" size="sm" className="shrink-0">
-              {t("settings.accounts.add.mode.apiKey")}
-            </Badge>
-          )}
-          {!account.loggedIn && (
-            <Badge variant="warning" size="sm" className="shrink-0">
-              {t("settings.accounts.notLoggedIn")}
-            </Badge>
-          )}
-          <HealthBadge accountId={account.id} />
-          <LimitBadges limits={limits} />
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 min-w-0">
+            <span className="truncate max-w-full text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">
+              {title}
+            </span>
+            {title !== account.name && !account.id.startsWith("system:") && (
+              <span className="truncate max-w-full text-[10.5px] text-gray-400 dark:text-white/35">{account.name}</span>
+            )}
+            {byKey && (
+              <Badge variant="info" size="sm" className="shrink-0">
+                {t("settings.accounts.add.mode.apiKey")}
+              </Badge>
+            )}
+            {showDiskNotLoggedIn && (
+              <Badge variant="warning" size="sm" className="shrink-0">
+                {t("settings.accounts.notLoggedIn")}
+              </Badge>
+            )}
+            <HealthBadge accountId={account.id} />
+            <LimitBadges limits={limits} />
+          </div>
+          {/* Cuando la TUI expone el mail se muestra: es lo que de verdad distingue una
+              cuenta de otra — el nombre simbólico lo eligió el usuario y puede mentir.
+              La ruta del perfil va en el tooltip: hace falta para depurar, pero mostrarla
+              en cada fila llenaba la lista de texto que nadie lee. */}
+          <Tooltip content={`${account.envVar}=${account.dir}`} placement="bottom">
+            <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35">
+              {subtitle}
+            </span>
+          </Tooltip>
+          {usage && <UsageLine usage={usage} />}
         </div>
-        {/* Cuando la TUI expone el mail se muestra: es lo que de verdad distingue una
-            cuenta de otra — el nombre simbólico lo eligió el usuario y puede mentir.
-            La ruta del perfil va en el tooltip: hace falta para depurar, pero mostrarla
-            en cada fila llenaba la lista de texto que nadie lee. */}
-        <Tooltip content={`${account.envVar}=${account.dir}`} placement="bottom">
-          <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35">
-            {account.label ?? (account.loggedIn
-              ? t("settings.accounts.loggedIn")
-              : t("settings.accounts.pendingLogin"))}
-          </span>
-        </Tooltip>
-        {usage && <UsageLine usage={usage} />}
       </div>
 
-      <div className="flex items-center gap-1.5 shrink-0">
+      <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0 ml-auto">
         <Button
           variant="outline"
           size="sm"
@@ -270,11 +283,11 @@ function AccountRow({ account, usage, limits, onLogin, onDelete, onLimits, onIde
         {/* Una cuenta por API key no tiene login que rehacer: se cambia la key creando
             otra cuenta. */}
         {!byKey && <Button
-          variant={account.loggedIn ? "outline" : "primary"}
+          variant={effectiveLoggedIn ? "outline" : "primary"}
           size="sm"
           onClick={onLogin}
         >
-          {account.loggedIn
+          {effectiveLoggedIn
             ? t("settings.accounts.relogin")
             : t("settings.accounts.login.btn")}
         </Button>}

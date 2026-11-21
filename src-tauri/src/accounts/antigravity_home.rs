@@ -47,13 +47,21 @@ const SHARED_SKILLS: &[&str] = &["config/skills", "antigravity-cli/skills"];
 const KEYCHAIN_FILENAME: &str = "antigravity.keychain-db";
 
 #[cfg(target_os = "macos")]
+const LOGIN_KEYCHAIN_FILENAME: &str = "login.keychain-db";
+
+#[cfg(target_os = "macos")]
 const SECURITY_PLIST: &str = "com.apple.security.plist";
 
 #[cfg(target_os = "macos")]
 const SECURITY_BIN: &str = "/usr/bin/security";
 
+/// O `agy` no macOS grava o token no Keychain com serviço `"gemini"` e conta `"antigravity"`.
+/// Mantemos também a consulta por serviço `"antigravity"` para retrocompatibilidade.
 #[cfg(target_os = "macos")]
-const ANTIGRAVITY_KEYCHAIN_SERVICE: &str = "antigravity";
+const ANTIGRAVITY_KEYCHAIN_ENTRIES: &[(&str, Option<&str>)] = &[
+    ("gemini", Some("antigravity")),
+    ("antigravity", None),
+];
 
 #[cfg(target_os = "macos")]
 const KEYCHAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -135,30 +143,37 @@ pub(super) fn cleanup_keychain_secret(account_dir: &Path) {
 #[cfg(not(target_os = "macos"))]
 pub(super) fn cleanup_keychain_secret(_account_dir: &Path) {}
 
-/// Confere pelos metadados do chaveiro isolado se o `agy` gravou uma credencial `"antigravity"`.
+/// Confere pelos metadados do chaveiro da conta (isolado em `antigravity.keychain-db`, ou
+/// `login.keychain-db` na conta principal do usuário) se o `agy` gravou uma credencial.
 /// Nunca passa `-w` e nunca lê nem expõe o segredo; funciona mesmo com o chaveiro travado.
 #[cfg(target_os = "macos")]
 pub(super) fn has_keychain_credential(account_dir: &Path) -> bool {
-    let kc_path = account_dir
-        .join("Library")
-        .join("Keychains")
-        .join(KEYCHAIN_FILENAME);
-    let Ok(meta) = std::fs::symlink_metadata(&kc_path) else {
+    let keychains_dir = account_dir.join("Library").join("Keychains");
+    let kc_path = [KEYCHAIN_FILENAME, LOGIN_KEYCHAIN_FILENAME]
+        .into_iter()
+        .map(|name| keychains_dir.join(name))
+        .find(|candidate| {
+            std::fs::symlink_metadata(candidate)
+                .map(|meta| meta.file_type().is_file())
+                .unwrap_or(false)
+        });
+    let Some(kc_path) = kc_path else {
         return false;
     };
-    if !meta.file_type().is_file() {
-        return false;
-    }
     let resolved_home =
         std::fs::canonicalize(account_dir).unwrap_or_else(|_| account_dir.to_path_buf());
     let resolved_kc = std::fs::canonicalize(&kc_path).unwrap_or(kc_path);
-    let mut cmd = crate::util::spawn::hidden_command(SECURITY_BIN);
-    cmd.args(["find-generic-password", "-s", ANTIGRAVITY_KEYCHAIN_SERVICE])
-        .arg(&resolved_kc)
-        .env("HOME", &resolved_home);
-    crate::util::spawn::output(&mut cmd, KEYCHAIN_PROBE_TIMEOUT)
-        .map(|out| out.status.success())
-        .unwrap_or(false)
+    ANTIGRAVITY_KEYCHAIN_ENTRIES.iter().any(|(service, account)| {
+        let mut cmd = crate::util::spawn::hidden_command(SECURITY_BIN);
+        cmd.args(["find-generic-password", "-s", service]);
+        if let Some(account) = account {
+            cmd.args(["-a", account]);
+        }
+        cmd.arg(&resolved_kc).env("HOME", &resolved_home);
+        crate::util::spawn::output(&mut cmd, KEYCHAIN_PROBE_TIMEOUT)
+            .map(|out| out.status.success())
+            .unwrap_or(false)
+    })
 }
 
 #[cfg(not(target_os = "macos"))]

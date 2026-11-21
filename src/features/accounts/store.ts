@@ -54,6 +54,9 @@ export const useAccountsStore = create<AccountsState>()((set, get) => ({
     try {
       const result = await ipc.accountHealth(accountId);
       set((s) => ({ health: { ...s.health, [accountId]: result } }));
+      if (result.status === "ok" || result.status === "not_logged_in" || result.email) {
+        void get().load().catch(() => undefined);
+      }
       return result;
     } catch (e) {
       const failed: AccountHealth = { status: "unknown", detail: String(e), email: null, plan: null, checkedAt: Date.now() / 1000 };

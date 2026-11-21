@@ -2,6 +2,7 @@ import { accountDisplayLabel, shouldShowAccountBadge } from "@/features/accounts
 import { accountRefFromWire, accountRefToWire, type AccountRef } from "@/features/accounts/accountRef";
 import type { AgentAccount } from "@/features/accounts/types";
 import type { Roster } from "@/features/runs/types";
+import { dedupeRosterAccounts } from "./accountChoice";
 
 /**
  * O trilho do seletor de modelo: um ícone por agente e, quando o agente tem mais de uma conta,
@@ -49,11 +50,17 @@ export function buildRail(
   roster: Roster | null,
   identities: readonly AgentAccount[],
   principalLabel: string,
-  /** `false` numa conversa aberta: a conta não muda, então o trilho volta a um ícone por agente, sem selo. */
+  /** `false` numa conversa aberta com conta fixa: volta a um ícone por agente, sem selo. */
   perAccount = true,
+  /** Conta ativa do agente atual, para preservar na deduplicação por e-mail. */
+  currentAccount?: { agentId: string | null; accountId: string | null },
 ): RailItem[] {
   return agents.flatMap((agent) => {
-    const accounts = perAccount ? roster?.agents.find((a) => a.agentId === agent.id)?.accounts ?? [] : [];
+    const rawAccounts = perAccount ? roster?.agents.find((a) => a.agentId === agent.id)?.accounts ?? [] : [];
+    const accounts = dedupeRosterAccounts(
+      rawAccounts,
+      currentAccount?.agentId === agent.id ? currentAccount.accountId : undefined,
+    );
     const sources = accounts.length > 0
       ? accounts.map((a) => ({ accountId: a.accountId, name: a.name, email: a.label, loggedIn: a.loggedIn }))
       : [{ accountId: null, name: agent.label, email: null, loggedIn: true }];
@@ -73,7 +80,7 @@ export function buildRail(
     return entries.map(({ source, who }): RailItem => {
       const badgeLabel = accountDisplayLabel(who, principalLabel);
       const showBadge = perAccount && shouldShowAccountBadge(who, everyone);
-      const shown = who.displayName?.trim() || (source.accountId ? source.email ?? badgeLabel : badgeLabel);
+      const shown = who.displayName?.trim() || (source.accountId ? source.email ?? badgeLabel : source.email ?? badgeLabel);
       return {
         key: railKeyOf(accountRefFromWire(agent.id, source.accountId)),
         agentId: agent.id,
