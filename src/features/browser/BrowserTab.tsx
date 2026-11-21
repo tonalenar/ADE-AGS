@@ -18,7 +18,7 @@ import { pasteIntoTab } from "@/features/terminal/terminalRegistry";
 
 import pickerScript from "./picker.ts?script";
 import runtimeScript from "./page/runtime.ts?script";
-import { registerBrowserHost } from "./agentBridge";
+import { onCaptchaDocumentEvent, recheckCaptchaForView, registerBrowserHost } from "./agentBridge";
 import { PREVIEW_COMMAND_EVENT, setPreviewViewVisible, type PreviewCommandEventDetail } from "./commands";
 import type { DeviceSpec } from "./devices";
 import { newMarkId, rememberMarks } from "./markStore";
@@ -518,6 +518,9 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
       setDebugTab("network");
       setDebugOpen(true);
     },
+    watchCaptcha: (on) => {
+      postRef.current(on ? "captcha:watch" : "captcha:unwatch");
+    },
     screenshot: async (tag) => {
       // No Chrome real a foto vem do próprio Chrome: não depende de a página estar à vista na tela.
       if (realRef.current) return previewSaveCapture(await canvasToPng((await realBrowserShot(view.id)).canvas), tag);
@@ -718,6 +721,9 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
       rememberPage(shown, msg.payload.title || host);
       doc.current.ready = true;
       wakeLoadWaiters();
+      void recheckCaptchaForView(view.id);
+    } else if (msg.type === "captcha:state") {
+      void onCaptchaDocumentEvent(view.id, msg.payload.snapshot);
     } else if (msg.type === "page:ready") {
       const url = display(msg.payload.url);
       channel.documentChanged(url);

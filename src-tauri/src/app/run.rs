@@ -589,6 +589,8 @@ pub fn run() {
             crate::preview::preview_add_mock,
             crate::preview::preview_list_mocks,
             crate::preview::preview_clear_mocks,
+            crate::preview::preview_waf_challenge,
+            crate::preview::preview_captcha_notify,
             // Importação de cookies de outro navegador (ver `preview/importer`): listar fontes, revisar e gravar cifrado no perfil de destino.
             crate::preview::browser_import_sources,
             crate::preview::browser_import_review,

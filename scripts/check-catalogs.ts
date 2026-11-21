@@ -46,13 +46,18 @@ export function mcpTools(mcp: string, git: string): ToolFamily[] {
   const field = /name: "([a-z_]+)"/g;
   const orchestration = names(rustBlock(mcp, "ORCHESTRATION_TOOLS"), field);
   const ask = mcp.match(/pub const ASK_TOOL: &str = "([a-z_]+)";/)?.[1];
+  const captchaWait = mcp.match(/pub const CAPTCHA_WAIT_TOOL: &str = "([a-z_]+)";/)?.[1];
   const secrets = ["SECRET_REQUEST_TOOL", "SECRET_RUN_TOOL", "SECRET_REVOKE_TOOL"]
     .map((constant) => mcp.match(new RegExp(`pub const ${constant}: &str = "([a-z_]+)";`))?.[1])
     .filter((name): name is string => Boolean(name));
   const approve = mcp.match(/pub const TOOL_NAME: &str = "([a-z_]+)";/)?.[1];
   if (!ask || !approve) throw new Error("não achei ASK_TOOL/TOOL_NAME em mcp.rs");
+  const browserTools = [
+    ...names(rustBlock(mcp, "BROWSER_TOOLS"), field),
+    ...(captchaWait ? [captchaWait] : []),
+  ];
   return [
-    { family: "Browser", pt: "Navegador", who: "every session", tools: names(rustBlock(mcp, "BROWSER_TOOLS"), field) },
+    { family: "Browser", pt: "Navegador", who: "every session", tools: browserTools },
     { family: "Fleet orchestration", pt: "Orquestração da frota", who: "every session (read-only roles get only the Read power)", tools: orchestration.filter((t) => !t.startsWith("memory_")) },
     { family: "Fleet memory", pt: "Memória da frota", who: "fleet tasks only (`--task`)", tools: orchestration.filter((t) => t.startsWith("memory_")) },
     { family: "Git account", pt: "Conta de git", who: "every session", tools: names(rustBlock(git, "GIT_TOOLS"), field) },

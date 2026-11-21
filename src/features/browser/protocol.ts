@@ -7,6 +7,8 @@
  * script autocontenido.
  */
 
+import type { DocumentSnapshot } from "./captcha";
+
 /** Firma de los mensajes que manda la página. Cualquier otro `postMessage` se ignora. */
 export type PageSource = "ags-preview";
 /** Firma de los mensajes que manda la app. */
@@ -54,6 +56,8 @@ export type PageMessage =
   /** Un `alert`, `confirm` o `prompt` que disparó un agente. El runtime ya lo rechazó; la app pregunta a la persona. */
   | { source: PageSource; type: "dialog:asked"; payload: DialogAsk }
   | { source: PageSource; type: "debug:batch"; payload: DebugBatch }
+  /** Estado de captcha atualizado por mutação no DOM enquanto a página está sob observação. */
+  | { source: PageSource; type: "captcha:state"; payload: { snapshot: DocumentSnapshot } }
   /** Só no Chrome real: o runtime pede um toque ou uma tecla de verdade (o `Input` do CDP). Responde-se `input:done`. */
   | { source: PageSource; type: "input:request"; payload: NativeInput & { id: string } };
 
@@ -71,7 +75,9 @@ export type SimpleAppMessage = {
   /** La tab del navegador pasó a estar (o dejó de estar) a la vista. */
   | "view:shown" | "view:hidden"
   /** Se abrió (o cerró) el panel de debug: la página anota la red solo mientras está abierto. */
-  | "net:on" | "net:off";
+  | "net:on" | "net:off"
+  /** Observa (ou para de observar) mutações do DOM para avisar quando um captcha some. */
+  | "captcha:watch" | "captcha:unwatch";
 };
 
 export type AppMessage =
@@ -127,7 +133,9 @@ export type PageCommand =
    *  y con qué estilos. Le asigna un ref (`u1`) que sobrevive a los snapshots. */
   | { op: "describe"; target: string }
   /** O que há sob um alvo (nome, texto, id), sem tocar nele: o piloto olha antes de tocar num ponto apontado por uma foto. */
-  | { op: "peek"; target: string };
+  | { op: "peek"; target: string }
+  /** Retrato mínimo do documento para detectar captcha/desafio anti-robô sem interagir com ele. */
+  | { op: "captcha" };
 
 export type PageOp = PageCommand["op"];
 

@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.86.0
+version: 1.87.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -1094,6 +1094,8 @@ confirmation use `--timeout 300`; the CLI waits that long plus a margin, and the
 **One act at a time.** One per simulator and one on the Mac (a global lock): a second one is refused while
 the first runs. Do not start acts in parallel on the same target; on the Mac, not at all.
 
+**Captchas belong to the person (`browser_wait_human`).** ADE never solves captchas automatically, and clicking inside a challenge iframe is always refused. When a browser tool returns `{"blocked":"captcha","handoff":"<id>"}`, call `browser_wait_human` with that `handoff` (default timeout 900 s, max 1800 s): ADE shows the user a card to solve it and wakes you by event with `{"resolved":true}`, `{"cancelled":true}`, or `{"expired":true}`. Reading tools (`browser_snapshot`, `browser_screenshot`, `browser_describe`) remain allowed while paused.
+
 **Covered targets on iOS.** Sometimes the control Jev picks sits under the keyboard or a floating tab bar, or is
 cut by the bottom edge. A tap there would hit a key or the bar, so `sim act` scrolls the content inside the free
 area first and looks again; the action reads `scroll` → `reveal`. If scrolling cannot free it, the act ends
@@ -1710,7 +1712,7 @@ flags of each command.
 <!-- Gerado por `bun run gen:catalogs` a partir do código; não edite à mão. -->
 | Family | Who sees it | Tools |
 |---|---|---|
-| Browser | every session | `browser_navigate`, `browser_pick`, `browser_marked`, `browser_snapshot`, `browser_click`, `browser_act`, `browser_type`, `browser_press`, `browser_select`, `browser_describe`, `browser_screenshot`, `browser_drag`, `browser_upload`, `browser_mock`, `browser_dialogs`, `browser_hover`, `browser_scroll`, `browser_wait`, `browser_history`, `browser_resize`, `browser_layout`, `browser_console`, `browser_network`, `browser_storage`, `browser_cookies`, `browser_performance`, `browser_eval` |
+| Browser | every session | `browser_navigate`, `browser_pick`, `browser_marked`, `browser_snapshot`, `browser_click`, `browser_act`, `browser_type`, `browser_press`, `browser_select`, `browser_describe`, `browser_screenshot`, `browser_drag`, `browser_upload`, `browser_mock`, `browser_dialogs`, `browser_hover`, `browser_scroll`, `browser_wait`, `browser_history`, `browser_resize`, `browser_layout`, `browser_console`, `browser_network`, `browser_storage`, `browser_cookies`, `browser_performance`, `browser_eval`, `browser_wait_human` |
 | Fleet orchestration | every session (read-only roles get only the Read power) | `gemini_desktop_status`, `gemini_desktop_consult`, `gemini_desktop_result`, `agent_roster`, `run_plan`, `task_add`, `delegate_task`, `task_handoff`, `task_status`, `task_result`, `run_await`, `fact_add`, `facts_read`, `fact_read`, `task_reroute`, `task_cancel` |
 | Fleet memory | fleet tasks only (`--task`) | `memory_list`, `memory_get`, `memory_search`, `memory_open`, `memory_propose`, `memory_update`, `memory_delete`, `memory_promote_fact` |
 | Git account | every session | `git_account`, `git_repos`, `git_pr_list`, `git_pr_view`, `git_checks`, `git_pr_files`, `git_issue_list`, `git_issue_view`, `git_fetch`, `git_pull`, `git_push`, `git_pr_create`, `git_issue_create`, `git_tag`, `git_release_list`, `git_release_create`, `git_comment` |
