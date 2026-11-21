@@ -489,6 +489,21 @@ pub(crate) fn challenge_in_progress(target_origin: &str) -> Option<String> {
     (at.elapsed() < CHALLENGE_TTL).then(|| action.clone())
 }
 
+/// Expõe ao frontend a ação WAF detectada pelo proxy para uma origem (ex.: `"challenge"` ou `"captcha"`).
+#[tauri::command]
+pub fn preview_waf_challenge(target_origin: String) -> Option<String> {
+    challenge_in_progress(&target_origin)
+}
+
+/// Aviso nativo do sistema quando um agente encontra um captcha e precisa da pessoa.
+/// Reutiliza o mesmo mecanismo das missões e permissões (`notifier::show_custom`).
+#[tauri::command]
+pub fn preview_captcha_notify(app: tauri::AppHandle, title: String, body: String) -> bool {
+    let title: String = title.chars().take(120).collect();
+    let body: String = body.chars().take(300).collect();
+    crate::notifier::show_custom(&app, &title, &body)
+}
+
 fn plain_status(status: u16) -> Response<Body> {
     Response::builder()
         .status(status)
