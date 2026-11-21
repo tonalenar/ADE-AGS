@@ -24,6 +24,7 @@ import type {
 import { virtualKeyCode } from "./keys";
 import { createCursor } from "./cursor";
 import { componentChain, describeElement, selectorOf } from "./dom";
+import { findLoginFields } from "./loginFields";
 import {
   errorKindOf, headerList, headerValue, parseRawHeaders, readResponseBody, requestBodyPreview, MAX_PAGE_BODY,
 } from "./netCapture";
@@ -1378,6 +1379,39 @@ declare global {
     return { typed: describeElement(el), value: valueOf(el) ?? "", ...(options !== null ? { options } : {}), ...waitedField(waited) };
   }
 
+  async function fillInputField(field: HTMLInputElement, text: string, cursorLabel: string): Promise<void> {
+    await cursor.toElement(field, cursorLabel);
+    field.focus({ preventScroll: false });
+    if (!(await typeNatively(true, text))) {
+      nativeSetValue(field, text);
+      inputEvent(field, text);
+      field.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
+  /**
+   * Preenche um formulário de login com credenciais do cofre da ADE.
+   * A senha nunca entra no texto do cursor, no resultado nem em mensagens de erro.
+   */
+  async function fillLogin(username: string, password: string, submit: boolean): Promise<{ filled: true; submitted: boolean }> {
+    const fields = findLoginFields(document);
+    if (!fields) {
+      throw new Error("Nenhum campo de senha (input[type=password]) foi encontrado nesta página.");
+    }
+    if (fields.username && username) {
+      await fillInputField(fields.username, username, "fill username");
+    }
+    await fillInputField(fields.password, password, "fill password");
+    let submitted = false;
+    if (submit) {
+      await press("Enter", fields.password);
+      submitted = true;
+    } else {
+      await settle(800, 150, PENDING_MS.type);
+    }
+    return { filled: true, submitted };
+  }
+
   /** Digita no campo focado pelo `Input` do CDP: com `clear`, seleciona tudo antes (o texto novo substitui; vazio apaga). */
   async function typeNatively(clear: boolean, text: string): Promise<boolean> {
     if (!trustedInput) return false;
@@ -1943,6 +1977,7 @@ declare global {
       case "click": return acting(command.target, click);
       case "hover": return acting(command.target, hover);
       case "type": return acting(command.target, (el) => type(el, command.text, !!command.clear, !!command.submit));
+      case "fillLogin": return fillLogin(command.username, command.password, !!command.submit);
       case "press": return command.target ? acting(command.target, (el) => press(command.key, el)) : press(command.key);
       case "select": return acting(command.target, (el) => select(el, command.value));
       case "scroll": return scroll(command);

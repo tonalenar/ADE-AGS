@@ -51,6 +51,10 @@ import { bareUrl, createLedger, forgetLedger, ledgerOf, type ActLedger, type Pri
 import { backendSink, withProgress } from "./actProgress";
 import { beginWindowMeasure } from "./windowBeat";
 import { readBrowserPreferences } from "./browserPreferences";
+import { vaultAllowAgent, vaultList, vaultSecretForFill } from "@/features/vault/ipc";
+import { originMatches as vaultOriginMatches } from "@/features/vault/origin";
+import { useVaultPromptStore } from "@/features/vault/store";
+import type { VaultEntry } from "@/features/vault/types";
 
 export interface BrowserHost {
   viewId: string;
@@ -748,6 +752,60 @@ async function execute(
         op: "type", target: required(request, "target"), text: str(request, "text") ?? "",
         clear: bool(request, "clear"), submit: bool(request, "submit"),
       }, true);
+    case "fillLogin": {
+      const pageUrl = host.currentUrl() || host.targetOrigin() || "";
+      if (!pageUrl) {
+        throw new Error("origin_mismatch: Não há página carregada na aba atual.");
+      }
+      const entries = await vaultList();
+      const requestedId = str(request, "id")?.trim();
+      const requestedOrigin = str(request, "origin")?.trim();
+      let entry: VaultEntry | undefined;
+      if (requestedId) {
+        entry = entries.find((candidate) => candidate.id === requestedId);
+      } else if (requestedOrigin) {
+        entry = entries.find((candidate) =>
+          candidate.origin.toLowerCase() === requestedOrigin.toLowerCase()
+          || vaultOriginMatches(candidate.origin, requestedOrigin),
+        );
+      } else {
+        entry = entries.find((candidate) => vaultOriginMatches(candidate.origin, pageUrl));
+      }
+      if (!entry) {
+        throw new Error("not_found: Nenhum login correspondente foi encontrado no cofre.");
+      }
+      if (!vaultOriginMatches(entry.origin, pageUrl)) {
+        throw new Error("origin_mismatch: A origem da página atual não corresponde à origem cadastrada no cofre.");
+      }
+      const agentId = str(request, "agentId")?.trim() || owner?.id || "unknown";
+      if (!entry.allowed_agents.includes(agentId)) {
+        const decision = await useVaultPromptStore.getState().requestConfirm({
+          entry,
+          pageOrigin: host.targetOrigin() || pageUrl,
+          from: owner?.label ?? agentId,
+          fromId: agentId,
+        });
+        if (decision === "decline") {
+          throw new Error("declined: O usuário recusou o preenchimento do login.");
+        }
+        if (decision === "always") {
+          await vaultAllowAgent(entry.id, agentId);
+        }
+      }
+      const password = await vaultSecretForFill(entry.id, pageUrl);
+      const submit = bool(request, "submit");
+      try {
+        const res = await host.channel.run(
+          { op: "fillLogin", username: entry.username, password, submit },
+          18_000,
+        ) as { filled?: boolean; submitted?: boolean } | null;
+        return JSON.stringify({ filled: true, submitted: Boolean(res?.submitted ?? submit) });
+      } catch (cause) {
+        const rawMsg = errorText(cause);
+        const safeMsg = password ? rawMsg.split(password).join("[cofre]") : rawMsg;
+        throw new Error(safeMsg);
+      }
+    }
     case "press": return inPage(host, { op: "press", key: required(request, "key"), target: str(request, "target") }, true);
     case "select": return inPage(host, { op: "select", target: required(request, "target"), value: required(request, "value") }, true);
     case "scroll":

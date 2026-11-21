@@ -6566,5 +6566,21 @@
   "chat.picker.accountLoggedOut": "sin sesión",
   "chat.picker.accountLimitUsed": "{{percent}}% del límite usado",
   "accounts.multipleNote": "Ya tienes una cuenta de {{agent}} conectada. Cada cuenta tiene su propia cuota y su propio login, y ADE no suma ni reparte límites entre ellas. Comprueba que tu plan permita usar más de una cuenta en la misma máquina.",
-  "chat.picker.addAccount": "Añadir cuenta de {{agent}}"
+  "chat.picker.addAccount": "Añadir cuenta de {{agent}}",
+  "vault.card.register.title": "{{agent}} pidió guardar un login en la bóveda",
+  "vault.card.register.save": "Guardar en la bóveda",
+  "vault.card.confirm.title": "Usar login de la bóveda",
+  "vault.card.confirm.body": "{{agent}} quiere completar el login {{label}} en {{origin}}.",
+  "vault.card.confirm.allow": "Completar ahora",
+  "vault.card.confirm.always": "Permitir siempre para este agente",
+  "vault.card.decline": "Rechazar",
+  "vault.card.privacy": "La contraseña permanece solo en el llavero del sistema operativo y ADE la escribe directamente; el agente nunca ve el valor.",
+  "vault.field.origin": "Origen del sitio",
+  "vault.field.originPlaceholder": "https://cuentas.ejemplo.com o *.ejemplo.com",
+  "vault.field.label": "Etiqueta (opcional)",
+  "vault.field.labelPlaceholder": "Ej.: Cuenta principal",
+  "vault.field.username": "Usuario o correo",
+  "vault.field.usernamePlaceholder": "usuario@ejemplo.com",
+  "vault.field.password": "Contraseña",
+  "vault.field.passwordPlaceholder": "Escribe la contraseña"
 }

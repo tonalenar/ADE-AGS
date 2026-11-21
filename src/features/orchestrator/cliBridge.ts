@@ -13,6 +13,7 @@ import { comparablePath } from "@/features/tabs/viewTabs";
 import i18n from "@/i18n";
 import { useRunsStore } from "@/features/runs/store";
 import { parseReview, useAskStore } from "@/features/ask/askStore";
+import { useVaultPromptStore } from "@/features/vault/store";
 import { getAutonomy } from "@/features/missions/autonomy";
 import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { isPageRoute } from "@/features/chat/chatRoutes";
@@ -321,6 +322,25 @@ async function handleSecretRequest(args: Record<string, unknown>): Promise<unkno
   return { secret };
 }
 
+/** Pedido de cadastro de login no cofre: o cartão grava direto via Tauri e só devolve o id ou declined. */
+async function handleVaultRequest(args: Record<string, unknown>): Promise<unknown> {
+  const origin = str(args, "origin");
+  if (!origin) throw new Error("Falta informar a origem do site");
+  const owner = ownerOf(args);
+  if (!owner || owner.kind === "task") {
+    throw new Error("Cadastros no cofre só podem ser pedidos por uma conversa interativa");
+  }
+  const reason = str(args, "reason") ?? "";
+  const timeoutMs = (typeof args.timeout_s === "number" ? args.timeout_s : 600) * 1000;
+  return useVaultPromptStore.getState().requestRegister({
+    origin,
+    reason,
+    from: owner.label,
+    fromId: owner.id,
+    timeoutMs,
+  });
+}
+
 /** El canvas donde vive la tab `tabId`: el de su misión o el de su carpeta. */
 function keyFor(tabId: string, cwd: string): string {
   const tab = useTabsStore.getState().tabs.find((t) => t.id === tabId);
@@ -562,6 +582,7 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "browser.run": return handleBrowser(args);
     case "user.ask": return handleAsk(args);
     case "user.secret": return handleSecretRequest(args);
+    case "vault.request": return handleVaultRequest(args);
     case "tab.screen": return handleScreen(args);
     case "canvas.connect": return handleCanvas(args, (key, a, b) => canvasActions.connect(key, a, b));
     case "canvas.disconnect": return handleCanvas(args, (key, a, b) => canvasActions.disconnectPair(key, a, b));

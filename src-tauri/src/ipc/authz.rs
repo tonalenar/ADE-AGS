@@ -245,6 +245,10 @@ pub(crate) const METHODS: &[(&str, Class)] = &[
     ("secret.request", CALLER),
     ("secret.consume", CALLER),
     ("secret.revoke", CALLER),
+    // Cofre de logins: só abas/conversas interativas provadas; nunca tarefas da frota.
+    ("vault.list", CALLER),
+    ("vault.request", CALLER),
+    ("vault.fill", CALLER),
     // Memória e swarm: o handler já prova token + PID da aba (`terminal::authorize`).
     ("memory.search", CALLER),
     ("memory.suggest", CALLER),
