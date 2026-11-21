@@ -25,6 +25,11 @@ export interface CaptchaIframeRect {
   top?: number;
   right?: number;
   bottom?: number;
+  /**
+   * `false` só quando se sabe que o quadro não aparece para a pessoa (oculto, fora da tela ou
+   * reCAPTCHA invisível). Ausente = desconhecido, tratado como visível.
+   */
+  visible?: boolean;
 }
 
 export interface DocumentSnapshot {
@@ -64,6 +69,26 @@ const CAPTCHA_CONTAINER_SELECTOR = [
   "[id*='awswaf-captcha' i]",
   "[class*='awswaf-captcha' i]",
 ].join(",");
+
+/**
+ * reCAPTCHA v3 / invisível (o selo no canto) e quadros escondidos de provedores vêm em
+ * muitas páginas sem pedir nada à pessoa: não são desafio e não podem travar o agente.
+ */
+function isInvisibleCaptchaFrame(frame: CaptchaIframeRect): boolean {
+  if (frame.visible === false) return true;
+  return /[?&]size=invisible\b/i.test(frame.src);
+}
+
+/** Se o quadro aparece na tela: `false` quando escondido por estilo ou totalmente fora dela. */
+function frameVisibility(frame: HTMLIFrameElement, rect: DOMRect | null): boolean | undefined {
+  const view = frame.ownerDocument?.defaultView;
+  const style = view?.getComputedStyle?.(frame);
+  if (style && (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.opacity === "0")) {
+    return false;
+  }
+  if (rect && (rect.width > 0 || rect.height > 0) && (rect.bottom <= 0 || rect.right <= 0)) return false;
+  return undefined;
+}
 
 /** `true` se a URL pertence a um provedor conhecido de widget/desafio de captcha. */
 export function isCaptchaIframeUrl(src: string): boolean {
@@ -147,6 +172,7 @@ export function snapshotFromDocument(doc: Document, wafChallengeAction?: string 
       name: frame.getAttribute("name") ?? undefined,
       id: frame.getAttribute("id") ?? undefined,
       ...(hasBox ? { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom } : {}),
+      ...(frameVisibility(frame, rect) === false ? { visible: false } : {}),
     };
   });
 
@@ -154,7 +180,7 @@ export function snapshotFromDocument(doc: Document, wafChallengeAction?: string 
     doc.querySelector("#challenge-form, form[action*='__cf_chl'], #cf-challenge-running, .cf-browser-verification"),
   );
   const hasRecaptchaWidget = Boolean(
-    doc.querySelector(".g-recaptcha, #recaptcha, [data-sitekey][class*='recaptcha' i]"),
+    doc.querySelector(".g-recaptcha:not([data-size='invisible']), #recaptcha, [data-sitekey][class*='recaptcha' i]:not([data-size='invisible'])"),
   );
   const hasHcaptchaWidget = Boolean(
     doc.querySelector(".h-captcha, [data-hcaptcha-widget-id]"),
@@ -241,6 +267,7 @@ export function detectCaptcha(doc: DocumentSnapshot): CaptchaKind | null {
 
   // 3. Iframes de provedores conhecidos.
   for (const frame of iframes) {
+    if (isInvisibleCaptchaFrame(frame)) continue;
     if (RECAPTCHA_URL_RE.test(frame.src)) return "recaptcha";
     if (HCAPTCHA_URL_RE.test(frame.src)) return "hcaptcha";
     if (TURNSTILE_URL_RE.test(frame.src)) return "turnstile";
@@ -249,7 +276,7 @@ export function detectCaptcha(doc: DocumentSnapshot): CaptchaKind | null {
   }
 
   // 4. Contêineres de widget no DOM/HTML (quando o iframe ainda está carregando).
-  if (doc.hasRecaptchaWidget || /class\s*=\s*["'][^"']*\bg-recaptcha\b/i.test(html)) {
+  if (doc.hasRecaptchaWidget || (/class\s*=\s*["'][^"']*\bg-recaptcha\b/i.test(html) && !/data-size\s*=\s*["']invisible["']/i.test(html))) {
     return "recaptcha";
   }
   if (doc.hasHcaptchaWidget || /class\s*=\s*["'][^"']*\bh-captcha\b/i.test(html)) {

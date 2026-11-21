@@ -300,3 +300,35 @@ describe("detecção de captcha (C1)", () => {
     await expect(harness.run({ op: "click", target: "@120,100" })).rejects.toThrow(/captcha/i);
   });
 });
+
+describe("captcha invisível não trava o agente", () => {
+  it("recaptcha_v3_invisivel_nao_detecta", () => {
+    const snap: DocumentSnapshot = {
+      title: "Loja",
+      text: "Produtos em promoção",
+      iframes: [{ src: "https://www.google.com/recaptcha/api2/anchor?ar=1&k=abc&size=invisible", title: "reCAPTCHA" }],
+    };
+    expect(detectCaptcha(snap)).toBeNull();
+  });
+
+  it("quadro_de_desafio_escondido_nao_detecta_e_visivel_detecta", () => {
+    const hidden: DocumentSnapshot = {
+      title: "Entrar",
+      iframes: [{ src: "https://www.google.com/recaptcha/api2/bframe?k=abc", title: "recaptcha challenge", visible: false }],
+    };
+    expect(detectCaptcha(hidden)).toBeNull();
+    expect(detectCaptcha({ ...hidden, iframes: [{ ...hidden.iframes![0]!, visible: undefined }] })).toBe("recaptcha");
+  });
+
+  it("widget_g_recaptcha_invisivel_no_dom_nao_detecta", () => {
+    document.body.innerHTML = `<form><div class="g-recaptcha" data-size="invisible" data-sitekey="abc"></div><button>Enviar</button></form>`;
+    expect(detectCaptcha(snapshotFromDocument(document))).toBeNull();
+  });
+
+  it("iframe_escondido_por_estilo_fica_invisivel_no_retrato", () => {
+    document.body.innerHTML = `<div style="visibility:hidden"><iframe title="recaptcha challenge" src="https://www.google.com/recaptcha/api2/bframe?k=abc"></iframe></div>`;
+    const snap = snapshotFromDocument(document);
+    expect(snap.iframes![0]!.visible).toBe(false);
+    expect(detectCaptcha(snap)).toBeNull();
+  });
+});
