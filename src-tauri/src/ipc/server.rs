@@ -352,3 +352,37 @@ pub(super) fn handle_connection(
         }
     }
 }
+
+/// Despacha um comando IPC dentro do próprio processo do app, sem socket, usando a identidade
+/// já provada (`principal`). Segue exatamente o mesmo caminho de autorização e handlers que
+/// `handle_connection`, inclusive a captura de pânico.
+pub(crate) fn dispatch_in_process(
+    app: &AppHandle,
+    command: &str,
+    args: serde_json::Value,
+    principal: crate::terminal::Principal,
+) -> Result<serde_json::Value, String> {
+    let response = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        commands::dispatch_with_principal(app, command, &args, || Ok(principal), false)
+    }))
+    .unwrap_or_else(|_| {
+        Response::err(format!(
+            "Erro interno do app ao executar `{command}`: o comando falhou no meio. Tente de novo; se repetir, veja o log do app."
+        ))
+    });
+
+    if command != "credential.redeem"
+        && !command.is_empty()
+        && let Ok(json) = serde_json::to_string(&response)
+    {
+        crate::orchestrator::record_response(app, command, &json);
+    }
+
+    if response.ok {
+        Ok(response.data.unwrap_or(serde_json::Value::Null))
+    } else {
+        Err(response
+            .error
+            .unwrap_or_else(|| format!("O comando `{command}` falhou sem detalhe")))
+    }
+}

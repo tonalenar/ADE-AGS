@@ -72,6 +72,26 @@ Flags globais: `--version` e `--json-args '{…}'`. Uma URL `http…` solta vira
 - `ask_user` tem prazo (padrão 600 s): ao vencer devolve `status: "pending"`, nunca aprovação, e a resposta tardia chega à aba como mensagem. Integrante de time recebe `refused` (`ask_lead`) e leva a dúvida ao orquestrador.
 - Segredos temporários: `secret_request`/`secret_run`/`secret_revoke` só aparecem para conversas interativas, nunca para tasks headless. O valor fica no keyring por até 24 h, vinculado à conversa; `secret_run` o envia apenas no stdin de um executável e descarta stdout/stderr. O uso pede a aprovação normal da TUI. Para um cliente sem MCP por sessão, a skill oferece `ags secret request`, `ags secret run <id> -- <programa>` e `ags secret revoke <id>`; `secret.consume` é recusado pela CLI comum.
 
+### MCP remoto (HTTP com pareamento)
+- Nasce **desligado** e é ativado em **Configurações → Conexões → Acesso remoto**. Escuta somente em `127.0.0.1:<porta>` e, quando detectado por `tailscale ip -4`, no IP Tailscale (`100.64.0.0/10`) — nunca em `0.0.0.0` nem `::` (porta padrão `47820`).
+- **Pareamento:** gera um token aleatório de 32 bytes (base64url) mostrado **uma única vez**; o keyring do SO (`ade-ags.remote.<hash>`) guarda apenas o hash SHA-256. A lista permite revogar qualquer cliente imediatamente.
+- **Como conectar** (substitua `<ip>` por `127.0.0.1` na mesma máquina ou pelo IP Tailscale exibido na tela, e `<token>` pelo token gerado):
+  - **Claude Code:**
+    ```bash
+    claude mcp add --transport http ade http://<ip>:47820/mcp --header "Authorization: Bearer <token>"
+    ```
+  - **Codex** (`~/.codex/config.toml` + variável de ambiente):
+    ```bash
+    export ADE_MCP_TOKEN="<token>"
+    ```
+    ```toml
+    [mcp_servers.ade]
+    url = "http://<ip>:47820/mcp"
+    bearer_token_env_var = "ADE_MCP_TOKEN"
+    ```
+  - **T3 Code:** URL `http://<ip>:47820/mcp` e cabeçalho `Authorization: Bearer <token>`.
+- **Identidade, presets e canvas:** cada cliente autentica como `Principal::Remote { client, preset }` (nunca vira `Principal::Outside` e nunca passa em `Target::Outside`), recebe só as tools do preset (`read`, `browser`, `agents`, `all`) e só aceita `project` dentro das pastas liberadas no pareamento. Ações perigosas (`git push`, merge, apagar arquivos/andares, digitar em terminal não aberto pelo cliente, `secret_run`, `vault_run`, `browser_fill_login` no primeiro uso, gasto acima do teto) pedem confirmação da pessoa. Cada cliente pareado vira um nó **Agente remoto** (`remote:<id>`) no canvas da pasta padrão; cordas ligam e desligam o alcance dele com abas, conversas e portais.
+
 ### Tools (região gerada)
 A tabela abaixo sai de `ipc/mcp.rs` e `forge/tools.rs`; o mesmo vale para a ajuda de `ags` e para a skill. Mudou uma tool ou um comando? Rode `bun run gen:catalogs`; o CI roda `bun run check:catalogs`.
 

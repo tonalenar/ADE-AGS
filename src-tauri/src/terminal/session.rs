@@ -518,6 +518,11 @@ pub enum Principal {
     /// Fora de todo processo do ADE e sem identidade declarada: a pessoa num terminal próprio, ou CI. Não prova que não seja
     /// um agente que se destacou da árvore (`setsid`, duplo fork): é o limite conhecido (HOST_REMOTO.md, F-09).
     Outside,
+    /// Cliente remoto autenticado pelo servidor MCP HTTP. Nunca vira `Outside`; o canvas o autoriza como `remote:<client>`.
+    Remote {
+        client: String,
+        preset: crate::remote::Preset,
+    },
     /// Canal sem PID (TCP legado, CLI antiga) nas plataformas em que o socket local existe. Só os métodos livres.
     Unknown,
 }

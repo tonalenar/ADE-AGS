@@ -5482,6 +5482,145 @@ mod autorizacao {
         );
         assert_ne!(authz::class_of("tab.close"), authz::class_of("tab.state"));
     }
+
+    // ── 14. Cliente remoto (Parte B2) ──
+
+    fn remoto(client: &str, preset: crate::remote::Preset) -> Result<Principal, String> {
+        Ok(Principal::Remote {
+            client: client.into(),
+            preset,
+        })
+    }
+
+    #[test]
+    fn remoto_nunca_vira_outside() {
+        let p = Principal::Remote {
+            client: "cli-1".into(),
+            preset: crate::remote::Preset::All,
+        };
+        assert_ne!(p, Principal::Outside);
+        // `workspace.open --close-current` passa para Outside, mas deve ser recusado para Remote.
+        assert!(
+            decide(
+                "workspace.open",
+                json!({ "workspace": "w", "closeCurrent": true }),
+                Ok(p.clone()),
+                &[],
+            )
+            .is_err()
+        );
+        // `chat.pending` sem --thread passa para Outside, mas deve ser recusado para Remote.
+        assert!(decide("chat.pending", json!({}), Ok(p), &[]).is_err());
+    }
+
+    #[test]
+    fn remoto_recusado_em_comando_so_da_pessoa() {
+        let p = remoto("cli-1", crate::remote::Preset::All);
+        for metodo in [
+            "mission.create",
+            "mission.run",
+            "mission.start",
+            "worktrees.prune",
+            "pool.delete",
+            "approval.decide",
+            "approval.list",
+            "memory.compact",
+            "workspace.restore",
+        ] {
+            let err = decide(metodo, json!({}), p.clone(), &[]).unwrap_err();
+            assert!(!err.contains("não implementado"), "{metodo}: {err}");
+        }
+    }
+
+    #[test]
+    fn remoto_ligado_por_corda_fala_com_a_conversa() {
+        let board: Board = serde_json::from_value(json!({
+            "edges": [
+                { "id": "e1", "a": "remote:cli-1", "b": "thread:c1" }
+            ],
+            "nodes": { "remote:cli-1": {}, "thread:c1": {} }
+        }))
+        .unwrap();
+        let boards = Boards::from([("/repo".to_string(), board)]);
+        let res = authz::authorize(
+            "chat.send",
+            &json!({ "thread": "c1", "text": "olá" }),
+            || remoto("cli-1", crate::remote::Preset::Agents),
+            || Ok(boards),
+            &|_| None,
+        );
+        assert!(res.is_ok(), "remoto com corda deveria falar com a conversa: {res:?}");
+    }
+
+    #[test]
+    fn remoto_sem_corda_recusado() {
+        let board: Board = serde_json::from_value(json!({
+            "edges": [],
+            "nodes": { "remote:cli-1": {}, "thread:c1": {} }
+        }))
+        .unwrap();
+        let boards = Boards::from([("/repo".to_string(), board)]);
+        let err = authz::authorize(
+            "chat.send",
+            &json!({ "thread": "c1", "text": "olá" }),
+            || remoto("cli-1", crate::remote::Preset::All),
+            || Ok(boards),
+            &|_| None,
+        )
+        .unwrap_err();
+        assert!(err.contains("c1"), "recusa deve nomear a conversa: {err}");
+    }
+
+    #[test]
+    fn project_fora_da_lista_recusado() {
+        let ctx = crate::ipc::mcp::McpContext::Remote {
+            client: "cli-1".into(),
+            cwd: "/repo-a".into(),
+            preset: crate::remote::Preset::All,
+            folders: vec!["/repo-a".into(), "/repo-b".into()],
+        };
+        let req_fora = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "browser_snapshot",
+                "arguments": { "project": "/etc" }
+            }
+        });
+        let mut called = false;
+        let resp = crate::ipc::mcp::handle_frame(&ctx, "", &req_fora, &mut |_, _| {
+            called = true;
+            Ok(json!({}))
+        })
+        .expect("tools/call deve devolver resposta JSON-RPC");
+        assert!(!called, "não pode despachar quando project está fora da lista");
+        assert_eq!(resp["result"]["isError"], true);
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+        assert!(
+            text.contains("Pasta fora das liberadas para este agente"),
+            "mensagem esperada em PT-BR: {text}"
+        );
+
+        // Pasta liberada (mesmo com barra final) passa com o cwd trocado.
+        let req_ok = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "browser_snapshot",
+                "arguments": { "project": "/repo-b/" }
+            }
+        });
+        let mut seen_cwd = None;
+        let resp_ok = crate::ipc::mcp::handle_frame(&ctx, "", &req_ok, &mut |_, payload| {
+            seen_cwd = payload.get("cwd").and_then(Value::as_str).map(str::to_string);
+            Ok(json!({ "text": "ok" }))
+        })
+        .expect("tools/call válido deve devolver resposta");
+        assert!(resp_ok["result"].get("isError").is_none());
+        assert_eq!(seen_cwd.as_deref(), Some("/repo-b"));
+    }
 }
 
 // ── Cofre de logins (Parte A2) ──────────────────────────────────────────────

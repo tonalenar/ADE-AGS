@@ -66,6 +66,7 @@ import { StorageSettings } from "@/features/settings/StorageSettings";
 import { DiagnosticsSettings } from "@/features/settings/DiagnosticsSettings";
 import { LicensesSetting } from "@/features/settings/LicensesSetting";
 import { UsagePricesSettings } from "@/features/settings/UsagePricesSettings";
+import { RemoteAccessSettings } from "@/features/settings/remote/RemoteAccessSettings";
 import type { SettingsPageId } from "@/features/settings/settingsNav";
 import { useSettingsTargetStore } from "@/features/settings/settingsTarget";
 
@@ -290,6 +291,10 @@ function AccessPage() {
   );
 }
 
+function RemotePage() {
+  return <SettingsAnchor id="remote-main"><RemoteAccessSettings /></SettingsAnchor>;
+}
+
 function MaintenancePage() {
   return <SettingsAnchor id="maintenance-updates"><UpdatesSection /></SettingsAnchor>;
 }
@@ -442,6 +447,7 @@ const PAGE_BODIES: Record<SettingsPageId, () => React.ReactElement> = {
   worktrees: WorktreesPage,
   environments: EnvironmentsPage,
   access: AccessPage,
+  remote: RemotePage,
   maintenance: MaintenancePage,
   storage: StoragePage,
   diagnostics: DiagnosticsPage,

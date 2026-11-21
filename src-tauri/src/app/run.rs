@@ -63,6 +63,8 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
     // Servidor IPC de la CLI `ade-ags` (Fase 8). Va después de restaurar las
     // ventanas: varios comandos necesitan que exista al menos una para responder.
     crate::ipc::start(app.clone());
+    // Servidor MCP HTTP remoto: só sobe se estiver ligado nas configurações (nasce desligado).
+    crate::remote::start_if_enabled(app.clone());
     Ok(())
 }
 
@@ -819,6 +821,12 @@ pub fn run() {
             // Modo orquestador (Fase 9): consumo estimado y tabs observadas
             crate::orchestrator::orchestrator_stats,
             crate::orchestrator::orchestrator_reset_usage,
+            // Acesso remoto (MCP HTTP com pareamento)
+            crate::remote::remote_status,
+            crate::remote::remote_set_enabled,
+            crate::remote::remote_clients_list,
+            crate::remote::remote_client_pair,
+            crate::remote::remote_client_revoke,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
@@ -944,6 +952,7 @@ pub fn run() {
                 // Com teto de 3 s: a gravação que não fecha nesse prazo não segura a saída (antes, até ~29 s).
                 crate::screen_recording::stop_all_with_deadline(app_handle);
                 crate::voice_input::cancel_all();
+                crate::remote::stop();
                 #[cfg(target_os = "macos")]
                 crate::real_browser::cef_shutdown();
                 // Handshake do IPC e sessões PTY: a mesma limpeza do "fechar tudo" e dos

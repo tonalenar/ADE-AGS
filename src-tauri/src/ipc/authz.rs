@@ -452,6 +452,11 @@ fn out_of_reach(command: &str, kind: &str, target: &str) -> String {
     )
 }
 
+/// Identificador de canvas de um cliente remoto (`remote:<client>`).
+pub(crate) fn remote_actor_id(client: &str) -> String {
+    format!("remote:{client}")
+}
+
 /// Autoriza `command` e devolve os argumentos que o handler deve usar (com a identidade **provada** no lugar da declarada).
 ///
 /// - `who` prova quem chama (só é chamado se a classe precisa);
@@ -482,6 +487,18 @@ pub(crate) fn authorize(
                     ))
                 }
             }
+            Principal::Remote { client, .. } => {
+                let me = remote_actor_id(&client);
+                claims_match(args, &me)?;
+                if crate::canvas::is_orchestrator(&boards()?, &me) {
+                    Ok(with_key(args, "from", &me))
+                } else {
+                    Err(screen_only(
+                        command,
+                        "Só o orquestrador (a coroa no canvas) decide ou responde por um integrante; um cliente remoto sem coroa não decide.",
+                    ))
+                }
+            }
             Principal::Task(_) => Err(task_refusal(command)),
             Principal::Outside => Err(screen_only(
                 command,
@@ -503,6 +520,7 @@ fn scope(
 ) -> Result<Value, String> {
     match (target, principal) {
         // Fora de toda árvore do ADE, sem identidade: a pessoa num terminal próprio (ou CI). O acesso de sempre.
+        // Cliente remoto NUNCA entra aqui.
         (Target::Outside, Principal::Outside) => Ok(args.clone()),
         (Target::Outside, _) => Err(only_person(command)),
         (
@@ -532,27 +550,49 @@ fn scope(
                 None => Ok(with_key(args, "taskId", &task)),
             }
         }
-        (Target::Task, Principal::Tab(_)) => Err(format!(
+        (Target::Task, Principal::Tab(_) | Principal::Remote { .. }) => Err(format!(
             "`{command}` é uma ferramenta de tarefa da Frota (MCP `--task`): uma aba usa `ags memory search`, `ags memory index` ou `ags memory open`."
         )),
         (_, Principal::Task(_)) => Err(task_refusal(command)),
 
-        // Uma aba ou conversa provada.
-        (Target::Fleet, Principal::Tab(me)) => {
-            claims_match(args, &me)?;
+        // Uma aba, conversa ou cliente remoto (`remote:<client>`) provado.
+        (target, Principal::Tab(me)) => scope_actor(command, args, target, &me, false, boards, opened_by),
+        (target, Principal::Remote { client, .. }) => {
+            let me = remote_actor_id(&client);
+            scope_actor(command, args, target, &me, true, boards, opened_by)
+        }
+    }
+}
+
+fn scope_actor(
+    command: &str,
+    args: &Value,
+    target: Target,
+    me: &str,
+    is_remote: bool,
+    boards: impl FnOnce() -> Result<Boards, String>,
+    opened_by: &dyn Fn(&str) -> Option<String>,
+) -> Result<Value, String> {
+    match target {
+        Target::Fleet => {
+            claims_match(args, me)?;
             if text(args, "taskId").is_some() {
                 return Err(format!(
-                    "`{command}` declara uma tarefa da Frota, mas quem chamou é a aba `{me}`: o `taskId` só vale para o processo da tarefa."
+                    "`{command}` declara uma tarefa da Frota, mas quem chamou é `{me}`: o `taskId` só vale para o processo da tarefa."
                 ));
             }
-            Ok(args.clone())
+            if is_remote {
+                Ok(with_key(args, "tabId", me))
+            } else {
+                Ok(args.clone())
+            }
         }
-        (Target::OpenedTab(arg), Principal::Tab(me)) => {
-            claims_match(args, &me)?;
+        Target::OpenedTab(arg) => {
+            claims_match(args, me)?;
             let Some(tab) = text(args, arg) else {
                 return Err(format!("`{command}` precisa do alvo (--{arg})."));
             };
-            if opened_by(tab).as_deref() == Some(me.as_str()) {
+            if opened_by(tab).as_deref() == Some(me) {
                 Ok(args.clone())
             } else {
                 Err(format!(
@@ -561,19 +601,19 @@ Peça à pessoa para fechar o resto."
                 ))
             }
         }
-        (Target::Tab(arg), Principal::Tab(me)) => {
-            claims_match(args, &me)?;
+        Target::Tab(arg) => {
+            claims_match(args, me)?;
             let Some(tab) = text(args, arg) else {
                 return Err(format!("`{command}` precisa do alvo (--{arg})."));
             };
-            if crate::ipc::guard::in_reach(&boards()?, &me, tab, opened_by(tab).as_deref()) {
+            if crate::ipc::guard::in_reach(&boards()?, me, tab, opened_by(tab).as_deref()) {
                 Ok(args.clone())
             } else {
                 Err(out_of_reach(command, "aba", tab))
             }
         }
-        (Target::Thread { arg, optional }, Principal::Tab(me)) => {
-            claims_match(args, &me)?;
+        Target::Thread { arg, optional } => {
+            claims_match(args, me)?;
             let Some(thread) = text(args, arg) else {
                 return if optional {
                     Err(format!(
@@ -584,39 +624,40 @@ Peça à pessoa para fechar o resto."
                 };
             };
             let key = thread_ref(thread);
-            if crate::ipc::guard::in_reach(&boards()?, &me, &key, opened_by(&key).as_deref()) {
+            if crate::ipc::guard::in_reach(&boards()?, me, &key, opened_by(&key).as_deref()) {
                 Ok(args.clone())
             } else {
                 Err(out_of_reach(command, "conversa", thread))
             }
         }
-        (Target::Mission { arg, crown }, Principal::Tab(me)) => {
-            claims_match(args, &me)?;
+        Target::Mission { arg, crown } => {
+            claims_match(args, me)?;
             let Some(mission) = text(args, arg) else {
                 return Err(format!("`{command}` precisa da missão (--{arg})."));
             };
             let boards = boards()?;
-            if crate::canvas::mission_of_tab(&boards, &me).as_deref() != Some(mission) {
+            if crate::canvas::mission_of_tab(&boards, me).as_deref() != Some(mission) {
                 return Err(format!(
                     "A missão {mission} não é a do seu quadro: `{command}` só age na missão a que você pertence."
                 ));
             }
-            if crown && !crate::canvas::is_orchestrator(&boards, &me) {
+            if crown && !crate::canvas::is_orchestrator(&boards, me) {
                 return Err(format!(
                     "`{command}` muda o resultado da missão: só o orquestrador dela (a coroa no canvas) o faz, ou a pessoa pela tela."
                 ));
             }
             Ok(args.clone())
         }
-        (Target::Caller, Principal::Tab(me)) => {
-            claims_match(args, &me)?;
-            Ok(with_key(args, "from", &me))
+        Target::Caller => {
+            claims_match(args, me)?;
+            Ok(with_key(args, "from", me))
         }
-        (Target::CallerOrOutside, Principal::Tab(me)) => {
-            claims_match(args, &me)?;
-            extra_rule(command, args, &me, boards)?;
-            Ok(with_key(args, "from", &me))
+        Target::CallerOrOutside => {
+            claims_match(args, me)?;
+            extra_rule(command, args, me, boards)?;
+            Ok(with_key(args, "from", me))
         }
+        Target::Outside | Target::Task => unreachable!("tratado antes de scope_actor"),
     }
 }
 
