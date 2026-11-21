@@ -222,3 +222,37 @@ describe("browser_fill_login (cofre no navegador)", () => {
     expect(second?.password.id).toBe("pw");
   });
 });
+
+describe("identidade e página mexida", () => {
+  it("agentId_no_pedido_nao_pula_a_confirmacao", async () => {
+    vaultListMock.mockResolvedValueOnce([{ ...ENTRY, allowed_agents: ["tab-autorizada"] }]);
+    confirmPromptMock.mockResolvedValueOnce("decline");
+    tabs.views[0] = { ...tabs.views[0]!, owner: { kind: "tab", id: "tab-2", label: "Outro" } };
+    fakeHost("v-login", "https://conta.exemplo.com/login", () => ({ filled: true }));
+
+    await expect(runBrowserRequest(
+      "/proj",
+      { op: "fillLogin", id: "v-1", agentId: "tab-autorizada" },
+      { kind: "tab", id: "tab-2", label: "Outro" },
+    )).rejects.toThrow(/declined/);
+    expect(confirmPromptMock).toHaveBeenCalledTimes(1);
+    expect(vaultSecretForFillMock).not.toHaveBeenCalled();
+  });
+
+  it("navegar_sem_carregar_documento_novo_mantem_a_marca_e_recarrega_antes_de_preencher", async () => {
+    vaultListMock.mockResolvedValueOnce([ENTRY]);
+    vaultSecretForFillMock.mockResolvedValueOnce(SENHA);
+    const owner = { kind: "tab" as const, id: "tab-1", label: "Claude" };
+    // Aba nova: a dos testes anteriores já está blindada por um preenchimento.
+    tabs.views[0] = { ...tabs.views[0]!, id: "v-ancora" };
+    tabs.activeViewId = "v-ancora";
+    const { host } = fakeHost("v-ancora", "https://conta.exemplo.com/login", (cmd) => (cmd.op === "fillLogin" ? { filled: true } : "ok"));
+    await runBrowserRequest("/proj", { op: "eval", code: "1" }, owner);
+    // Âncora da mesma página: sem documento novo.
+    (host as unknown as { waitForLoad: () => Promise<boolean> }).waitForLoad = async () => false;
+    await runBrowserRequest("/proj", { op: "navigate", url: "https://conta.exemplo.com/login#topo" }, owner);
+    (host as unknown as { waitForLoad: () => Promise<boolean> }).waitForLoad = async () => true;
+    await runBrowserRequest("/proj", { op: "fillLogin", id: "v-1" }, owner);
+    expect(host.history).toHaveBeenCalledWith("reload");
+  });
+});

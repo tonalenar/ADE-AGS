@@ -565,7 +565,8 @@ async function execute(
       const mark = opened ? 0 : host.loadCount();
       if (!opened) await host.navigate(url);
       const loaded = await host.waitForLoad(mark, 20_000);
-      tainted.delete(host.viewId);
+      // Só um documento novo limpa a marca: navegar para uma âncora da mesma página mantém o script plantado.
+      if (loaded) tainted.delete(host.viewId);
       activeShield(host);
       const head = loaded
         ? `Loaded ${host.currentUrl()}`
@@ -835,7 +836,12 @@ async function execute(
       if (!vaultOriginMatches(entry.origin, pageUrl)) {
         throw new Error("origin_mismatch: A origem da página atual não corresponde à origem cadastrada no cofre.");
       }
-      const agentId = str(request, "agentId")?.trim() || owner?.id || "unknown";
+      // A identidade vem do dono provado pelo backend, nunca de um campo do pedido: um agente que
+      // mandasse `agentId` de outro já autorizado pularia a confirmação da pessoa.
+      const agentId = owner?.id;
+      if (!agentId) {
+        throw new Error("declined: Preencher login exige um agente identificado.");
+      }
       if (!entry.allowed_agents.includes(agentId)) {
         const decision = await useVaultPromptStore.getState().requestConfirm({
           entry,
