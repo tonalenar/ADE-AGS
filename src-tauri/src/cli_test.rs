@@ -559,6 +559,11 @@ fn la_ayuda_nombra_todos_los_grupos_que_la_app_atiende() {
         if group == "user" || group == "forge" || group == "mcp" || group == "memory" {
             continue;
         }
+        // `vault.*` (cofre de logins) só existe como tool MCP (`vault_list`, `vault_request`,
+        // `browser_fill_login`): não há `ags vault` para digitar, e a ajuda as lista na seção do servidor.
+        if group == "vault" {
+            continue;
+        }
         // `replay.*` é o gravador de telas para os testes por replay: só de desenvolvimento, só responde com o app
         // aberto com `ADE_AGS_REPLAY_RECORD=1`, e fica fora da ajuda de propósito (ver docs/ade-ags/REPLAY_TESTES.md).
         if group == "replay" {
