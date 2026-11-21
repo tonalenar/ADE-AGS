@@ -32,7 +32,14 @@ import {
   previewAddMock, previewClearMocks, previewCookies, previewListMocks, previewReadUpload, previewRequest, type Mock,
 } from "./ipc";
 import { detailForAgent, detailFromPage, detailFromProxy } from "./networkDetail";
-import { egressOriginFor, isLocalOrigin, redactForAgent, untrustedData } from "./egressPolicy";
+import { egressOriginFor, isLocalOrigin, redactForAgent, redactVaultSecrets, registerVaultSecret, untrustedData } from "./egressPolicy";
+import {
+  isDangerousNavigateUrl,
+  maskPasswordSecretsInSnapshot,
+  sanitizeDescribedPassword,
+  SHIELDED_OPS,
+  VAULT_SHIELD_MESSAGE,
+} from "./vaultShield";
 import { askPersonAboutReset, tellPersonAboutResetFailure } from "./dialogPolicy";
 import type { AnnotatedCapture } from "./composeMessage";
 import {
@@ -115,6 +122,36 @@ const lastUsed = new Map<string, string>();
 const lastUrl = new Map<string, string>();
 const hostWaiters = new Set<() => void>();
 
+/** Abas em que o cofre preencheu uma senha; a blindagem dura até a aba mudar de origem. */
+const protectedViews = new Map<string, { origin: string; secrets: string[] }>();
+/** Abas em que o agente executou script/mock desde o último carregamento da página. */
+const tainted = new Set<string>();
+
+function originOfUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function currentOriginOf(host: BrowserHost): string | null {
+  return originOfUrl(host.currentUrl()) ?? originOfUrl(host.targetOrigin());
+}
+
+/** Confere se a proteção da aba ainda vale para a origem atual; cai automaticamente ao mudar de origem. */
+function activeShield(host: BrowserHost): { origin: string; secrets: string[] } | undefined {
+  const entry = protectedViews.get(host.viewId);
+  if (!entry) return undefined;
+  const current = currentOriginOf(host);
+  if (current && current !== entry.origin) {
+    protectedViews.delete(host.viewId);
+    return undefined;
+  }
+  return entry;
+}
+
 /** ¿Esa tab tiene algo señalado (pendiente o recién mandado)? */
 function hasMarks(host: BrowserHost | undefined): boolean {
   return host?.marks() != null;
@@ -124,7 +161,11 @@ export function registerBrowserHost(host: BrowserHost): () => void {
   hosts.set(host.viewId, host);
   for (const wake of hostWaiters) wake();
   return () => {
-    if (hosts.get(host.viewId) === host) hosts.delete(host.viewId);
+    if (hosts.get(host.viewId) === host) {
+      hosts.delete(host.viewId);
+      protectedViews.delete(host.viewId);
+      tainted.delete(host.viewId);
+    }
   };
 }
 
@@ -331,6 +372,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * acción. Es lo que convierte "hice click" en "hice click y la API devolvió 500".
  */
 async function sideEffects(host: BrowserHost, firstId: number, startedAt: number): Promise<string> {
+  // Em aba blindada pelo cofre, nunca expor console nem rede como efeito colateral de uma ação.
+  if (activeShield(host)) return "";
   // El runtime manda la tanda enseguida después de contestar; se le da un momento para
   // que llegue, y al proxy para anotar lo que la acción disparó.
   await sleep(150);
@@ -505,9 +548,16 @@ async function execute(
   portalId?: string
 ): Promise<string> {
   const op = request.op;
+  const shield = activeShield(host);
+  if (shield && SHIELDED_OPS.has(op)) {
+    throw new Error(VAULT_SHIELD_MESSAGE);
+  }
   switch (op) {
     case "navigate": {
       const url = required(request, "url");
+      if (isDangerousNavigateUrl(url)) {
+        throw new Error("Navegação para URLs javascript: ou data: foi recusada por segurança.");
+      }
       const firstId = debugLogOf(host.viewId).nextId;
       const startedAt = Date.now();
       // Recién abierta, la tab ya está cargando esta misma URL: pedirla otra vez sería
@@ -515,6 +565,8 @@ async function execute(
       const mark = opened ? 0 : host.loadCount();
       if (!opened) await host.navigate(url);
       const loaded = await host.waitForLoad(mark, 20_000);
+      tainted.delete(host.viewId);
+      activeShield(host);
       const head = loaded
         ? `Loaded ${host.currentUrl()}`
         : `The page did not report finishing the load within 20 s (${host.currentUrl()}). It may still be loading, or it may not be going through the ADE AGS proxy.`;
@@ -528,6 +580,8 @@ async function execute(
       host.history(action);
       // Atrás en una SPA no recarga el documento: se espera un poco y se informa dónde quedó.
       const loaded = await host.waitForLoad(mark, action === "reload" ? 20_000 : 1500);
+      if (action === "reload" || loaded) tainted.delete(host.viewId);
+      activeShield(host);
       const url = host.currentUrl();
       return loaded || url !== before ? `Ahora en ${url}` : `Sigue en ${url} (no había a dónde ir, o la página no cambió).`;
     }
@@ -692,6 +746,7 @@ async function execute(
         return gone > 0 ? `Removed ${gone} rule(s).` : "There were no rules to remove.";
       }
       if (action === "add") {
+        tainted.add(host.viewId);
         await previewAddMock(origin, {
           url: required(request, "url"),
           method: str(request, "method")?.toUpperCase() ?? null,
@@ -709,9 +764,9 @@ async function execute(
     case "describe": {
       // Con el mismo formato que lo que marca la persona: un modelo lee mejor seis líneas
       // rotuladas que el JSON entero con sus llaves.
-      const described = await host.channel.run(
+      const described = sanitizeDescribedPassword(await host.channel.run(
         { op: "describe", target: required(request, "target") }, 12_000
-      ) as DescribedElement;
+      ) as DescribedElement);
       return inServerTerms(host, formatElement({ live: true, element: described }, 1, (url) => url));
     }
     case "screenshot": {
@@ -742,7 +797,10 @@ async function execute(
       if (action && action !== "dismiss") throw new Error("action é dismiss, ou nada para ver os diálogos.");
       return inPage(host, { op: "dialogs" }, false);
     }
-    case "snapshot": return inPage(host, { op: "snapshot", all: bool(request, "full") }, false);
+    case "snapshot": {
+      const text = await inPage(host, { op: "snapshot", all: bool(request, "full") }, false);
+      return shield ? maskPasswordSecretsInSnapshot(text, shield.secrets) : text;
+    }
     case "layout": return inPage(host, { op: "layout" }, false);
     case "performance": return inPage(host, { op: "performance" }, false);
     case "click": return inPage(host, { op: "click", target: required(request, "target") }, true);
@@ -792,17 +850,34 @@ async function execute(
           await vaultAllowAgent(entry.id, agentId);
         }
       }
-      const password = await vaultSecretForFill(entry.id, pageUrl);
+      if (tainted.has(host.viewId)) {
+        const mark = host.loadCount();
+        host.history("reload");
+        await host.waitForLoad(mark, 20_000);
+        tainted.delete(host.viewId);
+      }
+      const freshUrl = host.currentUrl() || host.targetOrigin() || "";
+      if (!vaultOriginMatches(entry.origin, freshUrl)) {
+        throw new Error("origin_mismatch: A origem da página atual não corresponde à origem cadastrada no cofre.");
+      }
+      const password = await vaultSecretForFill(entry.id, freshUrl);
+      registerVaultSecret(password);
       const submit = bool(request, "submit");
       try {
         const res = await host.channel.run(
           { op: "fillLogin", username: entry.username, password, submit },
           18_000,
         ) as { filled?: boolean; submitted?: boolean } | null;
+        const shieldOrigin = currentOriginOf(host) ?? originOfUrl(freshUrl) ?? entry.origin.toLowerCase();
+        const existing = protectedViews.get(host.viewId);
+        const secrets = existing && existing.origin === shieldOrigin
+          ? [...new Set([...existing.secrets, password])]
+          : [password];
+        protectedViews.set(host.viewId, { origin: shieldOrigin, secrets });
         return JSON.stringify({ filled: true, submitted: Boolean(res?.submitted ?? submit) });
       } catch (cause) {
         const rawMsg = errorText(cause);
-        const safeMsg = password ? rawMsg.split(password).join("[cofre]") : rawMsg;
+        const safeMsg = redactVaultSecrets(password ? rawMsg.split(password).join("[cofre]") : rawMsg);
         throw new Error(safeMsg);
       }
     }
@@ -818,7 +893,10 @@ async function execute(
         op: "wait", text: str(request, "text"), selector: str(request, "selector"),
         gone: bool(request, "gone"), idle: bool(request, "idle"), timeoutMs: num(request, "timeout_ms"),
       }, false);
-    case "eval": return inPage(host, { op: "eval", code: required(request, "code") }, true);
+    case "eval": {
+      tainted.add(host.viewId);
+      return inPage(host, { op: "eval", code: required(request, "code") }, true);
+    }
     case "reset": {
       // Começar do zero no site aberto: cookies, localStorage e sessionStorage da página atual e o livro-razão dos `act`
       // deste portal. É o que o bench faz antes de cada rodada (J1): sem isso o carrinho da rodada anterior continuava lá e
@@ -910,7 +988,11 @@ export async function runBrowserRequest(
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
     throw new Error("The browser for this project has no page loaded. Use browser_navigate with the project URL.");
   }
-  return forAgent(request.op, await execute(cwd, host, request, opened, owner));
+  try {
+    return forAgent(request.op, await execute(cwd, host, request, opened, owner));
+  } catch (cause) {
+    throw new Error(redactVaultSecrets(errorText(cause)));
+  }
 }
 
 /** Ops cuyo texto lo escribe la app, no la página: no se marcan como dato no confiable. (`reset` sí: nombra cookies del sitio.) */
@@ -921,7 +1003,8 @@ const OWN_TEXT_OPS = new Set(["resize", "touch"]);
  * su consola). Se marca UNA vez, aquí, en la frontera: `marksText` y `markedBatchText` no marcan por su cuenta.
  */
 function forAgent(op: string, text: string): string {
-  return OWN_TEXT_OPS.has(op) ? text : untrustedData(text);
+  const safe = redactVaultSecrets(text);
+  return OWN_TEXT_OPS.has(op) ? safe : untrustedData(safe);
 }
 
 /** El mensaje de un error de cualquier forma que llegue (un `Error`, o un texto del canal). */
@@ -1134,5 +1217,9 @@ export async function runPortalRequest(
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
     throw new Error("O portal não tem nenhuma página carregada. Comece com `ags portal navigate <portal> <url>`.");
   }
-  return forAgent(request.op, await execute(cwd, host, request, false, owner, portalId));
+  try {
+    return forAgent(request.op, await execute(cwd, host, request, false, owner, portalId));
+  } catch (cause) {
+    throw new Error(redactVaultSecrets(errorText(cause)));
+  }
 }

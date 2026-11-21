@@ -824,8 +824,8 @@ declare global {
     if (el.tagName === "INPUT") {
       const input = el as HTMLInputElement;
       if (["checkbox", "radio", "button", "submit", "reset", "image", "file"].includes(input.type) || !input.value) return undefined;
-      // La contraseña no sale de la página: alcanza con saber que hay algo escrito.
-      return input.type === "password" ? "•".repeat(Math.min(input.value.length, 8)) : normalizeName(input.value, 100);
+      // A senha nunca sai da página: mostra máscara fixa sem revelar o tamanho.
+      return input.type === "password" ? "••••" : normalizeName(input.value, 100);
     }
     if ((el as HTMLElement).isContentEditable) return normalizeName(textOf(el), 100) || undefined;
     return undefined;
@@ -1882,13 +1882,14 @@ declare global {
       markedPrints.set(ref, fingerprintOf(el));
     }
 
+    const isPasswordInput = el.tagName === "INPUT" && (el as HTMLInputElement).type === "password";
     const attributes: Record<string, string> = {};
     for (const attr of Array.from(el.attributes)) {
       if (attr.name.startsWith("data-ade-ags")) continue;
       // Las clases y el estilo en línea ya viajan aparte; el resto (aria, data, name,
       // href, type…) es justo lo que identifica al elemento en el código.
       if (attr.name === "class" || attr.name === "style") continue;
-      attributes[attr.name] = clip(attr.value, 200);
+      attributes[attr.name] = isPasswordInput && attr.name === "value" && attr.value ? "••••" : clip(attr.value, 200);
     }
 
     const ancestors: string[] = [];
@@ -1937,7 +1938,7 @@ declare global {
         zIndex: style.zIndex,
         overflow: style.overflow,
       },
-      html: clip(el.outerHTML, 1500),
+      html: clip(isPasswordInput ? el.outerHTML.replace(/value="[^"]*"/gi, 'value="••••"') : el.outerHTML, 1500),
       url: location.href,
     };
   }

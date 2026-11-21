@@ -101,6 +101,36 @@ export function redacted(value: string): string {
   return `[redigido: ${new TextEncoder().encode(value).length} bytes]`;
 }
 
+/** Senhas do cofre usadas nesta sessão: redigidas por conteúdo em qualquer saída ao agente. */
+const sessionVaultSecrets = new Set<string>();
+
+/** Registra uma senha usada pelo cofre na sessão atual para defesa em profundidade na saída. */
+export function registerVaultSecret(secret: string): void {
+  if (secret.length > 0) sessionVaultSecrets.add(secret);
+}
+
+/** Limpa o registro de senhas da sessão (somente para isolamento de testes). */
+export function clearVaultSecretsForTest(): void {
+  sessionVaultSecrets.clear();
+}
+
+/** Troca qualquer ocorrência exata (ou codificada em URL) de segredos do cofre usados na sessão por `[cofre]`. */
+export function redactVaultSecrets(text: string): string {
+  if (sessionVaultSecrets.size === 0 || !text) return text;
+  const secrets = [...sessionVaultSecrets].sort((a, b) => b.length - a.length);
+  let out = text;
+  for (const secret of secrets) {
+    if (out.includes(secret)) {
+      out = out.split(secret).join("[cofre]");
+    }
+    const encoded = encodeURIComponent(secret);
+    if (encoded !== secret && out.includes(encoded)) {
+      out = out.split(encoded).join("[cofre]");
+    }
+  }
+  return out;
+}
+
 /** Decodifica os `%xx` que se conseguem (um `%` solto fica como está), sem lançar. */
 function lenientDecode(text: string): string {
   return text.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
@@ -201,8 +231,8 @@ function redactBody(value: string): string {
  * `header` é para o valor de um cabeçalho que já foi decidido como sensível (ver `isSensitiveHeader`).
  */
 export function redactForAgent(kind: EgressKind, origin: string | null | undefined, value: string): string {
-  if (isLocalOrigin(origin)) return value;
-  if (kind === "request-body" || kind === "response-body") return redactBody(value);
+  if (isLocalOrigin(origin)) return redactVaultSecrets(value);
+  if (kind === "request-body" || kind === "response-body") return redactVaultSecrets(redactBody(value));
   return redacted(value);
 }
 
