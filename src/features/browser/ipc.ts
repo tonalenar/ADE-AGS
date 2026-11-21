@@ -145,6 +145,14 @@ export const previewCookies = (proxyOrigin: string) =>
 export const previewForgetSite = (proxyOrigin: string) =>
   invoke<void>("preview_forget_site", { proxyOrigin });
 
+/** Ação WAF reportada pelo proxy (`preview/proxy.rs::waf_challenge_action`) para esta origem, ou `null`. */
+export const previewWafChallenge = (targetOrigin: string) =>
+  invoke<string | null>("preview_waf_challenge", { targetOrigin });
+
+/** Aviso nativo do SO quando um agente precisa da pessoa para resolver um captcha. */
+export const previewCaptchaNotify = (title: string, body: string) =>
+  invoke<boolean>("preview_captcha_notify", { title, body });
+
 /* ── Importação de cookies de outro navegador (`src-tauri/src/preview/importer`) ──
  * Nada daqui leva valores de cookie: a revisão traz só domínios e contagens. */
 

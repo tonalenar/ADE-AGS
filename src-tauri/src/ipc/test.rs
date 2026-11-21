@@ -1257,6 +1257,86 @@ fn browser_act_aceita_timeout_e_o_prazo_e_o_mesmo_do_portal_act() {
     assert!(src.contains("ade_ags_lib::ipc::mcp::act_timeout_secs(args.get(\"timeout\")) + 30"));
 }
 
+#[test]
+fn browser_wait_human_tem_contrato_schema_instrucao_e_prazo() {
+    let ctx = McpContext::Cwd {
+        cwd: "/p".into(),
+        tab: Some("t1".into()),
+        mission: None,
+        role: None,
+    };
+    let (init_and_list, _) = mcp_session(
+        &ctx,
+        &[
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }),
+            json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+        ],
+        |_, _| Ok(json!({})),
+    );
+    let instructions = init_and_list[0]["result"]["instructions"].as_str().unwrap();
+    assert!(
+        instructions.contains("If a browser tool returns blocked: captcha, call browser_wait_human; never try to solve it"),
+        "{instructions}"
+    );
+    let wait_tool = init_and_list[1]["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "browser_wait_human")
+        .expect("browser_wait_human listada")
+        .clone();
+    assert_eq!(wait_tool["inputSchema"]["required"], json!(["handoff"]));
+    assert!(wait_tool["inputSchema"]["properties"]["handoff"].is_object());
+    assert!(wait_tool["inputSchema"]["properties"]["timeout_s"].is_object());
+    assert_eq!(wait_tool["annotations"]["readOnlyHint"], true);
+    assert!(super::mcp::auto_approved("browser_wait_human"));
+    assert!(
+        super::mcp::browser_tool_names()
+            .iter()
+            .any(|name| name.ends_with("__browser_wait_human"))
+    );
+
+    // Prefixo de TUI (OpenCode) reescreve browser_wait_human nas instruções.
+    let (opencode, _) = mcp_session_as(
+        &ctx,
+        "ags_",
+        &[json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" })],
+        |_, _| Ok(json!({})),
+    );
+    assert!(
+        opencode[0]["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("ags_browser_wait_human")
+    );
+
+    // Chamada viaja como browser.run com op=wait_human e handoff/timeout_s.
+    let (responses, sent) = mcp_session(
+        &ctx,
+        &[call(
+            9,
+            "browser_wait_human",
+            json!({ "handoff": "cap-abc123", "timeout_s": 600 }),
+        )],
+        |_, _| Ok(json!({ "text": "{\"resolved\":true}" })),
+    );
+    assert_eq!(responses[0]["result"]["content"][0]["text"], "{\"resolved\":true}");
+    assert_eq!(sent[0].0, "browser.run");
+    assert_eq!(
+        sent[0].1["request"],
+        json!({ "op": "wait_human", "handoff": "cap-abc123", "timeout_s": 600 })
+    );
+
+    // Prazo padrão 900 s, máximo 1800 s, honrado pela CLI e pelo handler do navegador.
+    assert_eq!(super::mcp::captcha_wait_timeout_secs(None), 900);
+    assert_eq!(super::mcp::captcha_wait_timeout_secs(Some(&json!(300))), 300);
+    assert_eq!(super::mcp::captcha_wait_timeout_secs(Some(&json!(9999))), 1800);
+    let cli_src = include_str!("../bin/cli.rs");
+    assert!(cli_src.contains(
+        r#""browser.run" if args.pointer("/request/op").and_then(Value::as_str) == Some("wait_human")"#
+    ));
+}
+
 /// `sim_act`/`desk_act` são o `sim.act`/`desk.act` da CLI: os mesmos argumentos e a identidade que o
 /// processo herdou (nunca a que o modelo mandou), para o backend conferir com `authorize_actor`.
 #[test]

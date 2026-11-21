@@ -36,6 +36,7 @@ import { useFileDropToTerminal } from "@/features/terminal/useFileDropToTerminal
 import { SyncRunner } from "@/features/sync/SyncRunner";
 import { UpdateNotifier } from "@/features/updates/UpdateNotifier";
 import { ApprovalToast } from "@/features/runs/ApprovalToast";
+import { CaptchaHandoffCard } from "@/features/browser/CaptchaHandoffCard";
 import { InAppNotices } from "@/features/chat/InAppNotices";
 import { PoolFailoverNotice } from "@/features/accounts/PoolFailoverNotice";
 import { AgentUpdateWatcher } from "@/features/agents/AgentUpdateWatcher";
@@ -299,6 +300,7 @@ export function AppShell() {
           nueva, sin taparse entre ellos. */}
       <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2 pointer-events-none
         [&>*]:pointer-events-auto">
+        <CaptchaHandoffCard />
         <ApprovalToast />
         <InAppNotices />
         <UpdateNotifier />
