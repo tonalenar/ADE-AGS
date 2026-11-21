@@ -77,6 +77,9 @@ pub struct Board {
     /// estar no struct para sobreviver ao salvar. Ausente em canvas antigo.
     #[serde(default)]
     pub threads: Value,
+    /// Os nós de agentes remotos pareados (`remote:<id>` → retângulo). Aditivo: ausente em canvas antigo.
+    #[serde(default)]
+    pub remotes: Value,
 }
 
 /// Un portal: un navegador dentro del canvas que los agentes conectados manejan con

@@ -13,7 +13,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 pub use clients::{Preset, RemoteClient, authenticate, list, pair, revoke};
 
@@ -22,6 +22,7 @@ pub const DEFAULT_PORT: u16 = 47820;
 
 const SETTING_ENABLED: &str = "remote_mcp_enabled";
 const SETTING_PORT: &str = "remote_mcp_port";
+const CLIENTS_CHANGED_EVENT: &str = "cc-remote-clients-changed";
 
 static ACTIVE: LazyLock<Mutex<Option<http::RunningServer>>> = LazyLock::new(|| Mutex::new(None));
 
@@ -34,6 +35,14 @@ pub struct RemoteServerStatus {
     pub port: u16,
     pub tailscale_ip: Option<String>,
     pub bind_addrs: Vec<String>,
+}
+
+/// Resposta única do pareamento: o token bruto é devolvido só aqui e nunca fica salvo em claro.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairedClientResult {
+    pub client: RemoteClient,
+    pub token: String,
 }
 
 /// Confere se um IPv4 pertence à faixa CGNAT do Tailscale (`100.64.0.0/10`).
@@ -170,4 +179,114 @@ pub async fn start_server(app: AppHandle, port: u16) -> Result<Vec<SocketAddr>, 
     let bound = running.addrs().to_vec();
     *ACTIVE.lock().unwrap_or_else(|e| e.into_inner()) = Some(running);
     Ok(bound)
+}
+
+fn current_status_sync(app: &AppHandle, tailscale_ip: Option<Ipv4Addr>) -> RemoteServerStatus {
+    let enabled = configured_enabled(app);
+    let port = configured_port(app);
+    let guard = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
+    let (running, bind_addrs) = match guard.as_ref() {
+        Some(active) => (
+            true,
+            active.addrs().iter().map(|a| a.to_string()).collect(),
+        ),
+        None => (
+            false,
+            bind_addrs_on(tailscale_ip, port)
+                .into_iter()
+                .map(|a| a.to_string())
+                .collect(),
+        ),
+    };
+    RemoteServerStatus {
+        enabled,
+        running,
+        port,
+        tailscale_ip: tailscale_ip.map(|ip| ip.to_string()),
+        bind_addrs,
+    }
+}
+
+#[tauri::command]
+pub async fn remote_status(app: AppHandle) -> Result<RemoteServerStatus, String> {
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let ts = detect_tailscale_ip();
+        current_status_sync(&app_clone, ts)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remote_set_enabled(
+    app: AppHandle,
+    enabled: bool,
+    port: Option<u16>,
+) -> Result<RemoteServerStatus, String> {
+    if let Some(p) = port
+        && p < 1024
+    {
+        return Err("Escolha uma porta entre 1024 e 65535".into());
+    }
+    let app_save = app.clone();
+    let effective_port = tauri::async_runtime::spawn_blocking(move || -> Result<u16, String> {
+        let Some(db) = app_save.try_state::<crate::database::DbConnection>() else {
+            return Err("Banco de dados indisponível".into());
+        };
+        crate::database::set_setting(&db, SETTING_ENABLED, if enabled { "true" } else { "false" })?;
+        let p = port.unwrap_or_else(|| configured_port(&app_save));
+        crate::database::set_setting(&db, SETTING_PORT, &p.to_string())?;
+        Ok(p)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    if enabled {
+        start_server(app.clone(), effective_port).await?;
+    } else {
+        stop();
+    }
+
+    let app_status = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let ts = detect_tailscale_ip();
+        current_status_sync(&app_status, ts)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remote_clients_list() -> Result<Vec<RemoteClient>, String> {
+    tauri::async_runtime::spawn_blocking(clients::list)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remote_client_pair(
+    app: AppHandle,
+    name: String,
+    preset: Preset,
+    folders: Vec<String>,
+    default_folder: String,
+    ttl_days: Option<u32>,
+) -> Result<PairedClientResult, String> {
+    let (client, token) = tauri::async_runtime::spawn_blocking(move || {
+        clients::pair(&name, preset, folders, &default_folder, ttl_days)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let _ = app.emit(CLIENTS_CHANGED_EVENT, ());
+    Ok(PairedClientResult { client, token })
+}
+
+#[tauri::command]
+pub async fn remote_client_revoke(app: AppHandle, id: String) -> Result<bool, String> {
+    let revoked = tauri::async_runtime::spawn_blocking(move || clients::revoke(&id))
+        .await
+        .map_err(|e| e.to_string())??;
+    let _ = app.emit(CLIENTS_CHANGED_EVENT, ());
+    Ok(revoked)
 }
