@@ -102,6 +102,8 @@ export type PageCommand =
   | { op: "click"; target: string; fast?: boolean }
   | { op: "hover"; target: string }
   | { op: "type"; target: string; text: string; clear?: boolean; submit?: boolean; fast?: boolean }
+  /** Preenche usuário e senha vindos do cofre da ADE sem devolver o segredo ao agente. */
+  | { op: "fillLogin"; username: string; password: string; submit?: boolean }
   | { op: "press"; key: string; target?: string }
   | { op: "select"; target: string; value: string; fast?: boolean }
   | { op: "scroll"; target?: string; dy?: number; to?: "top" | "bottom"; fast?: boolean }

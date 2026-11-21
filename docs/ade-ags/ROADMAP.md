@@ -1,5 +1,9 @@
 # Roadmap ADE AGS
 
+## Cofre de logins (F1)
+
+Cofre de logins por origem guardado exclusivamente no chaveiro do sistema operacional (`src-tauri/src/vault/`, serviço `ade-ags.vault.<hash>`), sem alterar o schema do `data.db`. Agentes interativos (abas e conversas por protocolo, nunca tarefas headless da frota) dispõem das tools MCP `vault_list` (metadados sem senha), `vault_request` (cartão seguro de cadastro) e `browser_fill_login` (preenchimento direto no navegador da aba, validando a origem contra phishing e pedindo confirmação no primeiro uso por par login/agente, com opção "Sempre permitir"). Depois de preencher, a aba fica blindada até mudar de origem (`eval`, `mock`, `console`, `storage` e `network` são recusados; `javascript:`/`data:` em `navigate` são bloqueados; `snapshot` e `describe` mascaram `input[type=password]` como `••••`; abas sujas por `eval`/`mock` são recarregadas antes de preencher; e `egressPolicy` redige qualquer ocorrência de senhas da sessão para `[cofre]`). Configurações → Cofre lista, adiciona, edita usuário/rótulo, troca senha sem exibi-la, apaga e revoga permissões por agente (skill `ags-orchestrator` 1.88.0).
+
 ## Auditoria completa de 2026-11-16
 
 Leitura dos 2.217 arquivos de código, com os bugs confirmados (3 P0: erro de render que mata todos os terminais, a paleta que lança no render, o canvas apagado quando `canvas.json` não lê) e as causas dos sintomas de chat, PiP, navegador e travamento. Os próximos passos estão em fases: dados e agentes, travamento, sintomas visuais, segurança e aparelhos. Ver [AUDITORIA_2026-11-16.md](./AUDITORIA_2026-11-16.md) e o [status das correções](./AUDITORIA_2026-11-16.md#status-das-corre%C3%A7%C3%B5es).

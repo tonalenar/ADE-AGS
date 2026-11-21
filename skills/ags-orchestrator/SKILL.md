@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.87.0
+version: 1.88.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -1459,6 +1459,12 @@ ags peer deliver --file handoff.json            # a member's final delivery (Han
   Call `secret_revoke` as soon as the task is done. Headless fleet tasks cannot request or use secrets.
   Clients without per-session MCP can use `ags secret request --label "R2" --description "..."`,
   `ags secret run <id> -- <program> [args...]`, and `ags secret revoke <id>`. Do not call `secret.consume` directly.
+- For site logins in the project browser, use the **login vault** (interactive tabs/threads only, never headless fleet tasks):
+  `vault_list` lists saved `{ id, origin, username, label }` metadata without passwords; `vault_request` opens a secure card
+  for the user to save a login for an `origin`; `browser_fill_login` fills username and password directly into the current page
+  (only if its origin matches, asking confirmation on first use per agent) and optionally submits the form. After filling,
+  the tab is shielded (`browser_eval`, `browser_mock`, `browser_console`, `browser_storage`, and `browser_network` are refused
+  until the tab navigates to another origin) so the password never reaches the agent.
 - Large answers are spilled: above ~6,000 tokens an MCP tool result, or `tab output`, `tab
   screen`, `peer check`, `peer pending`, `chat show`, `chat wait`, `recall get`, comes back as
   head + tail + the path of a private file under `~/.ags/spill/` (deleted after 30 days); the
@@ -1724,5 +1730,6 @@ flags of each command.
 | Devices | interactive sessions (`--cwd`); caller reach is checked and fleet tasks are refused | `device_list`, `device_shot`, `device_action` |
 | Questions to the person | every session (team members get `refused`, see above) | `ask_user` |
 | Temporary secrets | interactive tabs (`--tab`), never headless fleet tasks | `secret_request`, `secret_run`, `secret_revoke` |
+| Login vault | interactive tabs (`--tab`), never headless fleet tasks | `vault_list`, `vault_request`, `browser_fill_login` |
 | Permission | fleet tasks only (`--task`) | `approve_tool_use` |
 <!-- END GENERATED: mcp-tools -->

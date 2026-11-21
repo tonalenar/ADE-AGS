@@ -91,6 +91,7 @@ A tabela abaixo sai de `ipc/mcp.rs` e `forge/tools.rs`; o mesmo vale para a ajud
 | Devices | interactive sessions (`--cwd`); caller reach is checked and fleet tasks are refused | `device_list`, `device_shot`, `device_action` |
 | Questions to the person | every session (team members get `refused`, see above) | `ask_user` |
 | Temporary secrets | interactive tabs (`--tab`), never headless fleet tasks | `secret_request`, `secret_run`, `secret_revoke` |
+| Login vault | interactive tabs (`--tab`), never headless fleet tasks | `vault_list`, `vault_request`, `browser_fill_login` |
 | Permission | fleet tasks only (`--task`) | `approve_tool_use` |
 <!-- END GENERATED: mcp-tools -->
 

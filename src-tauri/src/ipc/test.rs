@@ -4174,7 +4174,7 @@ mod autorizacao {
         );
     }
     const LIVRE: usize = 28;
-    const ESCOPO: usize = 190;
+    const ESCOPO: usize = 193;
     const PESSOA: usize = 4;
     const PAPEL: usize = 2;
 
@@ -4556,6 +4556,9 @@ mod autorizacao {
             "secret.request",
             "secret.consume",
             "secret.revoke",
+            "vault.list",
+            "vault.request",
+            "vault.fill",
             "sim.act",
             "desk.act",
             "swarm.note",
@@ -5478,5 +5481,137 @@ mod autorizacao {
             "tab.close divide a classe de tab.send: a regra de fechar está por nome"
         );
         assert_ne!(authz::class_of("tab.close"), authz::class_of("tab.state"));
+    }
+}
+
+// ── Cofre de logins (Parte A2) ──────────────────────────────────────────────
+
+#[test]
+fn tools_do_cofre_aparecem_em_tab_e_thread_mas_nunca_na_frota() {
+    let tab = McpContext::Cwd {
+        cwd: "/p".into(),
+        tab: Some("tab-1".into()),
+        mission: None,
+        role: None,
+    };
+    let thread = McpContext::Cwd {
+        cwd: "/p".into(),
+        tab: Some("thread:abc".into()),
+        mission: None,
+        role: None,
+    };
+    let task = McpContext::Task("task-1".into());
+
+    let list_names = |ctx: &McpContext| -> Vec<String> {
+        let out = raw_session(
+            ctx,
+            &[json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })],
+            |_, _| Ok(json!({})),
+        );
+        out[0]["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t["name"].as_str().map(str::to_string))
+            .collect()
+    };
+
+    let tab_tools = list_names(&tab);
+    let thread_tools = list_names(&thread);
+    let task_tools = list_names(&task);
+
+    for tool in [
+        super::mcp::VAULT_LIST_TOOL,
+        super::mcp::VAULT_REQUEST_TOOL,
+        super::mcp::BROWSER_FILL_LOGIN_TOOL,
+    ] {
+        assert!(
+            tab_tools.iter().any(|n| n == tool),
+            "tab interativa deve listar {tool}"
+        );
+        assert!(
+            thread_tools.iter().any(|n| n == tool),
+            "thread interativa deve listar {tool}"
+        );
+        assert!(
+            !task_tools.iter().any(|n| n == tool),
+            "tarefa da frota NÃO pode listar {tool}"
+        );
+    }
+}
+
+#[test]
+fn tools_do_cofre_despacham_e_recusam_frota() {
+    let tab = McpContext::Cwd {
+        cwd: "/p".into(),
+        tab: Some("tab-1".into()),
+        mission: None,
+        role: None,
+    };
+    let seen = std::sync::Mutex::new(Vec::<(String, serde_json::Value)>::new());
+    let out = raw_session(
+        &tab,
+        &[
+            call(1, "vault_list", json!({})),
+            call(
+                2,
+                "vault_request",
+                json!({ "origin": "https://app.exemplo.com", "reason": "Entrar no painel" }),
+            ),
+            call(
+                3,
+                "browser_fill_login",
+                json!({ "id": "v-1", "submit": true }),
+            ),
+        ],
+        |cmd, payload| {
+            seen.lock().unwrap().push((cmd.to_string(), payload));
+            match cmd {
+                "vault.list" => Ok(json!({ "entries": [] })),
+                "vault.request" => Ok(json!({ "id": "v-new" })),
+                "vault.fill" => Ok(json!({ "text": "{\"filled\":true,\"submitted\":true}" })),
+                other => Err(format!("inesperado: {other}")),
+            }
+        },
+    );
+
+    let by_id = |id: i64| out.iter().find(|r| r["id"] == id).unwrap();
+    assert!(by_id(1)["result"].get("isError").is_none());
+    assert!(by_id(2)["result"].get("isError").is_none());
+    assert!(by_id(3)["result"].get("isError").is_none());
+    assert!(by_id(3)["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("\"filled\":true"));
+
+    let recorded = seen.into_inner().unwrap();
+    let find_cmd = |name: &str| {
+        recorded
+            .iter()
+            .find(|(c, _)| c == name)
+            .unwrap_or_else(|| panic!("esperava comando {name}"))
+    };
+    assert_eq!(recorded.len(), 3);
+    assert_eq!(find_cmd("vault.request").1["origin"], "https://app.exemplo.com");
+    assert_eq!(find_cmd("vault.fill").1["id"], "v-1");
+    assert_eq!(find_cmd("vault.fill").1["submit"], true);
+
+    // Tarefa da frota tentando chamar direto sem listar deve ser recusada.
+    let task = McpContext::Task("task-1".into());
+    let denied = raw_session(
+        &task,
+        &[
+            call(1, "vault_list", json!({})),
+            call(
+                2,
+                "vault_request",
+                json!({ "origin": "https://app.exemplo.com", "reason": "x" }),
+            ),
+            call(3, "browser_fill_login", json!({ "id": "v-1" })),
+        ],
+        |_, _| panic!("frota nunca pode despachar comandos do cofre"),
+    );
+    for resp in denied {
+        assert_eq!(resp["result"]["isError"], true);
     }
 }

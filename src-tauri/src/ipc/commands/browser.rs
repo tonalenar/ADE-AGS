@@ -30,10 +30,7 @@ pub(super) fn browser_run(app: &AppHandle, args: &Value) -> Result<Value, String
     let owner = args.get("tabId").and_then(Value::as_str).map(|id| json!({ "kind": "tab", "id": id })).or_else(
         || args.get("taskId").and_then(Value::as_str).map(|id| json!({ "kind": "task", "id": id })),
     );
-    let window = match args.get("tabId").and_then(Value::as_str) {
-        Some(tab) => window_with_tab(app, tab)?.map_or_else(|| window_with_folder(app, &cwd), |w| Ok(Some(w)))?,
-        None => window_with_folder(app, &cwd)?,
-    };
+    let window = window_for_caller(app, args.get("tabId").and_then(Value::as_str), &cwd)?;
 
     let raw = ask_frontend_within(
         app,
@@ -43,6 +40,19 @@ pub(super) fn browser_run(app: &AppHandle, args: &Value) -> Result<Value, String
         Duration::from_secs(browser_timeout(&request)),
     )?;
     unwrap_frontend_result(raw)
+}
+
+pub(super) fn window_for_caller(
+    app: &AppHandle,
+    tab_id: Option<&str>,
+    cwd: &str,
+) -> Result<Option<String>, String> {
+    match tab_id {
+        Some(tab) => {
+            window_with_tab(app, tab)?.map_or_else(|| window_with_folder(app, cwd), |w| Ok(Some(w)))
+        }
+        None => window_with_folder(app, cwd),
+    }
 }
 
 /// La ventana donde vive esa tab. Es más preciso que buscar por carpeta: dos ventanas
