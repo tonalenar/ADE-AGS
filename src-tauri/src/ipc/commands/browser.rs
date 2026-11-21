@@ -77,6 +77,9 @@ fn browser_timeout(request: &Value) -> u64 {
     if request.get("op").and_then(Value::as_str) == Some("act") {
         return crate::ipc::mcp::act_timeout_secs(request.get("timeout"));
     }
+    if request.get("op").and_then(Value::as_str) == Some("wait_human") {
+        return crate::ipc::mcp::captcha_wait_timeout_secs(request.get("timeout_s")) + 30;
+    }
     if request.get("op").and_then(Value::as_str) != Some("pick") {
         return BROWSER_TIMEOUT_SECS;
     }

@@ -86,6 +86,71 @@ export function isSelectionRectVisible(rect: ClipRect, clips: readonly ClipRect[
 }
 
 /**
+ * Afinidade entre uma instância de `QuoteCards` e a fonte da seleção (`sourceAnchor`),
+ * para escolher o composer da mesma superfície quando mais de um está montado para a mesma conversa.
+ */
+export function quoteHostAffinity(element: HTMLElement | null, sourceAnchor?: QuoteSourceAnchor): number {
+  if (!element || !sourceAnchor?.source) return 0;
+  const sourceEl = sourceAnchor.source;
+  const hostThread = element.closest("[data-thread-node]");
+  const sourceThread = sourceEl.closest("[data-thread-node]");
+  if (hostThread && hostThread === sourceThread) return 3;
+  if (hostThread !== sourceThread) return 0;
+  const hostShell = element.closest("[data-chat-shell]");
+  const sourceShell = sourceEl.closest("[data-chat-shell]");
+  if (hostShell && hostShell === sourceShell) return 2;
+  if (hostShell !== sourceShell) return 0;
+  return 1;
+}
+
+/**
+ * Verifica se o contêiner de chips de citação está visível na tela (sem ancestral oculto por
+ * `display: none`, `visibility: hidden`, `hidden`/`inert` e, quando tem caixa medida, dentro da
+ * viewport). Impede que um `ThreadNode` escondido no canvas (`visibility: hidden; translateX(-300vw)`)
+ * abra um portal de editor sobre a barra lateral no modo chat.
+ */
+export function isQuoteHostVisible(element: HTMLElement | null, sourceAnchor?: QuoteSourceAnchor): boolean {
+  if (!element || !element.isConnected) return false;
+  const doc = element.ownerDocument;
+  const view = doc?.defaultView;
+  for (let cur: HTMLElement | null = element; cur && cur !== doc.documentElement; cur = cur.parentElement) {
+    if (cur.hidden || cur.hasAttribute("inert") || cur.getAttribute("aria-hidden") === "true") {
+      return false;
+    }
+    const inlineDisplay = cur.style?.display;
+    const inlineVisibility = cur.style?.visibility;
+    if (inlineDisplay === "none" || inlineVisibility === "hidden" || inlineVisibility === "collapse") {
+      return false;
+    }
+    const style = view?.getComputedStyle?.(cur);
+    if (style && (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse")) {
+      return false;
+    }
+  }
+  const rect = element.getBoundingClientRect();
+  if (view && (rect.width > 0 || rect.height > 0)) {
+    const inViewport =
+      rect.right > 0 &&
+      rect.left < view.innerWidth &&
+      rect.bottom > 0 &&
+      rect.top < view.innerHeight;
+    if (!inViewport) {
+      if (sourceAnchor && sourceAnchor.source.isConnected && quoteHostAffinity(element, sourceAnchor) >= 3) {
+        const sourceRect = sourceAnchor.source.getBoundingClientRect();
+        return (
+          sourceRect.right > 0 &&
+          sourceRect.left < view.innerWidth &&
+          sourceRect.bottom > 0 &&
+          sourceRect.top < view.innerHeight
+        );
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Restringe o retângulo da seleção à largura da mensagem fonte (ex.: blocos de código ou tabelas
  * com rolagem horizontal, onde o texto citado pode terminar além da borda visível). Pura.
  */

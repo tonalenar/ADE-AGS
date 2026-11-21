@@ -111,7 +111,8 @@ server URL, browser_snapshot to read the page and get element refs, act with bro
 browser_press using those refs (or give a whole multi-step goal to browser_act, which is faster), then check browser_console and browser_network for errors. Use browser_resize \
 to test responsive layouts. There are no screenshots in these tools: read the page through snapshots; when you need \
 an image of a page, `ags portal screenshot <portal>` saves a PNG and returns its path. Never launch your own browser \
-window (Playwright/Puppeteer/Selenium with headless: false): it opens outside the canvas.\n\
+window (Playwright/Puppeteer/Selenium with headless: false): it opens outside the canvas. \
+If a browser tool returns blocked: captcha, call browser_wait_human; never try to solve it.\n\
 Computer use: browser_act (canvas browser), sim_act (a reachable iOS simulator or physical iPhone/iPad) and desk_act (the Mac screen; \
 the person consents at the start of every act) let Jev drive a whole goal. On iOS, Jev gets local OCR text first; the screenshot is sent only for unlabeled icons or ambiguous labels. device_list shows reachable devices and stable phone ids; \
 device_shot takes a local screenshot; device_action can list iPhone apps, launch/close one by bundle id, open a URL, tap, swipe, press a key/button or type. \
@@ -176,6 +177,7 @@ pub fn tool_prefix(style: crate::agents::McpStyle) -> String {
 /// Todos los nombres de tool que este servidor publica, para poder reescribirlos.
 pub(crate) fn tool_names() -> Vec<&'static str> {
     let mut names: Vec<&str> = BROWSER_TOOLS.iter().map(|t| t.name).collect();
+    names.push(CAPTCHA_WAIT_TOOL);
     names.extend(ORCHESTRATION_TOOLS.iter().map(|t| t.name));
     names.extend(GIT_TOOLS.iter().map(|t| t.name));
     names.extend(COMPUTER_USE_TOOLS.iter().map(|t| t.name));
@@ -605,11 +607,81 @@ const BROWSER_NEEDS_APPROVAL: &[&str] = &["browser_upload", "browser_eval"];
 /// Los nombres completos de las tools del navegador que se aprueban solas, como los ve el
 /// agente (`mcp__ags__browser_click`). Es lo que va en `--allowedTools`.
 pub fn browser_tool_names() -> Vec<String> {
-    BROWSER_TOOLS
+    let mut names: Vec<String> = BROWSER_TOOLS
         .iter()
         .filter(|t| !BROWSER_NEEDS_APPROVAL.contains(&t.name))
         .map(|t| format!("mcp__{SERVER_NAME}__{}", t.name))
-        .collect()
+        .collect();
+    names.push(format!("mcp__{SERVER_NAME}__{CAPTCHA_WAIT_TOOL}"));
+    names
+}
+
+// ── Captcha com a pessoa (C2) ─────────────────────────────────
+
+pub const CAPTCHA_WAIT_TOOL: &str = "browser_wait_human";
+/// Prazo padrão (15 min) e teto máximo (30 min) para a pessoa resolver um captcha.
+pub const CAPTCHA_WAIT_DEFAULT_SECS: u64 = 900;
+pub const CAPTCHA_WAIT_MAX_SECS: u64 = 1800;
+
+/// O prazo pedido para `browser_wait_human`, dentro da faixa `1..=1800` (padrão 900 s).
+pub fn captcha_wait_timeout_secs(asked: Option<&Value>) -> u64 {
+    asked
+        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())))
+        .unwrap_or(CAPTCHA_WAIT_DEFAULT_SECS)
+        .clamp(1, CAPTCHA_WAIT_MAX_SECS)
+}
+
+fn captcha_schemas() -> Vec<Value> {
+    vec![json!({
+        "name": CAPTCHA_WAIT_TOOL,
+        "description": "Wait by event (never polling) for the user to solve a captcha that blocked a browser tool. Never attempt to solve a captcha yourself or click inside its challenge widget; call this with the handoff id returned by the blocked tool. Returns {\"resolved\":true} once the page clears the challenge, {\"cancelled\":true} if the user cancels, or {\"expired\":true} on timeout.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "handoff": {
+                    "type": "string",
+                    "description": "The handoff id from the { blocked: \"captcha\", handoff } response.",
+                },
+                "timeout_s": {
+                    "type": "number",
+                    "description": "Maximum seconds to wait for the user (default 900, max 1800).",
+                },
+            },
+            "required": ["handoff"],
+        },
+    })]
+}
+
+fn captcha_wait_human<F>(context: &McpContext, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let Some(handoff) = arguments
+        .get("handoff")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    else {
+        return tool_error("Informe o handoff do captcha.");
+    };
+    let mut request = serde_json::Map::new();
+    request.insert("op".into(), json!("wait_human"));
+    request.insert("handoff".into(), json!(handoff));
+    if let Some(timeout_s) = arguments.get("timeout_s") {
+        request.insert("timeout_s".into(), timeout_s.clone());
+    }
+    let mut payload = context.scope();
+    payload["request"] = Value::Object(request);
+    match send("browser.run", payload) {
+        Ok(data) => {
+            let text = data
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| data.to_string());
+            json!({ "content": [{ "type": "text", "text": text }] })
+        }
+        Err(e) => tool_error(&e),
+    }
 }
 
 // ── Computer use (simulador iOS e Mac) ─────────────────────────
@@ -1254,6 +1326,8 @@ where
         approve(task_id, &args, send)
     } else if let Some(tool) = BROWSER_TOOLS.iter().find(|t| t.name == name) {
         browser(context, tool, args, send)
+    } else if name == CAPTCHA_WAIT_TOOL {
+        captcha_wait_human(context, args, send)
     } else if let Some(tool) = COMPUTER_USE_TOOLS.iter().find(|t| t.name == name) {
         computer_use(context, tool, args, send)
     } else if let Some(tool) = DEVICE_TOOLS.iter().find(|t| t.name == name) {
@@ -1592,6 +1666,7 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
             .iter()
             .map(|t| schema(t.name, t.description, (t.properties)(), t.required)),
     );
+    tools.extend(captcha_schemas());
     tools.extend(
         ORCHESTRATION_TOOLS
             .iter()
@@ -1675,6 +1750,7 @@ pub(crate) fn is_orchestration_tool(name: &str) -> bool {
 /// Si una tool solo lee: no cambia la página, el repo, el host ni el run.
 pub(crate) fn is_read_only(name: &str) -> bool {
     BROWSER_READ_ONLY.contains(&name)
+        || name == CAPTCHA_WAIT_TOOL
         || ORCHESTRATION_TOOLS.iter().any(|t| t.name == name && t.power == OrchestrationPower::Read)
         || GIT_TOOLS.iter().any(|t| t.name == name && t.read_only)
         // Preguntar y pedir permiso no tocan nada: muestran una tarjeta.
@@ -1719,6 +1795,7 @@ pub(crate) fn annotations(name: &str) -> Value {
 /// persona, cada vez.
 pub fn auto_approved(name: &str) -> bool {
     (BROWSER_TOOLS.iter().any(|t| t.name == name) && !BROWSER_NEEDS_APPROVAL.contains(&name))
+        || name == CAPTCHA_WAIT_TOOL
         || ORCHESTRATION_TOOLS.iter().any(|t| {
             t.name == name
                 && matches!(

@@ -4,6 +4,7 @@ import { NodeResizer, Position, type Node, type NodeProps } from "@xyflow/react"
 import { Button } from "neogestify-ui-components";
 
 import { agentAccent, agentTile, nodeFrame } from "@/features/agents/agentTile";
+import { QuoteSurfaceActiveProvider } from "@/features/chat/quotes/QuoteCards";
 import { StructuredConversationView } from "@/features/chat/structured/StructuredConversationView";
 import { threadCards } from "@/features/chat/structured/model";
 import { useStructured } from "@/features/chat/structured/store";
@@ -15,6 +16,7 @@ import { CordPort } from "./cords";
 import { HEADER_H } from "./geometry";
 import { CrownIcon, PencilIcon, ROLE_PILL_BASE, rolePill } from "./nodeBadges";
 import { RoleEditDialog } from "./RoleEditDialog";
+import { useCanvasActive } from "./store";
 
 export interface ThreadNodeData extends Record<string, unknown> {
   /** `thread:<id>`. */
@@ -39,6 +41,7 @@ const handle = "ade-port z-10! w-3! h-3! border-2! border-white! dark:border-sur
  */
 export const ThreadNode = memo(function ThreadNode({ data, selected }: NodeProps<ThreadFlowNode>) {
   const { t } = useTranslation();
+  const canvasActive = useCanvasActive();
   const row = useStructured((s) => s.threads.find((x) => x.id === data.threadId));
   const detected = useTabsStore((s) => s.detectedAgents);
   const [editingRole, setEditingRole] = useState(false);
@@ -112,7 +115,11 @@ export const ThreadNode = memo(function ThreadNode({ data, selected }: NodeProps
         </div>
         {/* `nodrag nowheel`: dentro do cartão o mouse é da conversa (rolar, digitar), não do canvas. */}
         <div className="nodrag nowheel flex-1 min-h-0 flex flex-col">
-          {row && card ? <StructuredConversationView card={card} thread={row} cards={[card]} /> : null}
+          {row && card ? (
+            <QuoteSurfaceActiveProvider active={canvasActive}>
+              <StructuredConversationView card={card} thread={row} cards={[card]} />
+            </QuoteSurfaceActiveProvider>
+          ) : null}
         </div>
       </div>
     </div>

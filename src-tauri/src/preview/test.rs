@@ -1671,17 +1671,20 @@ fn el_desafio_aws_waf_es_un_202_con_la_accion() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn el_proxy_marca_el_desafio_anti_robot_y_lo_quita_con_la_pagina_normal() {
-    use super::proxy::challenge_in_progress;
+    use super::proxy::{challenge_in_progress, preview_waf_challenge};
     let port = fake_dev_server().await;
     let origin = format!("http://127.0.0.1:{port}");
     let target = preview_resolve(format!("{origin}/"), String::new(), None).await.unwrap();
     assert_eq!(challenge_in_progress(&origin), None);
+    assert_eq!(preview_waf_challenge(origin.clone()), None);
     let res = client().get(format!("{}/waf", target.proxy_origin)).send().await.unwrap();
     assert_eq!(res.status().as_u16(), 202);
     assert_eq!(challenge_in_progress(&origin).as_deref(), Some("challenge"));
+    assert_eq!(preview_waf_challenge(origin.clone()).as_deref(), Some("challenge"));
     // La página normal del mismo origen (200) cierra el desafío.
     client().get(format!("{}/", target.proxy_origin)).send().await.unwrap();
     assert_eq!(challenge_in_progress(&origin), None);
+    assert_eq!(preview_waf_challenge(origin), None);
 }
 
 #[test]

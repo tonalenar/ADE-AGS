@@ -57,6 +57,81 @@ pub fn delete(account_id: &str) {
     }
 }
 
+#[cfg(test)]
+lazy_static::lazy_static! {
+    /// Em testes, `keyring::mock` não persiste entre instâncias de `Entry::new`; este cofre
+    /// em memória simula o keyring do SO sem nunca tocar no Keychain real do usuário.
+    static ref TEST_RAW_STORE: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
+}
+
+/// Grava um segredo direto no keyring do SO sem usar o cache de API keys.
+#[cfg(not(test))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn save_raw(key: &str, secret: &str) -> Result<(), String> {
+    entry(key)?
+        .set_password(secret)
+        .map_err(|e| format!("Não foi possível salvar o segredo no cofre do sistema: {e}"))
+}
+
+#[cfg(test)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn save_raw(key: &str, secret: &str) -> Result<(), String> {
+    TEST_RAW_STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key.to_string(), secret.to_string());
+    Ok(())
+}
+
+/// Lê um segredo direto do keyring do SO distinguindo ausência (`Ok(None)`) de erro do cofre.
+#[cfg(not(test))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn load_raw(key: &str) -> Result<Option<WipeString>, String> {
+    match entry(key)?.get_password() {
+        Ok(secret) => Ok(Some(WipeString(secret))),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("Não foi possível ler o cofre do sistema: {e}")),
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn load_raw(key: &str) -> Result<Option<WipeString>, String> {
+    Ok(TEST_RAW_STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(key)
+        .cloned()
+        .map(WipeString))
+}
+
+/// Remove um segredo gravado com `save_raw`.
+#[cfg(not(test))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn delete_raw(key: &str) {
+    if let Ok(e) = entry(key) {
+        let _ = e.delete_credential();
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn delete_raw(key: &str) {
+    TEST_RAW_STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(key);
+}
+
+/// Substitui o keyring real por um mock em memória nos testes para nunca tocar o cofre do usuário.
+#[cfg(test)]
+pub(super) fn use_mock_keyring() {
+    static KEYRING: std::sync::Once = std::sync::Once::new();
+    KEYRING.call_once(|| {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+    });
+}
+
 /// Migra a chave criada por versões antigas do `codex login --with-api-key` do
 /// `auth.json` para o keyring. Regrava o JSON sem o campo secreto; em caso de falha,
 /// mantém o arquivo original e impede que o lançamento prossiga silenciosamente.
@@ -112,9 +187,14 @@ pub(super) fn migrate_legacy_codex_api_key(
     Ok(())
 }
 
-struct WipeString(String);
+pub(super) struct WipeString(pub(super) String);
 
 impl WipeString {
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(super) fn as_str(&self) -> &str {
+        &self.0
+    }
+
     fn wipe(&mut self) {
         crate::accounts::broker::wipe_secret(&mut self.0);
     }
