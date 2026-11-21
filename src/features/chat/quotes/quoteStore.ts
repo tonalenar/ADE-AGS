@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import { addQuote, clipQuote, updateQuoteComment, type Quote } from "./quoteModel";
-import type { QuoteSourceAnchor } from "./selectionModel";
+import { isQuoteHostVisible, quoteHostAffinity, type QuoteSourceAnchor } from "./selectionModel";
 
 /** Sessão ativa do editor flutuante de comentário sobre uma citação recém-inserida ou existente. */
 export interface QuoteCommentEditSession {
@@ -10,6 +10,73 @@ export interface QuoteCommentEditSession {
   removeOnCancel: boolean;
   /** Âncora no trecho selecionado na timeline para posicionar o popover ao lado da seleção. */
   sourceAnchor?: QuoteSourceAnchor;
+  /** Instância de `QuoteCards` eleita como única dona deste popover de edição. */
+  ownerId?: string;
+}
+
+interface QuoteEditorHost {
+  id: string;
+  getElement: () => HTMLElement | null;
+}
+
+/** Instâncias montadas e ativas de `QuoteCards` por chave de conversa, para garantir um único popover aberto. */
+const editorHostsByKey = new Map<string, Map<string, QuoteEditorHost>>();
+
+function pickQuoteEditorOwner(key: string, session: QuoteCommentEditSession): string | null {
+  const hosts = editorHostsByKey.get(key);
+  if (!hosts || hosts.size === 0) return null;
+  const eligible: Array<{ id: string; affinity: number }> = [];
+  for (const host of hosts.values()) {
+    const el = host.getElement();
+    if (!isQuoteHostVisible(el, session.sourceAnchor)) continue;
+    eligible.push({ id: host.id, affinity: quoteHostAffinity(el, session.sourceAnchor) });
+  }
+  if (eligible.length === 0) return null;
+  let bestAffinity = -1;
+  for (const candidate of eligible) {
+    if (candidate.affinity > bestAffinity) bestAffinity = candidate.affinity;
+  }
+  const topCandidates = eligible.filter((candidate) => candidate.affinity === bestAffinity);
+  if (session.ownerId && topCandidates.some((candidate) => candidate.id === session.ownerId)) {
+    return session.ownerId;
+  }
+  return topCandidates[0]!.id;
+}
+
+/** Reconcilia qual instância visível de `QuoteCards` deve exibir o editor aberto para `key` (sempre no máximo uma). */
+export function reconcileQuoteCommentEditOwner(key: string): void {
+  useQuoteStore.setState((s) => {
+    const active = s.openEditByKey[key];
+    if (!active) return s;
+    const nextOwner = pickQuoteEditorOwner(key, active) ?? undefined;
+    if (active.ownerId === nextOwner) return s;
+    const nextSession: QuoteCommentEditSession = {
+      id: active.id,
+      removeOnCancel: active.removeOnCancel,
+      ...(active.sourceAnchor ? { sourceAnchor: active.sourceAnchor } : {}),
+      ...(nextOwner ? { ownerId: nextOwner } : {}),
+    };
+    return {
+      openEditByKey: { ...s.openEditByKey, [key]: nextSession },
+    };
+  });
+}
+
+/** Registra uma instância ativa de `QuoteCards` como candidata a exibir o editor de comentário de `key`. */
+export function registerQuoteEditorHost(key: string, host: QuoteEditorHost): () => void {
+  let hosts = editorHostsByKey.get(key);
+  if (!hosts) {
+    hosts = new Map();
+    editorHostsByKey.set(key, hosts);
+  }
+  hosts.set(host.id, host);
+  reconcileQuoteCommentEditOwner(key);
+  return () => {
+    const current = editorHostsByKey.get(key);
+    if (!current) return;
+    current.delete(host.id);
+    if (current.size === 0) editorHostsByKey.delete(key);
+  };
 }
 
 /**
@@ -64,14 +131,19 @@ export function addQuoteAndOpenCommentFor(
     if (next !== current) {
       const created = next[next.length - 1]!;
       targetId = created.id;
+      const draftSession: QuoteCommentEditSession = {
+        id: created.id,
+        removeOnCancel: options?.removeOnCancel ?? true,
+        ...(options?.sourceAnchor ? { sourceAnchor: options.sourceAnchor } : {}),
+      };
+      const ownerId = pickQuoteEditorOwner(key, draftSession);
       return {
         byKey: { ...s.byKey, [key]: next },
         openEditByKey: {
           ...s.openEditByKey,
           [key]: {
-            id: created.id,
-            removeOnCancel: options?.removeOnCancel ?? true,
-            ...(options?.sourceAnchor ? { sourceAnchor: options.sourceAnchor } : {}),
+            ...draftSession,
+            ...(ownerId ? { ownerId } : {}),
           },
         },
       };
@@ -84,13 +156,18 @@ export function addQuoteAndOpenCommentFor(
     );
     if (!existing) return s;
     targetId = existing.id;
+    const draftSession: QuoteCommentEditSession = {
+      id: existing.id,
+      removeOnCancel: false,
+      ...(options?.sourceAnchor ? { sourceAnchor: options.sourceAnchor } : {}),
+    };
+    const ownerId = pickQuoteEditorOwner(key, draftSession);
     return {
       openEditByKey: {
         ...s.openEditByKey,
         [key]: {
-          id: existing.id,
-          removeOnCancel: false,
-          ...(options?.sourceAnchor ? { sourceAnchor: options.sourceAnchor } : {}),
+          ...draftSession,
+          ...(ownerId ? { ownerId } : {}),
         },
       },
     };
@@ -99,9 +176,20 @@ export function addQuoteAndOpenCommentFor(
 }
 
 export function openQuoteCommentEditFor(key: string, session: QuoteCommentEditSession): void {
-  useQuoteStore.setState((s) => ({
-    openEditByKey: { ...s.openEditByKey, [key]: session },
-  }));
+  useQuoteStore.setState((s) => {
+    const ownerId = session.ownerId ?? pickQuoteEditorOwner(key, session) ?? undefined;
+    return {
+      openEditByKey: {
+        ...s.openEditByKey,
+        [key]: {
+          id: session.id,
+          removeOnCancel: session.removeOnCancel,
+          ...(session.sourceAnchor ? { sourceAnchor: session.sourceAnchor } : {}),
+          ...(ownerId ? { ownerId } : {}),
+        },
+      },
+    };
+  });
 }
 
 export function closeQuoteCommentEditFor(key: string, id?: string): void {

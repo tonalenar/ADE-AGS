@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { DESKTOP_OS } from "@/app/platform";
 
 import { QuoteIcon } from "../chatIcons";
+import { useQuoteSurfaceActive } from "./QuoteCards";
 import { MAX_QUOTE_CHARS } from "./quoteModel";
 import { addQuoteAndOpenCommentFor } from "./quoteStore";
 import {
@@ -35,6 +36,7 @@ export function SelectionComment({
   quoteKey: string;
 }) {
   const { t } = useTranslation();
+  const surfaceActive = useQuoteSurfaceActive();
   const [floating, setFloating] = useState<FloatingCite | null>(null);
   const toolbarRef = useRef<HTMLButtonElement>(null);
   const actionsRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
@@ -42,6 +44,10 @@ export function SelectionComment({
   floatingRef.current = floating;
 
   useEffect(() => {
+    if (!surfaceActive) {
+      setFloating(null);
+      return;
+    }
     const element = container();
     if (!element) {
       setFloating(null);
@@ -157,7 +163,7 @@ ${target.text}`
       actions.dispose();
       actionsRef.current = null;
     };
-  }, [container, quoteKey, t]);
+  }, [container, quoteKey, surfaceActive, t]);
 
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current;
