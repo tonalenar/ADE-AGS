@@ -126,6 +126,8 @@ export interface Board {
   /** Os nós das conversas por protocolo (`thread:<id>` → retângulo): um cartão com a timeline, sem terminal. Aditivo:
    *  um canvas antigo não os tem. */
   threads: Record<string, Box>;
+  /** Os nós de agentes remotos pareados (`remote:<id>` → retângulo) no canvas da pasta padrão. Aditivo. */
+  remotes: Record<string, Box>;
   /** El papel con que se recrutó cada agente (id de tab → nombre del papel). Solo una
    *  etiqueta para el nodo: no da ni quita permisos. */
   roles: Record<string, string>;
@@ -138,7 +140,7 @@ export interface Board {
 }
 
 export function emptyBoard(): Board {
-  return { nodes: {}, notes: {}, portals: {}, texts: {}, images: {}, folders: {}, drawings: [], threads: {}, roles: {}, subagents: [], edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
+  return { nodes: {}, notes: {}, portals: {}, texts: {}, images: {}, folders: {}, drawings: [], threads: {}, remotes: {}, roles: {}, subagents: [], edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
 }
 
 /**
@@ -203,13 +205,101 @@ export const THREAD_REF_PREFIX = "thread:";
 /** O tamanho padrão do cartão de uma conversa por protocolo no canvas. */
 export const THREAD_SIZE = { w: 460, h: 540 };
 
+/** O prefixo do id de um agente remoto pareado no canvas (`remote:<id>`). */
+export const REMOTE_REF_PREFIX = "remote:";
+
+/** O tamanho padrão do cartão de um agente remoto no canvas. */
+export const REMOTE_SIZE = { w: 320, h: 176 };
+
+export function remoteRefOf(clientId: string): string {
+  return `${REMOTE_REF_PREFIX}${clientId}`;
+}
+
+export function isRemoteRef(id: string): boolean {
+  return id.startsWith(REMOTE_REF_PREFIX);
+}
+
+export function remoteClientIdOf(ref: string): string | null {
+  return ref.startsWith(REMOTE_REF_PREFIX) ? ref.slice(REMOTE_REF_PREFIX.length) : null;
+}
+
+export interface RemoteClientSummary {
+  id: string;
+  name: string;
+  default_folder: string;
+  revoked: boolean;
+}
+
+function normalizeRemoteFolder(path: string): string {
+  const unified = path.trim().replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_, drive: string) => `${drive.toLowerCase()}:`);
+  const withoutTrailing = unified.replace(/\/+$/, "");
+  return withoutTrailing === "" && unified.startsWith("/") ? "/" : withoutTrailing;
+}
+
 /** Os retângulos de tudo o que ocupa lugar no canvas, para um nó novo não cair em cima. */
 function occupied(board: Board): Box[] {
   return [
-    ...Object.values(board.nodes), ...Object.values(board.threads),
+    ...Object.values(board.nodes), ...Object.values(board.threads), ...Object.values(board.remotes ?? {}),
     ...Object.values(board.notes).map((n) => n.box), ...Object.values(board.portals).map((n) => n.box),
     ...Object.values(board.folders).map((n) => n.box), ...Object.values(board.images).map((n) => n.box),
   ];
+}
+
+/**
+ * Sincroniza os nós de agentes remotos (`remote:<id>`) do canvas de uma pasta com os clientes pareados ativos
+ * cuja `default_folder` bate com `folder`. Clientes revogados ou de outra pasta saem junto com suas cordas.
+ * Idempotente: sem mudança, devolve o mesmo objeto `board`. Pura.
+ */
+export function syncRemoteNodesForFolder(
+  board: Board,
+  folder: string,
+  clients: readonly RemoteClientSummary[],
+  size: { w: number; h: number } = REMOTE_SIZE,
+): Board {
+  const target = normalizeRemoteFolder(folder);
+  const currentRemotes = board.remotes ?? {};
+  const wanted = new Set(
+    target
+      ? clients
+          .filter((client) => !client.revoked && normalizeRemoteFolder(client.default_folder) === target)
+          .map((client) => remoteRefOf(client.id))
+      : [],
+  );
+
+  const removed = Object.keys(currentRemotes).filter((ref) => !wanted.has(ref));
+  const added = [...wanted].filter((ref) => !(ref in currentRemotes));
+  if (removed.length === 0 && added.length === 0) return board;
+
+  const remotes: Record<string, Box> = {};
+  for (const [ref, box] of Object.entries(currentRemotes)) {
+    if (wanted.has(ref)) remotes[ref] = box;
+  }
+  const taken = [
+    ...Object.values(board.nodes),
+    ...Object.values(board.threads),
+    ...Object.values(remotes),
+    ...Object.values(board.notes).map((n) => n.box),
+    ...Object.values(board.portals).map((n) => n.box),
+    ...Object.values(board.folders).map((n) => n.box),
+    ...Object.values(board.images).map((n) => n.box),
+  ];
+  for (const ref of added) {
+    const box = nextFreeBox(taken, size);
+    remotes[ref] = box;
+    taken.push(box);
+  }
+
+  if (removed.length === 0) return { ...board, remotes };
+
+  const removedSet = new Set(removed);
+  const edges = board.edges.filter((edge) => !removedSet.has(edge.a) && !removedSet.has(edge.b));
+  const orchestrators = board.orchestrators.filter((id) => !removedSet.has(id));
+  const subagents = board.subagents.filter((id) => !removedSet.has(id));
+  const roles = Object.keys(board.roles).some((id) => removedSet.has(id))
+    ? Object.fromEntries(Object.entries(board.roles).filter(([id]) => !removedSet.has(id)))
+    : board.roles;
+
+  return { ...board, remotes, edges, orchestrators, subagents, roles };
 }
 
 /** Dá um nó à conversa por protocolo `ref`, num lugar livre. Já tendo, devolve o MESMO canvas. Pura. */
@@ -243,12 +333,14 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
   // Uma conversa por protocolo do modo chat (`thread:<id>`) não é aba nem nó: a corda dela com o
   // orquestrador do time (e a coroa, se ela orquestra) vale enquanto o time a tiver (ver `chat/team`).
   const outside = (id: string) => id.startsWith(THREAD_REF_PREFIX);
-  const alive = (id: string) => open.has(id) || anywhere.has(id) || id in board.notes || id in board.portals || outside(id);
+  const remotes = board.remotes ?? {};
+  const remote = (id: string) => isRemoteRef(id) && id in remotes;
+  const alive = (id: string) => open.has(id) || anywhere.has(id) || id in board.notes || id in board.portals || outside(id) || remote(id);
   // Uma tab ainda aberta NUNCA perde a ligação por uma reconciliação parcial (ex.: a janela ainda
   // não sabe que ela é deste canvas). Antes a aresta sumia e o integrante saía de `ags peers` com a
   // aba viva: o orquestrador deixava de conseguir falar com ele.
   const edges = board.edges.filter((e) => (alive(e.a) && alive(e.b)) || (anywhere.has(e.a) && anywhere.has(e.b)));
-  const participant = (id: string) => open.has(id) || board.portals[id]?.kind === "gemini" || outside(id);
+  const participant = (id: string) => open.has(id) || board.portals[id]?.kind === "gemini" || outside(id) || remote(id);
   const orchestrators = board.orchestrators.filter(participant);
   // El papel de una tab cerrada se va con ella.
   const roleIds = Object.keys(board.roles);
@@ -272,7 +364,7 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
 
   const nodes: Record<string, Box> = Object.fromEntries(kept);
   const noteBoxes = [...Object.values(board.notes), ...Object.values(board.portals)].map((n) => n.box);
-  for (const id of missing) nodes[id] = nextFreeBox([...Object.values(nodes), ...Object.values(threads), ...noteBoxes]);
+  for (const id of missing) nodes[id] = nextFreeBox([...Object.values(nodes), ...Object.values(threads), ...Object.values(remotes), ...noteBoxes]);
   return { ...board, nodes, threads, edges, orchestrators, roles, subagents };
 }
 
@@ -474,7 +566,7 @@ export function neighbors(board: Board, tabId: string): string[] {
 
 /** Dónde está un nodo, sea terminal o nota. */
 export function boxOf(board: Board, id: string): Box | undefined {
-  return board.nodes[id] ?? board.notes[id]?.box ?? board.portals[id]?.box ?? board.texts[id]?.box ?? board.images[id]?.box ?? board.folders[id]?.box ?? board.threads[id];
+  return board.nodes[id] ?? board.notes[id]?.box ?? board.portals[id]?.box ?? board.texts[id]?.box ?? board.images[id]?.box ?? board.folders[id]?.box ?? board.threads[id] ?? board.remotes?.[id];
 }
 
 export const NOTE_SIZE = { w: 320, h: 240 };
@@ -655,6 +747,8 @@ export const PORTAL_MIN = { w: 320, h: 240 };
 function allBoxes(board: Board): Box[] {
   return [
     ...Object.values(board.nodes),
+    ...Object.values(board.threads),
+    ...Object.values(board.remotes ?? {}),
     ...Object.values(board.notes).map((n) => n.box),
     ...Object.values(board.portals).map((p) => p.box),
     ...Object.values(board.texts).map((t) => t.box),

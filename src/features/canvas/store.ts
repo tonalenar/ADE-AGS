@@ -10,10 +10,10 @@ import { useTeamIndex } from "@/features/chat/team/teamIndex";
 
 import {
   FOLDER_PREFIX, IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addFolder, addImage, addNote, addPortal,
-  addStroke, addText, addThreadNode, removeThreadNode, removeFolder, updateFolder,
+  addStroke, addText, addThreadNode, removeThreadNode, removeFolder, updateFolder, syncRemoteNodesForFolder,
   emptyBoard, moveSessionArtifacts, placeInNextGridCell, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
   buildMissionTeam, setRole, removeStroke, removeText, toggleOrchestrator, moveTerminals, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
-  type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
+  type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type RemoteClientSummary, type Stroke,
 } from "./board";
 import { safeViewport, type Box, type Rect, type Viewport } from "./geometry";
 import { buildComparisonBoard, type ComparisonNode } from "@/features/compare/layout";
@@ -269,12 +269,17 @@ export const canvasActions = {
   /** Leva a ref do canvas antigo para o da sessão (ver `moveSessionArtifacts`): o destino grava antes da origem. */
   moveSessionFrom: (fromKey: string, toKey: string, ref: string) => moveSession(fromKey, toKey, ref),
   removeThread: (key: string, ref: string) => updateBoard(key, (b) => removeThreadNode(b, ref)),
+  /** Sincroniza os nós de agentes remotos (`remote:<id>`) do canvas de pasta com os clientes pareados. */
+  syncRemotesForFolder: (key: string, folder: string, clients: readonly RemoteClientSummary[]) =>
+    updateBoard(key, (b) => syncRemoteNodesForFolder(b, folder, clients)),
   /** Pede ao canvas `key` que centre e destaque `ref` (a conversa escolhida fora dele). */
   focusRef: (key: string, ref: string) => useCanvasStore.setState({ focus: { key, ref, nonce: ++focusSequence } }),
   moveNode: (key: string, id: string, patch: Partial<Box>) =>
     updateBoard(key, (b) => {
       const thread = b.threads[id];
       if (thread) return { ...b, threads: { ...b.threads, [id]: { ...thread, ...patch } } };
+      const remote = b.remotes?.[id];
+      if (remote) return { ...b, remotes: { ...b.remotes, [id]: { ...remote, ...patch } } };
       const note = b.notes[id];
       if (note) return setNoteBox(b, id, patch);
       const portal = b.portals[id];
@@ -519,7 +524,7 @@ export function initCanvasSync(label: string): () => void {
       const mine = Object.fromEntries(
         Object.entries(saved ?? {})
           .filter(([k]) => k.startsWith(`${label}|`))
-          .map(([k, b]) => [k, { ...emptyBoard(), ...b, viewport: safeViewport(b?.viewport), nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], threads: b?.threads ?? {}, roles: b?.roles ?? {}, subagents: b?.subagents ?? [] }]),
+          .map(([k, b]) => [k, { ...emptyBoard(), ...b, viewport: safeViewport(b?.viewport), nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], threads: b?.threads ?? {}, remotes: b?.remotes ?? {}, roles: b?.roles ?? {}, subagents: b?.subagents ?? [] }]),
       );
       const current = useCanvasStore.getState();
       const merged = { ...mine };

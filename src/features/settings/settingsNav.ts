@@ -21,7 +21,7 @@ export const SETTINGS_NAV_GROUPS: readonly SettingsNavGroup[] = [
   { heading: null, pages: ["general", "appearance", "chat", "threads", "shortcuts"] },
   { heading: "settings.nav.agents", pages: ["accounts", "browser", "devices", "scheduled", "usage"] },
   { heading: "settings.nav.code", pages: ["projects", "diffs", "sourceControl", "worktrees"] },
-  { heading: "settings.nav.connections", pages: ["environments", "access"] },
+  { heading: "settings.nav.connections", pages: ["environments", "access", "remote"] },
   { heading: null, pages: ["maintenance", "storage", "diagnostics", "licenses", "labs"] },
   { heading: "settings.nav.ade", pages: ["memory", "decisions", "permissions", "terminal", "orchestrator", "skills", "cli"] },
 ];
@@ -43,6 +43,7 @@ export const SETTINGS_PAGE_LABEL_KEYS: Record<SettingsPageId, string> = {
   worktrees: "settings.worktrees",
   environments: "settings.environments",
   access: "settings.access",
+  remote: "settings.remote",
   maintenance: "settings.maintenance",
   storage: "settings.storage",
   diagnostics: "settings.diagnostics",
@@ -168,6 +169,8 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
 
   { id: "access.local", page: "access", anchor: "access-local", titleKey: "settings.access.local.title" },
   { id: "access.network", page: "access", anchor: "access-network", titleKey: "settings.access.network.title" },
+  { id: "remote.server", page: "remote", anchor: "remote-main", titleKey: "settings.remote.server.title", keywordKeys: ["settings.remote.tailscale.label"] },
+  { id: "remote.pair", page: "remote", anchor: "remote-main", titleKey: "settings.remote.pair.title" },
 
   { id: "maintenance.updates", page: "maintenance", anchor: "maintenance-updates", titleKey: "settings.updates" },
   { id: "usage.prices", page: "usage", anchor: "usage-prices", titleKey: "settings.usage.prices.title", keywordKeys: ["settings.usage.prices.desc"] },

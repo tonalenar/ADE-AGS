@@ -262,6 +262,27 @@ fn os_nos_de_conversa_por_protocolo_sobrevivem_ao_salvar_e_canvas_antigo_abre_se
 }
 
 #[test]
+fn os_nos_de_agente_remoto_sobrevivem_ao_salvar_e_autorizam_cordas_e_coroa() {
+    let json = serde_json::json!({
+        "main|/p": {
+            "nodes": { "t1": { "x": 0, "y": 0, "w": 600, "h": 400 } },
+            "remotes": { "remote:cli-1": { "x": 640, "y": 0, "w": 320, "h": 176 } },
+            "edges": [{ "id": "e1", "a": "remote:cli-1", "b": "t1" }],
+            "orchestrators": ["remote:cli-1"]
+        }
+    });
+    let boards: Boards = serde_json::from_value(json).unwrap();
+    let back = serde_json::to_value(&boards).unwrap();
+    assert_eq!(back["main|/p"]["remotes"]["remote:cli-1"]["w"], 320);
+    assert!(peers_of(&boards, "remote:cli-1").contains("t1"));
+    assert!(is_orchestrator_here(&boards, "remote:cli-1"));
+
+    // Um canvas de antes do campo `remotes`: abre normalmente.
+    let old: Boards = serde_json::from_value(serde_json::json!({ "main|/q": { "nodes": {} } })).unwrap();
+    assert!(old["main|/q"].remotes.is_null());
+}
+
+#[test]
 fn papeis_ilegivel_nao_e_regravado() {
     let dir = std::env::temp_dir().join(format!("ags-roles-bad-{}", uuid::Uuid::new_v4().simple()));
     std::fs::create_dir_all(&dir).unwrap();

@@ -8,6 +8,7 @@ import {
   type Edge, type EdgeChange, type Node, type NodeChange, type NodeProps, type Connection,
 } from "@xyflow/react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Button, CloseIcon, useTheme } from "neogestify-ui-components";
 import { DEFAULT_DEVICE, DEVICE_SCALE, deviceById, deviceNodeSize, deviceScaleOf, stepDeviceScale, type DeviceSpec } from "@/features/browser/devices";
 import { DeviceFloatBar, PhoneModeIcon } from "./DeviceFloatBar";
@@ -25,7 +26,7 @@ import { announceToOrchestrators } from "./orchestratorAnnounce";
 import { portalConnectedNotice } from "./portalNotice";
 
 import { isHiddenNote, shownNote, stackMembers,
-  AGENT_PORTAL_SIZE, NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isFreeNodeId, neighbors, thin, type CanvasNote, type CanvasPortal, type Stroke,
+  AGENT_PORTAL_SIZE, NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isFreeNodeId, isRemoteRef, neighbors, remoteClientIdOf, thin, type CanvasNote, type CanvasPortal, type Stroke,
 } from "./board";
 import { CanvasToolbar, type DrawStyle, type Tool } from "./CanvasToolbar";
 import { boxFromDrag, defaultSize as defaultPlaceSize, isDrag, loadSizes, rememberSize, sizeLabel, type PlaceKind, type Point, type Size } from "./placeBox";
@@ -73,9 +74,11 @@ import { RoleEditDialog } from "./RoleEditDialog";
 import { applyTabRole, applyThreadRole } from "./applyRole";
 import type { AgentRoleChoice } from "./agentRole";
 import { CrownIcon, PencilIcon, ROLE_PILL_BASE, rolePill } from "./nodeBadges";
-import { boardKeyOfTab, canvasActions, compareOfKey, missionOfKey, useActiveBoardKey, useCanvasActive, useCanvasStore } from "./store";
+import { boardKey, boardKeyOfTab, canvasActions, compareOfKey, missionOfKey, useActiveBoardKey, useCanvasActive, useCanvasStore } from "./store";
 import { usePortalViewLifetime } from "./portalLifetime";
 import { ThreadNode, type ThreadFlowNode } from "./ThreadNode";
+import { RemoteNode, type RemoteFlowNode } from "./RemoteNode";
+import { remoteClientsList, type RemoteClient } from "@/features/settings/remote/ipc";
 import { selectConversation } from "@/features/chat/unified/selectionActions";
 import { useSelectedRef } from "@/features/chat/unified/useConversations";
 import { useChatLive, type TabTurn } from "@/features/chat/liveStore";
@@ -139,7 +142,7 @@ interface PortalNodeData extends Record<string, unknown> {
 }
 
 type PortalFlowNode = Node<PortalNodeData, "portal">;
-type FlowNode = AgentFlowNode | ThreadFlowNode | SubagentCardFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode | FolderFlowNode | DesignBoardFlowNode | DesignFrameFlowNode;
+type FlowNode = AgentFlowNode | ThreadFlowNode | RemoteFlowNode | SubagentCardFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode | FolderFlowNode | DesignBoardFlowNode | DesignFrameFlowNode;
 
 // El navegador pesa más de un megabyte: se baja con el primer portal, no con el canvas.
 const BrowserTab = lazy(() => import("@/features/browser/BrowserTab").then((m) => ({ default: m.BrowserTab })));
@@ -194,6 +197,9 @@ const agentSig = (n: AgentFlowNode) =>
     n.data.links, n.data.orchestrator, n.data.role, n.data.subagent].join("|");
 const threadSig = (n: ThreadFlowNode) =>
   [n.id, n.position.x, n.position.y, n.width, n.height, n.selected, n.data.links, n.data.orchestrator, n.data.role, n.data.subagent].join("|");
+const remoteSig = (n: RemoteFlowNode) =>
+  [n.id, n.position.x, n.position.y, n.width, n.height, n.selected, n.data.links, n.data.orchestrator, n.data.role, n.data.subagent,
+    n.data.client?.name, n.data.client?.preset, n.data.client?.last_seen_at].join("|");
 const subagentCardSig = (n: SubagentCardFlowNode) =>
   [n.id, n.data.card.title, n.data.card.subtitle, n.data.card.status, n.data.card.kind, n.data.card.openRef, boxSig(n.data.card.box)].join("|");
 const noteSig = (n: NoteFlowNode) => [
@@ -368,11 +374,11 @@ function CanvasInner() {
   useEffect(() => {
     if (!focusReq || focusReq.nonce === handledFocus.current || focusReq.key !== key || size.width === 0) return;
     const current = useCanvasStore.getState().boards[key ?? ""];
-    const box = current?.threads[focusReq.ref] ?? current?.nodes[focusReq.ref];
+    const box = current?.threads[focusReq.ref] ?? current?.remotes?.[focusReq.ref] ?? current?.nodes[focusReq.ref];
     if (!box) return; // o cartão ainda não nasceu: o efeito roda de novo quando o canvas mudar
     handledFocus.current = focusReq.nonce;
     rf.setViewport(focusViewport(box, size.width, size.height), { duration: 220 });
-  }, [focusReq, key, size.width, size.height, board.threads, board.nodes]);
+  }, [focusReq, key, size.width, size.height, board.threads, board.remotes, board.nodes]);
 
   // Un panel a la vez: los dos se abren en el mismo lugar.
   const [panel, setPanel] = useState<DockPanel | null>(null);
@@ -555,7 +561,87 @@ function CanvasInner() {
       },
     }] : [];
   }), [board, selected, key]);
+  const [remoteClients, setRemoteClients] = useState<RemoteClient[]>([]);
+  const boardLoaded = useCanvasStore((s) => s.loaded);
+  useEffect(() => {
+    if (!canvasActive) return;
+    let active = true;
+    const loadRemotes = () => {
+      void remoteClientsList()
+        .then((list) => {
+          if (active && Array.isArray(list)) setRemoteClients(list);
+        })
+        .catch(() => undefined);
+    };
+    loadRemotes();
+    let off = () => {};
+    void listen("cc-remote-clients-changed", loadRemotes)
+      .then((unlisten) => {
+        if (!active) unlisten();
+        else off = unlisten;
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      off();
+    };
+  }, [canvasActive]);
+
+  // Cada cliente remoto pareado vira nó `remote:<id>` no canvas da sua pasta padrão.
+  useEffect(() => {
+    if (!canvasActive || !boardLoaded) return;
+    const folders = new Set<string>();
+    for (const client of remoteClients) {
+      if (client.default_folder) folders.add(client.default_folder);
+    }
+    if (portalCwd && key === boardKey(portalCwd)) folders.add(portalCwd);
+    for (const existingKey of Object.keys(useCanvasStore.getState().boards)) {
+      if (/#(?:m|c|cmp|s):/.test(existingKey)) continue;
+      const sep = existingKey.indexOf("|");
+      if (sep < 0) continue;
+      const folder = existingKey.slice(sep + 1);
+      if (folder) folders.add(folder);
+    }
+    for (const folder of folders) {
+      canvasActions.syncRemotesForFolder(boardKey(folder), folder, remoteClients);
+    }
+  }, [canvasActive, boardLoaded, remoteClients, key, portalCwd]);
+
+  const rawRemoteNodes: RemoteFlowNode[] = useMemo(() => {
+    const byId = new Map(remoteClients.map((c) => [c.id, c]));
+    return Object.entries(board.remotes ?? {}).flatMap(([ref, box]) => {
+      const clientId = remoteClientIdOf(ref);
+      return clientId ? [{
+        id: ref,
+        type: "remote" as const,
+        position: { x: box.x, y: box.y },
+        width: box.w,
+        height: box.h,
+        selected: ref === selectedNote,
+        dragHandle: ".ade-node-drag",
+        deletable: false,
+        data: {
+          ref,
+          clientId,
+          client: byId.get(clientId),
+          links: neighbors(board, ref).length,
+          orchestrator: board.orchestrators.includes(ref),
+          role: board.roles[ref],
+          subagent: board.subagents.includes(ref),
+          onToggleOrchestrator: (id: string) => { if (!key) return; canvasActions.toggleOrchestrator(key, id); announceToOrchestrators(key, [id]); },
+          onSetRole: (id: string, choice: AgentRoleChoice) => {
+            if (!key) return;
+            void applyThreadRole(key, id, choice).then(() => {
+              announceToOrchestrators(key, useCanvasStore.getState().boards[key]?.orchestrators ?? []);
+            });
+          },
+        },
+      }] : [];
+    });
+  }, [board, remoteClients, selectedNote, key]);
+
   const threadNodes = useStable(rawThreadNodes, threadSig);
+  const remoteNodes = useStable(rawRemoteNodes, remoteSig);
   const agentNodes = useStable(rawAgentNodes, agentSig);
   const folderNodes = useStable(rawFolderNodes, folderSig);
   const textNodes = useStable(rawTextNodes, textSig);
@@ -640,8 +726,8 @@ function CanvasInner() {
   }), [groups, dragPos, design.details, t]);
 
   const nodes: FlowNode[] = useMemo(
-    () => [...designNodes, ...imageNodes, ...folderNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...threadNodes, ...subagentNodes, ...textNodes],
-    [designNodes, imageNodes, folderNodes, noteNodes, portalNodes, agentNodes, threadNodes, subagentNodes, textNodes],
+    () => [...designNodes, ...imageNodes, ...folderNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...threadNodes, ...remoteNodes, ...subagentNodes, ...textNodes],
+    [designNodes, imageNodes, folderNodes, noteNodes, portalNodes, agentNodes, threadNodes, remoteNodes, subagentNodes, textNodes],
   );
 
   // El modo de foco (solo el diseño) y a qué abre: el aviso, el botón EDITAR de un nodo o el último diseño.
@@ -737,7 +823,7 @@ function CanvasInner() {
         canvasActions.moveNode(key, c.id, { w: Math.round(c.dimensions.width), h: Math.round(c.dimensions.height) });
       } else if (c.type === "select") {
         if (threadIdOf(c.id)) { if (c.selected && c.id !== selected) selectConversation(c.id); }
-        else if (isFreeNodeId(c.id)) setSelectedNote(c.selected ? c.id : (prev) => (prev === c.id ? null : prev));
+        else if (isFreeNodeId(c.id) || isRemoteRef(c.id)) setSelectedNote(c.selected ? c.id : (prev) => (prev === c.id ? null : prev));
         else if (c.selected) activateTab(c.id);
       }
     }
@@ -1579,5 +1665,5 @@ const PortalOrDevice = memo(function PortalOrDevice(props: NodeProps<PortalFlowN
     : <PortalNode {...props} />;
 });
 
-const NODE_TYPES = { designBoard: DesignBoardNode, designFrame: DesignFrameNode, agent: AgentNode, thread: ThreadNode, subagentCard: SubagentCardNode, note: NoteNode, portal: PortalOrDevice, text: TextNode, image: ImageNode, folder: FolderNode };
+const NODE_TYPES = { designBoard: DesignBoardNode, designFrame: DesignFrameNode, agent: AgentNode, thread: ThreadNode, remote: RemoteNode, subagentCard: SubagentCardNode, note: NoteNode, portal: PortalOrDevice, text: TextNode, image: ImageNode, folder: FolderNode };
 const EDGE_TYPES = { link: CordEdge };

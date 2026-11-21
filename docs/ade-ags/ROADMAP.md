@@ -1,5 +1,9 @@
 # Roadmap ADE AGS
 
+## Acesso remoto (MCP HTTP com pareamento)
+
+O servidor MCP da ADE (`src-tauri/src/remote/`) também pode ser servido por HTTP (`POST /mcp`, porta padrão `47820`, nascendo **desligado**), escutando apenas em `127.0.0.1` e, se presente, no IP privado Tailscale (`100.64.0.0/10`) — nunca em `0.0.0.0` nem `::`. Em **Configurações → Conexões → Acesso remoto**, a pessoa liga/desliga o servidor, vê o estado do Tailscale, pareia clientes definindo nome, preset (`Leitura`, `Navegador`, `Agentes` ou `Tudo`), pasta padrão, pastas extras e validade, e recebe o token **uma única vez** com trechos prontos para Claude Code, Codex e T3 Code. Só o hash SHA-256 do token fica no keyring do sistema; a comparação é em tempo constante, com limite de 20 req/s por cliente, corpo máximo de 8 MB e auditoria sem argumentos sensíveis. No IPC, o cliente remoto atua sempre como `Principal::Remote` (nunca `Principal::Outside`), limitado às pastas aprovadas (`project`), ao preset escolhido e à confirmação humana nas ações perigosas (`remote/approval.rs`). Cada cliente pareado aparece como um nó **Agente remoto** (`remote:<id>`) no canvas da pasta padrão, usando as mesmas cordas para autorizar comunicação com abas, conversas e portais; revogar remove o acesso e o nó.
+
 ## Auditoria completa de 2026-11-16
 
 Leitura dos 2.217 arquivos de código, com os bugs confirmados (3 P0: erro de render que mata todos os terminais, a paleta que lança no render, o canvas apagado quando `canvas.json` não lê) e as causas dos sintomas de chat, PiP, navegador e travamento. Os próximos passos estão em fases: dados e agentes, travamento, sintomas visuais, segurança e aparelhos. Ver [AUDITORIA_2026-11-16.md](./AUDITORIA_2026-11-16.md) e o [status das correções](./AUDITORIA_2026-11-16.md#status-das-corre%C3%A7%C3%B5es).

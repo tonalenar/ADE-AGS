@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.86.0
+version: 1.87.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -1658,6 +1658,15 @@ failure means no memory MCP injection. Workspace/project remain fixed for the co
 Divergent scopes, global/profile/multi-project requests, unknown tools and methods are rejected.
 Only memory_query, memory_recent, memory_status, memory_read_page, memory_write_page and
 memory_patch_page are exposed. This does not change settings or live tabs.
+
+## Remote MCP over HTTP
+
+ADE AGS can expose its MCP tools over HTTP (`POST /mcp`, default port `47820`) for external agents (Claude Code, Codex, T3 Code) on localhost or over Tailscale. The server is **disabled by default** and binds only to `127.0.0.1` and the machine's Tailscale IPv4 (`100.64.0.0/10`) — never `0.0.0.0`.
+
+- **Pairing:** enable and pair in **Settings → Connections → Remote access** with a client name, permission preset (`read`, `browser`, `agents`, `all`), default folder, optional extra folders, and expiration. The bearer token is shown once and stored only as a SHA-256 hash in the OS keyring.
+- **Scoping:** remote callers run as `Principal::Remote` (never `Principal::Outside`), can only call tools allowed by their preset, and may pass an optional `project` argument only for folders approved during pairing.
+- **Canvas authorization:** each paired client appears as a **Remote agent** node (`remote:<id>`) on its default folder's canvas. Connect cords to tabs, conversations, or portals to grant reach; revoking the client immediately removes access and its canvas node.
+- **Confirmations:** dangerous actions (push, merge, deleting files/floors, typing into a terminal opened by someone else, `secret_run`, spending above budget) always require user confirmation regardless of preset.
 
 ## Reference (generated)
 

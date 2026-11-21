@@ -812,6 +812,12 @@ pub fn run() {
             // Modo orquestador (Fase 9): consumo estimado y tabs observadas
             crate::orchestrator::orchestrator_stats,
             crate::orchestrator::orchestrator_reset_usage,
+            // Acesso remoto (MCP HTTP com pareamento)
+            crate::remote::remote_status,
+            crate::remote::remote_set_enabled,
+            crate::remote::remote_clients_list,
+            crate::remote::remote_client_pair,
+            crate::remote::remote_client_revoke,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
