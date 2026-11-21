@@ -171,11 +171,11 @@ fn o_modo_leve_desliga_cada_servico_uma_vez_e_o_caminho_e_seguro() {
             assert!(label.starts_with("com.apple."), "{label}");
         }
     }
-    assert_eq!(seen.len(), 157);
+    assert_eq!(seen.len(), 156);
     let expected: std::collections::HashSet<_> = include_str!("slim-labels.expected").lines().collect();
-    assert_eq!(expected.len(), 157, "o conjunto de referência deve ser único");
+    assert_eq!(expected.len(), 156, "o conjunto de referência deve ser único");
     assert_eq!(seen, expected, "as categorias devem preservar exatamente os rótulos existentes");
-    assert_eq!(slim::all_labels().count(), 157);
+    assert_eq!(slim::all_labels().count(), 156);
     let only_widgets = slim::labels_except(&["widgets".to_string()]);
     assert_eq!(only_widgets.len(), 153);
     assert!(!only_widgets.contains(&"com.apple.PosterBoard"));
@@ -210,8 +210,8 @@ fn o_modo_maximo_soma_16_servicos_sem_duplicata_com_o_modo_leve() {
     for keep in ["com.apple.assistantd", "com.apple.gamed", "com.apple.sharingd"] {
         assert!(!extra.contains(keep), "{keep} não pode sair nem no modo máximo");
     }
-    assert_eq!(slim::Level::Light.labels(&[]).len(), 157);
-    assert_eq!(slim::Level::Max.labels(&[]).len(), 157 + 16);
+    assert_eq!(slim::Level::Light.labels(&[]).len(), 156);
+    assert_eq!(slim::Level::Max.labels(&[]).len(), 156 + 16);
     for label in slim::MAX_EXTRA_LABELS {
         assert!(slim::LABELS.iter().any(|c| c.id == slim::max_extra_category(label)), "{label}");
     }
@@ -541,4 +541,12 @@ fn o_religamento_reusa_as_excecoes_do_ultimo_boot_do_aparelho() {
     assert!(exceptions_for("99999999-2222-3333-4444-555555555555").is_empty(), "uma entrada por aparelho");
     remember_exceptions(udid, &[]);
     assert!(exceptions_for(udid).is_empty(), "um boot sem exceções apaga as anteriores");
+}
+
+/// Sem o `chronod`, o `WidgetRenderer_Default` que a tela inicial abre espera por ele até o watchdog do
+/// iOS matá-lo (10 s) e o macOS mostra um relatório de problema a cada boot leve (visto em 21/11/2026).
+#[test]
+fn modo_leve_nao_desliga_o_chronod() {
+    assert!(!crate::simulator::slim::Level::Light.labels(&[]).contains(&"com.apple.chronod"));
+    assert!(!crate::simulator::slim::Level::Max.labels(&[]).contains(&"com.apple.chronod"));
 }
