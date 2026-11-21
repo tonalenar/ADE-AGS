@@ -4,6 +4,7 @@ mod agents;
 mod app;
 mod ask;
 mod agent_secrets;
+mod vault;
 mod notes;
 mod notify;
 mod renders;

@@ -19,7 +19,7 @@ export interface SettingsNavGroup {
 /** A ordem do menu. Cada página aparece num grupo só (o teste de navegação confere). */
 export const SETTINGS_NAV_GROUPS: readonly SettingsNavGroup[] = [
   { heading: null, pages: ["general", "appearance", "chat", "threads", "shortcuts"] },
-  { heading: "settings.nav.agents", pages: ["accounts", "browser", "devices", "scheduled", "usage"] },
+  { heading: "settings.nav.agents", pages: ["accounts", "browser", "vault", "devices", "scheduled", "usage"] },
   { heading: "settings.nav.code", pages: ["projects", "diffs", "sourceControl", "worktrees"] },
   { heading: "settings.nav.connections", pages: ["environments", "access", "remote"] },
   { heading: null, pages: ["maintenance", "storage", "diagnostics", "licenses", "labs"] },
@@ -35,6 +35,7 @@ export const SETTINGS_PAGE_LABEL_KEYS: Record<SettingsPageId, string> = {
   shortcuts: "settings.shortcuts",
   accounts: "settings.providers",
   browser: "settings.browser",
+  vault: "settings.vault",
   devices: "settings.devices",
   scheduled: "settings.scheduled",
   diffs: "settings.diffs",
@@ -60,7 +61,7 @@ export const SETTINGS_PAGE_LABEL_KEYS: Record<SettingsPageId, string> = {
 };
 
 /** As páginas com o selo "Novo" no menu (a marca desta versão). */
-export const NEW_SETTINGS: ReadonlySet<SettingsPageId> = new Set(["chat", "devices", "permissions"]);
+export const NEW_SETTINGS: ReadonlySet<SettingsPageId> = new Set(["chat", "vault", "devices", "permissions"]);
 
 /** A chave do texto de uma página (a descrição do topo). */
 export function settingsPageDescKey(page: SettingsPageId): string {
@@ -140,6 +141,8 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "browser.search", page: "browser", anchor: "browser-search", titleKey: "settings.browserSearch.title" },
   { id: "browser.import", page: "browser", anchor: "browser-import", titleKey: "settings.browserImport.title" },
   { id: "browser.recording", page: "browser", anchor: "browser-recording", titleKey: "settings.browser.recording.title", keywordKeys: ["settings.browser.recording.description"] },
+
+  { id: "vault.logins", page: "vault", anchor: "vault-main", titleKey: "settings.vault", keywordKeys: ["settings.vault.desc"] },
 
   { id: "devices.ios", page: "devices", anchor: "devices-main", titleKey: "settings.devices.ios" },
   { id: "devices.android", page: "devices", anchor: "devices-main", titleKey: "settings.devices.android" },

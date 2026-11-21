@@ -29,10 +29,25 @@ import {
 } from "./debugLog";
 import { debugLogOf, refreshProxyLog } from "./debugStore";
 import {
-  previewAddMock, previewClearMocks, previewCookies, previewListMocks, previewReadUpload, previewRequest, type Mock,
+  previewAddMock, previewClearMocks, previewCookies, previewListMocks, previewReadUpload, previewRequest, previewWafChallenge, type Mock,
 } from "./ipc";
+import {
+  detectCaptcha, isCaptchaSelector, parsePointTarget, pointHitsCaptchaIframe,
+  type CaptchaIframeRect, type DocumentSnapshot,
+} from "./captcha";
+import {
+  getCaptchaHandoffForView, openCaptchaHandoff, resetCaptchaStore, resolveCaptchaHandoff, waitForCaptchaHandoff,
+  type CaptchaHandoff,
+} from "./captchaStore";
 import { detailForAgent, detailFromPage, detailFromProxy } from "./networkDetail";
-import { egressOriginFor, isLocalOrigin, redactForAgent, untrustedData } from "./egressPolicy";
+import { egressOriginFor, isLocalOrigin, redactForAgent, redactVaultSecrets, registerVaultSecret, untrustedData } from "./egressPolicy";
+import {
+  isDangerousNavigateUrl,
+  maskPasswordSecretsInSnapshot,
+  sanitizeDescribedPassword,
+  SHIELDED_OPS,
+  VAULT_SHIELD_MESSAGE,
+} from "./vaultShield";
 import { askPersonAboutReset, tellPersonAboutResetFailure } from "./dialogPolicy";
 import type { AnnotatedCapture } from "./composeMessage";
 import {
@@ -51,6 +66,10 @@ import { bareUrl, createLedger, forgetLedger, ledgerOf, type ActLedger, type Pri
 import { backendSink, withProgress } from "./actProgress";
 import { beginWindowMeasure } from "./windowBeat";
 import { readBrowserPreferences } from "./browserPreferences";
+import { vaultAllowAgent, vaultList, vaultSecretForFill } from "@/features/vault/ipc";
+import { originMatches as vaultOriginMatches } from "@/features/vault/origin";
+import { useVaultPromptStore } from "@/features/vault/store";
+import type { VaultEntry } from "@/features/vault/types";
 
 export interface BrowserHost {
   viewId: string;
@@ -92,6 +111,8 @@ export interface BrowserHost {
   /** Abre el panel de debug en la red, que es lo que prende el registro. A la vista de la
    *  persona a propósito: así sabe por qué está abierto. */
   openNetworkDebug: () => void;
+  /** Liga ou desliga o observador de mutações de captcha dentro da página. */
+  watchCaptcha?: (on: boolean) => void;
 }
 
 /** Elementos, capturas y nota: lo que la persona señaló de una vez. */
@@ -110,6 +131,197 @@ const lastUsed = new Map<string, string>();
  *  abrirla donde estaba en vez de contestarle "no tenés ningún navegador". */
 const lastUrl = new Map<string, string>();
 const hostWaiters = new Set<() => void>();
+/** Últimos iframes observados em cada vista, usados para recusar cliques por coordenada no iframe do desafio. */
+const lastCaptchaIframes = new Map<string, CaptchaIframeRect[]>();
+/** Último dono/portal conhecido por vista, para preencher nome do agente e foco no cartão de captcha. */
+const lastCaptchaMeta = new Map<string, { owner: ViewOwner | null; portalId?: string }>();
+
+/** Ops interativos bloqueados enquanto a aba tem um captcha aguardando a pessoa. Leitura continua liberada. */
+const CAPTCHA_BLOCKED_OPS = new Set([
+  "click", "type", "press", "drag", "select", "fillLogin", "eval", "act", "hover", "upload",
+]);
+
+/** Respostas geradas pela própria ADE (sem texto da página): não recebem envelope `UNTRUSTED DATA`. */
+const CAPTCHA_APP_RESPONSE_RE = /^\{"(?:blocked":"captcha","handoff":"[^"]+"|resolved":true|expired":true|cancelled":true)\}$/;
+
+const CAPTCHA_IFRAME_CLICK_REFUSED =
+  "Clique recusado: o alvo cai dentro do iframe de captcha. Nunca tente resolver captcha; chame browser_wait_human.";
+
+function captchaBlockedJson(handoffId: string): string {
+  return JSON.stringify({ blocked: "captcha", handoff: handoffId });
+}
+
+export function captchaHandoffOf(viewId: string): CaptchaHandoff | null {
+  return getCaptchaHandoffForView(viewId);
+}
+
+export function clearCaptchaState(): void {
+  lastCaptchaIframes.clear();
+  lastCaptchaMeta.clear();
+  resetCaptchaStore();
+}
+
+function originOfHost(host: BrowserHost): string | null {
+  const target = typeof host.targetOrigin === "function" ? host.targetOrigin() : null;
+  if (target) return target;
+  const rawUrl = typeof host.currentUrl === "function" ? host.currentUrl() : "";
+  try {
+    return rawUrl ? new URL(rawUrl).origin : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readProxyWafAction(host: BrowserHost): Promise<string | null> {
+  const origin = originOfHost(host);
+  if (!origin) return null;
+  try {
+    return await previewWafChallenge(origin);
+  } catch {
+    return null;
+  }
+}
+
+async function readPageCaptchaSnapshot(host: BrowserHost): Promise<DocumentSnapshot | null> {
+  try {
+    const raw = await host.channel.run({ op: "captcha" }, 4_000);
+    if (!raw || typeof raw !== "object") return null;
+    const snap = raw as DocumentSnapshot;
+    if (Array.isArray(snap.iframes)) lastCaptchaIframes.set(host.viewId, snap.iframes);
+    return snap;
+  } catch {
+    return null;
+  }
+}
+
+function agentNameOf(owner: ViewOwner | null): string {
+  return owner?.label?.trim() || "Agente";
+}
+
+function applyCaptchaDetection(
+  host: BrowserHost,
+  snapshot: DocumentSnapshot,
+  owner: ViewOwner | null,
+  portalId?: string,
+): CaptchaHandoff | null {
+  if (Array.isArray(snapshot.iframes)) lastCaptchaIframes.set(host.viewId, snapshot.iframes);
+  const kind = detectCaptcha(snapshot);
+  if (!kind) {
+    if (resolveCaptchaHandoff(host.viewId)) {
+      host.watchCaptcha?.(false);
+    }
+    return null;
+  }
+  const url = snapshot.url || (typeof host.currentUrl === "function" ? host.currentUrl() : "") || originOfHost(host) || "";
+  const { handoff } = openCaptchaHandoff({
+    viewId: host.viewId,
+    kind,
+    url,
+    agentName: agentNameOf(owner),
+    cwd: host.cwd,
+    owner,
+    portalId,
+  });
+  host.watchCaptcha?.(true);
+  return handoff;
+}
+
+/** Inspeciona o documento atual + WAF do proxy e atualiza o estado de captcha da vista. */
+async function inspectCaptcha(
+  host: BrowserHost,
+  owner: ViewOwner | null,
+  portalId?: string,
+): Promise<CaptchaHandoff | null> {
+  lastCaptchaMeta.set(host.viewId, { owner, portalId });
+  const [pageSnap, wafAction] = await Promise.all([
+    readPageCaptchaSnapshot(host),
+    readProxyWafAction(host),
+  ]);
+  if (!pageSnap && !wafAction) {
+    // Sem retrato (ex.: página ainda carregando ou mock simples): só limpa se já não há desafio conhecido.
+    return getCaptchaHandoffForView(host.viewId);
+  }
+  const merged: DocumentSnapshot = {
+    ...(pageSnap ?? {}),
+    wafChallengeAction: pageSnap?.wafChallengeAction ?? wafAction,
+  };
+  return applyCaptchaDetection(host, merged, owner, portalId);
+}
+
+/** Chamado pelo `BrowserTab` quando o DOM muta sob observação (`captcha:state`). */
+export async function onCaptchaDocumentEvent(viewId: string, snapshot: DocumentSnapshot): Promise<CaptchaHandoff | null> {
+  const host = hosts.get(viewId);
+  if (!host) return null;
+  const wafAction = await readProxyWafAction(host);
+  const meta = lastCaptchaMeta.get(viewId);
+  return applyCaptchaDetection(
+    host,
+    { ...snapshot, wafChallengeAction: snapshot.wafChallengeAction ?? wafAction },
+    meta?.owner ?? null,
+    meta?.portalId,
+  );
+}
+
+/** Chamado pelo `BrowserTab` após navegação/carga de documento (`nav`). */
+export async function recheckCaptchaForView(viewId: string): Promise<CaptchaHandoff | null> {
+  const host = hosts.get(viewId);
+  if (!host) return null;
+  const meta = lastCaptchaMeta.get(viewId);
+  return inspectCaptcha(host, meta?.owner ?? null, meta?.portalId);
+}
+
+/**
+ * Recusa sempre um clique cujo seletor ou coordenadas caiam dentro do iframe do desafio,
+ * mesmo antes de a aba ter sido marcada com `captchaHandoff`.
+ */
+async function assertNotCaptchaIframeClick(host: BrowserHost, request: BrowserRequest): Promise<void> {
+  const target = str(request, "target") ?? "";
+  if (target && isCaptchaSelector(target)) {
+    throw new Error(CAPTCHA_IFRAME_CLICK_REFUSED);
+  }
+  const point = target ? parsePointTarget(target) : null;
+  const x = point?.x ?? num(request, "x");
+  const y = point?.y ?? num(request, "y");
+  if (x === undefined || y === undefined) return;
+  let iframes = lastCaptchaIframes.get(host.viewId);
+  if (!iframes) {
+    const snap = await readPageCaptchaSnapshot(host);
+    iframes = snap?.iframes ?? [];
+  }
+  if (pointHitsCaptchaIframe(x, y, iframes)) {
+    throw new Error(CAPTCHA_IFRAME_CLICK_REFUSED);
+  }
+}
+
+/** Abas em que o cofre preencheu uma senha; a blindagem dura até a aba mudar de origem. */
+const protectedViews = new Map<string, { origin: string; secrets: string[] }>();
+/** Abas em que o agente executou script/mock desde o último carregamento da página. */
+const tainted = new Set<string>();
+
+function originOfUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function currentOriginOf(host: BrowserHost): string | null {
+  return originOfUrl(host.currentUrl()) ?? originOfUrl(host.targetOrigin());
+}
+
+/** Confere se a proteção da aba ainda vale para a origem atual; cai automaticamente ao mudar de origem. */
+function activeShield(host: BrowserHost): { origin: string; secrets: string[] } | undefined {
+  const entry = protectedViews.get(host.viewId);
+  if (!entry) return undefined;
+  const current = currentOriginOf(host);
+  if (current && current !== entry.origin) {
+    protectedViews.delete(host.viewId);
+    return undefined;
+  }
+  return entry;
+}
 
 /** ¿Esa tab tiene algo señalado (pendiente o recién mandado)? */
 function hasMarks(host: BrowserHost | undefined): boolean {
@@ -120,7 +332,13 @@ export function registerBrowserHost(host: BrowserHost): () => void {
   hosts.set(host.viewId, host);
   for (const wake of hostWaiters) wake();
   return () => {
-    if (hosts.get(host.viewId) === host) hosts.delete(host.viewId);
+    if (hosts.get(host.viewId) === host) {
+      hosts.delete(host.viewId);
+      protectedViews.delete(host.viewId);
+      tainted.delete(host.viewId);
+      lastCaptchaIframes.delete(host.viewId);
+      lastCaptchaMeta.delete(host.viewId);
+    }
   };
 }
 
@@ -327,6 +545,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * acción. Es lo que convierte "hice click" en "hice click y la API devolvió 500".
  */
 async function sideEffects(host: BrowserHost, firstId: number, startedAt: number): Promise<string> {
+  // Em aba blindada pelo cofre, nunca expor console nem rede como efeito colateral de uma ação.
+  if (activeShield(host)) return "";
   // El runtime manda la tanda enseguida después de contestar; se le da un momento para
   // que llegue, y al proxy para anotar lo que la acción disparó.
   await sleep(150);
@@ -501,9 +721,26 @@ async function execute(
   portalId?: string
 ): Promise<string> {
   const op = request.op;
+  // Cliques no iframe do desafio são sempre recusados, mesmo antes de a aba ser marcada.
+  if (op === "click") {
+    await assertNotCaptchaIframeClick(host, request);
+  }
+  // Aba com captcha ativo: bloqueia qualquer ação interativa e instrui o agente a chamar browser_wait_human.
+  const activeCaptcha = getCaptchaHandoffForView(host.viewId);
+  if (activeCaptcha && CAPTCHA_BLOCKED_OPS.has(op)) {
+    return captchaBlockedJson(activeCaptcha.id);
+  }
+  // Aba com senha do cofre preenchida: nada que leia a página por código.
+  const shield = activeShield(host);
+  if (shield && SHIELDED_OPS.has(op)) {
+    throw new Error(VAULT_SHIELD_MESSAGE);
+  }
   switch (op) {
     case "navigate": {
       const url = required(request, "url");
+      if (isDangerousNavigateUrl(url)) {
+        throw new Error("Navegação para URLs javascript: ou data: foi recusada por segurança.");
+      }
       const firstId = debugLogOf(host.viewId).nextId;
       const startedAt = Date.now();
       // Recién abierta, la tab ya está cargando esta misma URL: pedirla otra vez sería
@@ -511,10 +748,18 @@ async function execute(
       const mark = opened ? 0 : host.loadCount();
       if (!opened) await host.navigate(url);
       const loaded = await host.waitForLoad(mark, 20_000);
+      // Só um documento novo limpa a marca: navegar para uma âncora da mesma página mantém o script plantado.
+      if (loaded) tainted.delete(host.viewId);
+      activeShield(host);
       const head = loaded
         ? `Loaded ${host.currentUrl()}`
         : `The page did not report finishing the load within 20 s (${host.currentUrl()}). It may still be loading, or it may not be going through the ADE AGS proxy.`;
-      return head + await sideEffects(host, firstId, startedAt);
+      const effects = await sideEffects(host, firstId, startedAt);
+      const detected = await inspectCaptcha(host, owner, portalId);
+      const captchaNote = detected
+        ? `\n\n${captchaBlockedJson(detected.id)}`
+        : "";
+      return head + effects + captchaNote;
     }
     case "history": {
       const action = required(request, "action");
@@ -524,8 +769,12 @@ async function execute(
       host.history(action);
       // Atrás en una SPA no recarga el documento: se espera un poco y se informa dónde quedó.
       const loaded = await host.waitForLoad(mark, action === "reload" ? 20_000 : 1500);
+      if (action === "reload" || loaded) tainted.delete(host.viewId);
+      activeShield(host);
       const url = host.currentUrl();
-      return loaded || url !== before ? `Ahora en ${url}` : `Sigue en ${url} (no había a dónde ir, o la página no cambió).`;
+      const detected = await inspectCaptcha(host, owner, portalId);
+      const captchaNote = detected ? `\n\n${captchaBlockedJson(detected.id)}` : "";
+      return (loaded || url !== before ? `Ahora en ${url}` : `Sigue en ${url} (no había a dónde ir, o la página no cambió).`) + captchaNote;
     }
     case "resize": {
       // El táctil se decide antes de medir: prenderlo cambia qué reglas aplican, y un
@@ -688,6 +937,7 @@ async function execute(
         return gone > 0 ? `Removed ${gone} rule(s).` : "There were no rules to remove.";
       }
       if (action === "add") {
+        tainted.add(host.viewId);
         await previewAddMock(origin, {
           url: required(request, "url"),
           method: str(request, "method")?.toUpperCase() ?? null,
@@ -705,9 +955,9 @@ async function execute(
     case "describe": {
       // Con el mismo formato que lo que marca la persona: un modelo lee mejor seis líneas
       // rotuladas que el JSON entero con sus llaves.
-      const described = await host.channel.run(
+      const described = sanitizeDescribedPassword(await host.channel.run(
         { op: "describe", target: required(request, "target") }, 12_000
-      ) as DescribedElement;
+      ) as DescribedElement);
       return inServerTerms(host, formatElement({ live: true, element: described }, 1, (url) => url));
     }
     case "screenshot": {
@@ -738,16 +988,99 @@ async function execute(
       if (action && action !== "dismiss") throw new Error("action é dismiss, ou nada para ver os diálogos.");
       return inPage(host, { op: "dialogs" }, false);
     }
-    case "snapshot": return inPage(host, { op: "snapshot", all: bool(request, "full") }, false);
+    case "snapshot": {
+      const text = await inPage(host, { op: "snapshot", all: bool(request, "full") }, false);
+      return shield ? maskPasswordSecretsInSnapshot(text, shield.secrets) : text;
+    }
     case "layout": return inPage(host, { op: "layout" }, false);
     case "performance": return inPage(host, { op: "performance" }, false);
-    case "click": return inPage(host, { op: "click", target: required(request, "target") }, true);
+    case "click": {
+      const out = await inPage(host, { op: "click", target: required(request, "target") }, true);
+      const detected = await inspectCaptcha(host, owner, portalId);
+      return detected ? `${out}\n\n${captchaBlockedJson(detected.id)}` : out;
+    }
     case "hover": return inPage(host, { op: "hover", target: required(request, "target") }, true);
     case "type":
       return inPage(host, {
         op: "type", target: required(request, "target"), text: str(request, "text") ?? "",
         clear: bool(request, "clear"), submit: bool(request, "submit"),
       }, true);
+    case "fillLogin": {
+      const pageUrl = host.currentUrl() || host.targetOrigin() || "";
+      if (!pageUrl) {
+        throw new Error("origin_mismatch: Não há página carregada na aba atual.");
+      }
+      const entries = await vaultList();
+      const requestedId = str(request, "id")?.trim();
+      const requestedOrigin = str(request, "origin")?.trim();
+      let entry: VaultEntry | undefined;
+      if (requestedId) {
+        entry = entries.find((candidate) => candidate.id === requestedId);
+      } else if (requestedOrigin) {
+        entry = entries.find((candidate) =>
+          candidate.origin.toLowerCase() === requestedOrigin.toLowerCase()
+          || vaultOriginMatches(candidate.origin, requestedOrigin),
+        );
+      } else {
+        entry = entries.find((candidate) => vaultOriginMatches(candidate.origin, pageUrl));
+      }
+      if (!entry) {
+        throw new Error("not_found: Nenhum login correspondente foi encontrado no cofre.");
+      }
+      if (!vaultOriginMatches(entry.origin, pageUrl)) {
+        throw new Error("origin_mismatch: A origem da página atual não corresponde à origem cadastrada no cofre.");
+      }
+      // A identidade vem do dono provado pelo backend, nunca de um campo do pedido: um agente que
+      // mandasse `agentId` de outro já autorizado pularia a confirmação da pessoa.
+      const agentId = owner?.id;
+      if (!agentId) {
+        throw new Error("declined: Preencher login exige um agente identificado.");
+      }
+      if (!entry.allowed_agents.includes(agentId)) {
+        const decision = await useVaultPromptStore.getState().requestConfirm({
+          entry,
+          pageOrigin: host.targetOrigin() || pageUrl,
+          from: owner?.label ?? agentId,
+          fromId: agentId,
+        });
+        if (decision === "decline") {
+          throw new Error("declined: O usuário recusou o preenchimento do login.");
+        }
+        if (decision === "always") {
+          await vaultAllowAgent(entry.id, agentId);
+        }
+      }
+      if (tainted.has(host.viewId)) {
+        const mark = host.loadCount();
+        host.history("reload");
+        await host.waitForLoad(mark, 20_000);
+        tainted.delete(host.viewId);
+      }
+      const freshUrl = host.currentUrl() || host.targetOrigin() || "";
+      if (!vaultOriginMatches(entry.origin, freshUrl)) {
+        throw new Error("origin_mismatch: A origem da página atual não corresponde à origem cadastrada no cofre.");
+      }
+      const password = await vaultSecretForFill(entry.id, freshUrl);
+      registerVaultSecret(password);
+      const submit = bool(request, "submit");
+      try {
+        const res = await host.channel.run(
+          { op: "fillLogin", username: entry.username, password, submit },
+          18_000,
+        ) as { filled?: boolean; submitted?: boolean } | null;
+        const shieldOrigin = currentOriginOf(host) ?? originOfUrl(freshUrl) ?? entry.origin.toLowerCase();
+        const existing = protectedViews.get(host.viewId);
+        const secrets = existing && existing.origin === shieldOrigin
+          ? [...new Set([...existing.secrets, password])]
+          : [password];
+        protectedViews.set(host.viewId, { origin: shieldOrigin, secrets });
+        return JSON.stringify({ filled: true, submitted: Boolean(res?.submitted ?? submit) });
+      } catch (cause) {
+        const rawMsg = errorText(cause);
+        const safeMsg = redactVaultSecrets(password ? rawMsg.split(password).join("[cofre]") : rawMsg);
+        throw new Error(safeMsg);
+      }
+    }
     case "press": return inPage(host, { op: "press", key: required(request, "key"), target: str(request, "target") }, true);
     case "select": return inPage(host, { op: "select", target: required(request, "target"), value: required(request, "value") }, true);
     case "scroll":
@@ -760,7 +1093,10 @@ async function execute(
         op: "wait", text: str(request, "text"), selector: str(request, "selector"),
         gone: bool(request, "gone"), idle: bool(request, "idle"), timeoutMs: num(request, "timeout_ms"),
       }, false);
-    case "eval": return inPage(host, { op: "eval", code: required(request, "code") }, true);
+    case "eval": {
+      tainted.add(host.viewId);
+      return inPage(host, { op: "eval", code: required(request, "code") }, true);
+    }
     case "reset": {
       // Começar do zero no site aberto: cookies, localStorage e sessionStorage da página atual e o livro-razão dos `act`
       // deste portal. É o que o bench faz antes de cada rodada (J1): sem isso o carrinho da rodada anterior continuava lá e
@@ -843,6 +1179,12 @@ export async function runBrowserRequest(
   request: BrowserRequest,
   owner: ViewOwner | null = null
 ): Promise<string> {
+  if (request.op === "wait_human") {
+    const handoffId = required(request, "handoff");
+    const timeoutS = Math.min(Math.max(num(request, "timeout_s") ?? 900, 1), 1800);
+    const result = await waitForCaptchaHandoff(handoffId, timeoutS * 1000);
+    return JSON.stringify(result);
+  }
   const { host, opened } = await hostFor(cwd, request, owner);
   // A troca de viewport é a entrada do aparelho emulado; manter essa prévia visível também
   // evita que a pessoa perca o layout móvel que o agente acabou de abrir.
@@ -852,18 +1194,24 @@ export async function runBrowserRequest(
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
     throw new Error("The browser for this project has no page loaded. Use browser_navigate with the project URL.");
   }
-  return forAgent(request.op, await execute(cwd, host, request, opened, owner));
+  try {
+    return forAgent(request.op, await execute(cwd, host, request, opened, owner));
+  } catch (cause) {
+    throw new Error(redactVaultSecrets(errorText(cause)));
+  }
 }
 
 /** Ops cuyo texto lo escribe la app, no la página: no se marcan como dato no confiable. (`reset` sí: nombra cookies del sitio.) */
-const OWN_TEXT_OPS = new Set(["resize", "touch"]);
+const OWN_TEXT_OPS = new Set(["resize", "touch", "wait_human"]);
 
 /**
  * Lo que devuelve `execute` sale hacia el agente marcado como dato de la página (su texto, su DOM, sus pedidos,
  * su consola). Se marca UNA vez, aquí, en la frontera: `marksText` y `markedBatchText` no marcan por su cuenta.
  */
 function forAgent(op: string, text: string): string {
-  return OWN_TEXT_OPS.has(op) ? text : untrustedData(text);
+  const safe = redactVaultSecrets(text);
+  if (OWN_TEXT_OPS.has(op) || CAPTCHA_APP_RESPONSE_RE.test(safe)) return safe;
+  return untrustedData(safe);
 }
 
 /** El mensaje de un error de cualquier forma que llegue (un `Error`, o un texto del canal). */
@@ -879,7 +1227,7 @@ function errorText(cause: unknown): string {
  */
 export const PORTAL_OPS = new Set([
   "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll",
-  "wait", "screenshot", "console", "layout", "act", "reset",
+  "wait", "wait_human", "screenshot", "console", "layout", "act", "reset",
 ]);
 
 /** Confere o `act` contra a página como ficou (um snapshot completo, não só o que está à vista). Nunca lança: sem leitura, o relatório sai como estava. */
@@ -1029,6 +1377,10 @@ export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLe
       ledger.endAct(finalSnapshot ? fingerprint(parseSnapshot(finalSnapshot)) : lastPage ? fingerprint(lastPage) : null);
     },
     clickAt: async (x, y, second) => {
+      await assertNotCaptchaIframeClick(host, { op: "click", x, y });
+      if (getCaptchaHandoffForView(host.viewId)) {
+        throw new Error(CAPTCHA_IFRAME_CLICK_REFUSED);
+      }
       openAction(second ? "tocou no outro ícone sem nome ao lado do ponto da foto" : "tocou num ponto da foto", null);
       const loads = host.loadCount();
       const result = await inPage(host, { op: "click", target: `@${x},${y}${second ? "#2" : ""}`, fast: true }, false);
@@ -1070,11 +1422,21 @@ export async function runPortalRequest(
   if (!PORTAL_OPS.has(request.op)) {
     throw new Error(`Um portal não aceita '${request.op}'. Aceita: ${[...PORTAL_OPS].join(", ")}.`);
   }
+  if (request.op === "wait_human") {
+    const handoffId = required(request, "handoff");
+    const timeoutS = Math.min(Math.max(num(request, "timeout_s") ?? 900, 1), 1800);
+    const result = await waitForCaptchaHandoff(handoffId, timeoutS * 1000);
+    return JSON.stringify(result);
+  }
   // El nodo monta el navegador al dibujarse; si el canvas todavía no lo hizo (ventana en
   // otra vista), se espera a que aparezca.
   const host = await waitForHost(portalId, 15_000);
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
     throw new Error("O portal não tem nenhuma página carregada. Comece com `ags portal navigate <portal> <url>`.");
   }
-  return forAgent(request.op, await execute(cwd, host, request, false, owner, portalId));
+  try {
+    return forAgent(request.op, await execute(cwd, host, request, false, owner, portalId));
+  } catch (cause) {
+    throw new Error(redactVaultSecrets(errorText(cause)));
+  }
 }

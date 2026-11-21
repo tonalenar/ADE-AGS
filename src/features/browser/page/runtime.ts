@@ -24,6 +24,7 @@ import type {
 import { virtualKeyCode } from "./keys";
 import { createCursor } from "./cursor";
 import { componentChain, describeElement, selectorOf } from "./dom";
+import { findLoginFields } from "./loginFields";
 import {
   errorKindOf, headerList, headerValue, parseRawHeaders, readResponseBody, requestBodyPreview, MAX_PAGE_BODY,
 } from "./netCapture";
@@ -39,6 +40,7 @@ import { CORS_HEADER, CRED_HEADER, HEADERS_HEADER, corsMessage, routeRequest, ty
 import {
   displayHref, distanceToBox, farFromWindow, formatSnapshot, normalizeName, humanizeId, parseKeyCombo, parseTarget, probePoints, snapToNearest, type Box4, type SnapshotNode,
 } from "./snapshotFormat";
+import { isCaptchaIframeElement, pointHitsCaptchaIframe, snapshotFromDocument } from "../captcha";
 
 declare global {
   interface Window {
@@ -823,8 +825,8 @@ declare global {
     if (el.tagName === "INPUT") {
       const input = el as HTMLInputElement;
       if (["checkbox", "radio", "button", "submit", "reset", "image", "file"].includes(input.type) || !input.value) return undefined;
-      // La contraseña no sale de la página: alcanza con saber que hay algo escrito.
-      return input.type === "password" ? "•".repeat(Math.min(input.value.length, 8)) : normalizeName(input.value, 100);
+      // A senha nunca sai da página: mostra máscara fixa sem revelar o tamanho.
+      return input.type === "password" ? "••••" : normalizeName(input.value, 100);
     }
     if ((el as HTMLElement).isContentEditable) return normalizeName(textOf(el), 100) || undefined;
     return undefined;
@@ -1060,6 +1062,20 @@ declare global {
     return hit ? found[hit.index].el : null;
   }
 
+  const CAPTCHA_CLICK_REFUSED =
+    "Clique recusado: o alvo cai dentro do iframe de captcha. Nunca tente resolver captcha; chame browser_wait_human.";
+
+  function assertNotCaptchaElement(el: Element | null): void {
+    if (isCaptchaIframeElement(el)) throw new Error(CAPTCHA_CLICK_REFUSED);
+  }
+
+  function assertNotCaptchaPoint(x: number, y: number): void {
+    const snap = snapshotFromDocument(document);
+    if (pointHitsCaptchaIframe(x, y, snap.iframes ?? [])) {
+      throw new Error(CAPTCHA_CLICK_REFUSED);
+    }
+  }
+
   /** `act`: vai agir sobre o elemento (tocar, digitar, escolher…). Um ref que já não é o que foi lido não é usado: ver `guard.ts`. */
   function resolve(target: string, act = false): Element {
     // Lo último que la persona marcó con el selector: se resuelve por identidad y no por
@@ -1068,6 +1084,7 @@ declare global {
       const picked = window.__agsLastPick;
       if (!picked) throw new Error("A pessoa ainda não marcou nada.");
       if (!picked.isConnected) throw new Error("O que a pessoa marcou não está mais na página.");
+      if (act) assertNotCaptchaElement(picked);
       return picked;
     }
     const spec = parseTarget(target);
@@ -1080,9 +1097,11 @@ declare global {
         const diff = diffFingerprint(printed, fingerprintOf(el));
         if (diff) throw new Error(staleMessage(spec.ref, diff));
       }
+      if (act) assertNotCaptchaElement(el);
       return el;
     }
     if (spec.kind === "point") {
+      if (act) assertNotCaptchaPoint(spec.x, spec.y);
       pointNeighbors = 0;
       pointGroup = null;
       pointIcons = [];
@@ -1096,16 +1115,19 @@ declare global {
           .filter((c) => c.d <= 80)
           .sort((a, b) => a.d - b.d);
         if (others.length === 0) throw new Error("Não há outro controle sem nome perto do ponto.");
+        if (act) assertNotCaptchaElement(others[0].el);
         if (act) lastPoint = { el: others[0].el, unnamed: true };
         return others[0].el;
       }
       // O que há sob o ponto; se está dentro de algo clicável (um ícone dentro de um link), o clicável.
       const under = document.elementFromPoint(spec.x, spec.y);
       if (!under) throw new Error(`Não há nada no ponto (${Math.round(spec.x)}, ${Math.round(spec.y)}): fora da janela da página.`);
+      if (act) assertNotCaptchaElement(under);
       const direct = under.closest("a[href],button,[role=button],[role=link],input,select,textarea,label,summary,[role=tab],[role=menuitem],[role=option],[onclick]");
       // Um ponto que caiu no vazio ao lado de um controle (a foto erra alguns pixels): vai para o clicável mais perto.
       const chosen = direct ?? clickableNear(spec.x, spec.y);
       if (!chosen) throw new Error(`Não há nada clicável perto do ponto (${Math.round(spec.x)}, ${Math.round(spec.y)}).`);
+      if (act) assertNotCaptchaElement(chosen);
       if (act) {
         const unnamed = isUnnamed(chosen);
         lastPoint = { el: chosen, unnamed };
@@ -1133,10 +1155,16 @@ declare global {
         if (!parent || !isVisible(parent)) continue;
         const text = normalizeName(n.textContent ?? "", 10_000).toLowerCase();
         const hit = parent.closest("a[href],button,[role=button],[role=link],label,summary,[role=tab],[role=menuitem],[role=option]") ?? parent;
-        if (text === wanted) return hit;
+        if (text === wanted) {
+          if (act) assertNotCaptchaElement(hit);
+          return hit;
+        }
         if (!partial && text.includes(wanted)) partial = hit;
       }
-      if (partial) return partial;
+      if (partial) {
+        if (act) assertNotCaptchaElement(partial);
+        return partial;
+      }
       throw new Error(`Não há nenhum elemento visível com o texto "${spec.text}".`);
     }
     let el: Element | null;
@@ -1146,6 +1174,7 @@ declare global {
       throw new Error(`"${spec.selector}" não é um ref (e12), um texto (text=Entrar) nem um seletor CSS válido.`);
     }
     if (!el) throw new Error(`Ningún elemento coincide con "${spec.selector}".`);
+    if (act) assertNotCaptchaElement(el);
     return el;
   }
 
@@ -1238,10 +1267,13 @@ declare global {
   }
 
   async function click(el: Element): Promise<unknown> {
+    assertNotCaptchaElement(el);
     if ((el as HTMLButtonElement).disabled) throw new Error(`${describeElement(el)} está desabilitado.`);
     await cursor.toElement(el, "click");
     cursor.click();
     const { x, y, target } = aim(el);
+    assertNotCaptchaElement(target);
+    assertNotCaptchaPoint(x, y);
     const before = location.href;
     // No Chrome real, um clique de verdade no ponto livre achado por `aim` (o toque emulado continua sintético).
     if (isTouch() || !(await nativeInput({ kind: "click", x, y }))) {
@@ -1376,6 +1408,39 @@ declare global {
     // Um autocomplete mostra as sugestões um instante depois de digitar; sem esperar, o Jev lê a lista vazia e aperta Enter.
     const options = combobox ? await optionsAppear(el, typedAt) : null;
     return { typed: describeElement(el), value: valueOf(el) ?? "", ...(options !== null ? { options } : {}), ...waitedField(waited) };
+  }
+
+  async function fillInputField(field: HTMLInputElement, text: string, cursorLabel: string): Promise<void> {
+    await cursor.toElement(field, cursorLabel);
+    field.focus({ preventScroll: false });
+    if (!(await typeNatively(true, text))) {
+      nativeSetValue(field, text);
+      inputEvent(field, text);
+      field.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
+  /**
+   * Preenche um formulário de login com credenciais do cofre da ADE.
+   * A senha nunca entra no texto do cursor, no resultado nem em mensagens de erro.
+   */
+  async function fillLogin(username: string, password: string, submit: boolean): Promise<{ filled: true; submitted: boolean }> {
+    const fields = findLoginFields(document);
+    if (!fields) {
+      throw new Error("Nenhum campo de senha (input[type=password]) foi encontrado nesta página.");
+    }
+    if (fields.username && username) {
+      await fillInputField(fields.username, username, "fill username");
+    }
+    await fillInputField(fields.password, password, "fill password");
+    let submitted = false;
+    if (submit) {
+      await press("Enter", fields.password);
+      submitted = true;
+    } else {
+      await settle(800, 150, PENDING_MS.type);
+    }
+    return { filled: true, submitted };
   }
 
   /** Digita no campo focado pelo `Input` do CDP: com `clear`, seleciona tudo antes (o texto novo substitui; vazio apaga). */
@@ -1848,13 +1913,14 @@ declare global {
       markedPrints.set(ref, fingerprintOf(el));
     }
 
+    const isPasswordInput = el.tagName === "INPUT" && (el as HTMLInputElement).type === "password";
     const attributes: Record<string, string> = {};
     for (const attr of Array.from(el.attributes)) {
       if (attr.name.startsWith("data-ade-ags")) continue;
       // Las clases y el estilo en línea ya viajan aparte; el resto (aria, data, name,
       // href, type…) es justo lo que identifica al elemento en el código.
       if (attr.name === "class" || attr.name === "style") continue;
-      attributes[attr.name] = clip(attr.value, 200);
+      attributes[attr.name] = isPasswordInput && attr.name === "value" && attr.value ? "••••" : clip(attr.value, 200);
     }
 
     const ancestors: string[] = [];
@@ -1903,7 +1969,7 @@ declare global {
         zIndex: style.zIndex,
         overflow: style.overflow,
       },
-      html: clip(el.outerHTML, 1500),
+      html: clip(isPasswordInput ? el.outerHTML.replace(/value="[^"]*"/gi, 'value="••••"') : el.outerHTML, 1500),
       url: location.href,
     };
   }
@@ -1943,6 +2009,7 @@ declare global {
       case "click": return acting(command.target, click);
       case "hover": return acting(command.target, hover);
       case "type": return acting(command.target, (el) => type(el, command.text, !!command.clear, !!command.submit));
+      case "fillLogin": return fillLogin(command.username, command.password, !!command.submit);
       case "press": return command.target ? acting(command.target, (el) => press(command.key, el)) : press(command.key);
       case "select": return acting(command.target, (el) => select(el, command.value));
       case "scroll": return scroll(command);
@@ -1958,6 +2025,7 @@ declare global {
         const el = resolve(command.target);
         return { label: [nameOf(el, roleOf(el) || "clickable"), normalizeName(textOf(el), 80), describeElement(el), el.getAttribute("href") ?? ""].filter(Boolean).join(" | ") };
       }
+      case "captcha": return snapshotFromDocument(document);
       case "drag": return drag(command.from, command.to);
       case "upload": return upload(command.target, command.name, command.mime, command.data);
       case "dialogs": {
@@ -1996,6 +2064,43 @@ declare global {
     flush();
   }
 
+  let captchaObserver: MutationObserver | null = null;
+  let captchaDebounce: number | null = null;
+  let captchaSchedule: (() => void) | null = null;
+
+  function emitCaptchaState(): void {
+    captchaDebounce = null;
+    post({ type: "captcha:state", payload: { snapshot: snapshotFromDocument(document) } });
+  }
+
+  function setCaptchaWatch(on: boolean): void {
+    if (!on) {
+      if (captchaDebounce !== null) {
+        clearTimer(captchaDebounce);
+        captchaDebounce = null;
+      }
+      captchaObserver?.disconnect();
+      captchaObserver = null;
+      if (captchaSchedule) {
+        document.removeEventListener("input", captchaSchedule, true);
+        document.removeEventListener("change", captchaSchedule, true);
+        captchaSchedule = null;
+      }
+      return;
+    }
+    if (captchaObserver || typeof MutationObserver !== "function") return;
+    captchaSchedule = () => {
+      if (captchaDebounce !== null) clearTimer(captchaDebounce);
+      captchaDebounce = setTimer(emitCaptchaState, 150);
+    };
+    captchaObserver = new MutationObserver(captchaSchedule);
+    captchaObserver.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
+    document.addEventListener("input", captchaSchedule, true);
+    document.addEventListener("change", captchaSchedule, true);
+  }
+
+  window.addEventListener("pagehide", () => setCaptchaWatch(false));
+
   window.addEventListener("message", (e: MessageEvent<AppMessage>) => {
     if (e.source !== window.parent || e.data?.source !== "ade-ags") return;
     parentOrigin = e.origin;
@@ -2008,6 +2113,10 @@ declare global {
     }
     if (message.type === "net:on" || message.type === "net:off") {
       recordingNet = message.type === "net:on";
+      return;
+    }
+    if (message.type === "captcha:watch" || message.type === "captcha:unwatch") {
+      setCaptchaWatch(message.type === "captcha:watch");
       return;
     }
     if (message.type === "input:done") {

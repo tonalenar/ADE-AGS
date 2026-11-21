@@ -460,7 +460,7 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
     browser_act, browser_type, browser_press, browser_select, browser_describe, browser_screenshot,
     browser_drag, browser_upload, browser_mock, browser_dialogs, browser_hover, browser_scroll,
     browser_wait, browser_history, browser_resize, browser_layout, browser_console, browser_network,
-    browser_storage, browser_cookies, browser_performance, browser_eval
+    browser_storage, browser_cookies, browser_performance, browser_eval, browser_wait_human
   Orquestração da frota: gemini_desktop_status, gemini_desktop_consult, gemini_desktop_result,
     agent_roster, run_plan, task_add, delegate_task, task_handoff, task_status, task_result,
     run_await, fact_add, facts_read, fact_read, task_reroute, task_cancel
@@ -482,6 +482,7 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
   Dispositivos: device_list, device_shot, device_action
   Perguntas à pessoa: ask_user
   Segredos temporários: secret_request, secret_run, secret_revoke
+  Cofre de logins: vault_list, vault_request, browser_fill_login
   Permissão: approve_tool_use
 ";
 // END GENERATED: mcp-tools-help
@@ -1729,6 +1730,12 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         "browser.run" if args.pointer("/request/op").and_then(Value::as_str) == Some("act") => {
             Duration::from_secs(
                 ade_ags_lib::ipc::mcp::act_timeout_secs(args.pointer("/request/timeout")) + 30,
+            )
+        }
+        // `wait_human` espera a pessoa resolver um captcha (padrão 900 s, máx 1800 s), mais margem.
+        "browser.run" if args.pointer("/request/op").and_then(Value::as_str) == Some("wait_human") => {
+            Duration::from_secs(
+                ade_ags_lib::ipc::mcp::captcha_wait_timeout_secs(args.pointer("/request/timeout_s")) + 60,
             )
         }
         "browser.run" => Duration::from_secs(ade_ags_lib::ipc::mcp::BROWSER_TIMEOUT_SECS + 15),

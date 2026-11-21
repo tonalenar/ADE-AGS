@@ -37,6 +37,7 @@ import { ShortcutsSection } from "@/features/settings/ShortcutsSection";
 import { DecisionsSection } from "@/features/settings/DecisionsSection";
 import { CliInstallSection } from "@/features/settings/CliInstallSection";
 import { DevicesSection } from "@/features/settings/DevicesSection";
+import { VaultSettings } from "@/features/settings/vault/VaultSettings";
 import { WorktreesSection } from "@/features/settings/WorktreesSection";
 import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
 import { InAppNoticesSetting } from "@/features/settings/InAppNoticesSetting";
@@ -213,6 +214,10 @@ function BrowserPage() {
       <BrowserAdvancedSection />
     </>
   );
+}
+
+function VaultPage() {
+  return <SettingsAnchor id="vault-main"><VaultSettings /></SettingsAnchor>;
 }
 
 function DevicesPage() {
@@ -433,6 +438,7 @@ const PAGE_BODIES: Record<SettingsPageId, () => React.ReactElement> = {
   shortcuts: ShortcutsPage,
   accounts: ProvidersPage,
   browser: BrowserPage,
+  vault: VaultPage,
   devices: DevicesPage,
   scheduled: ScheduledPage,
   diffs: DiffsPage,

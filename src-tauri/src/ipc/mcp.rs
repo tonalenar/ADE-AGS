@@ -141,7 +141,8 @@ server URL, browser_snapshot to read the page and get element refs, act with bro
 browser_press using those refs (or give a whole multi-step goal to browser_act, which is faster), then check browser_console and browser_network for errors. Use browser_resize \
 to test responsive layouts. There are no screenshots in these tools: read the page through snapshots; when you need \
 an image of a page, `ags portal screenshot <portal>` saves a PNG and returns its path. Never launch your own browser \
-window (Playwright/Puppeteer/Selenium with headless: false): it opens outside the canvas.\n\
+window (Playwright/Puppeteer/Selenium with headless: false): it opens outside the canvas. \
+If a browser tool returns blocked: captcha, call browser_wait_human; never try to solve it.\n\
 Computer use: browser_act (canvas browser), sim_act (a reachable iOS simulator or physical iPhone/iPad) and desk_act (the Mac screen; \
 the person consents at the start of every act) let Jev drive a whole goal. On iOS, Jev gets local OCR text first; the screenshot is sent only for unlabeled icons or ambiguous labels. device_list shows reachable devices and stable phone ids; \
 device_shot takes a local screenshot; device_action can list iPhone apps, launch/close one by bundle id, open a URL, tap, swipe, press a key/button or type. \
@@ -206,6 +207,7 @@ pub fn tool_prefix(style: crate::agents::McpStyle) -> String {
 /// Todos los nombres de tool que este servidor publica, para poder reescribirlos.
 pub(crate) fn tool_names() -> Vec<&'static str> {
     let mut names: Vec<&str> = BROWSER_TOOLS.iter().map(|t| t.name).collect();
+    names.push(CAPTCHA_WAIT_TOOL);
     names.extend(ORCHESTRATION_TOOLS.iter().map(|t| t.name));
     names.extend(GIT_TOOLS.iter().map(|t| t.name));
     names.extend(COMPUTER_USE_TOOLS.iter().map(|t| t.name));
@@ -213,6 +215,7 @@ pub(crate) fn tool_names() -> Vec<&'static str> {
     names.extend(CHAT_TOOLS.iter().map(|t| t.name));
     names.push(ASK_TOOL);
     names.extend([SECRET_REQUEST_TOOL, SECRET_RUN_TOOL, SECRET_REVOKE_TOOL]);
+    names.extend([VAULT_LIST_TOOL, VAULT_REQUEST_TOOL, BROWSER_FILL_LOGIN_TOOL]);
     names.push(TOOL_NAME);
     names
 }
@@ -634,11 +637,81 @@ const BROWSER_NEEDS_APPROVAL: &[&str] = &["browser_upload", "browser_eval"];
 /// Los nombres completos de las tools del navegador que se aprueban solas, como los ve el
 /// agente (`mcp__ags__browser_click`). Es lo que va en `--allowedTools`.
 pub fn browser_tool_names() -> Vec<String> {
-    BROWSER_TOOLS
+    let mut names: Vec<String> = BROWSER_TOOLS
         .iter()
         .filter(|t| !BROWSER_NEEDS_APPROVAL.contains(&t.name))
         .map(|t| format!("mcp__{SERVER_NAME}__{}", t.name))
-        .collect()
+        .collect();
+    names.push(format!("mcp__{SERVER_NAME}__{CAPTCHA_WAIT_TOOL}"));
+    names
+}
+
+// ── Captcha com a pessoa (C2) ─────────────────────────────────
+
+pub const CAPTCHA_WAIT_TOOL: &str = "browser_wait_human";
+/// Prazo padrão (15 min) e teto máximo (30 min) para a pessoa resolver um captcha.
+pub const CAPTCHA_WAIT_DEFAULT_SECS: u64 = 900;
+pub const CAPTCHA_WAIT_MAX_SECS: u64 = 1800;
+
+/// O prazo pedido para `browser_wait_human`, dentro da faixa `1..=1800` (padrão 900 s).
+pub fn captcha_wait_timeout_secs(asked: Option<&Value>) -> u64 {
+    asked
+        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())))
+        .unwrap_or(CAPTCHA_WAIT_DEFAULT_SECS)
+        .clamp(1, CAPTCHA_WAIT_MAX_SECS)
+}
+
+fn captcha_schemas() -> Vec<Value> {
+    vec![json!({
+        "name": CAPTCHA_WAIT_TOOL,
+        "description": "Wait by event (never polling) for the user to solve a captcha that blocked a browser tool. Never attempt to solve a captcha yourself or click inside its challenge widget; call this with the handoff id returned by the blocked tool. Returns {\"resolved\":true} once the page clears the challenge, {\"cancelled\":true} if the user cancels, or {\"expired\":true} on timeout.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "handoff": {
+                    "type": "string",
+                    "description": "The handoff id from the { blocked: \"captcha\", handoff } response.",
+                },
+                "timeout_s": {
+                    "type": "number",
+                    "description": "Maximum seconds to wait for the user (default 900, max 1800).",
+                },
+            },
+            "required": ["handoff"],
+        },
+    })]
+}
+
+fn captcha_wait_human<F>(context: &McpContext, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let Some(handoff) = arguments
+        .get("handoff")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    else {
+        return tool_error("Informe o handoff do captcha.");
+    };
+    let mut request = serde_json::Map::new();
+    request.insert("op".into(), json!("wait_human"));
+    request.insert("handoff".into(), json!(handoff));
+    if let Some(timeout_s) = arguments.get("timeout_s") {
+        request.insert("timeout_s".into(), timeout_s.clone());
+    }
+    let mut payload = context.scope();
+    payload["request"] = Value::Object(request);
+    match send("browser.run", payload) {
+        Ok(data) => {
+            let text = data
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| data.to_string());
+            json!({ "content": [{ "type": "text", "text": text }] })
+        }
+        Err(e) => tool_error(&e),
+    }
 }
 
 // ── Computer use (simulador iOS e Mac) ─────────────────────────
@@ -1268,8 +1341,8 @@ where
         return call_tool_inner(context, name, args, send);
     }
     let mut result = call_tool_inner(context, name, args, send);
-    // Resultados de segredos nunca vão para spill, mesmo se o programa terminar com erro.
-    if name.starts_with("secret_") {
+    // Resultados de segredos e do cofre nunca vão para spill, mesmo se houver erro.
+    if name.starts_with("secret_") || name.starts_with("vault_") || name == BROWSER_FILL_LOGIN_TOOL {
         return result;
     }
     super::spill::spill_tool_result(super::spill::root().as_deref(), &context.spill_session(), &mut result);
@@ -1309,6 +1382,8 @@ where
         approve(task_id, &args, send)
     } else if let Some(tool) = BROWSER_TOOLS.iter().find(|t| t.name == name) {
         browser(context, tool, args, send)
+    } else if name == CAPTCHA_WAIT_TOOL {
+        captcha_wait_human(context, args, send)
     } else if let Some(tool) = COMPUTER_USE_TOOLS.iter().find(|t| t.name == name) {
         computer_use(context, tool, args, send)
     } else if let Some(tool) = DEVICE_TOOLS.iter().find(|t| t.name == name) {
@@ -1333,6 +1408,12 @@ where
         secret_run(context, args, send)
     } else if name == SECRET_REVOKE_TOOL {
         secret_revoke(context, args, send)
+    } else if name == VAULT_LIST_TOOL {
+        vault_list(context, send)
+    } else if name == VAULT_REQUEST_TOOL {
+        vault_request(context, args, send)
+    } else if name == BROWSER_FILL_LOGIN_TOOL {
+        browser_fill_login(context, args, send)
     } else {
         tool_error(&format!("'{name}' não é uma ferramenta deste servidor"))
     }
@@ -1858,6 +1939,7 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
             .iter()
             .map(|t| schema(t.name, t.description, (t.properties)(), t.required)),
     );
+    tools.extend(captcha_schemas());
     tools.extend(
         ORCHESTRATION_TOOLS
             .iter()
@@ -1876,6 +1958,7 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
         tools.extend(peer_schemas());
         if allowed_powers.map_or(true, |powers| powers.contains(&OrchestrationPower::Spawn)) {
             tools.extend(secret_schemas());
+            tools.extend(vault_schemas());
         }
     }
     if matches!(context, McpContext::Cwd { .. } | McpContext::Remote { .. }) {
@@ -1948,6 +2031,7 @@ pub(crate) fn is_orchestration_tool(name: &str) -> bool {
 /// Si una tool solo lee: no cambia la página, el repo, el host ni el run.
 pub(crate) fn is_read_only(name: &str) -> bool {
     BROWSER_READ_ONLY.contains(&name)
+        || name == CAPTCHA_WAIT_TOOL
         || ORCHESTRATION_TOOLS.iter().any(|t| t.name == name && t.power == OrchestrationPower::Read)
         || GIT_TOOLS.iter().any(|t| t.name == name && t.read_only)
         // Preguntar y pedir permiso no tocan nada: muestran una tarjeta.
@@ -1958,6 +2042,7 @@ pub(crate) fn is_read_only(name: &str) -> bool {
         || RENDER_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || DEVICE_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || TEAM_READ_ONLY.contains(&name)
+        || name == VAULT_LIST_TOOL
 }
 
 /// Las anotaciones del protocolo (`readOnlyHint`, `destructiveHint`, `openWorldHint`): lo
@@ -1991,6 +2076,7 @@ pub(crate) fn annotations(name: &str) -> Value {
 /// persona, cada vez.
 pub fn auto_approved(name: &str) -> bool {
     (BROWSER_TOOLS.iter().any(|t| t.name == name) && !BROWSER_NEEDS_APPROVAL.contains(&name))
+        || name == CAPTCHA_WAIT_TOOL
         || ORCHESTRATION_TOOLS.iter().any(|t| {
             t.name == name
                 && matches!(
@@ -2161,6 +2247,132 @@ where
     match send("secret.revoke", payload) {
         Ok(data) => {
             let text = data.get("text").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| data.to_string());
+            json!({ "content": [{ "type": "text", "text": text }] })
+        }
+        Err(error) => tool_error(&error),
+    }
+}
+
+// ── Cofre de logins (Parte A) ───────────────────────────────────────────
+
+/// Cofre de logins do usuário: metadados sem senha, cadastro via cartão e preenchimento
+/// direto no navegador sem expor a senha ao modelo.
+pub const VAULT_LIST_TOOL: &str = "vault_list";
+pub const VAULT_REQUEST_TOOL: &str = "vault_request";
+pub const BROWSER_FILL_LOGIN_TOOL: &str = "browser_fill_login";
+
+fn vault_schemas() -> Vec<Value> {
+    vec![
+        json!({
+            "name": VAULT_LIST_TOOL,
+            "description": "List saved logins from ADE's operating-system vault. Returns only metadata ({ entries: [{ id, origin, username, label }] }); passwords are never returned to the agent.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": VAULT_REQUEST_TOOL,
+            "description": "Ask the user to save a login for an origin in ADE's vault through a secure password card. Returns { id } when saved or { declined: true } if the user declines. Never ask for passwords in chat.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "origin": { "type": "string", "description": "Origin of the site, such as 'https://accounts.example.com'." },
+                    "reason": { "type": "string", "description": "Short explanation shown on the secure card of why this login is needed." }
+                },
+                "required": ["origin", "reason"]
+            }
+        }),
+        json!({
+            "name": BROWSER_FILL_LOGIN_TOOL,
+            "description": "Fill username and password from ADE's vault into the current browser page without revealing the password to the agent. Verifies that the current page origin matches the saved login (returns origin_mismatch otherwise), requests confirmation on first use per agent, optionally submits the form, and shields the tab afterwards. Returns { filled: true, submitted: bool }.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Optional vault entry id from vault_list or vault_request." },
+                    "origin": { "type": "string", "description": "Optional origin to match when id is omitted." },
+                    "submit": { "type": "boolean", "description": "Submit the login form after filling (default false)." }
+                }
+            }
+        }),
+    ]
+}
+
+fn vault_list<F>(context: &McpContext, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let McpContext::Cwd { tab: Some(_), .. } = context else {
+        return tool_error("vault_list exige uma conversa interativa conectada à ADE.");
+    };
+    match send("vault.list", context.scope()) {
+        Ok(data) => json!({ "content": [{ "type": "text", "text": data.to_string() }] }),
+        Err(error) => tool_error(&error),
+    }
+}
+
+fn vault_request<F>(context: &McpContext, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let McpContext::Cwd { tab: Some(_), .. } = context else {
+        return tool_error("vault_request exige uma conversa interativa conectada à ADE.");
+    };
+    let Some(origin) = arguments
+        .get("origin")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    else {
+        return tool_error("Informe origin para cadastrar o login no cofre.");
+    };
+    let Some(reason) = arguments
+        .get("reason")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    else {
+        return tool_error("Informe reason explicando o motivo do pedido.");
+    };
+    let mut payload = context.scope();
+    payload["origin"] = json!(origin);
+    payload["reason"] = json!(reason);
+    match send("vault.request", payload) {
+        Ok(data) => json!({ "content": [{ "type": "text", "text": data.to_string() }] }),
+        Err(error) => tool_error(&error),
+    }
+}
+
+fn browser_fill_login<F>(context: &McpContext, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let McpContext::Cwd { tab: Some(_), .. } = context else {
+        return tool_error("browser_fill_login exige uma conversa interativa conectada à ADE.");
+    };
+    let mut payload = context.scope();
+    if let Some(id) = arguments
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    {
+        payload["id"] = json!(id);
+    }
+    if let Some(origin) = arguments
+        .get("origin")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    {
+        payload["origin"] = json!(origin);
+    }
+    if let Some(submit) = arguments.get("submit").and_then(Value::as_bool) {
+        payload["submit"] = json!(submit);
+    }
+    match send("vault.fill", payload) {
+        Ok(data) => {
+            let text = data
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| data.to_string());
             json!({ "content": [{ "type": "text", "text": text }] })
         }
         Err(error) => tool_error(&error),

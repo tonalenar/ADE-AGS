@@ -36,6 +36,7 @@ import { useFileDropToTerminal } from "@/features/terminal/useFileDropToTerminal
 import { SyncRunner } from "@/features/sync/SyncRunner";
 import { UpdateNotifier } from "@/features/updates/UpdateNotifier";
 import { ApprovalToast } from "@/features/runs/ApprovalToast";
+import { CaptchaHandoffCard } from "@/features/browser/CaptchaHandoffCard";
 import { InAppNotices } from "@/features/chat/InAppNotices";
 import { PoolFailoverNotice } from "@/features/accounts/PoolFailoverNotice";
 import { AgentUpdateWatcher } from "@/features/agents/AgentUpdateWatcher";
@@ -67,6 +68,7 @@ const CommandPalette = lazyWithRetry(() => import("@/features/palette/CommandPal
 const CompareHost = lazyWithRetry(() => import("@/features/compare/CompareHost").then((module) => ({ default: module.CompareHost })));
 const ArchivedMessagePreviewHost = lazyWithRetry(() => import("@/features/sessions/ArchivedMessagePreview").then((module) => ({ default: module.ArchivedMessagePreviewHost })));
 const AskDialog = lazyWithRetry(() => import("@/features/ask/AskDialog").then((module) => ({ default: module.AskDialog })));
+const VaultCard = lazyWithRetry(() => import("@/features/vault/VaultCard").then((module) => ({ default: module.VaultCard })));
 
 function toFrontendTab(row: RestoredTabRow): Tab {
   return {
@@ -299,6 +301,7 @@ export function AppShell() {
           nueva, sin taparse entre ellos. */}
       <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2 pointer-events-none
         [&>*]:pointer-events-auto">
+        <CaptchaHandoffCard />
         <ApprovalToast />
         <InAppNotices />
         <UpdateNotifier />
@@ -306,6 +309,7 @@ export function AppShell() {
       {/* Encima de todo y fuera de las rutas: lo pregunta un agente que está esperando, y
           no puede depender de en qué pantalla esté parado el usuario. */}
       <PanelBoundary name="ask"><Suspense fallback={null}><AskDialog /></Suspense></PanelBoundary>
+      <PanelBoundary name="vault"><Suspense fallback={null}><VaultCard /></Suspense></PanelBoundary>
 
       {/* Fila 0: encabezado del lateral (controles de ventana + nombre) y, a partir de
           donde ese lateral termina, las tabs de agente. Nada más — lo que antes vivía a
