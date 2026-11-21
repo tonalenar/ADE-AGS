@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { ArrowUpRightIcon, PenIcon, QuoteIcon, XIcon } from "../chatIcons";
 import { citationLabel, MAX_COMMENT_CHARS, resolveCommentDismissal } from "./quoteModel";
-import { closeQuoteCommentEditFor, openQuoteCommentEditFor, useQuoteCommentEdit } from "./quoteStore";
+import {
+  closeQuoteCommentEditFor,
+  openQuoteCommentEditFor,
+  reconcileQuoteCommentEditOwner,
+  registerQuoteEditorHost,
+  useQuoteCommentEdit,
+} from "./quoteStore";
 import {
   citationCommentCoordinates,
   clampAnchorRectToSource,
@@ -12,6 +18,17 @@ import {
   type QuoteSourceAnchor,
   type Rect,
 } from "./selectionModel";
+
+/** Indica se a superfície atual está visível/ativa (ex.: `false` para nós do canvas mantidos montados sob o chat). */
+const QuoteSurfaceActiveContext = createContext(true);
+
+export function QuoteSurfaceActiveProvider({ active, children }: { active: boolean; children: ReactNode }) {
+  return <QuoteSurfaceActiveContext.Provider value={active}>{children}</QuoteSurfaceActiveContext.Provider>;
+}
+
+export function useQuoteSurfaceActive(): boolean {
+  return useContext(QuoteSurfaceActiveContext);
+}
 
 export interface QuoteCardItem {
   id: string;
@@ -34,10 +51,15 @@ function toRect(r: DOMRect | Rect): Rect {
 function resolveAnchorRect(anchorEl: HTMLElement | null, sourceAnchor?: QuoteSourceAnchor): Rect | null {
   if (sourceAnchor && sourceAnchor.source.isConnected) {
     const rects = sourceAnchor.range.getClientRects?.();
+    const lastClientRect = rects && rects.length > 0 ? rects[rects.length - 1] : undefined;
+    const candidate =
+      lastClientRect && (lastClientRect.width > 0 || lastClientRect.height > 0)
+        ? lastClientRect
+        : sourceAnchor.range.getBoundingClientRect?.();
     const raw =
-      (rects && rects.length > 0 ? rects[rects.length - 1] : undefined) ??
-      sourceAnchor.range.getBoundingClientRect?.() ??
-      sourceAnchor.rect;
+      candidate && (candidate.width > 0 || candidate.height > 0)
+        ? candidate
+        : sourceAnchor.rect;
     const rawRect = toRect(raw);
     const bounds = toRect(sourceAnchor.source.getBoundingClientRect());
     if (bounds.width > 0 || bounds.height > 0) {
@@ -410,17 +432,46 @@ export function QuoteCards({
   className?: string;
 }) {
   const { t } = useTranslation();
+  const instanceId = useId();
+  const surfaceActive = useQuoteSurfaceActive();
   const storeEdit = useQuoteCommentEdit(quoteKey);
   const [localEditingId, setLocalEditingId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
   const chipRefs = useRef<Record<string, HTMLElement | null>>({});
 
-  if (items.length === 0) return null;
-
   const composerMode = Boolean(onRemove || onUpdateComment);
+  const hasItems = items.length > 0;
+  const storeEditId = storeEdit?.id ?? null;
+  const storeEditOwnerId = storeEdit?.ownerId ?? null;
+
+  useLayoutEffect(() => {
+    if (!composerMode || !quoteKey || !hasItems || !surfaceActive) return;
+    const unregister = registerQuoteEditorHost(quoteKey, {
+      id: instanceId,
+      getElement: () => listRef.current,
+    });
+    return () => {
+      unregister();
+    };
+  }, [composerMode, hasItems, instanceId, quoteKey, surfaceActive]);
+
+  // Quando a superfície deixa de estar ativa (ex.: canvas oculto ao voltar para o chat), cede imediatamente a posse.
+  useLayoutEffect(() => {
+    if (!composerMode || !quoteKey || surfaceActive) return;
+    reconcileQuoteCommentEditOwner(quoteKey);
+  }, [composerMode, quoteKey, surfaceActive]);
+
+  // Garante que uma sessão aberta antes do primeiro chip montar eleja exatamente um host visível após o commit.
+  useLayoutEffect(() => {
+    if (!composerMode || !quoteKey || !hasItems || !surfaceActive || !storeEditId) return;
+    if (storeEditOwnerId !== instanceId) reconcileQuoteCommentEditOwner(quoteKey);
+  }, [composerMode, hasItems, instanceId, quoteKey, storeEditId, storeEditOwnerId, surfaceActive]);
+
+  if (!hasItems) return null;
 
   if (!composerMode) {
-    const activeDetail = detailId ? items.find((q) => q.id === detailId) ?? null : null;
+    const activeDetail = surfaceActive && detailId ? items.find((q) => q.id === detailId) ?? null : null;
     return (
       <>
         <ul aria-label={t("chat.quote.list")} className={`list-none m-0 p-0 flex flex-wrap items-center gap-1.5 ${className}`}>
@@ -460,12 +511,17 @@ export function QuoteCards({
     );
   }
 
-  const activeSession =
-    storeEdit && items.some((q) => q.id === storeEdit.id)
-      ? storeEdit
-      : localEditingId && items.some((q) => q.id === localEditingId)
-        ? { id: localEditingId, removeOnCancel: false, sourceAnchor: undefined }
-        : null;
+  const ownsStoreEdit = Boolean(
+    surfaceActive &&
+      storeEdit &&
+      storeEdit.ownerId === instanceId &&
+      items.some((q) => q.id === storeEdit.id),
+  );
+  const activeSession = ownsStoreEdit
+    ? storeEdit!
+    : surfaceActive && !quoteKey && localEditingId && items.some((q) => q.id === localEditingId)
+      ? { id: localEditingId, removeOnCancel: false, sourceAnchor: undefined }
+      : null;
   const activeEditing = activeSession ? items.find((q) => q.id === activeSession.id) ?? null : null;
 
   const closeEditor = (restoreFocus = false) => {
@@ -476,7 +532,11 @@ export function QuoteCards({
 
   return (
     <>
-      <ul aria-label={t("chat.quote.list")} className={`list-none m-0 p-0 flex flex-wrap items-center gap-1.5 ${className}`}>
+      <ul
+        ref={listRef}
+        aria-label={t("chat.quote.list")}
+        className={`list-none m-0 p-0 flex flex-wrap items-center gap-1.5 ${className}`}
+      >
         {items.map((q) => {
           const label = citationLabel(q);
           const canNavigate = Boolean(q.originItemId && onNavigate);
@@ -521,8 +581,11 @@ ${q.comment}` : `${t("chat.quote.assistantQuote")}: ${q.text}`}
                   data-citation-comment-trigger=""
                   onClick={() => {
                     if (quoteKey) {
-                      if (storeEdit?.id === q.id) closeQuoteCommentEditFor(quoteKey, q.id);
-                      else openQuoteCommentEditFor(quoteKey, { id: q.id, removeOnCancel: false });
+                      if (storeEdit?.id === q.id && storeEdit.ownerId === instanceId) {
+                        closeQuoteCommentEditFor(quoteKey, q.id);
+                      } else {
+                        openQuoteCommentEditFor(quoteKey, { id: q.id, removeOnCancel: false, ownerId: instanceId });
+                      }
                     } else {
                       setLocalEditingId((cur) => (cur === q.id ? null : q.id));
                     }
