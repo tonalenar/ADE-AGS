@@ -48,6 +48,7 @@ mod project_chat_policy;
 mod prelaunch;
 mod privacy_settings;
 mod preview;
+pub mod remote;
 mod real_browser;
 #[cfg(target_os = "macos")]
 pub fn cef_helper_entry() -> Option<i32> {
