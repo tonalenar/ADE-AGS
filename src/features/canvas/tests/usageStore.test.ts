@@ -5,7 +5,8 @@ const agy = vi.fn();
 vi.mock("@/features/accounts/ipc", () => ({
   codexAccountUsage: vi.fn(),
   discoverAntigravityAccount: (id: string) => discover(id),
-  antigravityCliUsage: (force: boolean) => agy(force),
+  antigravityCliUsage: (force: boolean, accountId?: string | null) =>
+    accountId !== undefined ? agy(force, accountId) : agy(force),
 }));
 
 import type { AgentAccount } from "@/features/accounts/types";
@@ -41,6 +42,38 @@ describe("usageStore · antigravity", () => {
     const entry = useUsageStore.getState().antigravity.a1;
     expect(entry.failed).toBe(true);
     expect(entry.meters).toHaveLength(1);
+  });
+
+  it("conta extra do Antigravity (perfil HOME isolado) lê via agy /usage com accountId e não chama OAuth discovery", async () => {
+    agy.mockReset();
+    const cliAccount = {
+      id: "kiro0", agentId: "antigravity", name: "Kiro0", envVar: "HOME", dir: "/tmp/accounts/antigravity/Kiro0",
+    } as unknown as AgentAccount;
+    const groups = [{
+      name: "Gemini Models",
+      windows: [{ id: "g-w", kind: "weekly", usedPct: 35, resetsAt: "2026-10-31T12:35:00Z" }],
+    }];
+    const now = Math.floor(Date.now() / 1000);
+    agy.mockResolvedValueOnce({ installed: true, groups, fetchedAt: now, cached: true });
+
+    await useUsageStore.getState().refresh(cliAccount, false);
+
+    expect(discover).not.toHaveBeenCalled();
+    expect(agy).toHaveBeenCalledTimes(1);
+    expect(agy).toHaveBeenCalledWith(false, "kiro0");
+    const entry = useUsageStore.getState().antigravity.kiro0;
+    expect(entry.failed).toBe(false);
+    expect(entry.groups).toEqual(groups);
+    expect(entry.fetchedAt).toBe(now);
+    expect(useUsageStore.getState().busy.kiro0).toBe(false);
+
+    // Se falhar depois, marca erro e preserva os últimos grupos bons.
+    agy.mockRejectedValueOnce(new Error("falha"));
+    await useUsageStore.getState().refresh(cliAccount, true);
+    expect(agy).toHaveBeenLastCalledWith(true, "kiro0");
+    const afterFail = useUsageStore.getState().antigravity.kiro0;
+    expect(afterFail.failed).toBe(true);
+    expect(afterFail.groups).toEqual(groups);
   });
 });
 

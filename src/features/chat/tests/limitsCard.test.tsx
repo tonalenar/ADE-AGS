@@ -238,6 +238,43 @@ describe("todas as contas conectadas, não só as da conversa", () => {
     expect(text()).toContain("Gemini · chat.accounts.window");
   });
 
+  it("conta extra do Antigravity (perfil HOME isolado) lê e exibe seus próprios grupos de cota sem misturar com a principal", async () => {
+    const kiro = account("kiro0", "antigravity", "Kiro0", { envVar: "HOME", dir: "/tmp/accounts/antigravity/Kiro0" });
+    const sysAgy = account("system:antigravity", "antigravity", "Antigravity", { envVar: "HOME", dir: "/Users/teste" });
+    const iso = new Date((NOW + 3600) * 1000).toISOString();
+    useAccountsStore.setState({ accounts: [kiro], systemAccounts: [sysAgy], capable: [], loaded: true });
+    useTabsStore.setState({ tabs: [tab("kiro0", "antigravity")] } as never);
+    useUsageStore.setState({
+      agy: {
+        usage: {
+          installed: true, fetchedAt: NOW, cached: false,
+          groups: [{ name: "Gemini Models", windows: [{ id: "sys-w", kind: "weekly", usedPct: 24, resetsAt: iso }] }],
+        },
+        failed: false,
+      },
+      antigravity: {
+        kiro0: {
+          meters: null,
+          groups: [
+            { name: "Gemini Models", windows: [{ id: "k-w", kind: "weekly", usedPct: 61, resetsAt: iso }, { id: "k-s", kind: "session", usedPct: 15, resetsAt: iso }] },
+            { name: "Claude and GPT models", windows: [{ id: "k-c", kind: "weekly", usedPct: 8, resetsAt: iso }] },
+          ],
+          failed: false,
+          fetchedAt: NOW,
+        },
+      },
+    } as never);
+    await mount(card("antigravity", "Antigravity"));
+    expect(refreshes).toEqual([["kiro0", false]]);
+    expect(text()).toContain("Kiro0");
+    expect(text()).not.toContain("chat.summary.limits.reason.failed");
+    expect(text()).toContain("Gemini Models · chat.accounts.week");
+    expect(text()).toContain("Gemini Models · chat.accounts.window");
+    expect(text()).toContain("Claude and GPT models · chat.accounts.week");
+    const values = bars().map((b) => b.getAttribute("aria-valuenow"));
+    expect(values.slice(0, 3)).toEqual(["61", "15", "8"]);
+  });
+
   describe("o pool da conversa", () => {
     const asThread = () => {
       useStructured.setState({ threads: [{ id: "t1", accountId: "ton" }], live: {}, hydrated: {} } as never);

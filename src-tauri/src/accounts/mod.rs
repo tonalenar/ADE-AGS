@@ -44,3 +44,8 @@ mod test;
 pub use commands::*;
 pub use health::*;
 pub use store::*;
+
+#[cfg(test)]
+pub(crate) fn use_mock_keyring_for_tests() {
+    secrets::use_mock_keyring();
+}

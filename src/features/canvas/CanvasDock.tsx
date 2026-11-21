@@ -48,7 +48,13 @@ function useUsageRings(): { claude: number | null; codex: number | null; antigra
       const top = agyTopPercent(st.agy.usage?.groups);
       if (top !== null) return top;
     }
-    for (const e of Object.values(st.antigravity)) if (e.meters && e.meters.length > 0) return e.meters[0].percent;
+    for (const e of Object.values(st.antigravity)) {
+      if (e.groups && e.groups.length > 0) {
+        const top = agyTopPercent(e.groups);
+        if (top !== null) return top;
+      }
+      if (e.meters && e.meters.length > 0) return e.meters[0].percent;
+    }
     return null;
   });
   return { claude, codex, antigravity };

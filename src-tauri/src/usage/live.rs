@@ -117,6 +117,18 @@ pub(super) fn capture_problem(raw: &str) -> Option<&'static str> {
     }
 }
 
+/// Aplica o ambiente da conta na sonda PTY, removendo variáveis herdadas que venceriam
+/// o login do perfil (ex.: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`), igual ao PTY
+/// normal e ao `account_health`.
+pub(super) fn apply_probe_env(cmd: &mut CommandBuilder, env: &[(String, String)]) {
+    for var in crate::agents::overriding_env(env.iter().map(|(k, _)| k)) {
+        cmd.env_remove(var);
+    }
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+}
+
 /// Abre `claude` en una PTY, le manda `/usage` y devuelve lo que dibujó.
 ///
 /// No es privada para poder probarla contra la TUI instalada (ver `contra_la_tui_de_verdad`).
@@ -139,9 +151,7 @@ pub(super) fn capture(
     // Que esta sesión de sondeo NO deje transcript: si no, cada vez que se mira el
     // consumo aparecería una conversación vacía en el historial del usuario.
     cmd.env("CLAUDE_CODE_CHILD_SESSION", "1");
-    for (k, v) in env {
-        cmd.env(k, v);
-    }
+    apply_probe_env(&mut cmd, env);
 
     let child = pty.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pty.slave);

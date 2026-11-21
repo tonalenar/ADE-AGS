@@ -1,14 +1,17 @@
-//! A cota do login local do Antigravity, lida do próprio CLI: `agy -p /usage --output-format json`.
+//! A cota do Antigravity, lida do próprio CLI: `agy -p /usage --output-format json`.
 //!
 //! É o comando `/usage` do `agy`, não um prompt: responde com `num_turns` 0 e nenhum token, e traz
-//! os grupos de modelos (Gemini, Claude/GPT, Argon…) com as janelas semanal e de 5 horas. Fala só
-//! pelo login que o `agy` tem nesta máquina — as contas OAuth da ADE seguem por
-//! `antigravity_access` (`fetchAvailableModels`).
+//! os grupos de modelos (Gemini, Claude/GPT, Argon…) com as janelas semanal e de 5 horas. Funciona
+//! tanto para a conta principal (login local do sistema) quanto para contas extras por `HOME`
+//! isolado (no macOS, prepara e destrava o chaveiro isolado da conta via `env_for_account_for_agent`
+//! antes de rodar o `agy`, sem jamais misturar com a conta principal). Contas OAuth da ADE seguem
+//! por `antigravity_access` (`fetchAvailableModels`).
 //!
 //! O `agy` é chamado direto, sem shell: um shell MSYS transforma `/usage` em caminho e o CLI
 //! recebe um prompt de verdade, que gasta cota.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::time::Duration;
 
 const KEY: &str = "usage.antigravity.cli.v1";
@@ -112,8 +115,26 @@ pub fn parse(stdout: &str) -> Result<Vec<AgyGroup>, String> {
     Ok(out)
 }
 
-/// Roda o `/usage`. Bloqueante: chamar de `spawn_blocking`.
-fn run(program: &std::path::Path) -> Result<Vec<AgyGroup>, String> {
+fn normalize_account_id(account_id: Option<&str>) -> Option<&str> {
+    account_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && *id != "system:antigravity")
+}
+
+/// Chave de cache no SQLite: mantém `usage.antigravity.cli.v1` para a conta principal e isola cada
+/// conta extra em `usage.antigravity.cli.v1.<account_id>`.
+pub(crate) fn storage_key(account_id: Option<&str>) -> String {
+    match normalize_account_id(account_id) {
+        Some(id) => format!("{KEY}.{id}"),
+        None => KEY.to_string(),
+    }
+}
+
+/// Roda o `/usage` no ambiente da conta (vazio = conta principal). Bloqueante: chamar de `spawn_blocking`.
+fn run_with_env(
+    program: &std::path::Path,
+    env: &HashMap<String, String>,
+) -> Result<Vec<AgyGroup>, String> {
     let mut cmd = crate::util::spawn::hidden_command(program);
     cmd.args(["-p", "/usage", "--output-format", "json"])
         // As mesmas que o Maestri limpa: credencial por variável apontaria para outra conta.
@@ -123,6 +144,9 @@ fn run(program: &std::path::Path) -> Result<Vec<AgyGroup>, String> {
         .env("TERM", "dumb")
         .env("NO_COLOR", "1")
         .stdin(std::process::Stdio::null());
+    if !env.is_empty() {
+        crate::agents::apply_account_env(&mut cmd, env);
+    }
     let out = crate::util::spawn::output(&mut cmd, TIMEOUT).map_err(|e| match e.kind() {
         std::io::ErrorKind::TimedOut => "O agy demorou demais para responder ao /usage".to_string(),
         _ => "Não foi possível iniciar o agy".to_string(),
@@ -138,30 +162,76 @@ fn run(program: &std::path::Path) -> Result<Vec<AgyGroup>, String> {
     }
 }
 
+/// Lê a cota do `agy` (conta principal ou conta extra por `HOME` isolado).
+///
+/// Para conta extra, exige um `HOME` isolado resolvido e preparado antes de lançar o `agy`: se a
+/// preparação ou o desbloqueio do chaveiro falhar, devolve erro e NUNCA cai no `HOME` principal.
+pub(crate) fn fetch_cli_usage_with(
+    db: &crate::database::DbConnection,
+    account_id: Option<&str>,
+    force: bool,
+    program: &std::path::Path,
+    resolve_env: impl FnOnce(&crate::database::DbConnection, &str) -> Result<HashMap<String, String>, String>,
+) -> Result<AgyUsage, String> {
+    let key = storage_key(account_id);
+    if !force {
+        let stored = crate::database::get_setting(db, &key).ok().flatten().and_then(|raw| {
+            let mut stored = serde_json::from_str::<AgyUsage>(&raw).ok()?;
+            stored.cached = true;
+            Some(stored)
+        });
+        return Ok(stored.unwrap_or(AgyUsage {
+            installed: true,
+            groups: Vec::new(),
+            fetched_at: 0,
+            cached: false,
+        }));
+    }
+    let env = match normalize_account_id(account_id) {
+        Some(id) => {
+            let env = resolve_env(db, id)?;
+            // Defesa explícita: conta extra nunca pode rodar no HOME real do usuário.
+            if !env.get("HOME").is_some_and(|h| !h.trim().is_empty()) {
+                return Err("Ambiente isolado da conta Antigravity indisponível.".into());
+            }
+            env
+        }
+        None => HashMap::new(),
+    };
+    let groups = run_with_env(program, &env)?;
+    let found = AgyUsage {
+        installed: true,
+        groups,
+        fetched_at: crate::util::now_ts(),
+        cached: false,
+    };
+    if let Ok(raw) = serde_json::to_string(&found) {
+        let _ = crate::database::set_setting(db, &key, &raw);
+    }
+    Ok(found)
+}
+
 /// `force` ausente = ao vivo. O canvas manda `false` para reusar a última leitura guardada.
+/// `account_id` ausente ou `"system:antigravity"` lê a conta principal; um id de conta extra
+/// prepara/destrava o `HOME` e chaveiro isolados antes de rodar `agy /usage`.
 #[tauri::command]
 pub async fn antigravity_cli_usage(
     force: Option<bool>,
+    account_id: Option<String>,
     db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<AgyUsage, String> {
     let Some(program) = crate::util::find_program("agy") else {
         return Ok(AgyUsage { installed: false, groups: Vec::new(), fetched_at: 0, cached: false });
     };
     let db = (*db).clone();
-    if !force.unwrap_or(true) {
-        let stored = crate::database::get_setting(&db, KEY).ok().flatten().and_then(|raw| {
-            let mut stored = serde_json::from_str::<AgyUsage>(&raw).ok()?;
-            stored.cached = true;
-            Some(stored)
-        });
-        return Ok(stored.unwrap_or(AgyUsage { installed: true, groups: Vec::new(), fetched_at: 0, cached: false }));
-    }
-    let groups = tokio::task::spawn_blocking(move || run(&program)).await.map_err(|e| e.to_string())??;
-    let found = AgyUsage { installed: true, groups, fetched_at: crate::util::now_ts(), cached: false };
-    if let Ok(raw) = serde_json::to_string(&found) {
-        let _ = crate::database::set_setting(&db, KEY, &raw);
-    }
-    Ok(found)
+    let force = force.unwrap_or(true);
+    tokio::task::spawn_blocking(move || {
+        fetch_cli_usage_with(&db, account_id.as_deref(), force, &program, |db, id| {
+            crate::accounts::env_for_account_for_agent(db, id, "antigravity")
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -215,7 +285,7 @@ mod tests {
     #[ignore]
     fn ao_vivo_le_o_login_local() {
         let program = crate::util::find_program("agy").expect("agy no PATH");
-        let groups = run(&program).unwrap();
+        let groups = run_with_env(&program, &HashMap::new()).unwrap();
         assert!(!groups.is_empty());
         assert!(groups.iter().all(|g| g.windows.iter().all(|w| (0.0..=100.0).contains(&w.used_pct))));
     }
