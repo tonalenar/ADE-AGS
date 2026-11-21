@@ -136,7 +136,7 @@ pub fn stop() {
     }
 }
 
-pub async fn start_server(_app: AppHandle, port: u16) -> Result<Vec<SocketAddr>, String> {
+pub async fn start_server(app: AppHandle, port: u16) -> Result<Vec<SocketAddr>, String> {
     stop();
     let tailscale_ip = tokio::task::spawn_blocking(detect_tailscale_ip)
         .await
@@ -145,13 +145,22 @@ pub async fn start_server(_app: AppHandle, port: u16) -> Result<Vec<SocketAddr>,
     let addrs = bind_addrs_on(tailscale_ip, port);
     let config = http::ServerConfig {
         store: clients::ClientStore::default_store(),
-        handler: Arc::new(|_client, req| {
-            let id = req.get("id")?.clone();
-            Some(serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": { "code": -32603, "message": "Despacho remoto ainda não conectado" }
-            }))
+        handler: Arc::new(move |client, req| {
+            let context = crate::ipc::mcp::McpContext::remote_from_client(client);
+            let app = app.clone();
+            let client_id = client.id.clone();
+            let preset = client.preset;
+            crate::ipc::mcp::handle_frame(&context, "", &req, &mut |command, args| {
+                crate::ipc::dispatch_in_process(
+                    &app,
+                    command,
+                    args,
+                    crate::terminal::Principal::Remote {
+                        client: client_id.clone(),
+                        preset,
+                    },
+                )
+            })
         }),
         audit: http::default_audit_sink(),
         now_fn: Arc::new(crate::util::now_ts),

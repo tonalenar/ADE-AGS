@@ -52,6 +52,7 @@ pub fn person_only_error(command: &str) -> Option<&'static str> {
     matches!(command, "approval.decide" | "approval.list").then_some(APPROVAL_SCREEN_ONLY)
 }
 pub use server::{cleanup, export_instance_env, other_instance_alive, start};
+pub(crate) use server::dispatch_in_process;
 pub use transport::{exchange, ExchangeError};
 pub(crate) use transport::current_client_pid;
 #[cfg(test)]

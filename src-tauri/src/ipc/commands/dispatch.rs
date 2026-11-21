@@ -93,22 +93,8 @@ fn design_open(app: &AppHandle, args: &Value) -> Result<Value, String> {
 }
 
 pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
-    if let Some(error) = crate::ipc::agent_maintenance_error(command) {
-        return Response::err(error);
-    }
-    // F-01: antes de olhar token de tarefa, PID ou banco. Não depende de quem chama.
-    if let Some(error) = crate::ipc::person_only_error(command) {
-        return Response::err(error);
-    }
-    // F-02: o `taskId` é declarado pelo chamador. Só vale se o PID do outro lado é o do agente da tarefa; vale para
-    // todos os comandos, inclusive `run.approve`.
-    if let Some(error) = crate::ipc::guard::task_proof_error(args, crate::ipc::current_client_pid())
-    {
-        return Response::err(error);
-    }
-    // F-09: a tabela de classes por método (ipc/authz.rs). Prova quem chama pelo PID do canal de credencial e devolve os
-    // argumentos com a identidade **provada** no lugar da declarada. Método sem classe é recusado.
-    let patched = match crate::ipc::authz::authorize(
+    dispatch_with_principal(
+        app,
         command,
         args,
         || {
@@ -120,6 +106,39 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
                 crate::ipc::current_client_pid(),
             )
         },
+        true,
+    )
+}
+
+pub(crate) fn dispatch_with_principal(
+    app: &AppHandle,
+    command: &str,
+    args: &Value,
+    who: impl FnOnce() -> Result<crate::terminal::Principal, String>,
+    check_task_pid: bool,
+) -> Response {
+    if let Some(error) = crate::ipc::agent_maintenance_error(command) {
+        return Response::err(error);
+    }
+    // F-01: antes de olhar token de tarefa, PID ou banco. Não depende de quem chama.
+    if let Some(error) = crate::ipc::person_only_error(command) {
+        return Response::err(error);
+    }
+    // F-02: o `taskId` é declarado pelo chamador. Só vale se o PID do outro lado é o do agente da tarefa; vale para
+    // todos os comandos, inclusive `run.approve`.
+    if check_task_pid
+        && let Some(error) =
+            crate::ipc::guard::task_proof_error(args, crate::ipc::current_client_pid())
+    {
+        return Response::err(error);
+    }
+    // F-09: a tabela de classes por método (ipc/authz.rs). Prova quem chama (pelo PID do canal de credencial
+    // ou pela identidade remota já autenticada em processo) e devolve os argumentos com a identidade **provada**
+    // no lugar da declarada. Método sem classe é recusado.
+    let patched = match crate::ipc::authz::authorize(
+        command,
+        args,
+        who,
         || crate::canvas::load_boards(),
         &crate::ipc::guard::opened_by,
     ) {

@@ -71,15 +71,42 @@ pub enum McpContext {
     /// Una tab interactiva, en esta carpeta. `tab` es cuál, cuando la terminal lo supo al
     /// lanzarla: es lo que deja que cada agente tenga SU navegador, pintado de su color.
     Cwd { cwd: String, tab: Option<String>, mission: Option<String>, role: Option<String> },
+    /// Um cliente remoto autenticado pelo servidor MCP HTTP (`remote:<client>`).
+    Remote {
+        client: String,
+        cwd: String,
+        preset: crate::remote::Preset,
+        folders: Vec<String>,
+    },
 }
 
 impl McpContext {
+    /// Constrói o contexto MCP remoto a partir dos metadados autenticados do cliente.
+    pub fn remote_from_client(client: &crate::remote::RemoteClient) -> Self {
+        Self::Remote {
+            client: client.id.clone(),
+            cwd: client.default_folder.clone(),
+            preset: client.preset,
+            folders: client.folders.clone(),
+        }
+    }
+
+    /// Identidade de aba/ator (`tabId`/`from`) conhecida pelo contexto.
+    fn actor_tab_id(&self) -> Option<String> {
+        match self {
+            McpContext::Cwd { tab, .. } => tab.clone(),
+            McpContext::Remote { client, .. } => Some(format!("remote:{client}")),
+            McpContext::Task(_) => None,
+        }
+    }
+
     /// A pasta de spill desta sessão: a tarefa ou a aba (nunca o `ADE_SESSION`).
     fn spill_session(&self) -> String {
         match self {
             McpContext::Task(id) => format!("task-{id}"),
             McpContext::Cwd { tab: Some(tab), .. } => tab.clone(),
             McpContext::Cwd { .. } => "mcp".into(),
+            McpContext::Remote { client, .. } => format!("remote-{client}"),
         }
     }
 
@@ -97,6 +124,9 @@ impl McpContext {
                     scope["missionId"] = json!(mission);
                 }
                 scope
+            }
+            McpContext::Remote { client, cwd, .. } => {
+                json!({ "cwd": cwd, "tabId": format!("remote:{client}") })
             }
         }
     }
@@ -749,6 +779,7 @@ pub(crate) fn computer_use_args(context: &McpContext, arguments: Value, tab: Opt
     }
     let context_tab = match context {
         McpContext::Cwd { tab, .. } => tab.clone(),
+        McpContext::Remote { client, .. } => Some(format!("remote:{client}")),
         McpContext::Task(_) => None,
     };
     if let Some(tab) = tab.filter(|t| !t.is_empty()).or(context_tab) {
@@ -767,12 +798,12 @@ where
     if matches!(context, McpContext::Task(_)) {
         return tool_error("O computer use não está disponível para tarefas da frota: só para abas e conversas do ADE AGS.");
     }
-    let args = computer_use_args(
-        context,
-        arguments,
-        std::env::var("ADE_TAB_ID").ok(),
-        std::env::var(crate::terminal::SESSION_ENV).ok(),
-    );
+    let (env_tab, env_session) = if matches!(context, McpContext::Remote { .. }) {
+        (None, None)
+    } else {
+        (std::env::var("ADE_TAB_ID").ok(), std::env::var(crate::terminal::SESSION_ENV).ok())
+    };
+    let args = computer_use_args(context, arguments, env_tab, env_session);
     match send(tool.dispatch, args) {
         Ok(data) => {
             let text = data.get("text").and_then(Value::as_str).unwrap_or("").to_string();
@@ -792,12 +823,12 @@ where
     if matches!(context, McpContext::Task(_)) {
         return tool_error("O controle pontual de dispositivos não está disponível para tarefas da frota: só para abas e conversas do ADE AGS.");
     }
-    let args = computer_use_args(
-        context,
-        arguments,
-        std::env::var("ADE_TAB_ID").ok(),
-        std::env::var(crate::terminal::SESSION_ENV).ok(),
-    );
+    let (env_tab, env_session) = if matches!(context, McpContext::Remote { .. }) {
+        (None, None)
+    } else {
+        (std::env::var("ADE_TAB_ID").ok(), std::env::var(crate::terminal::SESSION_ENV).ok())
+    };
+    let args = computer_use_args(context, arguments, env_tab, env_session);
     match send(tool.dispatch, args) {
         Ok(data) => json!({ "content": [{ "type": "text", "text": data.to_string() }] }),
         Err(error) => tool_error(&error),
@@ -1245,10 +1276,15 @@ where
     result
 }
 
-fn call_tool_inner<F>(context: &McpContext, name: &str, args: Value, send: &mut F) -> Value
+fn call_tool_inner<F>(context: &McpContext, name: &str, mut args: Value, send: &mut F) -> Value
 where
     F: FnMut(&str, Value) -> Result<Value, String>,
 {
+    let resolved = match remote_resolve_context(context, name, &mut args) {
+        Ok(ctx) => ctx,
+        Err(error) => return tool_error(&error),
+    };
+    let context = resolved.as_ref();
     if let (McpContext::Task(task_id), TOOL_NAME) = (context, name) {
         approve(task_id, &args, send)
     } else if let Some(tool) = BROWSER_TOOLS.iter().find(|t| t.name == name) {
@@ -1280,6 +1316,180 @@ where
     } else {
         tool_error(&format!("'{name}' não é uma ferramenta deste servidor"))
     }
+}
+
+// ── Remote MCP (Parte B) ─────────────────────────────────────────
+
+const REMOTE_FOLDER_DENIED: &str = "Pasta fora das liberadas para este agente";
+
+fn remote_tool_uses_cwd(name: &str) -> bool {
+    BROWSER_TOOLS.iter().any(|t| t.name == name)
+        || ORCHESTRATION_TOOLS.iter().any(|t| t.name == name)
+        || GIT_TOOLS.iter().any(|t| t.name == name)
+        || matches!(
+            name,
+            "chat_new"
+                | "delegate_agent"
+                | "design_list"
+                | "design_create"
+                | ASK_TOOL
+                | SECRET_REQUEST_TOOL
+                | SECRET_RUN_TOOL
+                | SECRET_REVOKE_TOOL
+        )
+}
+
+fn remote_match_folder(requested: &str, folders: &[String]) -> Option<String> {
+    let wanted = crate::remote::clients::normalize_folder(requested);
+    if wanted.is_empty() {
+        return None;
+    }
+    folders
+        .iter()
+        .find(|allowed| crate::remote::clients::normalize_folder(allowed) == wanted)
+        .cloned()
+}
+
+/// Valida `project` (e `cwd`/`workspace` quando enviados) no contexto remoto contra `client.folders`.
+/// Em sessões locais (`Task` e `Cwd`), não altera nada.
+fn remote_resolve_context<'a>(
+    context: &'a McpContext,
+    name: &str,
+    args: &mut Value,
+) -> Result<std::borrow::Cow<'a, McpContext>, String> {
+    let McpContext::Remote {
+        client,
+        cwd,
+        preset,
+        folders,
+    } = context
+    else {
+        return Ok(std::borrow::Cow::Borrowed(context));
+    };
+
+    let requested_project = args
+        .as_object_mut()
+        .and_then(|map| map.remove("project"))
+        .and_then(|value| match value {
+            Value::String(s) if !s.trim().is_empty() => Some(s),
+            _ => None,
+        });
+
+    let effective_cwd = if let Some(project) = requested_project {
+        remote_match_folder(&project, folders).ok_or_else(|| REMOTE_FOLDER_DENIED.to_string())?
+    } else {
+        cwd.clone()
+    };
+
+    // Impede contornar `folders` passando `cwd` em `chat_new` ou `workspace` em `design_create`.
+    if name == "chat_new"
+        && let Some(explicit_cwd) = args
+            .get("cwd")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+    {
+        let matched = remote_match_folder(explicit_cwd, folders)
+            .ok_or_else(|| REMOTE_FOLDER_DENIED.to_string())?;
+        if let Some(map) = args.as_object_mut() {
+            map.insert("cwd".into(), json!(matched));
+        }
+    }
+    if matches!(name, "design_create" | "design_list")
+        && let Some(explicit_ws) = args
+            .get("workspace")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+    {
+        let matched = remote_match_folder(explicit_ws, folders)
+            .ok_or_else(|| REMOTE_FOLDER_DENIED.to_string())?;
+        if let Some(map) = args.as_object_mut() {
+            map.insert("workspace".into(), json!(matched));
+        }
+    }
+
+    Ok(std::borrow::Cow::Owned(McpContext::Remote {
+        client: client.clone(),
+        cwd: effective_cwd,
+        preset: *preset,
+        folders: folders.clone(),
+    }))
+}
+
+fn remote_add_project_property(tools: &mut [Value]) {
+    for tool in tools {
+        let Some(name) = tool.get("name").and_then(Value::as_str).map(str::to_string) else {
+            continue;
+        };
+        if !remote_tool_uses_cwd(&name) {
+            continue;
+        }
+        if let Some(props) = tool
+            .get_mut("inputSchema")
+            .and_then(|schema| schema.get_mut("properties"))
+            .and_then(Value::as_object_mut)
+        {
+            props.entry("project").or_insert_with(|| {
+                json!({
+                    "type": "string",
+                    "description": "Optional project folder from this remote client's allowed folders (defaults to the paired default folder)."
+                })
+            });
+        }
+    }
+}
+
+/// Processa um único quadro JSON-RPC (usado pelo servidor HTTP por requisição).
+pub fn handle_frame<F>(
+    context: &McpContext,
+    prefix: &str,
+    req: &Value,
+    send: &mut F,
+) -> Option<Value>
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let method = req.get("method").and_then(Value::as_str).unwrap_or("");
+    if method == "notifications/cancelled" {
+        return None;
+    }
+    let id = req.get("id")?.clone();
+    let response = match method {
+        "initialize" => {
+            let version = req
+                .pointer("/params/protocolVersion")
+                .and_then(Value::as_str)
+                .unwrap_or("2025-06-18");
+            ok(
+                id,
+                json!({
+                    "protocolVersion": version,
+                    "capabilities": { "tools": {} },
+                    "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
+                    "instructions": prefixed(&instructions(), prefix),
+                }),
+            )
+        }
+        "ping" => ok(id, json!({})),
+        "tools/list" => ok(id, json!({ "tools": tools_for(context, prefix) })),
+        "tools/call" => {
+            let name = req
+                .pointer("/params/name")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let args = req
+                .pointer("/params/arguments")
+                .cloned()
+                .unwrap_or(json!({}));
+            let result = call_tool(context, name, args, send);
+            ok(id, result)
+        }
+        _ => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": -32601, "message": format!("método no soportado: {method}") }
+        }),
+    };
+    Some(response)
 }
 
 /// Corre el bucle del servidor hasta que el cliente cierra stdin.
@@ -1571,7 +1781,7 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
     }
     let allowed_powers = match context {
         McpContext::Cwd { role, .. } => powers_for_role(role.as_deref()),
-        McpContext::Task(_) => None,
+        McpContext::Task(_) | McpContext::Remote { .. } => None,
     };
     let schema = |name: &str, description: &str, properties: Value, required: &[&str]| {
         json!({
@@ -1599,18 +1809,18 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
             .iter()
             .map(|t| schema(t.name, t.description, (t.properties)(), t.required)),
     );
-    if matches!(context, McpContext::Cwd { tab: Some(_), .. }) {
+    if matches!(context, McpContext::Cwd { tab: Some(_), .. } | McpContext::Remote { .. }) {
         tools.extend(peer_schemas());
         if allowed_powers.map_or(true, |powers| powers.contains(&OrchestrationPower::Spawn)) {
             tools.extend(secret_schemas());
         }
     }
-    if matches!(context, McpContext::Cwd { .. }) {
+    if matches!(context, McpContext::Cwd { .. } | McpContext::Remote { .. }) {
         let read_only = allowed_powers.is_some_and(|powers| !powers.contains(&OrchestrationPower::Spawn));
         tools.extend(chat_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
         tools.extend(design_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
         // As páginas HTML são da aba: sem aba (`--cwd` puro) não há dono para a página, então a família não se oferece.
-        if matches!(context, McpContext::Cwd { tab: Some(_), .. }) {
+        if matches!(context, McpContext::Cwd { tab: Some(_), .. } | McpContext::Remote { .. }) {
             tools.extend(render_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
         }
         // Como o navegador, o computer use vale para todo papel (QA testa no simulador).
@@ -1618,6 +1828,9 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
         tools.extend(device_schemas());
     }
     tools.push(ask_schema());
+    if matches!(context, McpContext::Remote { .. }) {
+        remote_add_project_property(&mut tools);
+    }
     // Todo el texto de una vez y en un solo lugar: el `name` queda pelado (lo prefija la
     // TUI; ponerlo acá daría `ags_ags_browser_click`) y se prefija el resto
     // —la descripción y la de cada parámetro, que nombran tools igual ("un ref de
@@ -1789,9 +2002,9 @@ fn secret_request<F>(context: &McpContext, arguments: Value, send: &mut F) -> Va
 where
     F: FnMut(&str, Value) -> Result<Value, String>,
 {
-    let McpContext::Cwd { tab: Some(_), .. } = context else {
+    if context.actor_tab_id().is_none() {
         return tool_error("Pedidos de segredo exigem uma conversa interativa conectada à ADE.");
-    };
+    }
     let Some(label) = arguments.get("label").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) else {
         return tool_error("Informe label para identificar o pedido.");
     };
@@ -1816,8 +2029,9 @@ fn secret_run<F>(context: &McpContext, arguments: Value, send: &mut F) -> Value
 where
     F: FnMut(&str, Value) -> Result<Value, String>,
 {
-    let McpContext::Cwd { cwd, tab: Some(_), .. } = context else {
-        return tool_error("secret_run exige uma conversa interativa conectada à ADE.");
+    let cwd = match context {
+        McpContext::Cwd { cwd, tab: Some(_), .. } | McpContext::Remote { cwd, .. } => cwd.as_str(),
+        _ => return tool_error("secret_run exige uma conversa interativa conectada à ADE."),
     };
     let Some(id) = arguments.get("secret_id").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) else {
         return tool_error("Informe secret_id.");
@@ -1868,9 +2082,9 @@ fn secret_revoke<F>(context: &McpContext, arguments: Value, send: &mut F) -> Val
 where
     F: FnMut(&str, Value) -> Result<Value, String>,
 {
-    let McpContext::Cwd { tab: Some(_), .. } = context else {
+    if context.actor_tab_id().is_none() {
         return tool_error("secret_revoke exige uma conversa interativa conectada à ADE.");
-    };
+    }
     let Some(id) = arguments.get("secret_id").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) else {
         return tool_error("Informe secret_id.");
     };
@@ -2008,7 +2222,7 @@ fn peer<F>(context: &McpContext, command: &str, arguments: Value, send: &mut F) 
 where
     F: FnMut(&str, Value) -> Result<Value, String>,
 {
-    let McpContext::Cwd { tab: Some(tab), .. } = context else {
+    let Some(tab) = context.actor_tab_id() else {
         return tool_error("As tools de equipe só funcionam numa aba do ADE AGS (falta a aba de origem).");
     };
     let mut args = match arguments {
@@ -2221,6 +2435,7 @@ fn scoped_chat_payload(
                 Some(tab) => format!("tab:{tab}"),
                 None => format!("cwd:{cwd}"),
             },
+            McpContext::Remote { client, .. } => format!("remote:{client}"),
         };
         args.insert("caller_scope".into(), json!(scope));
     }
@@ -2239,6 +2454,10 @@ fn scoped_chat_payload(
         } else {
             args.entry("cwd").or_insert_with(|| json!(cwd));
         }
+    } else if let (McpContext::Remote { client, cwd, .. }, "chat.new") = (context, command) {
+        args.remove("parent_ref");
+        args.entry("cwd").or_insert_with(|| json!(cwd));
+        args.insert("parent_ref".into(), json!(format!("remote:{client}")));
     }
     Value::Object(args)
 }
@@ -2249,7 +2468,7 @@ fn delegate_to_session<F>(context: &McpContext, input: &serde_json::Map<String, 
 where
     F: FnMut(&str, Value) -> Result<Value, String>,
 {
-    let McpContext::Cwd { tab: Some(tab), .. } = context else {
+    let Some(tab) = context.actor_tab_id() else {
         return tool_error("connected_session só funciona numa conversa ou aba ligada à ADE (falta a aba de origem)");
     };
     let mut payload = serde_json::Map::new();
@@ -2269,10 +2488,14 @@ fn delegate_agent<F>(context: &McpContext, arguments: Value, send: &mut F) -> Va
 where
     F: FnMut(&str, Value) -> Result<Value, String>,
 {
-    let McpContext::Cwd { role, .. } = context else {
-        return tool_error("delegate_agent só está disponível para uma conversa ou aba interativa da ADE");
+    let role = match context {
+        McpContext::Cwd { role, .. } => role.as_deref(),
+        McpContext::Remote { .. } => None,
+        McpContext::Task(_) => {
+            return tool_error("delegate_agent só está disponível para uma conversa ou aba interativa da ADE");
+        }
     };
-    if powers_for_role(role.as_deref()).is_some_and(|powers| !powers.contains(&OrchestrationPower::Spawn)) {
+    if powers_for_role(role).is_some_and(|powers| !powers.contains(&OrchestrationPower::Spawn)) {
         return tool_error("este papel pode consultar o harness, mas não pode criar agentes filhos");
     }
     let input = match arguments {
@@ -2460,7 +2683,7 @@ where
         _ => serde_json::Map::new(),
     };
     args.remove("from");
-    if let McpContext::Cwd { tab: Some(tab), .. } = context {
+    if let Some(tab) = context.actor_tab_id() {
         args.insert("from".into(), json!(tab));
     }
     match send(tool.cli, Value::Object(args)) {
@@ -2532,6 +2755,10 @@ where
         if let Some(tab) = tab {
             args.insert("from".into(), json!(tab));
         }
+    } else if let (McpContext::Remote { client, cwd, .. }, "design.create") = (context, tool.cli) {
+        args.entry("workspace").or_insert_with(|| json!(cwd));
+        args.remove("from");
+        args.insert("from".into(), json!(format!("remote:{client}")));
     }
     // Pelo MCP quem comenta é sempre o agente: a voz da pessoa só vem da tela.
     if tool.cli == "design.comment.add" {

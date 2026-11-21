@@ -41,6 +41,7 @@ mod windows;
 mod workspaces;
 
 pub use dispatch::dispatch;
+pub(crate) use dispatch::dispatch_with_principal;
 pub(crate) use agent_secrets::cleanup_expired_agent_secrets;
 
 #[cfg(test)]
