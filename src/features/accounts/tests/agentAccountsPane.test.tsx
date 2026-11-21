@@ -111,4 +111,80 @@ describe("contas de uma TUI", () => {
     expect(host.textContent).toContain("Kiro0");
     expect(host.innerHTML).toContain("flex-wrap");
   });
+
+  it("cada conta cresce com o conteúdo sem altura fixa, sem overflow-hidden e com ações contidas na própria linha", async () => {
+    const principal = conta({
+      id: "system:antigravity",
+      name: "Antigravity",
+      dir: "/Users/teste",
+      loggedIn: true,
+      accentColor: null,
+    });
+    const extra = conta({
+      id: "acc-kiro0",
+      name: "Kiro0",
+      label: "kiro@example.com",
+      loggedIn: true,
+    });
+    useAccountsStore.setState({
+      systemAccounts: [principal],
+      accounts: [extra],
+      health: {},
+    });
+    await renderPane();
+
+    const rows = [...host.querySelectorAll<HTMLElement>("[data-account-row]")];
+    expect(rows.map((r) => r.dataset.accountRow)).toEqual(["system:antigravity", "acc-kiro0"]);
+
+    for (const row of rows) {
+      const classes = row.className.split(/\s+/);
+      // Nunca encolhe dentro de contêiner flex vertical nem prende altura.
+      expect(classes).toContain("shrink-0");
+      expect(classes).toContain("flex-wrap");
+      expect(classes).not.toContain("overflow-hidden");
+      expect(classes.some((c) => /^h-(?:\d+|\[[^\]]+\]|px|full|screen)$/.test(c))).toBe(false);
+      expect(classes.some((c) => /^max-h-/.test(c))).toBe(false);
+      // `min-h-12` sobrescreve `min-height: auto` no flexbox e deixava o WebKit esmagar a linha.
+      expect(classes.some((c) => /^min-h-/.test(c))).toBe(false);
+
+      const identity = row.querySelector<HTMLElement>("[data-account-identity]");
+      const actions = row.querySelector<HTMLElement>("[data-account-actions]");
+      expect(identity).not.toBeNull();
+      expect(actions).not.toBeNull();
+      expect(row.contains(identity!)).toBe(true);
+      expect(row.contains(actions!)).toBe(true);
+      expect(identity!.className).toContain("min-w-0");
+      expect(identity!.querySelector(".truncate")).not.toBeNull();
+      expect(actions!.className).toContain("shrink-0");
+      expect(actions!.className).toContain("flex-wrap");
+
+      // Os botões de ação da conta ficam dentro do bloco dela (nunca fora/sobrepostos).
+      const labels = [...actions!.querySelectorAll("button")].map(
+        (b) => b.textContent?.trim() || b.getAttribute("aria-label") || "",
+      );
+      expect(labels).toContain("settings.accounts.health.check");
+      expect(labels).toContain("settings.accounts.limits.btn");
+      expect(labels).toContain("settings.accounts.identity.btn");
+      expect(labels).toContain("settings.accounts.relogin");
+    }
+
+    // A conta extra também traz o botão de remover dentro do próprio bloco.
+    const extraButtons = [...rows[1]!.querySelectorAll("button")].map(
+      (b) => b.getAttribute("aria-label") || b.textContent?.trim() || "",
+    );
+    expect(extraButtons).toContain("settings.accounts.delete.action");
+
+    // O contêiner rolável não pode ser um flex-col que comprima diretamente as linhas.
+    const scroller = host.querySelector<HTMLElement>(".cc-scroll");
+    expect(scroller).not.toBeNull();
+    expect(scroller!.className.split(/\s+/)).not.toContain("flex-col");
+
+    // A seção de pools (quando há 2+ contas) também não pode encolher.
+    const poolsSection = host.querySelector<HTMLElement>("section");
+    expect(poolsSection).not.toBeNull();
+    expect(poolsSection!.className.split(/\s+/)).toContain("shrink-0");
+
+    // Somente tokens de tema: nenhum hex embutido na árvore da conta.
+    expect(host.innerHTML).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  });
 });
