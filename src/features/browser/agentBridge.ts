@@ -1081,7 +1081,7 @@ function errorText(cause: unknown): string {
  */
 export const PORTAL_OPS = new Set([
   "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll",
-  "wait", "screenshot", "console", "layout", "act", "reset",
+  "wait", "wait_human", "screenshot", "console", "layout", "act", "reset",
 ]);
 
 /** Confere o `act` contra a página como ficou (um snapshot completo, não só o que está à vista). Nunca lança: sem leitura, o relatório sai como estava. */
@@ -1275,6 +1275,12 @@ export async function runPortalRequest(
 ): Promise<string> {
   if (!PORTAL_OPS.has(request.op)) {
     throw new Error(`Um portal não aceita '${request.op}'. Aceita: ${[...PORTAL_OPS].join(", ")}.`);
+  }
+  if (request.op === "wait_human") {
+    const handoffId = required(request, "handoff");
+    const timeoutS = Math.min(Math.max(num(request, "timeout_s") ?? 900, 1), 1800);
+    const result = await waitForCaptchaHandoff(handoffId, timeoutS * 1000);
+    return JSON.stringify(result);
   }
   // El nodo monta el navegador al dibujarse; si el canvas todavía no lo hizo (ventana en
   // otra vista), se espera a que aparezca.
