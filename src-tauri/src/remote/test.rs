@@ -298,3 +298,178 @@ async fn limite_de_taxa_429() {
     assert_eq!(throttled.status(), reqwest::StatusCode::TOO_MANY_REQUESTS);
     server.shutdown();
 }
+
+// ── Parte B3: presets e ações perigosas com confirmação ──────────
+
+fn remote_ctx(preset: Preset) -> crate::ipc::mcp::McpContext {
+    crate::ipc::mcp::McpContext::Remote {
+        client: "cli-b3".into(),
+        cwd: "/repo".into(),
+        preset,
+        folders: vec!["/repo".into()],
+    }
+}
+
+fn listed_tool_names(ctx: &crate::ipc::mcp::McpContext) -> Vec<String> {
+    let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let resp = crate::ipc::mcp::handle_frame(ctx, "", &req, &mut |_, _| Ok(json!({})))
+        .expect("tools/list devolve resposta");
+    resp["result"]["tools"]
+        .as_array()
+        .expect("lista de tools")
+        .iter()
+        .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(str::to_string))
+        .collect()
+}
+
+#[test]
+fn preset_leitura_nao_lista_nem_chama_browser_type() {
+    let ctx = remote_ctx(Preset::Read);
+    let names = listed_tool_names(&ctx);
+    assert!(
+        !names.iter().any(|n| n == "browser_type"),
+        "Leitura não deve listar browser_type: {names:?}"
+    );
+    assert!(
+        !names.iter().any(|n| n == "chat_send"),
+        "Leitura não deve listar chat_send"
+    );
+    assert!(
+        names.iter().any(|n| n == "chat_list") && names.iter().any(|n| n == "design_list"),
+        "Leitura mantém ferramentas de consulta: {names:?}"
+    );
+
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": { "name": "browser_type", "arguments": { "target": "e1", "text": "x" } }
+    });
+    let mut dispatched = false;
+    let resp = crate::ipc::mcp::handle_frame(&ctx, "", &req, &mut |_, _| {
+        dispatched = true;
+        Ok(json!({ "text": "ok" }))
+    })
+    .unwrap();
+    assert!(!dispatched, "browser_type não pode ser despachada no preset Leitura");
+    assert_eq!(resp["result"]["isError"], true);
+}
+
+#[test]
+fn preset_navegador_nao_chama_chat_send() {
+    let ctx = remote_ctx(Preset::Browser);
+    let names = listed_tool_names(&ctx);
+    assert!(
+        names.iter().any(|n| n == "browser_type"),
+        "Navegador deve listar browser_type"
+    );
+    assert!(
+        !names.iter().any(|n| n == "chat_send"),
+        "Navegador não deve listar chat_send"
+    );
+    assert!(
+        !names.iter().any(|n| n == "git_push"),
+        "Navegador não deve listar git_push"
+    );
+
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": { "name": "chat_send", "arguments": { "thread": "t1", "text": "oi" } }
+    });
+    let mut dispatched = false;
+    let resp = crate::ipc::mcp::handle_frame(&ctx, "", &req, &mut |_, _| {
+        dispatched = true;
+        Ok(json!({ "text": "ok" }))
+    })
+    .unwrap();
+    assert!(!dispatched, "chat_send não pode ser despachada no preset Navegador");
+    assert_eq!(resp["result"]["isError"], true);
+}
+
+#[test]
+fn acao_perigosa_fica_pendente_ate_confirmar() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+
+    assert!(super::approval::needs_approval("git_push", &json!({})));
+    assert!(super::approval::needs_approval("secret_run", &json!({ "secret_id": "s1", "program": "curl" })));
+    assert!(super::approval::needs_approval("vault_run", &json!({})));
+    assert!(super::approval::needs_approval("browser_fill_login", &json!({})));
+    assert!(super::approval::needs_approval("floor_delete", &json!({})));
+    assert!(super::approval::needs_approval("tab_send", &json!({ "tab": "t-usuario", "text": "rm -rf" })));
+    assert!(super::approval::needs_approval("delegate_task", &json!({ "budget_usd": 25.0 })));
+    assert!(!super::approval::needs_approval("browser_snapshot", &json!({})));
+
+    let (asked_tx, asked_rx) = mpsc::channel::<serde_json::Value>();
+    let (decide_tx, decide_rx) = mpsc::channel::<String>();
+    let forge_executed = Arc::new(AtomicBool::new(false));
+    let forge_flag = forge_executed.clone();
+
+    let worker = std::thread::spawn(move || {
+        let ctx = remote_ctx(Preset::All);
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": { "name": "git_push", "arguments": {} }
+        });
+        crate::ipc::mcp::handle_frame(&ctx, "", &req, &mut |command, payload| {
+            if command == "user.ask" {
+                asked_tx.send(payload).unwrap();
+                let answer = decide_rx.recv().unwrap();
+                return Ok(json!({ "text": answer }));
+            }
+            if command == "forge.run" {
+                forge_flag.store(true, Ordering::SeqCst);
+                return Ok(json!({ "text": "pushed" }));
+            }
+            Err(format!("comando inesperado: {command}"))
+        })
+    });
+
+    // O pedido de confirmação chega com cliente e tool, e a ação ainda NÃO executou.
+    let ask_payload = asked_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("ação perigosa deve pedir confirmação via user.ask");
+    let question = ask_payload["question"].as_str().unwrap_or("");
+    assert!(question.contains("cli-b3"), "cartão deve mostrar o cliente: {question}");
+    assert!(question.contains("git_push"), "cartão deve mostrar a tool: {question}");
+    assert!(
+        !forge_executed.load(Ordering::SeqCst),
+        "git_push não pode rodar antes da confirmação"
+    );
+
+    // Após a pessoa confirmar, a ação prossegue.
+    decide_tx.send("Permitir".into()).unwrap();
+    let resp = worker.join().unwrap().unwrap();
+    assert!(forge_executed.load(Ordering::SeqCst), "git_push deve executar após confirmar");
+    assert!(resp["result"].get("isError").is_none(), "{resp}");
+}
+
+#[test]
+fn acao_perigosa_recusada_quando_a_pessoa_nega() {
+    let ctx = remote_ctx(Preset::All);
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "tools/call",
+        "params": { "name": "git_push", "arguments": {} }
+    });
+    let mut forge_called = false;
+    let resp = crate::ipc::mcp::handle_frame(&ctx, "", &req, &mut |command, _payload| {
+        if command == "user.ask" {
+            return Ok(json!({ "text": "Recusar" }));
+        }
+        if command == "forge.run" {
+            forge_called = true;
+            return Ok(json!({ "text": "pushed" }));
+        }
+        Err(format!("comando inesperado: {command}"))
+    })
+    .unwrap();
+    assert!(!forge_called, "quando a pessoa nega, git_push não pode rodar");
+    assert_eq!(resp["result"]["isError"], true);
+}
+

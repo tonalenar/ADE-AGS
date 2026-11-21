@@ -1285,6 +1285,26 @@ where
         Err(error) => return tool_error(&error),
     };
     let context = resolved.as_ref();
+    if let McpContext::Remote { client, cwd, preset, .. } = context {
+        if !remote_preset_allows(*preset, name) {
+            return tool_error(&format!(
+                "A ferramenta '{name}' não está liberada no preset {:?} deste cliente remoto.",
+                preset
+            ));
+        }
+        if crate::remote::approval::needs_approval_for_client(
+            name,
+            &args,
+            client,
+            &crate::ipc::guard::opened_by,
+        ) {
+            if let Err(error) =
+                crate::remote::approval::request_confirmation(client, cwd, name, &args, send)
+            {
+                return tool_error(&error);
+            }
+        }
+    }
     if let (McpContext::Task(task_id), TOOL_NAME) = (context, name) {
         approve(task_id, &args, send)
     } else if let Some(tool) = BROWSER_TOOLS.iter().find(|t| t.name == name) {
@@ -1321,6 +1341,49 @@ where
 // ── Remote MCP (Parte B) ─────────────────────────────────────────
 
 const REMOTE_FOLDER_DENIED: &str = "Pasta fora das liberadas para este agente";
+
+/// Tabela de permissões por preset remoto (§5.2 de ADE_REMOTA.md).
+/// Aplica-se tanto na listagem (`tools/list`) quanto no despacho (`tools/call`).
+pub(crate) fn remote_preset_allows(preset: crate::remote::Preset, name: &str) -> bool {
+    use crate::remote::Preset;
+
+    // Nunca oferece broker da frota nem memória exclusiva de task headless.
+    if name == TOOL_NAME || name.starts_with("memory_") {
+        return false;
+    }
+
+    let is_read = is_read_only(name)
+        && !name.starts_with("browser_")
+        && !name.starts_with("vault_")
+        && name != "git_fetch";
+    if is_read {
+        return true;
+    }
+
+    let is_browser_or_vault = name.starts_with("browser_") || name.starts_with("vault_");
+    if matches!(preset, Preset::Browser | Preset::Agents | Preset::All) && is_browser_or_vault {
+        return true;
+    }
+
+    let is_agents = CHAT_TOOLS.iter().any(|t| t.name == name)
+        || ORCHESTRATION_TOOLS
+            .iter()
+            .any(|t| t.name == name && !t.name.starts_with("memory_"))
+        || PEER_TOOLS.iter().any(|(tool, _)| *tool == name)
+        || DESIGN_TOOLS.iter().any(|t| t.name == name)
+        || RENDER_TOOLS.iter().any(|t| t.name == name)
+        || matches!(name, SECRET_REQUEST_TOOL | SECRET_REVOKE_TOOL);
+    if matches!(preset, Preset::Agents | Preset::All) && is_agents {
+        return true;
+    }
+
+    let is_all = GIT_TOOLS.iter().any(|t| t.name == name)
+        || COMPUTER_USE_TOOLS.iter().any(|t| t.name == name)
+        || DEVICE_TOOLS.iter().any(|t| t.name == name)
+        || name == SECRET_RUN_TOOL
+        || matches!(name, "tab_send" | "tab_type" | "tab_create");
+    matches!(preset, Preset::All) && is_all
+}
 
 fn remote_tool_uses_cwd(name: &str) -> bool {
     BROWSER_TOOLS.iter().any(|t| t.name == name)
@@ -1828,7 +1891,12 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
         tools.extend(device_schemas());
     }
     tools.push(ask_schema());
-    if matches!(context, McpContext::Remote { .. }) {
+    if let McpContext::Remote { preset, .. } = context {
+        tools.retain(|tool| {
+            tool.get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| remote_preset_allows(*preset, name))
+        });
         remote_add_project_property(&mut tools);
     }
     // Todo el texto de una vez y en un solo lugar: el `name` queda pelado (lo prefija la

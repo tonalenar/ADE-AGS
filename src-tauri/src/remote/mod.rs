@@ -2,6 +2,7 @@
 //!
 //! O servidor nasce desligado e nunca escuta em `0.0.0.0` nem `::`.
 
+pub mod approval;
 pub mod clients;
 pub mod http;
 #[cfg(test)]
