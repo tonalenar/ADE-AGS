@@ -183,6 +183,7 @@ pub(crate) fn tool_names() -> Vec<&'static str> {
     names.extend(CHAT_TOOLS.iter().map(|t| t.name));
     names.push(ASK_TOOL);
     names.extend([SECRET_REQUEST_TOOL, SECRET_RUN_TOOL, SECRET_REVOKE_TOOL]);
+    names.extend([VAULT_LIST_TOOL, VAULT_REQUEST_TOOL, BROWSER_FILL_LOGIN_TOOL]);
     names.push(TOOL_NAME);
     names
 }
@@ -1237,8 +1238,8 @@ where
         return call_tool_inner(context, name, args, send);
     }
     let mut result = call_tool_inner(context, name, args, send);
-    // Resultados de segredos nunca vão para spill, mesmo se o programa terminar com erro.
-    if name.starts_with("secret_") {
+    // Resultados de segredos e do cofre nunca vão para spill, mesmo se houver erro.
+    if name.starts_with("secret_") || name.starts_with("vault_") || name == BROWSER_FILL_LOGIN_TOOL {
         return result;
     }
     super::spill::spill_tool_result(super::spill::root().as_deref(), &context.spill_session(), &mut result);
@@ -1277,6 +1278,12 @@ where
         secret_run(context, args, send)
     } else if name == SECRET_REVOKE_TOOL {
         secret_revoke(context, args, send)
+    } else if name == VAULT_LIST_TOOL {
+        vault_list(context, send)
+    } else if name == VAULT_REQUEST_TOOL {
+        vault_request(context, args, send)
+    } else if name == BROWSER_FILL_LOGIN_TOOL {
+        browser_fill_login(context, args, send)
     } else {
         tool_error(&format!("'{name}' não é uma ferramenta deste servidor"))
     }
@@ -1603,6 +1610,7 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
         tools.extend(peer_schemas());
         if allowed_powers.map_or(true, |powers| powers.contains(&OrchestrationPower::Spawn)) {
             tools.extend(secret_schemas());
+            tools.extend(vault_schemas());
         }
     }
     if matches!(context, McpContext::Cwd { .. }) {
@@ -1677,6 +1685,7 @@ pub(crate) fn is_read_only(name: &str) -> bool {
         || RENDER_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || DEVICE_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || TEAM_READ_ONLY.contains(&name)
+        || name == VAULT_LIST_TOOL
 }
 
 /// Las anotaciones del protocolo (`readOnlyHint`, `destructiveHint`, `openWorldHint`): lo
@@ -1879,6 +1888,132 @@ where
     match send("secret.revoke", payload) {
         Ok(data) => {
             let text = data.get("text").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| data.to_string());
+            json!({ "content": [{ "type": "text", "text": text }] })
+        }
+        Err(error) => tool_error(&error),
+    }
+}
+
+// ── Cofre de logins (Parte A) ───────────────────────────────────────────
+
+/// Cofre de logins do usuário: metadados sem senha, cadastro via cartão e preenchimento
+/// direto no navegador sem expor a senha ao modelo.
+pub const VAULT_LIST_TOOL: &str = "vault_list";
+pub const VAULT_REQUEST_TOOL: &str = "vault_request";
+pub const BROWSER_FILL_LOGIN_TOOL: &str = "browser_fill_login";
+
+fn vault_schemas() -> Vec<Value> {
+    vec![
+        json!({
+            "name": VAULT_LIST_TOOL,
+            "description": "List saved logins from ADE's operating-system vault. Returns only metadata ({ entries: [{ id, origin, username, label }] }); passwords are never returned to the agent.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": VAULT_REQUEST_TOOL,
+            "description": "Ask the user to save a login for an origin in ADE's vault through a secure password card. Returns { id } when saved or { declined: true } if the user declines. Never ask for passwords in chat.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "origin": { "type": "string", "description": "Origin of the site, such as 'https://accounts.example.com'." },
+                    "reason": { "type": "string", "description": "Short explanation shown on the secure card of why this login is needed." }
+                },
+                "required": ["origin", "reason"]
+            }
+        }),
+        json!({
+            "name": BROWSER_FILL_LOGIN_TOOL,
+            "description": "Fill username and password from ADE's vault into the current browser page without revealing the password to the agent. Verifies that the current page origin matches the saved login (returns origin_mismatch otherwise), requests confirmation on first use per agent, optionally submits the form, and shields the tab afterwards. Returns { filled: true, submitted: bool }.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Optional vault entry id from vault_list or vault_request." },
+                    "origin": { "type": "string", "description": "Optional origin to match when id is omitted." },
+                    "submit": { "type": "boolean", "description": "Submit the login form after filling (default false)." }
+                }
+            }
+        }),
+    ]
+}
+
+fn vault_list<F>(context: &McpContext, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let McpContext::Cwd { tab: Some(_), .. } = context else {
+        return tool_error("vault_list exige uma conversa interativa conectada à ADE.");
+    };
+    match send("vault.list", context.scope()) {
+        Ok(data) => json!({ "content": [{ "type": "text", "text": data.to_string() }] }),
+        Err(error) => tool_error(&error),
+    }
+}
+
+fn vault_request<F>(context: &McpContext, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let McpContext::Cwd { tab: Some(_), .. } = context else {
+        return tool_error("vault_request exige uma conversa interativa conectada à ADE.");
+    };
+    let Some(origin) = arguments
+        .get("origin")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    else {
+        return tool_error("Informe origin para cadastrar o login no cofre.");
+    };
+    let Some(reason) = arguments
+        .get("reason")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    else {
+        return tool_error("Informe reason explicando o motivo do pedido.");
+    };
+    let mut payload = context.scope();
+    payload["origin"] = json!(origin);
+    payload["reason"] = json!(reason);
+    match send("vault.request", payload) {
+        Ok(data) => json!({ "content": [{ "type": "text", "text": data.to_string() }] }),
+        Err(error) => tool_error(&error),
+    }
+}
+
+fn browser_fill_login<F>(context: &McpContext, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let McpContext::Cwd { tab: Some(_), .. } = context else {
+        return tool_error("browser_fill_login exige uma conversa interativa conectada à ADE.");
+    };
+    let mut payload = context.scope();
+    if let Some(id) = arguments
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    {
+        payload["id"] = json!(id);
+    }
+    if let Some(origin) = arguments
+        .get("origin")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    {
+        payload["origin"] = json!(origin);
+    }
+    if let Some(submit) = arguments.get("submit").and_then(Value::as_bool) {
+        payload["submit"] = json!(submit);
+    }
+    match send("vault.fill", payload) {
+        Ok(data) => {
+            let text = data
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| data.to_string());
             json!({ "content": [{ "type": "text", "text": text }] })
         }
         Err(error) => tool_error(&error),

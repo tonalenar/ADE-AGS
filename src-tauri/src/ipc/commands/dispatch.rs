@@ -341,6 +341,10 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "secret.request" => super::agent_secrets::request(app, args),
         "secret.consume" => super::agent_secrets::consume(args),
         "secret.revoke" => super::agent_secrets::revoke(args),
+        // Cofre de logins do usuário (ver `ipc/commands/vault.rs`).
+        "vault.list" => super::vault::list(args),
+        "vault.request" => super::vault::request(app, args),
+        "vault.fill" => super::vault::fill(app, args),
         "forge.run" => crate::forge::tools::run(app, args),
         "mcp.cancel" => {
             if let Some(id) = args.get("callId").and_then(Value::as_str) {

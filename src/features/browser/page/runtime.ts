@@ -24,6 +24,7 @@ import type {
 import { virtualKeyCode } from "./keys";
 import { createCursor } from "./cursor";
 import { componentChain, describeElement, selectorOf } from "./dom";
+import { findLoginFields } from "./loginFields";
 import {
   errorKindOf, headerList, headerValue, parseRawHeaders, readResponseBody, requestBodyPreview, MAX_PAGE_BODY,
 } from "./netCapture";
@@ -823,8 +824,8 @@ declare global {
     if (el.tagName === "INPUT") {
       const input = el as HTMLInputElement;
       if (["checkbox", "radio", "button", "submit", "reset", "image", "file"].includes(input.type) || !input.value) return undefined;
-      // La contraseña no sale de la página: alcanza con saber que hay algo escrito.
-      return input.type === "password" ? "•".repeat(Math.min(input.value.length, 8)) : normalizeName(input.value, 100);
+      // A senha nunca sai da página: mostra máscara fixa sem revelar o tamanho.
+      return input.type === "password" ? "••••" : normalizeName(input.value, 100);
     }
     if ((el as HTMLElement).isContentEditable) return normalizeName(textOf(el), 100) || undefined;
     return undefined;
@@ -1378,6 +1379,39 @@ declare global {
     return { typed: describeElement(el), value: valueOf(el) ?? "", ...(options !== null ? { options } : {}), ...waitedField(waited) };
   }
 
+  async function fillInputField(field: HTMLInputElement, text: string, cursorLabel: string): Promise<void> {
+    await cursor.toElement(field, cursorLabel);
+    field.focus({ preventScroll: false });
+    if (!(await typeNatively(true, text))) {
+      nativeSetValue(field, text);
+      inputEvent(field, text);
+      field.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
+  /**
+   * Preenche um formulário de login com credenciais do cofre da ADE.
+   * A senha nunca entra no texto do cursor, no resultado nem em mensagens de erro.
+   */
+  async function fillLogin(username: string, password: string, submit: boolean): Promise<{ filled: true; submitted: boolean }> {
+    const fields = findLoginFields(document);
+    if (!fields) {
+      throw new Error("Nenhum campo de senha (input[type=password]) foi encontrado nesta página.");
+    }
+    if (fields.username && username) {
+      await fillInputField(fields.username, username, "fill username");
+    }
+    await fillInputField(fields.password, password, "fill password");
+    let submitted = false;
+    if (submit) {
+      await press("Enter", fields.password);
+      submitted = true;
+    } else {
+      await settle(800, 150, PENDING_MS.type);
+    }
+    return { filled: true, submitted };
+  }
+
   /** Digita no campo focado pelo `Input` do CDP: com `clear`, seleciona tudo antes (o texto novo substitui; vazio apaga). */
   async function typeNatively(clear: boolean, text: string): Promise<boolean> {
     if (!trustedInput) return false;
@@ -1848,13 +1882,14 @@ declare global {
       markedPrints.set(ref, fingerprintOf(el));
     }
 
+    const isPasswordInput = el.tagName === "INPUT" && (el as HTMLInputElement).type === "password";
     const attributes: Record<string, string> = {};
     for (const attr of Array.from(el.attributes)) {
       if (attr.name.startsWith("data-ade-ags")) continue;
       // Las clases y el estilo en línea ya viajan aparte; el resto (aria, data, name,
       // href, type…) es justo lo que identifica al elemento en el código.
       if (attr.name === "class" || attr.name === "style") continue;
-      attributes[attr.name] = clip(attr.value, 200);
+      attributes[attr.name] = isPasswordInput && attr.name === "value" && attr.value ? "••••" : clip(attr.value, 200);
     }
 
     const ancestors: string[] = [];
@@ -1903,7 +1938,7 @@ declare global {
         zIndex: style.zIndex,
         overflow: style.overflow,
       },
-      html: clip(el.outerHTML, 1500),
+      html: clip(isPasswordInput ? el.outerHTML.replace(/value="[^"]*"/gi, 'value="••••"') : el.outerHTML, 1500),
       url: location.href,
     };
   }
@@ -1943,6 +1978,7 @@ declare global {
       case "click": return acting(command.target, click);
       case "hover": return acting(command.target, hover);
       case "type": return acting(command.target, (el) => type(el, command.text, !!command.clear, !!command.submit));
+      case "fillLogin": return fillLogin(command.username, command.password, !!command.submit);
       case "press": return command.target ? acting(command.target, (el) => press(command.key, el)) : press(command.key);
       case "select": return acting(command.target, (el) => select(el, command.value));
       case "scroll": return scroll(command);

@@ -82,6 +82,7 @@ pub mod testspeed;
 pub use terminal::SESSION_ENV;
 mod updates;
 mod usage;
+pub(crate) mod vault;
 mod storage_usage;
 mod diagnostics;
 pub mod util;
