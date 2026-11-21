@@ -769,7 +769,9 @@ fn agy_usage_chave_de_cache_separa_conta_principal_de_conta_extra() {
     );
 }
 
-#[cfg(unix)]
+// Só macOS: o HOME isolado por conta do Antigravity (`profile` = HOME) e o chaveiro próprio só existem lá;
+// no Linux a conta extra nem tem ambiente (ver `agents/test.rs`).
+#[cfg(target_os = "macos")]
 #[test]
 fn agy_usage_conta_extra_usa_home_isolado_desbloqueia_chaveiro_e_nao_mistura_com_principal() {
     use std::os::unix::fs::PermissionsExt;
