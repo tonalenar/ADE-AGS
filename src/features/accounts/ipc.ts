@@ -75,8 +75,9 @@ export type AgyWindow = {
 export type AgyGroup = { name: string; description?: string; windows: AgyWindow[] };
 export type AgyUsage = { installed: boolean; groups: AgyGroup[]; fetchedAt: number; cached: boolean };
 
-/** A cota do login local do `agy`, por grupo de modelos (ver `usage::agy`). `force` ausente vai ao vivo. */
-export const antigravityCliUsage = (force = true) => invoke<AgyUsage>("antigravity_cli_usage", { force });
+/** A cota do `agy` (conta principal ou perfil isolado), por grupo de modelos (ver `usage::agy`). `force` ausente vai ao vivo. */
+export const antigravityCliUsage = (force = true, accountId?: string | null) =>
+  invoke<AgyUsage>("antigravity_cli_usage", accountId ? { force, accountId } : { force });
 
 /** Cupo, mail y plan de una cuenta de Codex. `force` ausente va en vivo, como el popover. */
 export const codexAccountUsage = (accountId: string, force = true) =>

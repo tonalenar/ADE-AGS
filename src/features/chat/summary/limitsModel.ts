@@ -4,6 +4,7 @@
  * Claude, as janelas do Codex, os medidores do Antigravity; e o resumo do ledger para o orçamento do
  * dia). O que não tem fonte, ou falhou, é "não medido": nunca se inventa um número.
  */
+import type { AgyGroup } from "@/features/accounts/ipc";
 import type { LiveUsage } from "@/features/accounts/usage";
 import type { AccountLimits } from "@/features/accounts/types";
 import type { AgyEntry, AntigravityEntry, CodexEntry } from "@/features/canvas/usageStore";
@@ -100,10 +101,27 @@ export function readCodex(entry: CodexEntry | undefined, loggedIn: boolean, now:
   ], q.rejected);
 }
 
-/** Antigravity: o cupo é por modelo; mostra o mais gasto. */
+function readAgyGroups(groups: AgyGroup[], now: number): AccountReading {
+  const toEpoch = (iso?: string): number | null => {
+    const ms = iso ? Date.parse(iso) : NaN;
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+  };
+  const windows: LimitWindow[] = [];
+  for (const group of groups) {
+    for (const w of group.windows) {
+      const kind: WindowKind = w.kind === "session" ? "session" : w.kind === "weekly" ? "week" : "model";
+      windows.push(timed(kind, w.usedPct / 100, toEpoch(w.resetsAt), now, group.name, clamp(w.usedPct)));
+    }
+  }
+  return measured(windows);
+}
+
+/** Antigravity: perfil CLI lê grupos do `agy /usage`; conta OAuth lê medidores por modelo. */
 export function readAntigravity(entry: AntigravityEntry | undefined, loggedIn: boolean, now: number): AccountReading {
   if (!loggedIn) return unmeasured("notLoggedIn");
-  if (!entry || entry.meters === null) return unmeasured(entry?.failed ? "failed" : "loading");
+  if (!entry) return unmeasured("loading");
+  if (entry.groups !== undefined && entry.groups !== null) return readAgyGroups(entry.groups, now);
+  if (entry.meters === null) return unmeasured(entry.failed ? "failed" : "loading");
   const top = entry.meters[0];
   return measured([top ? timed("model", top.percent / 100, top.resetsAt, now, top.name, clamp(top.percent)) : null]);
 }
@@ -117,18 +135,7 @@ export function readAgy(entry: AgyEntry, loggedIn: boolean, now: number): Accoun
   const usage = entry.usage;
   if (!usage) return unmeasured(entry.failed ? "failed" : "loading");
   if (!usage.installed) return unmeasured("noSource");
-  const toEpoch = (iso?: string): number | null => {
-    const ms = iso ? Date.parse(iso) : NaN;
-    return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
-  };
-  const windows: LimitWindow[] = [];
-  for (const group of usage.groups) {
-    for (const w of group.windows) {
-      const kind: WindowKind = w.kind === "session" ? "session" : w.kind === "weekly" ? "week" : "model";
-      windows.push(timed(kind, w.usedPct / 100, toEpoch(w.resetsAt), now, group.name, clamp(w.usedPct)));
-    }
-  }
-  return measured(windows);
+  return readAgyGroups(usage.groups, now);
 }
 
 /** O destaque do cabeçalho: a janela mais gasta (100 se o servidor recusou). `null` = nenhum número. */

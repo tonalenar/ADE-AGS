@@ -205,11 +205,14 @@ function AccountRow({ account, usage, limits, onLogin, onDelete, onLimits, onIde
   const title = accountDisplayLabel(account, t("accounts.principalName"));
 
   return (
-    <div className="cc-t group flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 min-h-12 py-2 rounded-lg
-      bg-white dark:bg-white/4
-      hover:bg-gray-50 dark:hover:bg-white/6">
+    <div
+      data-account-row={account.id}
+      className="cc-t group shrink-0 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2.5 rounded-lg
+        bg-white dark:bg-white/4
+        hover:bg-gray-50 dark:hover:bg-white/6"
+    >
 
-      <div className="flex items-center gap-3 min-w-0 flex-1 basis-56">
+      <div data-account-identity="" className="flex items-center gap-3 min-w-0 flex-1 basis-52">
         {/* Selo de iniciais em vez do logo da TUI: numa lista de contas do MESMO serviço,
             repetir o logo em cada linha não distingue nada. Cor e nome são da pessoa (ver
             `AccountIdentityDialog`). O ponto de estado diz se há sessão iniciada. */}
@@ -256,7 +259,7 @@ function AccountRow({ account, usage, limits, onLogin, onDelete, onLimits, onIde
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0 ml-auto">
+      <div data-account-actions="" className="flex flex-wrap items-center justify-end gap-1.5 shrink-0 ml-auto">
         <Button
           variant="outline"
           size="sm"
@@ -395,50 +398,54 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
         </Tooltip>
       </div>
 
-      <div className="flex-1 min-h-0 cc-scroll flex flex-col gap-1.5 p-3">
-        {system.map((account) => (
-          <AccountRow
-            key={account.id}
-            account={account}
-            usage={usage[account.id]}
-            limits={limits[account.id]}
-            onLogin={() => setLoginFor(account)}
-            onLimits={() => setLimitsFor(account)}
-            onIdentity={() => setIdentityFor(account)}
-          />
-        ))}
-        {rows.length === 0 ? (
-          <EmptyState
-            className="m-auto"
-            icon={<UserIcon className="w-7 h-7" />}
-            title={t("settings.accounts.emptyForAgent")}
-            description={!canAdd ? t("settings.accounts.add.needsProgram") : undefined}
-            action={
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={!canAdd}
-                onClick={() => setAdding(true)}
-              >
-                {t("settings.accounts.add")}
-              </Button>
-            }
-          />
-        ) : (
-          rows.map((account) => (
+      {/* O contêiner rolável é bloco normal e envolve uma coluna de altura natural: evita que o
+          flex-shrink de um flex-col com altura limitada comprima linhas que quebram em 2 faixas. */}
+      <div className="flex-1 min-h-0 cc-scroll p-3">
+        <div className="flex flex-col gap-1.5 min-h-full">
+          {system.map((account) => (
             <AccountRow
               key={account.id}
               account={account}
               usage={usage[account.id]}
               limits={limits[account.id]}
               onLogin={() => setLoginFor(account)}
-              onDelete={() => setDeleting(account)}
               onLimits={() => setLimitsFor(account)}
               onIdentity={() => setIdentityFor(account)}
             />
-          ))
-        )}
-        <PoolsSection agent={agent} />
+          ))}
+          {rows.length === 0 ? (
+            <EmptyState
+              className="m-auto"
+              icon={<UserIcon className="w-7 h-7" />}
+              title={t("settings.accounts.emptyForAgent")}
+              description={!canAdd ? t("settings.accounts.add.needsProgram") : undefined}
+              action={
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={!canAdd}
+                  onClick={() => setAdding(true)}
+                >
+                  {t("settings.accounts.add")}
+                </Button>
+              }
+            />
+          ) : (
+            rows.map((account) => (
+              <AccountRow
+                key={account.id}
+                account={account}
+                usage={usage[account.id]}
+                limits={limits[account.id]}
+                onLogin={() => setLoginFor(account)}
+                onDelete={() => setDeleting(account)}
+                onLimits={() => setLimitsFor(account)}
+                onIdentity={() => setIdentityFor(account)}
+              />
+            ))
+          )}
+          <PoolsSection agent={agent} />
+        </div>
       </div>
 
       {limitsFor && (

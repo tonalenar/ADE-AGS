@@ -753,3 +753,283 @@ fn csi_com_parametro_enorme_nao_explode() {
     let out = super::screen::render("\u{1b}[999999999Bhi");
     assert!(out.contains("hi"), "{out}");
 }
+
+// ── Antigravity CLI `/usage` por conta (HOME e chaveiro isolados) ──────────
+
+#[test]
+fn agy_usage_chave_de_cache_separa_conta_principal_de_conta_extra() {
+    assert_eq!(super::agy::storage_key(None), "usage.antigravity.cli.v1");
+    assert_eq!(
+        super::agy::storage_key(Some("system:antigravity")),
+        "usage.antigravity.cli.v1"
+    );
+    assert_eq!(
+        super::agy::storage_key(Some("acc-kiro0")),
+        "usage.antigravity.cli.v1.acc-kiro0"
+    );
+}
+
+// Só macOS: o HOME isolado por conta do Antigravity (`profile` = HOME) e o chaveiro próprio só existem lá;
+// no Linux a conta extra nem tem ambiente (ver `agents/test.rs`).
+#[cfg(target_os = "macos")]
+#[test]
+fn agy_usage_conta_extra_usa_home_isolado_desbloqueia_chaveiro_e_nao_mistura_com_principal() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::{Arc, Mutex};
+
+    crate::accounts::use_mock_keyring_for_tests();
+
+    let root = std::env::temp_dir().join(format!("ade-agy-usage-{}", uuid::Uuid::new_v4()));
+    let real_home = root.join("home-real");
+    let account_dir = root.join("accounts/antigravity/Kiro0");
+    std::fs::create_dir_all(real_home.join("Library/Keychains")).unwrap();
+    std::fs::write(real_home.join("Library/Keychains/login.keychain-db"), "real").unwrap();
+    std::fs::create_dir_all(&account_dir).unwrap();
+
+    let db: crate::database::DbConnection = Arc::new(Mutex::new(crate::database::test_db()));
+    db.lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at, kind)
+             VALUES ('acc-kiro0', 'antigravity', 'Kiro0', ?1, 1, 'login')",
+            [account_dir.to_string_lossy().as_ref()],
+        )
+        .unwrap();
+
+    // No macOS, prepara o chaveiro isolado, grava a credencial no serviço "gemini" / conta
+    // "antigravity" (igual ao `agy` real) e TRAVA o chaveiro para provar que o leitor de uso
+    // desbloqueia antes de executar o `agy`.
+    #[cfg(target_os = "macos")]
+    let (real_def_before, real_list_before) = {
+        let def = std::process::Command::new("/usr/bin/security")
+            .arg("default-keychain")
+            .output()
+            .expect("default-keychain");
+        let list = std::process::Command::new("/usr/bin/security")
+            .arg("list-keychains")
+            .output()
+            .expect("list-keychains");
+        crate::accounts::env_for_account_for_agent_with_home(
+            &db,
+            "acc-kiro0",
+            "antigravity",
+            &real_home,
+        )
+        .unwrap();
+        let add = std::process::Command::new("/usr/bin/security")
+            .args([
+                "add-generic-password",
+                "-s",
+                "gemini",
+                "-a",
+                "antigravity",
+                "-w",
+                "segredo-ficticio-kiro0",
+                "-U",
+            ])
+            .env("HOME", &account_dir)
+            .output()
+            .expect("gravar credencial ficticia no chaveiro isolado");
+        assert!(
+            add.status.success(),
+            "falha ao gravar no chaveiro isolado: {}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        let kc = account_dir.join("Library/Keychains/antigravity.keychain-db");
+        let lock = std::process::Command::new("/usr/bin/security")
+            .args(["lock-keychain", kc.to_str().unwrap()])
+            .env("HOME", &account_dir)
+            .output()
+            .expect("lock-keychain");
+        assert!(lock.status.success());
+        (def.stdout, list.stdout)
+    };
+
+    // Fake `agy` executável: comprova que recebe HOME da conta, que variáveis de override foram
+    // removidas e (no macOS) que o chaveiro isolado está desbloqueado com a credencial da conta.
+    let fake_agy = root.join("fake-agy");
+    let expected_home = account_dir.to_string_lossy().to_string();
+    let keychain_check = if cfg!(target_os = "macos") {
+        r#"
+TOKEN=$(/usr/bin/security find-generic-password -s gemini -a antigravity -w 2>/dev/null || true)
+if [ "$TOKEN" != "segredo-ficticio-kiro0" ]; then
+  echo '{"status":"ERROR"}'
+  exit 1
+fi
+"#
+    } else {
+        ""
+    };
+    let script = format!(
+        r#"#!/bin/sh
+set -eu
+if [ "$HOME" != "{expected_home}" ]; then
+  echo "home errado: $HOME" >&2
+  exit 2
+fi
+if [ -n "${{JETSKI_OAUTH_TOKEN:-}}" ] || [ -n "${{AGY_ADC_AUTH:-}}" ] || [ -n "${{GEMINI_API_KEY:-}}" ]; then
+  echo "variavel sobrescritora vazou" >&2
+  exit 3
+fi
+{keychain_check}
+printf '%s\n' '{{"conversation_id":"c1","status":"SUCCESS","num_turns":0,"command":{{"name":"usage","data":{{"groups":[{{"name":"Gemini Models","buckets":[{{"id":"gemini-weekly","window":"weekly","remaining_fraction":0.4,"reset_time":"2026-10-31T12:35:00Z"}},{{"id":"gemini-5h","window":"5h","remaining_fraction":0.85,"reset_time":"2026-10-27T17:23:10Z"}}]}}]}}}}}}'
+"#
+    );
+    std::fs::write(&fake_agy, script).unwrap();
+    std::fs::set_permissions(&fake_agy, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let usage = super::agy::fetch_cli_usage_with(
+        &db,
+        Some("acc-kiro0"),
+        true,
+        &fake_agy,
+        |db, id| {
+            crate::accounts::env_for_account_for_agent_with_home(
+                db,
+                id,
+                "antigravity",
+                &real_home,
+            )
+        },
+    )
+    .expect("leitura da conta extra deveria funcionar");
+
+    assert!(usage.installed);
+    assert!(!usage.cached);
+    assert_eq!(usage.groups.len(), 1);
+    assert_eq!(usage.groups[0].name, "Gemini Models");
+    assert!((usage.groups[0].windows[0].used_pct - 60.0).abs() < 0.01);
+    assert!((usage.groups[0].windows[1].used_pct - 15.0).abs() < 0.01);
+
+    // Nenhum segredo aparece no retorno serializado.
+    let serialized = serde_json::to_string(&usage).unwrap();
+    assert!(!serialized.contains("segredo-ficticio-kiro0"));
+
+    // Cache foi gravado sob a chave da conta extra, sem poluir a conta principal.
+    assert!(
+        crate::database::get_setting(&db, "usage.antigravity.cli.v1.acc-kiro0")
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        crate::database::get_setting(&db, "usage.antigravity.cli.v1")
+            .unwrap()
+            .is_none()
+    );
+
+    // Leitura em cache (`force = false`) devolve o snapshot da conta extra sem rodar o CLI.
+    let cached = super::agy::fetch_cli_usage_with(
+        &db,
+        Some("acc-kiro0"),
+        false,
+        std::path::Path::new("/caminho/que/nao/existe"),
+        |_, _| panic!("nao deve resolver ambiente quando usa cache"),
+    )
+    .unwrap();
+    assert!(cached.cached);
+    assert_eq!(cached.groups.len(), 1);
+
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(
+            real_def_before,
+            std::process::Command::new("/usr/bin/security")
+                .arg("default-keychain")
+                .output()
+                .unwrap()
+                .stdout
+        );
+        assert_eq!(
+            real_list_before,
+            std::process::Command::new("/usr/bin/security")
+                .arg("list-keychains")
+                .output()
+                .unwrap()
+                .stdout
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn agy_usage_conta_extra_invalida_ou_sem_home_nunca_cai_na_principal() {
+    use std::sync::{Arc, Mutex};
+
+    let root = std::env::temp_dir().join(format!("ade-agy-no-fallback-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let ran_marker = root.join("ran");
+    let fake_agy = root.join("fake-agy");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(
+            &fake_agy,
+            format!("#!/bin/sh\ntouch '{}'\n", ran_marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_agy, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let db: crate::database::DbConnection = Arc::new(Mutex::new(crate::database::test_db()));
+    db.lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at, kind)
+             VALUES ('acc-claude', 'claude-code', 'Ton', '/tmp/claude', 1, 'login')",
+            [],
+        )
+        .unwrap();
+
+    // 1. Conta inexistente
+    let err_missing = super::agy::fetch_cli_usage_with(
+        &db,
+        Some("inexistente"),
+        true,
+        &fake_agy,
+        |db, id| crate::accounts::env_for_account_for_agent(db, id, "antigravity"),
+    );
+    assert!(err_missing.is_err());
+
+    // 2. Conta de outro provedor (claude-code)
+    let err_wrong_agent = super::agy::fetch_cli_usage_with(
+        &db,
+        Some("acc-claude"),
+        true,
+        &fake_agy,
+        |db, id| crate::accounts::env_for_account_for_agent(db, id, "antigravity"),
+    );
+    assert!(err_wrong_agent.is_err());
+
+    // 3. Resolvedor devolvendo mapa sem HOME (recusa executar no HOME principal)
+    let err_no_home = super::agy::fetch_cli_usage_with(
+        &db,
+        Some("acc-sem-home"),
+        true,
+        &fake_agy,
+        |_, _| Ok(std::collections::HashMap::new()),
+    );
+    assert!(err_no_home.is_err());
+
+    assert!(
+        !ran_marker.exists(),
+        "o binario agy nunca pode rodar no HOME principal quando a conta extra falha"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn claude_live_probe_remove_variaveis_sobrescritoras_em_conta_extra() {
+    let mut cmd = portable_pty::CommandBuilder::new("claude");
+    cmd.env("ANTHROPIC_API_KEY", "sk-herdada");
+    cmd.env("CLAUDE_CODE_OAUTH_TOKEN", "oauth-herdada");
+    let extra_env = vec![("CLAUDE_CONFIG_DIR".to_string(), "/tmp/conta-ton".to_string())];
+    super::live::apply_probe_env(&mut cmd, &extra_env);
+    assert_eq!(
+        cmd.get_env("CLAUDE_CONFIG_DIR").and_then(|v| v.to_str()),
+        Some("/tmp/conta-ton")
+    );
+    assert!(cmd.get_env("ANTHROPIC_API_KEY").is_none());
+    assert!(cmd.get_env("CLAUDE_CODE_OAUTH_TOKEN").is_none());
+}

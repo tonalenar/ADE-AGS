@@ -224,6 +224,24 @@ pub(super) fn account_env_from_row(
     kind: &str,
     base_url: Option<&str>,
 ) -> Result<Option<HashMap<String, String>>, String> {
+    account_env_from_row_with_home(
+        account_id,
+        agent_id,
+        dir,
+        kind,
+        base_url,
+        dirs::home_dir().as_deref(),
+    )
+}
+
+fn account_env_from_row_with_home(
+    account_id: &str,
+    agent_id: &str,
+    dir: &str,
+    kind: &str,
+    base_url: Option<&str>,
+    real_home: Option<&std::path::Path>,
+) -> Result<Option<HashMap<String, String>>, String> {
     // La variable sale del provider. Sin perfil (Gemini, Kimi, una TUI desconocida) no hay
     // mapa: no se hereda el de otra.
     let Some(adapter) = crate::agents::adapter_for(agent_id) else {
@@ -235,14 +253,12 @@ pub(super) fn account_env_from_row(
     // Antigravity: a conta é um HOME inteiro; é montado aqui, uma vez por lançamento, e nunca
     // apaga nada (ver `antigravity_home`). Sem isso o PTY abriria num HOME sem git nem ssh.
     if agent_id == "antigravity" {
-        if let Some(home) = dirs::home_dir() {
-            super::antigravity_home::prepare(&home, std::path::Path::new(dir)).map_err(
-                |error| {
-                    format!(
-                        "Não foi possível preparar o HOME isolado da conta Antigravity: {error}"
-                    )
-                },
-            )?;
+        if let Some(home) = real_home {
+            super::antigravity_home::prepare(home, std::path::Path::new(dir)).map_err(|error| {
+                format!(
+                    "Não foi possível preparar o HOME isolado da conta Antigravity: {error}"
+                )
+            })?;
         }
     }
     // El llavero se lee FUERA del lock de la base: puede tardar (D-Bus, Keychain).
@@ -271,6 +287,30 @@ pub fn env_for_account_for_agent(
     account_id: &str,
     expected_agent_id: &str,
 ) -> Result<HashMap<String, String>, String> {
+    env_for_account_for_agent_inner(
+        db,
+        account_id,
+        expected_agent_id,
+        dirs::home_dir().as_deref(),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn env_for_account_for_agent_with_home(
+    db: &DbConnection,
+    account_id: &str,
+    expected_agent_id: &str,
+    real_home: &std::path::Path,
+) -> Result<HashMap<String, String>, String> {
+    env_for_account_for_agent_inner(db, account_id, expected_agent_id, Some(real_home))
+}
+
+fn env_for_account_for_agent_inner(
+    db: &DbConnection,
+    account_id: &str,
+    expected_agent_id: &str,
+    real_home: Option<&std::path::Path>,
+) -> Result<HashMap<String, String>, String> {
     let (agent_id, dir, kind, base_url): (String, String, String, Option<String>) = {
         let conn = db
             .lock()
@@ -285,9 +325,15 @@ pub fn env_for_account_for_agent(
     if agent_id != expected_agent_id {
         return Err("A conta selecionada não pertence ao provedor desta aba.".into());
     }
-    account_env_from_row(account_id, &agent_id, &dir, &kind, base_url.as_deref())?.ok_or_else(
-        || "O perfil ou a credencial desta conta não está disponível no sistema.".to_string(),
-    )
+    account_env_from_row_with_home(
+        account_id,
+        &agent_id,
+        &dir,
+        &kind,
+        base_url.as_deref(),
+        real_home,
+    )?
+    .ok_or_else(|| "O perfil ou a credencial desta conta não está disponível no sistema.".to_string())
 }
 
 /// Tipo da conta, validando também o provedor esperado pelo lançamento do PTY.

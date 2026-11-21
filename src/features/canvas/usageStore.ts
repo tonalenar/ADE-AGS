@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { antigravityCliUsage, codexAccountUsage, discoverAntigravityAccount, type AgyUsage } from "@/features/accounts/ipc";
+import { antigravityCliUsage, codexAccountUsage, discoverAntigravityAccount, type AgyGroup, type AgyUsage } from "@/features/accounts/ipc";
 import type { AgentAccount, CodexUsage } from "@/features/accounts/types";
 import { modelMeters, type ModelMeter } from "./antigravityQuota";
 import { agentAccountUsage, claudeLiveUsage, isUsageFresh, planLabel, type LiveUsage } from "@/features/accounts/usage";
@@ -8,6 +8,8 @@ import { agentAccountUsage, claudeLiveUsage, isUsageFresh, planLabel, type LiveU
 /** Cada cuánto se renuevan las cuotas mientras el canvas está abierto. */
 const EVERY = 5 * 60 * 1000;
 const isSystem = (a: AgentAccount) => a.id.startsWith("system:");
+/** Contas Antigravity por perfil CLI (`HOME` isolado no macOS) leem a cota pelo `agy /usage`, não por OAuth da ADE. */
+const isAntigravityCliProfile = (a: AgentAccount) => a.id === "system:antigravity" || a.envVar === "HOME";
 
 export interface CodexEntry {
   usage: CodexUsage | null;
@@ -17,6 +19,8 @@ export interface CodexEntry {
 export interface AntigravityEntry {
   /** `null` = todavía no se supo. Los más gastados primero (ver `modelMeters`). */
   meters: ModelMeter[] | null;
+  /** Grupos e janelas devolvidos pelo `agy /usage` quando a conta é um perfil CLI isolado. */
+  groups?: AgyGroup[] | null;
   failed: boolean;
   /** Epoch en segundos de la última consulta buena; 0 = ninguna. */
   fetchedAt: number;
@@ -112,23 +116,54 @@ export const useUsageStore = create<UsageState>((set, get) => ({
           set(patch("codex", id, { usage: get().codex[id]?.usage ?? null, failed: true }));
         }
       } else if (account.agentId === "antigravity") {
-        // Dos HTTP por cuenta (ver `antigravity_access.rs`): barato, va en paralelo con las demás.
-        try {
-          const now = Math.floor(Date.now() / 1000);
-          let discovery = await discoverAntigravityAccount(id, force);
-          const stamp = discovery.fetchedAt ?? 0;
-          if (!force && !(stamp > 0 && isUsageFresh(stamp, now))) {
-            if (stamp > 0) {
-              set(patch("antigravity", id, { meters: modelMeters(discovery.models), failed: false, fetchedAt: stamp }));
+        if (isSystem(account)) {
+          await get().refreshAgy(force);
+        } else if (isAntigravityCliProfile(account)) {
+          // Conta extra do Antigravity com HOME e chaveiro isolados: usa `agy /usage` no ambiente da conta.
+          try {
+            const now = Math.floor(Date.now() / 1000);
+            let usage = await antigravityCliUsage(force, id);
+            if (!force && usage.installed && !(usage.fetchedAt > 0 && isUsageFresh(usage.fetchedAt, now))) {
+              if (usage.fetchedAt > 0) {
+                set(patch("antigravity", id, { meters: null, groups: usage.groups, failed: false, fetchedAt: usage.fetchedAt }));
+              }
+              usage = await antigravityCliUsage(true, id);
             }
-            discovery = await discoverAntigravityAccount(id, true);
+            const fetchedAt = usage.fetchedAt > 0 ? usage.fetchedAt : now;
+            set(patch("antigravity", id, {
+              meters: null,
+              groups: usage.installed ? usage.groups : null,
+              failed: false,
+              fetchedAt: usage.installed ? fetchedAt : 0,
+            }));
+          } catch {
+            const prev = get().antigravity[id];
+            set(patch("antigravity", id, {
+              meters: prev?.meters ?? null,
+              groups: prev?.groups ?? null,
+              failed: true,
+              fetchedAt: prev?.fetchedAt ?? 0,
+            }));
           }
-          const fetchedAt = discovery.fetchedAt && discovery.fetchedAt > 0 ? discovery.fetchedAt : now;
-          set(patch("antigravity", id, { meters: modelMeters(discovery.models), failed: false, fetchedAt }));
-        } catch {
-          // Se conserva el último valor bueno, como en Codex.
-          const prev = get().antigravity[id];
-          set(patch("antigravity", id, { meters: prev?.meters ?? null, failed: true, fetchedAt: prev?.fetchedAt ?? 0 }));
+        } else {
+          // Dos HTTP por cuenta OAuth (ver `antigravity_access.rs`): barato, va en paralelo con las demás.
+          try {
+            const now = Math.floor(Date.now() / 1000);
+            let discovery = await discoverAntigravityAccount(id, force);
+            const stamp = discovery.fetchedAt ?? 0;
+            if (!force && !(stamp > 0 && isUsageFresh(stamp, now))) {
+              if (stamp > 0) {
+                set(patch("antigravity", id, { meters: modelMeters(discovery.models), failed: false, fetchedAt: stamp }));
+              }
+              discovery = await discoverAntigravityAccount(id, true);
+            }
+            const fetchedAt = discovery.fetchedAt && discovery.fetchedAt > 0 ? discovery.fetchedAt : now;
+            set(patch("antigravity", id, { meters: modelMeters(discovery.models), failed: false, fetchedAt }));
+          } catch {
+            // Se conserva el último valor bueno, como en Codex.
+            const prev = get().antigravity[id];
+            set(patch("antigravity", id, { meters: prev?.meters ?? null, failed: true, fetchedAt: prev?.fetchedAt ?? 0 }));
+          }
         }
       }
     } catch (e) {
@@ -158,7 +193,9 @@ export async function refreshAllUsage(accounts: AgentAccount[]): Promise<void> {
   const { refresh, refreshAgy } = useUsageStore.getState();
   await Promise.all([
     refreshAgy(true),
-    ...accounts.filter((a) => a.agentId === "codex" || a.agentId === "antigravity").map((a) => refresh(a, true)),
+    ...accounts
+      .filter((a) => a.agentId === "codex" || (a.agentId === "antigravity" && a.id !== "system:antigravity"))
+      .map((a) => refresh(a, true)),
   ]);
   for (const a of accounts.filter((x) => x.agentId === "claude-code")) await refresh(a, true);
 }
@@ -200,7 +237,9 @@ export function startUsagePolling(accounts: AgentAccount[], active = true): () =
       const { refresh, refreshAgy } = useUsageStore.getState();
       await Promise.all([
         refreshAgy(false),
-        ...accounts.filter((a) => a.agentId === "codex" || a.agentId === "antigravity").map((a) => refresh(a, false)),
+        ...accounts
+          .filter((a) => a.agentId === "codex" || (a.agentId === "antigravity" && a.id !== "system:antigravity"))
+          .map((a) => refresh(a, false)),
       ]);
       for (const a of accounts.filter((x) => x.agentId === "claude-code")) await refresh(a, false);
     } finally {

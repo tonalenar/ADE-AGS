@@ -40,11 +40,20 @@ describe("limite de cada conta no trilho do seletor", () => {
     expect(limitPercentFor(item({ agentId: "codex", accountId: "c1" }), { ...empty, codex: { c1: old } }, NOW)).toBeNull();
   });
 
-  it("Antigravity: a principal lê o agy local; a de perfil lê os medidores por modelo", () => {
+  it("Antigravity: a principal lê o agy local; a de perfil lê os grupos do agy ou os medidores por modelo", () => {
     const agy = { usage: { installed: true, fetchedAt: NOW, cached: false, groups: [{ name: "g", windows: [{ id: "w", kind: "session" as const, usedPct: 33, resetsAt: new Date((NOW + 3600) * 1000).toISOString() }] }] }, failed: false };
     expect(limitPercentFor(item({ agentId: "antigravity", accountId: null }), { ...empty, agy }, NOW)).toBe(33);
     const meters = { g1: { meters: [{ name: "m", percent: 71, resetsAt: NOW + 3600 }], failed: false, fetchedAt: NOW } };
     expect(limitPercentFor(item({ agentId: "antigravity", accountId: "g1" }), { ...empty, antigravity: meters as never }, NOW)).toBe(71);
+    const cliExtra = {
+      kiro0: {
+        meters: null,
+        groups: [{ name: "Gemini Models", windows: [{ id: "w", kind: "weekly" as const, usedPct: 48, resetsAt: new Date((NOW + 3600) * 1000).toISOString() }] }],
+        failed: false,
+        fetchedAt: NOW,
+      },
+    };
+    expect(limitPercentFor(item({ agentId: "antigravity", accountId: "kiro0" }), { ...empty, agy, antigravity: cliExtra as never }, NOW)).toBe(48);
   });
 
   it("agente sem fonte de cota não tem número", () => {

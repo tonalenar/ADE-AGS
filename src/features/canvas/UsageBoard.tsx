@@ -230,12 +230,13 @@ function AntigravitySection({ account }: { account: AgentAccount }) {
   const entry = useUsageStore((st) => st.antigravity[account.id]);
   const busy = useUsageStore((st) => !!st.busy[account.id]);
   const load = () => void useUsageStore.getState().refresh(account, true);
+  const groups = entry?.groups ?? null;
   const meters = entry?.meters ?? null;
-  const failed = !!entry?.failed && !meters;
+  const failed = !!entry?.failed && !meters && !groups;
 
   const now = Math.floor(Date.now() / 1000);
   const color = RING_COLORS.gemini;
-  const top = meters?.[0]?.percent ?? null;
+  const top = groups !== null ? agyTopPercent(groups) : meters?.[0]?.percent ?? null;
   return (
     <section className="px-4 py-4 space-y-3.5">
       <Head account={account} plan={null} percent={top} color={color}>
@@ -243,6 +244,27 @@ function AntigravitySection({ account }: { account: AgentAccount }) {
       </Head>
       {failed ? (
         <Notice tone="warn" action={<RefreshButton busy={busy} onClick={load} label={t("canvas.usage.retry")} />}>{t("canvas.usage.failed")}</Notice>
+      ) : groups !== null ? (
+        groups.length === 0 ? (
+          <Notice>{t("canvas.usage.agyEmpty")}</Notice>
+        ) : (
+          <>
+            {groups.map((g) => (
+              <div key={g.name} className="space-y-2">
+                <div title={g.description} className="truncate text-[11px] font-semibold text-gray-500 dark:text-gray-400">{g.name}</div>
+                {g.windows.map((w) => (
+                  <Meter key={w.id} label={t(`canvas.usage.window.${w.kind}`, { defaultValue: w.id })} percent={Math.round(w.usedPct)}
+                    resets={untilText(toEpoch(w.resetsAt), now, t)} color={color} />
+                ))}
+              </div>
+            ))}
+            {entry && entry.fetchedAt > 0 && (
+              <div className="text-[10px] text-gray-400 dark:text-gray-500">
+                {t("canvas.usage.updated", { ago: ago(now - entry.fetchedAt, t) })}
+              </div>
+            )}
+          </>
+        )
       ) : meters === null ? <Skeleton /> : meters.length === 0 ? (
         <Notice>{t("canvas.usage.noModelQuota")}</Notice>
       ) : (
@@ -317,11 +339,13 @@ export function UsageBoard({ accounts }: { accounts: AgentAccount[] }) {
   return (
     <div className="divide-y divide-gray-100 dark:divide-white/6">
       {agy && <AgySection />}
-      {accounts.map((a) => (
-        <div key={a.id}>
-          {a.agentId === "claude-code" ? <ClaudeSection account={a} /> : a.agentId === "codex" ? <CodexSection account={a} /> : a.agentId === "antigravity" ? <AntigravitySection account={a} /> : <OtherSection account={a} />}
-        </div>
-      ))}
+      {accounts
+        .filter((a) => !(agy && a.id === "system:antigravity"))
+        .map((a) => (
+          <div key={a.id}>
+            {a.agentId === "claude-code" ? <ClaudeSection account={a} /> : a.agentId === "codex" ? <CodexSection account={a} /> : a.agentId === "antigravity" ? <AntigravitySection account={a} /> : <OtherSection account={a} />}
+          </div>
+        ))}
     </div>
   );
 }

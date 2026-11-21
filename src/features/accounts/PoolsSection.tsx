@@ -73,7 +73,7 @@ export function PoolsSection({ agent }: { agent: AccountCapableAgent }) {
   if (options.length < 2 && pools.length === 0) return null;
 
   return (
-    <section className="mt-2 pt-3 border-t border-gray-200 dark:border-white/8">
+    <section className="shrink-0 mt-2 pt-3 border-t border-gray-200 dark:border-white/8">
       <div className="flex items-center gap-2 mb-1.5">
         <span className="flex-1 text-[11px] font-semibold uppercase tracking-widest text-gray-400 dark:text-white/35">
           {t("accounts.pools.title")}
