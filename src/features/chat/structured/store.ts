@@ -470,9 +470,9 @@ export async function retuneThread(id: string, model: string | null, effort: str
  * Troca o agente da conversa (só entre turnos). Devolve o erro em texto para quem pediu mostrar; a conversa e o
  * aviso «agora com …» chegam pelos eventos.
  */
-export async function switchThreadAgent(id: string, agentId: string, model: string | null, effort: string | null, access: ThreadAccess): Promise<string | null> {
+export async function switchThreadAgent(id: string, agentId: string, model: string | null, effort: string | null, access: ThreadAccess, accountId: string | null = null): Promise<string | null> {
   try {
-    upsertThread(await chatThreadSwitchAgent(id, agentId, model, effort, access, null));
+    upsertThread(await chatThreadSwitchAgent(id, agentId, model, effort, access, accountId));
     patchLive(id, (live) => ({ ...live, providerConfig: null, providerCommands: [] }));
     return null;
   } catch (e) {

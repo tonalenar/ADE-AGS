@@ -79,4 +79,24 @@ describe("o seletor de conta da conversa aberta", () => {
     await mount({ disabled: true });
     expect(select()!.disabled).toBe(true);
   });
+
+  it("mostra o e-mail da conta principal sem duplicar e nomeia a conta certa na confirmação", async () => {
+    backend.accounts = [
+      acc(null, "Claude Code", { label: "eristonalencaar@gmail.com" }),
+      acc("dup", "clone", { label: "eristonalencaar@gmail.com" }),
+      acc("kiro", "Kiro0", { label: null }),
+    ];
+    await mount({ accountId: null });
+    expect([...host.querySelectorAll("option")].map((o) => o.textContent)).toEqual([
+      "chat.account.option{\"name\":\"eristonalencaar@gmail.com\",\"state\":\"chat.account.state.ready\"}",
+      "chat.account.option{\"name\":\"Kiro0\",\"state\":\"chat.account.state.ready\"}",
+    ]);
+    await pick("kiro");
+    expect(host.textContent).toContain("chat.account.confirm{\"name\":\"Kiro0\"}");
+    expect(host.textContent).not.toContain("accounts.system");
+    // O container não pode forçar largura fixa sem quebra (evita estourar o popover).
+    const wrap = host.querySelector("[data-thread-account]") as HTMLElement;
+    expect(wrap.className).toContain("min-w-0");
+    expect(wrap.className).not.toContain("shrink-0");
+  });
 });

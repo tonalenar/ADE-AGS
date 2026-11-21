@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "neogestify-ui-components";
 
+import { useAccountsStore } from "@/features/accounts/store";
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { AgentModelPicker } from "../AgentModelPicker";
 import { ThreadAccountMenu } from "./ThreadAccountMenu";
@@ -36,7 +39,7 @@ import type { RequestRow, ThreadRow } from "./ipc";
 import { EMPTY_LIVE, isLocalAcpAgent, isPlanExit, menuAccess, questionOf, togglePlan } from "./model";
 import { AgentSwitchDialog } from "./AgentSwitchDialog";
 import { LogFailureNotice } from "./LogFailureNotice";
-import { answerRequest, autoCompactThreadOnReturn, clearThreadContext, compactThread, hydrateThread, interruptThread, retryThreadHydration, retuneThread, runThreadGoalAction, sendToThread, switchThreadAgent, useStructured } from "./store";
+import { answerRequest, autoCompactThreadOnReturn, clearThreadContext, compactThread, hydrateThread, interruptThread, retryThreadHydration, retuneThread, runThreadGoalAction, sendToThread, switchThreadAccount, switchThreadAgent, useStructured } from "./store";
 import { lacksApproval, switchableAgents } from "./switchModel";
 import { showBotToast } from "@/shared/brand/botToastStore";
 
@@ -65,10 +68,21 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   const hydrateError = useStructured((s) => s.hydrateErrors[thread.id] ?? null);
   const goal = useStructured((s) => s.goals[thread.id] ?? null);
   const goalNotice = useStructured((s) => s.goalNotices[thread.id] ?? null);
-  // Trocar de agente na mesma conversa: a escolha espera a confirmação (a cada troca).
+  // Trocar de agente ou de conta na mesma conversa: a escolha espera a confirmação (a cada troca).
   const detected = useAvailableAgents({ includeLocalAcp: true });
   const switchable = useMemo(() => switchableAgents(detected, thread.agentId, card.agentLabel), [detected, thread.agentId, card.agentLabel]);
-  const [switchTo, setSwitchTo] = useState<{ agentId: string; model: string | null } | null>(null);
+  const createdAccounts = useAccountsStore((s) => s.accounts);
+  const systemAccounts = useAccountsStore((s) => s.systemAccounts);
+  const accountLabelOf = useCallback((agentId: string, accountId: string | null) => {
+    const id = accountId ?? `system:${agentId}`;
+    const found = [...systemAccounts, ...createdAccounts].find((a) => a.id === id);
+    const custom = found?.displayName?.trim();
+    if (custom) return custom;
+    if (found?.label?.trim()) return found.label.trim();
+    return accountId === null ? t("accounts.system") : found?.name ?? accountId;
+  }, [createdAccounts, systemAccounts, t]);
+  const [switchTo, setSwitchTo] = useState<{ agentId: string; model: string | null; accountId: string | null } | null>(null);
+  const [accountSwitchTo, setAccountSwitchTo] = useState<{ accountId: string | null; model: string | null; effort: string | null } | null>(null);
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
   useEffect(() => {
@@ -156,15 +170,25 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
     </div>
   ) : (
     <div title={locked ? t("chat.composer.lockedWhileWorking") : undefined} className="flex min-w-0 flex-nowrap items-center justify-end gap-x-0.5">
-      {/* O trilho de agentes: escolher outro agente troca quem responde NESTA conversa (com confirmação, só entre turnos). */}
-      {/* A conta da conversa mora dentro do seletor de agente/modelo (no rodapé do popover), não solta no composer. */}
-      <AgentModelPicker agents={switchable} harnessSurface="chat" showAccount={false} disabled={locked} providerConfig={live.providerConfig}
+      {/* O trilho de agentes e contas: escolher outro agente ou outra conta troca quem responde NESTA conversa (com confirmação, só entre turnos). */}
+      {/* A conta da conversa mora dentro do seletor de agente/modelo (no trilho e no rodapé do popover), não solta no composer. */}
+      <AgentModelPicker agents={switchable} harnessSurface="chat" showAccount={false} railPerAccount={!side && !isLocalAcpAgent(thread.agentId)} disabled={locked} providerConfig={live.providerConfig}
         speed={{ fast: fastMode, onChange: (value) => { setFastMode(value); saveFastModeForThread(thread, value); } }}
         accountSlot={side || isLocalAcpAgent(thread.agentId) ? null : <ThreadAccountMenu threadId={thread.id} agentId={thread.agentId} accountId={thread.accountId} disabled={locked} />}
-        value={{ agentId: thread.agentId, model: thread.model, effort: thread.effort, account: null }}
+        value={{ agentId: thread.agentId, model: thread.model, effort: thread.effort, account: thread.accountId }}
         permission={{ value: menuAccess(thread.access), modes: accessModesFor(thread.agentId, true), onChange: locked ? undefined : (next) => retuneThread(thread.id, thread.model, thread.effort, next) }}
         onChange={(v) => {
-          if (v.agentId && v.agentId !== thread.agentId) { setSwitchError(null); setSwitchTo({ agentId: v.agentId, model: v.model }); return; }
+          const targetAccount = v.account ?? null;
+          if (v.agentId && v.agentId !== thread.agentId) {
+            setSwitchError(null);
+            setSwitchTo({ agentId: v.agentId, model: v.model, accountId: targetAccount });
+            return;
+          }
+          if (!side && !isLocalAcpAgent(thread.agentId) && targetAccount !== (thread.accountId ?? null)) {
+            setSwitchError(null);
+            setAccountSwitchTo({ accountId: targetAccount, model: v.model, effort: v.effort });
+            return;
+          }
           retuneThread(thread.id, v.model, v.effort, thread.access);
         }} />
       {!side && plan && planCapability.support === "supported" && (
@@ -308,17 +332,60 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
           onAnswer={question ? answer : undefined} onResend={resend}
           after={timelineAfter} />
       )} />
-      {switchTo && (
-        <AgentSwitchDialog from={card.agentLabel} to={switchable.find((a) => a.id === switchTo.agentId)?.label ?? switchTo.agentId} busy={switching} error={switchError} noApproval={lacksApproval(switchApprovalCapability.support, thread.access, isLocalAcpAgent(switchTo.agentId))}
-          onClose={() => setSwitchTo(null)}
-          onConfirm={() => {
-            setSwitching(true);
-            void switchThreadAgent(thread.id, switchTo.agentId, switchTo.model, null, thread.access).then((error) => {
-              setSwitching(false);
-              if (error) setSwitchError(error);
-              else setSwitchTo(null);
-            });
-          }} />
+      {switchTo && (() => {
+        const agentName = switchable.find((a) => a.id === switchTo.agentId)?.label ?? switchTo.agentId;
+        const targetLabel = switchTo.accountId !== null
+          ? `${agentName} · ${accountLabelOf(switchTo.agentId, switchTo.accountId)}`
+          : agentName;
+        return (
+          <AgentSwitchDialog from={card.agentLabel} to={targetLabel} busy={switching} error={switchError} noApproval={lacksApproval(switchApprovalCapability.support, thread.access, isLocalAcpAgent(switchTo.agentId))}
+            onClose={() => setSwitchTo(null)}
+            onConfirm={() => {
+              setSwitching(true);
+              void switchThreadAgent(thread.id, switchTo.agentId, switchTo.model, null, thread.access, switchTo.accountId).then((error) => {
+                setSwitching(false);
+                if (error) setSwitchError(error);
+                else setSwitchTo(null);
+              });
+            }} />
+        );
+      })()}
+      {accountSwitchTo && (
+        <AppDialog
+          title={t("chat.account.label")}
+          size="sm"
+          onClose={switching ? () => undefined : () => setAccountSwitchTo(null)}
+          closeOnEsc
+          footer={(
+            <>
+              <Button variant="outline" onClick={() => setAccountSwitchTo(null)} disabled={switching}>{t("chat.account.confirmNo")}</Button>
+              <Button variant="primary" disabled={switching} onClick={() => {
+                const target = accountSwitchTo;
+                setSwitching(true);
+                setSwitchError(null);
+                void switchThreadAccount(thread.id, target.accountId).then(async (error) => {
+                  if (error) {
+                    setSwitching(false);
+                    setSwitchError(error);
+                    return;
+                  }
+                  if (target.model !== thread.model || target.effort !== thread.effort) {
+                    await retuneThread(thread.id, target.model, target.effort, thread.access);
+                  }
+                  setSwitching(false);
+                  setAccountSwitchTo(null);
+                });
+              }}>
+                {t("chat.account.confirmYes")}
+              </Button>
+            </>
+          )}
+        >
+          <div className="flex flex-col gap-2 text-chat-ui text-gray-800 dark:text-white/85">
+            <p className="m-0">{t("chat.account.confirm", { name: accountLabelOf(thread.agentId, accountSwitchTo.accountId) })}</p>
+            {switchError && <p role="alert" className="m-0 text-red-700 dark:text-red-400">{switchError}</p>}
+          </div>
+        </AppDialog>
       )}
     </div>
   );

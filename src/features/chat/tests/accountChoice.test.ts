@@ -32,4 +32,31 @@ describe("choosableAccounts", () => {
     expect(hasChoice(agent([acc({ accountId: null }), acc({ accountId: "b" })]))).toBe(true);
     expect(hasChoice(undefined)).toBe(false);
   });
+  it("não duplica a conta principal quando uma conta extra tem o mesmo e-mail", () => {
+    const dup = agent([
+      acc({ accountId: null, name: "Claude Code", label: "eristonalencaar@gmail.com" }),
+      acc({ accountId: "b", name: "extra", label: "eristonalencaar@gmail.com" }),
+    ]);
+    const list = choosableAccounts(dup, 1_000);
+    expect(list.map((a) => [a.value, a.name])).toEqual([["", "eristonalencaar@gmail.com"]]);
+    expect(hasChoice(dup, 1_000)).toBe(false);
+  });
+  it("mantém contas distintas sem e-mail (ex.: Principal e Kiro0 do Antigravity)", () => {
+    const agy = agent([
+      acc({ accountId: null, name: "Antigravity", label: null }),
+      acc({ accountId: "kiro", name: "Kiro0", label: null }),
+    ]);
+    const list = choosableAccounts(agy, 1_000);
+    expect(list.map((a) => [a.value, a.name])).toEqual([["", "Antigravity"], ["kiro", "Kiro0"]]);
+    expect(hasChoice(agy, 1_000)).toBe(true);
+  });
+  it("se a conversa atual está na conta extra com mesmo e-mail da principal, mantém a ativa sem duplicar", () => {
+    const dup = agent([
+      acc({ accountId: null, name: "Claude Code", label: "eristonalencaar@gmail.com" }),
+      acc({ accountId: "b", name: "extra", label: "eristonalencaar@gmail.com" }),
+      acc({ accountId: "c", name: "Kiro0", label: null }),
+    ]);
+    const list = choosableAccounts(dup, 1_000, { currentAccountId: "b" });
+    expect(list.map((a) => [a.value, a.name])).toEqual([["b", "eristonalencaar@gmail.com"], ["c", "Kiro0"]]);
+  });
 });

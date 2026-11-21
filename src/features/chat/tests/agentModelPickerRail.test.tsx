@@ -217,4 +217,36 @@ describe("trilho do seletor com várias contas", () => {
     await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
     expect(botaoAdicionar()).toBeNull();
   });
+
+  it("com railPerAccount numa conversa aberta, mostra cada conta na trilha e passa a conta escolhida no onChange", async () => {
+    estado.accounts = [SYSTEM, { accountId: "kiro", name: "Kiro0", label: null, loggedIn: true }];
+    const multiAgents = [
+      ...AGENTS,
+      { id: "antigravity", label: "Antigravity", command: "agy", available: true } as never,
+    ];
+    await act(async () => {
+      root.render(
+        <AgentModelPicker
+          agents={multiAgents}
+          value={VALUE}
+          onChange={onChange}
+          showAccount={false}
+          railPerAccount
+          accountSlot={<div data-testid="thread-slot">slot</div>}
+        />,
+      );
+    });
+    await openPicker();
+    expect(tabs()).toHaveLength(3);
+    expect(tabs()[1].querySelector("[data-account-badge]")?.textContent).toBe("KI");
+    expect(document.body.querySelector("[data-testid='thread-slot']")).not.toBeNull();
+    // Ao navegar para outro provedor na trilha, o seletor de conta da conversa atual some para não ficar incoerente.
+    await click(tabs()[2]);
+    expect(document.body.querySelector("[data-testid='thread-slot']")).toBeNull();
+    // Voltando para outra conta do agente atual, o seletor volta e escolher um modelo passa a conta escolhida.
+    await click(tabs()[1]);
+    expect(document.body.querySelector("[data-testid='thread-slot']")).not.toBeNull();
+    await click(defaultRow());
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ agentId: "claude-code", account: "kiro" }));
+  });
 });

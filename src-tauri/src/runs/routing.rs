@@ -311,8 +311,9 @@ fn pick_account(
     choice: &AccountChoice,
     now: i64,
 ) -> Result<(Option<String>, Vec<String>), String> {
-    // Una TUI sin cuentas corre con la que tenga el sistema: no hay nada que elegir.
-    if agent.accounts.is_empty() {
+    // Una TUI sin cuentas (o cuya flota no aplica perfil por cuenta, como Antigravity) corre
+    // con la que tenga el sistema: no hay nada que elegir en la flota.
+    if !agent.capabilities.accounts || agent.accounts.is_empty() {
         return match choice {
             AccountChoice::Fixed(Some(id)) => Err(format!(
                 "{} não gerencia contas: '{id}' não existe",

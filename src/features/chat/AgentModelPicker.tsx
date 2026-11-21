@@ -22,6 +22,7 @@ import { matrixProviderForAgent, readHarnessCapability, useHarnessCapability, ty
 
 import { CheckIcon, PlusIcon, SearchIcon, StarIcon, ZapIcon } from "./chatIcons";
 import { AccessMenu } from "./AccessMenu";
+import { dedupeRosterAccounts } from "./accountChoice";
 import { reasoningEffortSupported, type ChatAccess, type ProviderRuntimeConfig } from "./chatModel";
 import { usePopover } from "./usePopover";
 import { buildRail, parseRailKey, railKeyOf, RAIL_FAVORITES } from "./pickerRail";
@@ -187,13 +188,15 @@ interface Row {
  * Seletor no estilo T3 Code: trilho de agentes/favoritos, busca e catálogo no centro, ajuste de
  * raciocínio à direita e controles da ADE no rodapé. A área ampla mantém os nomes e opções legíveis.
  */
-export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAccount = true, accountSlot = null, permission, speed, onCompare, compareDisabled = false, disabled = false, placement = "above", providerConfig, harnessSurface = "tui" }: {
+export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAccount = true, railPerAccount, accountSlot = null, permission, speed, onCompare, compareDisabled = false, disabled = false, placement = "above", providerConfig, harnessSurface = "tui" }: {
   agents: AgentInfo[];
   value: AgentModelValue;
   onChange: (next: AgentModelValue) => void;
   shortcutHint?: string;
-  /** Numa conversa aberta a conta não muda (a sessão mora na pasta da conta). */
+  /** Numa conversa aberta a conta não muda diretamente pelo seletor de rascunho. */
   showAccount?: boolean;
+  /** Mostra um ícone por conta na trilha da esquerda mesmo quando `showAccount` é `false` (ex.: conversa aberta que troca de conta com confirmação). */
+  railPerAccount?: boolean;
   /**
    * A conta de uma conversa aberta, no rodapé do mesmo popover (no lugar do seletor de conta da conversa nova): a
    * troca tem regras próprias (só entre turnos, com confirmação), por isso vem pronta de quem chama. Antes era um
@@ -220,8 +223,9 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   const { open, setOpen, ref } = usePopover();
   const [popoverPosition, setPopoverPosition] = useState<PickerPosition | null>(null);
   const { roster, update: updateRoster } = useRoster(true, open);
+  const perAccount = railPerAccount ?? showAccount;
   // O trilho tem um ícone por agente e, havendo mais de uma conta, um por conta: a chave junta os dois.
-  const [railKey, setRailKey] = useState<string>(() => value.agentId ? railKeyOf(accountRefFromWire(value.agentId, showAccount ? value.account : null)) : agents[0]?.id ?? RAIL_FAVORITES);
+  const [railKey, setRailKey] = useState<string>(() => value.agentId ? railKeyOf(accountRefFromWire(value.agentId, perAccount ? value.account : null)) : agents[0]?.id ?? RAIL_FAVORITES);
   const { tab, ref: railRef } = parseRailKey(railKey);
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState<string[]>(loadFavorites);
@@ -244,13 +248,24 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   }, [accountsLoaded]);
   const identities = useMemo(() => [...systemAccounts, ...createdAccounts], [systemAccounts, createdAccounts]);
   const principalLabel = t("accounts.principalName");
-  const rail = useMemo(() => buildRail(agents, roster, identities, principalLabel, showAccount), [agents, roster, identities, principalLabel, showAccount]);
+  const currentAccountId = useMemo(
+    () => (value.agentId ? selectedAccountId(accountRefFromWire(value.agentId, value.account)) : null),
+    [value.agentId, value.account],
+  );
+  const rail = useMemo(
+    () => buildRail(agents, roster, identities, principalLabel, perAccount, { agentId: value.agentId, accountId: currentAccountId }),
+    [agents, roster, identities, principalLabel, perAccount, value.agentId, currentAccountId],
+  );
+  const activeRailItem = useMemo(
+    () => (agent && perAccount ? rail.find((item) => item.agentId === agent.id && item.accountId === currentAccountId) ?? null : null),
+    [agent, perAccount, rail, currentAccountId],
+  );
   // Na aba de um agente a conta é a do ícone escolhido; nos favoritos, só o agente atual mantém a sua.
   const usage = useRailUsage(open);
   // Pede a cota das contas do agente da aba só quando a ADE ainda não tem nenhuma leitura delas (as leituras
   // existentes são atualizadas pelo canvas e pelo Resumo); sem isso o seletor nunca dispararia uma consulta.
   useEffect(() => {
-    if (!open || !showAccount) return;
+    if (!open || !perAccount) return;
     const items = rail.filter((item) => item.agentId === tab);
     if (items.length < 2) return;
     const store = useUsageStore.getState();
@@ -265,9 +280,9 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
       const account = identities.find((i) => i.id === key);
       if (!known && !store.busy[key] && account) void store.refresh(account, false);
     }
-  }, [open, showAccount, tab, rail, identities]);
+  }, [open, perAccount, tab, rail, identities]);
   const accountForAgent = (agentId: string): AccountRef | null =>
-    showAccount && tab !== RAIL_FAVORITES && agentId === tab ? railRef : agentId === value.agentId ? accountRefFromWire(agentId, value.account) : null;
+    perAccount && tab !== RAIL_FAVORITES && agentId === tab ? railRef : agentId === value.agentId ? accountRefFromWire(agentId, value.account) : null;
   const opencodeAccount = accountForAgent("opencode");
   const opencodeAccountId = selectedAccountId(opencodeAccount);
   const current = pickerCatalogOf(roster, agent?.id ?? null, agent ? accountRefFromWire(agent.id, value.account) : null, value.agentId, providerConfig);
@@ -362,7 +377,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
     return () => { alive = false; };
   }, [open, tabAgent?.id, opencodeAccountId]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir ou trocar de aba
 
-  useEffect(() => { if (open && agent) setRailKey(railKeyOf(accountRefFromWire(agent.id, showAccount ? value.account : null))); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir
+  useEffect(() => { if (open && agent) setRailKey(railKeyOf(accountRefFromWire(agent.id, perAccount ? value.account : null))); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir
 
   useEffect(() => {
     if (!open) return;
@@ -472,6 +487,9 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
         className={`flex max-w-full items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85
           hover:bg-gray-100 dark:hover:bg-white/[0.07] ${open ? "bg-gray-100 dark:bg-white/[0.07]" : ""}`}>
         <Icon className="w-4 h-4 shrink-0" />
+        {activeRailItem?.showBadge && (
+          <AccountBadge label={activeRailItem.badgeLabel} accentColor={activeRailItem.accentColor} size="sm" />
+        )}
         <span className="min-w-0 truncate max-w-52">{modelLabel}</span>
       </button>
 
@@ -480,7 +498,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
           style={{ position: "fixed", top: popoverPosition.top, left: popoverPosition.left, width: popoverPosition.width, height: popoverPosition.height,
             maxHeight: `calc(100vh - ${PICKER_VIEWPORT_MARGIN * 2}px)`, boxSizing: "border-box" }}
           className={`z-50 flex flex-col rounded-2xl ${ref.current?.closest(".cc-chat-type") ? "cc-chat-type" : ""}
-            overflow-hidden bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
+            overflow-hidden overflow-x-clip bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
             shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_20px_52px_-20px_rgba(0,0,0,0.55)]`}>
           <div className={`flex flex-1 min-h-0 ${hasFooter ? "rounded-t-lg" : "rounded-lg"} overflow-hidden`}>
           <div className="w-14 shrink-0 flex flex-col bg-gray-50/60 dark:bg-white/[0.01]">
@@ -568,7 +586,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                 const RIcon = agentIcon(r.agent.id, r.agent.command);
                 // Na aba de uma conta, o visto só vale se a conta do ícone é a que está em uso.
                 const selected = r.agent.id === agent.id && r.model === (selectedModel?.id ?? value.model)
-                  && (!showAccount || tab === RAIL_FAVORITES || sameAccountRef(railRef, accountRefFromWire(agent.id, value.account), agent.id));
+                  && (!perAccount || tab === RAIL_FAVORITES || sameAccountRef(railRef, accountRefFromWire(agent.id, value.account), agent.id));
                 const startAvailability = readHarnessCapability(harnessSurface, matrixProviderForAgent(r.agent.id) ?? "", "start");
                 const fav = !!r.model && favorites.includes(favKey(r.agent.id, r.model));
                 const compareIndex = comparePicks.findIndex((pick) => pick.agentId === r.agent.id && pick.model === r.model);
@@ -665,7 +683,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
           )}
           </div>
           {hasFooter && (
-            <div className="min-h-14 shrink-0 flex items-center gap-2 px-3 border-t border-gray-200 dark:border-white/[0.08] rounded-b-2xl text-chat-caption text-gray-500 dark:text-white/45">
+            <div className="min-h-14 shrink-0 flex flex-wrap items-center gap-x-2 gap-y-2 px-3 py-2 min-w-0 max-w-full border-t border-gray-200 dark:border-white/[0.08] rounded-b-2xl text-chat-caption text-gray-500 dark:text-white/45">
               {showFast && speed && (
                 <div role="group" aria-label={t("chat.picker.speedMode")} className="flex items-center gap-0.5 p-1 rounded-lg bg-gray-100 dark:bg-white/[0.07]">
                   <button type="button" aria-pressed={!speed.fast} onClick={() => speed.onChange(false)}
@@ -678,26 +696,36 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                   </button>
                 </div>
               )}
-              <span className="flex-1" />
+              <span className="flex-1 min-w-2" />
               {permission && <AccessMenu value={permission.value} available={permission.modes} onChange={permission.onChange} />}
-              {!showAccount && accountSlot}
+              {!showAccount && (!railPerAccount || tab === RAIL_FAVORITES || tab === value.agentId) && accountSlot}
               {showAccount && <>
                 <span>{t("chat.picker.account")}</span>
-                {tabAgent && (
-                  <PopupSelect value={accountRefToWire(tab === RAIL_FAVORITES ? (tabAgent.id === value.agentId ? accountRefFromWire(tabAgent.id, value.account) : null) : railRef) ?? ""} aria-label={t("chat.picker.account")}
-                    onChange={(e) => {
-                      const next = accountRefFromWire(tabAgent.id, e.target.value);
-                      if (tab !== RAIL_FAVORITES) setRailKey(railKeyOf(next));
-                      onChange({ agentId: tabAgent.id, model: tabAgent.id === value.agentId ? value.model : null, effort: tabAgent.id === value.agentId ? value.effort : null, account: accountRefToWire(next) });
-                    }}
-                    className="max-w-36 text-chat-caption">
-                    <option value="">{identities.find((i) => i.id === `system:${tabAgent.id}`)?.displayName?.trim() || t("accounts.system")}</option>
-                    {(roster?.agents.find((a) => a.agentId === tabAgent.id)?.accounts ?? []).filter((a) => a.accountId !== null).map((a) => (
-                      <option key={a.accountId!} value={a.accountId!}>{identities.find((i) => i.id === a.accountId)?.displayName?.trim() || a.label || a.name}</option>
-                    ))}
-                    {pools.map((p) => <option key={p.id} value={poolValue(p.name)}>{t("chat.picker.pool", { name: p.name })}</option>)}
-                  </PopupSelect>
-                )}
+                {tabAgent && (() => {
+                  const tabAccounts = dedupeRosterAccounts(
+                    roster?.agents.find((a) => a.agentId === tabAgent.id)?.accounts ?? [],
+                    tabAgent.id === value.agentId ? currentAccountId : undefined,
+                  );
+                  const systemOption = tabAccounts.find((a) => a.accountId === null);
+                  const extraOptions = tabAccounts.filter((a) => a.accountId !== null);
+                  return (
+                    <PopupSelect value={accountRefToWire(tab === RAIL_FAVORITES ? (tabAgent.id === value.agentId ? accountRefFromWire(tabAgent.id, value.account) : null) : railRef) ?? ""} aria-label={t("chat.picker.account")}
+                      onChange={(e) => {
+                        const next = accountRefFromWire(tabAgent.id, e.target.value);
+                        if (tab !== RAIL_FAVORITES) setRailKey(railKeyOf(next));
+                        onChange({ agentId: tabAgent.id, model: tabAgent.id === value.agentId ? value.model : null, effort: tabAgent.id === value.agentId ? value.effort : null, account: accountRefToWire(next) });
+                      }}
+                      className="max-w-36 text-chat-caption">
+                      {(systemOption || extraOptions.length === 0) && (
+                        <option value="">{identities.find((i) => i.id === `system:${tabAgent.id}`)?.displayName?.trim() || systemOption?.label?.trim() || t("accounts.system")}</option>
+                      )}
+                      {extraOptions.map((a) => (
+                        <option key={a.accountId!} value={a.accountId!}>{identities.find((i) => i.id === a.accountId)?.displayName?.trim() || a.label || a.name}</option>
+                      ))}
+                      {pools.map((p) => <option key={p.id} value={poolValue(p.name)}>{t("chat.picker.pool", { name: p.name })}</option>)}
+                    </PopupSelect>
+                  );
+                })()}
               </>}
             </div>
           )}

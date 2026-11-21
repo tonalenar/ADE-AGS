@@ -762,6 +762,50 @@ fn antigravity_home_isolado_cria_e_desbloqueia_chaveiro_proprio_sem_tocar_o_sist
 
 #[cfg(target_os = "macos")]
 #[test]
+fn antigravity_detecta_credencial_do_agy_no_chaveiro_isolado_servico_gemini() {
+    fake_keyring();
+    let tmp = TempDir::new();
+    let real_home = tmp.path().join("home-real");
+    let account = tmp.path().join("accounts/antigravity/Kiro0");
+    std::fs::create_dir_all(&real_home).unwrap();
+    std::fs::create_dir_all(&account).unwrap();
+
+    super::antigravity_home::prepare(&real_home, &account).unwrap();
+    assert_eq!(read_identity(&account, spec("antigravity")), (false, None));
+
+    // O `agy` real no macOS grava o login no chaveiro com serviço "gemini" e conta "antigravity".
+    let add = security_stdout(
+        Some(&account),
+        &[
+            "add-generic-password",
+            "-s",
+            "gemini",
+            "-a",
+            "antigravity",
+            "-w",
+            "token-ficticio-agy",
+            "-U",
+        ],
+    );
+    assert!(
+        add.status.success(),
+        "gravar credencial gemini/antigravity no chaveiro isolado falhou: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let kc = account.join("Library/Keychains/antigravity.keychain-db");
+    let lock = security_stdout(Some(&account), &["lock-keychain", kc.to_str().unwrap()]);
+    assert!(lock.status.success());
+
+    // Mesmo com o chaveiro travado e sem arquivos legados em `.gemini/antigravity-acp`,
+    // `read_identity` precisa reconhecer a conta como conectada.
+    assert_eq!(read_identity(&account, spec("antigravity")), (true, None));
+
+    super::antigravity_home::cleanup_keychain_secret(&account);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn antigravity_chaveiro_sem_senha_no_keyring_recusa_sem_apagar_dados() {
     fake_keyring();
     let tmp = TempDir::new();
@@ -840,6 +884,20 @@ fn a_frota_nao_oferece_contas_do_antigravity() {
         .capabilities();
     assert!(!caps.accounts);
     assert!(caps.headless);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn roster_expoe_contas_do_antigravity_para_o_chat_sem_habilitar_na_frota() {
+    let adapter = crate::agents::adapter_for("antigravity").unwrap();
+    assert!(
+        crate::runs::roster::includes_accounts_in_roster(adapter),
+        "o roster precisa listar as contas do Antigravity para o seletor do chat"
+    );
+    assert!(
+        !adapter.capabilities().accounts,
+        "a Frota continua sem usar contas por HOME do Antigravity"
+    );
 }
 
 // ── Identidade visual da conta (nome de exibição e cor) ──────────

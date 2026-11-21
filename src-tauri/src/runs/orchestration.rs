@@ -379,7 +379,7 @@ pub fn format_roster(roster: &roster::Roster, tiers: &routing::Tiers, now: i64) 
                 out.push_str(&format!("    … {} more\n", usable.len() - MAX_MODELS));
             }
         }
-        if !agent.accounts.is_empty() {
+        if agent.capabilities.accounts && !agent.accounts.is_empty() {
             out.push_str("  accounts:\n");
             for acc in &agent.accounts {
                 let mut state = vec![
