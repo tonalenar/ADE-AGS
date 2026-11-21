@@ -482,6 +482,7 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
   Dispositivos: device_list, device_shot, device_action
   Perguntas à pessoa: ask_user
   Segredos temporários: secret_request, secret_run, secret_revoke
+  Cofre de logins: vault_list, vault_request, browser_fill_login
   Permissão: approve_tool_use
 ";
 // END GENERATED: mcp-tools-help

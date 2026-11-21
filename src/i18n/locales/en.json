@@ -6582,5 +6582,20 @@
   "vault.field.username": "Username or email",
   "vault.field.usernamePlaceholder": "user@example.com",
   "vault.field.password": "Password",
-  "vault.field.passwordPlaceholder": "Enter password"
+  "vault.field.passwordPlaceholder": "Enter password",
+  "settings.vault": "Vault",
+  "settings.page.vault": "Logins saved in the operating-system keychain to fill sites in the browser without exposing passwords to agents.",
+  "settings.vault.desc": "Manage logins stored in the OS keychain. Passwords are never shown.",
+  "settings.vault.add": "Add login",
+  "settings.vault.cancel": "Cancel",
+  "settings.vault.save": "Save",
+  "settings.vault.loading": "Loading vault…",
+  "settings.vault.empty": "No logins saved in the vault.",
+  "settings.vault.edit": "Edit",
+  "settings.vault.changePassword": "Change password",
+  "settings.vault.remove": "Delete",
+  "settings.vault.allowedAgents": "Always allow:",
+  "settings.vault.revoke": "Revoke",
+  "settings.vault.newPasswordPlaceholder": "New password",
+  "settings.vault.savePassword": "Update password"
 }

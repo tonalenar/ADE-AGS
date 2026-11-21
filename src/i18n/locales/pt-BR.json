@@ -6582,5 +6582,20 @@
   "vault.field.username": "Usuário ou e-mail",
   "vault.field.usernamePlaceholder": "usuario@exemplo.com",
   "vault.field.password": "Senha",
-  "vault.field.passwordPlaceholder": "Digite a senha"
+  "vault.field.passwordPlaceholder": "Digite a senha",
+  "settings.vault": "Cofre",
+  "settings.page.vault": "Logins salvos no chaveiro do sistema para preencher sites no navegador sem expor a senha aos agentes.",
+  "settings.vault.desc": "Gerencie logins guardados no chaveiro do SO. As senhas nunca são exibidas.",
+  "settings.vault.add": "Adicionar login",
+  "settings.vault.cancel": "Cancelar",
+  "settings.vault.save": "Salvar",
+  "settings.vault.loading": "Carregando cofre…",
+  "settings.vault.empty": "Nenhum login salvo no cofre.",
+  "settings.vault.edit": "Editar",
+  "settings.vault.changePassword": "Trocar senha",
+  "settings.vault.remove": "Apagar",
+  "settings.vault.allowedAgents": "Sempre permitir:",
+  "settings.vault.revoke": "Revogar",
+  "settings.vault.newPasswordPlaceholder": "Nova senha",
+  "settings.vault.savePassword": "Atualizar senha"
 }

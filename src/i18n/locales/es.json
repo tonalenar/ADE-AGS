@@ -6582,5 +6582,20 @@
   "vault.field.username": "Usuario o correo",
   "vault.field.usernamePlaceholder": "usuario@ejemplo.com",
   "vault.field.password": "Contraseña",
-  "vault.field.passwordPlaceholder": "Escribe la contraseña"
+  "vault.field.passwordPlaceholder": "Escribe la contraseña",
+  "settings.vault": "Bóveda",
+  "settings.page.vault": "Inicios de sesión guardados en el llavero del sistema para completar sitios en el navegador sin exponer contraseñas a los agentes.",
+  "settings.vault.desc": "Administra los accesos guardados en el llavero del SO. Las contraseñas nunca se muestran.",
+  "settings.vault.add": "Añadir acceso",
+  "settings.vault.cancel": "Cancelar",
+  "settings.vault.save": "Guardar",
+  "settings.vault.loading": "Cargando bóveda…",
+  "settings.vault.empty": "No hay accesos guardados en la bóveda.",
+  "settings.vault.edit": "Editar",
+  "settings.vault.changePassword": "Cambiar contraseña",
+  "settings.vault.remove": "Eliminar",
+  "settings.vault.allowedAgents": "Permitir siempre:",
+  "settings.vault.revoke": "Revocar",
+  "settings.vault.newPasswordPlaceholder": "Nueva contraseña",
+  "settings.vault.savePassword": "Actualizar contraseña"
 }
