@@ -57,10 +57,7 @@ fn spec(agent: &str) -> &'static ProfileSpec {
 }
 
 fn fake_keyring() {
-    static KEYRING: std::sync::Once = std::sync::Once::new();
-    KEYRING.call_once(|| {
-        keyring::set_default_credential_builder(keyring::mock::default_credential_builder())
-    });
+    super::secrets::use_mock_keyring();
 }
 
 /// El nombre ES el nombre de la carpeta: tiene que rechazar todo lo que escaparía del
@@ -630,6 +627,191 @@ fn antigravity_reconhece_o_login_pela_presenca_do_arquivo() {
 fn a_conta_do_sistema_do_antigravity_e_o_proprio_home() {
     let spec = spec("antigravity");
     assert_eq!(default_dir(spec), dirs::home_dir());
+}
+
+#[cfg(target_os = "macos")]
+fn security_stdout(home: Option<&Path>, args: &[&str]) -> std::process::Output {
+    let mut cmd = std::process::Command::new("/usr/bin/security");
+    cmd.args(args);
+    if let Some(dir) = home {
+        cmd.env("HOME", dir);
+    }
+    cmd.output().expect("executar /usr/bin/security")
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn antigravity_home_isolado_cria_e_desbloqueia_chaveiro_proprio_sem_tocar_o_sistema() {
+    fake_keyring();
+    let real_def_before = security_stdout(None, &["default-keychain"]);
+    let real_list_before = security_stdout(None, &["list-keychains"]);
+
+    let tmp = TempDir::new();
+    let real_home = tmp.path().join("home-real");
+    std::fs::create_dir_all(real_home.join("Library/Keychains")).unwrap();
+    std::fs::write(real_home.join("Library/Keychains/login.keychain-db"), "real").unwrap();
+    std::fs::create_dir_all(real_home.join(".gemini")).unwrap();
+
+    // Caminho com espaço, como `~/Library/Application Support/...` no macOS.
+    let account = tmp
+        .path()
+        .join("Application Support/ADE AGS/accounts/antigravity/conta-2");
+    std::fs::create_dir_all(&account).unwrap();
+
+    super::antigravity_home::prepare(&real_home, &account).unwrap();
+
+    // `Library` existe como diretório próprio da conta (nunca symlink para o home real).
+    let lib_meta = std::fs::symlink_metadata(account.join("Library")).unwrap();
+    assert!(lib_meta.file_type().is_dir(), "Library deve ser pasta própria da conta");
+    assert!(!account.join("Library/Keychains/login.keychain-db").exists());
+
+    let kc = account.join("Library/Keychains/antigravity.keychain-db");
+    assert!(kc.is_file(), "chaveiro isolado da conta deve existir");
+
+    // `default-keychain` e `list-keychains` no HOME da conta apontam para o chaveiro próprio.
+    let def = security_stdout(Some(&account), &["default-keychain"]);
+    assert!(
+        def.status.success(),
+        "HOME isolado precisa ter chaveiro padrão: {}",
+        String::from_utf8_lossy(&def.stderr)
+    );
+    let def_text = String::from_utf8_lossy(&def.stdout);
+    assert!(def_text.contains("antigravity.keychain-db"), "{def_text}");
+    assert!(!def_text.contains("login.keychain-db"), "{def_text}");
+
+    let list = security_stdout(Some(&account), &["list-keychains"]);
+    let list_text = String::from_utf8_lossy(&list.stdout);
+    assert!(list_text.contains("antigravity.keychain-db"), "{list_text}");
+    assert!(!list_text.contains("login.keychain-db"), "{list_text}");
+
+    // Sem credencial gravada, a conta ainda não figura como logada.
+    assert_eq!(read_identity(&account, spec("antigravity")), (false, None));
+
+    // Gravar no chaveiro padrão do HOME isolado (como `agy` via go-keyring faz) funciona sem `-k`.
+    let probe_account = format!("oauth-probe-{}", uuid::Uuid::new_v4());
+    let add = security_stdout(
+        Some(&account),
+        &[
+            "add-generic-password",
+            "-s",
+            "antigravity",
+            "-a",
+            &probe_account,
+            "-w",
+            "token-ficticio-teste",
+            "-U",
+        ],
+    );
+    assert!(
+        add.status.success(),
+        "gravar no chaveiro isolado falhou: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    // Trava o chaveiro: mesmo travado, `read_identity` detecta a presença sem ler o segredo.
+    let lock = security_stdout(Some(&account), &["lock-keychain", kc.to_str().unwrap()]);
+    assert!(lock.status.success());
+    assert_eq!(read_identity(&account, spec("antigravity")), (true, None));
+
+    // Um novo `prepare` (próximo lançamento do `agy`) desbloqueia e preserva o login gravado.
+    super::antigravity_home::prepare(&real_home, &account).unwrap();
+    let find = security_stdout(
+        Some(&account),
+        &[
+            "find-generic-password",
+            "-s",
+            "antigravity",
+            "-a",
+            &probe_account,
+            "-w",
+        ],
+    );
+    assert!(
+        find.status.success(),
+        "ler do chaveiro após re-desbloqueio falhou: {}",
+        String::from_utf8_lossy(&find.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&find.stdout).trim(),
+        "token-ficticio-teste"
+    );
+
+    // Nada vazou para o chaveiro do usuário real, e default/search list globais ficaram intocados.
+    let leaked = security_stdout(
+        None,
+        &[
+            "find-generic-password",
+            "-s",
+            "antigravity",
+            "-a",
+            &probe_account,
+        ],
+    );
+    assert!(!leaked.status.success(), "credencial vazou para o chaveiro real");
+    assert_eq!(
+        real_def_before.stdout,
+        security_stdout(None, &["default-keychain"]).stdout
+    );
+    assert_eq!(
+        real_list_before.stdout,
+        security_stdout(None, &["list-keychains"]).stdout
+    );
+
+    super::antigravity_home::cleanup_keychain_secret(&account);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn antigravity_chaveiro_sem_senha_no_keyring_recusa_sem_apagar_dados() {
+    fake_keyring();
+    let tmp = TempDir::new();
+    let real_home = tmp.path().join("home-real");
+    let account = tmp.path().join("conta-existente");
+    std::fs::create_dir_all(&real_home).unwrap();
+    std::fs::create_dir_all(&account).unwrap();
+
+    super::antigravity_home::prepare(&real_home, &account).unwrap();
+    let kc = account.join("Library/Keychains/antigravity.keychain-db");
+    let bytes_before = std::fs::read(&kc).unwrap();
+
+    // Remove a senha do keyring simulando cofre limpo/outra máquina: nunca pode recriar apagando o arquivo.
+    super::antigravity_home::cleanup_keychain_secret(&account);
+    let err = super::antigravity_home::prepare(&real_home, &account)
+        .expect_err("sem a senha no keyring deve falhar em vez de destruir o chaveiro");
+    assert!(
+        err.to_string().contains("preservados"),
+        "mensagem inesperada: {err}"
+    );
+    assert_eq!(
+        std::fs::read(&kc).unwrap(),
+        bytes_before,
+        "o chaveiro existente não pode ser apagado nem sobrescrito"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn antigravity_recusa_library_como_symlink_para_nao_tocar_home_real() {
+    fake_keyring();
+    let tmp = TempDir::new();
+    let real_home = tmp.path().join("home-real");
+    let account = tmp.path().join("conta-com-link");
+    std::fs::create_dir_all(real_home.join("Library/Preferences")).unwrap();
+    std::fs::create_dir_all(&account).unwrap();
+    std::os::unix::fs::symlink(real_home.join("Library"), account.join("Library")).unwrap();
+
+    let err = super::antigravity_home::prepare(&real_home, &account)
+        .expect_err("Library como symlink precisa ser recusada");
+    assert!(
+        err.to_string().contains("link simbólico"),
+        "mensagem inesperada: {err}"
+    );
+    assert!(
+        !real_home
+            .join("Library/Preferences/com.apple.security.plist")
+            .exists(),
+        "não pode gravar preferências no Library do home real"
+    );
 }
 
 #[test]
