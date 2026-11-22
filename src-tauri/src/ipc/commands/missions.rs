@@ -383,40 +383,53 @@ pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, Stri
     let db = db(app)?;
     let repo_key = crate::memory::repo_scope::mission_repo_key_unlocked(&db, Some(&id))?;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let mission = crate::missions::store::get(&conn, &id)?
+    let tab = authenticated_tab(args).ok();
+    memory_search_on(&conn, &id, &query, limit, at, repo_key.as_deref(), tab.as_deref())
+}
+
+/// O núcleo de `memory_search`, com o banco já aberto: lê só as memórias aprovadas da missão.
+pub(super) fn memory_search_on(
+    conn: &rusqlite::Connection,
+    id: &str,
+    query: &str,
+    limit: usize,
+    at: Option<i64>,
+    repo_key: Option<&str>,
+    tab: Option<&str>,
+) -> Result<Value, String> {
+    let mission = crate::missions::store::get(conn, id)?
         .ok_or_else(|| format!("não há nenhuma missão {id}"))?;
     let hits = match at {
         Some(at) => crate::memory::search::search_at_with_repo(
-            &conn,
+            conn,
             &mission.workspace_id,
             Some(&mission.id),
-            repo_key.as_deref(),
+            repo_key,
             true,
-            &query,
+            query,
             limit,
             at,
         )?,
         None => crate::memory::search::search_with_repo(
-            &conn,
+            conn,
             &mission.workspace_id,
             Some(&mission.id),
-            repo_key.as_deref(),
+            repo_key,
             true,
-            &query,
+            query,
             limit,
         )?,
     };
     let keys: Vec<String> = hits.iter().map(|hit| hit.key.clone()).collect();
-    let tab = authenticated_tab(args).ok();
     crate::memory::usage::record(
-        &conn,
+        conn,
         &crate::memory::usage::UsageRow {
             ts: crate::memory::usage::now(),
             workspace_id: &mission.workspace_id,
-            mission_id: Some(&id),
-            tab_id: tab.as_deref(),
+            mission_id: Some(id),
+            tab_id: tab,
             action: "search",
-            query: Some(query.as_str()),
+            query: Some(query),
             hits: hits.len() as u32,
             entry_keys: &keys,
         },
@@ -490,9 +503,12 @@ pub(super) fn memory_usage(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     let (workspace, _) = workspace_for_caller(&conn, &tab)?;
-    Ok(json!(crate::memory::usage::report(
-        &conn, &workspace, since
-    )?))
+    memory_usage_on(&conn, &workspace, since)
+}
+
+/// O núcleo de `memory_usage`: quem leu a memória do workspace, desde `since` (se houver).
+pub(super) fn memory_usage_on(conn: &rusqlite::Connection, workspace: &str, since: Option<i64>) -> Result<Value, String> {
+    Ok(json!(crate::memory::usage::report(conn, workspace, since)?))
 }
 
 pub(super) fn swarm_write(app: &AppHandle, args: &Value, question: bool) -> Result<Value, String> {
@@ -533,8 +549,13 @@ pub(super) fn swarm_read(app: &AppHandle, args: &Value) -> Result<Value, String>
     let id = memory_caller_mission(args)?;
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let mission = crate::missions::store::get(&conn, &id)?.ok_or("mission not found")?;
-    let notes = crate::memory::lifecycle::swarm_read(&conn, &mission.workspace_id, &id)?;
+    swarm_read_on(&conn, &id)
+}
+
+/// O núcleo de `swarm_read`: o quadro da missão, com o banco já aberto.
+pub(super) fn swarm_read_on(conn: &rusqlite::Connection, id: &str) -> Result<Value, String> {
+    let mission = crate::missions::store::get(conn, id)?.ok_or("mission not found")?;
+    let notes = crate::memory::lifecycle::swarm_read(conn, &mission.workspace_id, id)?;
     Ok(json!({ "text": crate::memory::lifecycle::render_board(&notes), "notes": notes }))
 }
 
@@ -604,37 +625,48 @@ pub(super) fn memory_history(app: &AppHandle, args: &Value) -> Result<Value, Str
     }
 
     let db = db(app)?;
-    let (workspace_id, mission_cwd, entry_id) = {
+    let mission_cwd = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let mission = crate::missions::store::get(&conn, &mission_id)?
-            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
-        let entry_id: String = match scope.as_str() {
-            "workspace" => conn.query_row(
-                "SELECT id FROM memory_entries WHERE workspace_id=?1 AND scope='workspace' AND key=?2",
-                params![mission.workspace_id.as_str(), key.as_str()],
-                |row| row.get(0),
-            ),
-            "mission" => conn.query_row(
-                "SELECT id FROM memory_entries WHERE workspace_id=?1 AND mission_id=?2 AND scope='mission' AND key=?3",
-                params![mission.workspace_id.as_str(), mission.id.as_str(), key.as_str()],
-                |row| row.get(0),
-            ),
-            _ => unreachable!(),
-        }
-        .map_err(|_| format!("no {scope} memory entry with key {key}"))?;
-        (mission.workspace_id, mission.cwd, entry_id)
+        crate::missions::store::get(&conn, &mission_id)?
+            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?
+            .cwd
     };
     let repository_key = crate::memory::repo_scope::repo_key(std::path::Path::new(&mission_cwd));
-    let history = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        crate::memory::history::history_for_entry(
-            &conn,
-            &workspace_id,
-            Some(&mission_id),
-            &entry_id,
-            repository_key,
-        )?
-    };
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    memory_history_on(&conn, &mission_id, &key, &scope, repository_key)
+}
+
+/// O núcleo de `memory_history`, com o banco já aberto: o histórico de validade de uma entrada aprovada.
+pub(super) fn memory_history_on(
+    conn: &rusqlite::Connection,
+    mission_id: &str,
+    key: &str,
+    scope: &str,
+    repository_key: Option<String>,
+) -> Result<Value, String> {
+    let mission = crate::missions::store::get(conn, mission_id)?
+        .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
+    let entry_id: String = match scope {
+        "workspace" => conn.query_row(
+            "SELECT id FROM memory_entries WHERE workspace_id=?1 AND scope='workspace' AND key=?2",
+            params![mission.workspace_id.as_str(), key],
+            |row| row.get(0),
+        ),
+        "mission" => conn.query_row(
+            "SELECT id FROM memory_entries WHERE workspace_id=?1 AND mission_id=?2 AND scope='mission' AND key=?3",
+            params![mission.workspace_id.as_str(), mission.id.as_str(), key],
+            |row| row.get(0),
+        ),
+        _ => unreachable!(),
+    }
+    .map_err(|_| format!("no {scope} memory entry with key {key}"))?;
+    let history = crate::memory::history::history_for_entry(
+        conn,
+        &mission.workspace_id,
+        Some(mission_id),
+        &entry_id,
+        repository_key,
+    )?;
     Ok(json!({ "entryId": entry_id, "scope": scope, "key": key, "history": history }))
 }
 
