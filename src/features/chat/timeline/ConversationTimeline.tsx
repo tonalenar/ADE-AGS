@@ -28,6 +28,7 @@ import { activityOf, joinParts, summarizeTools } from "./workSummary";
 import { SelectionComment } from "../quotes/SelectionComment";
 import { voicesByItem } from "./agentSwitch";
 import { NoticeRow } from "./NoticeRow";
+import { latestInteractivePoolNoticeId } from "./poolNotice";
 import { TurnEndNotice } from "./TurnEndNotice";
 import { clampTimelineRange, endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, thinkingTurnKey, timelineTurnsCached, visibleTurnBody, type BodyRow, type ChangedFile, type Turn, type TurnsCache } from "./timelineModel";
 import type { TimelineItem, ToolKind } from "./types";
@@ -586,14 +587,17 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
         )}
         <div ref={turnsHostRef} data-chat-turns-host="" className="flex flex-col gap-4">
           {topSpacer > 0 && <div aria-hidden="true" data-chat-virtual-spacer="top" style={{ height: topSpacer, flex: "0 0 auto" }} />}
-          {turns.slice(startIndex, endIndex).map((turn, offset) => {
-            const index = startIndex + offset;
-            return <VirtualTurn key={turn.key} turnKey={turn.key} index={index} onMeasure={measureTurn}>
-              {turn.notice
-                ? <NoticeRow item={turn.notice} onResend={onResend} threadId={threadId} />
-                : <TurnView turn={turn} thinking={turn.key === thinkingKey} working={working && !compacting && turn.end === null} waiting={approval !== null || approvalDocked} workingSince={turn.user?.at ?? startedAt} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} quietWhenEmpty={toolVisibility === "zen"} />}
-            </VirtualTurn>;
-          })}
+          {(() => {
+            const activePoolNoticeId = latestInteractivePoolNoticeId(turns.map((turn) => turn.notice));
+            return turns.slice(startIndex, endIndex).map((turn, offset) => {
+              const index = startIndex + offset;
+              return <VirtualTurn key={turn.key} turnKey={turn.key} index={index} onMeasure={measureTurn}>
+                {turn.notice
+                  ? <NoticeRow item={turn.notice} onResend={onResend} threadId={threadId} activePoolNotice={turn.notice.id === activePoolNoticeId} />
+                  : <TurnView turn={turn} thinking={turn.key === thinkingKey} working={working && !compacting && turn.end === null} waiting={approval !== null || approvalDocked} workingSince={turn.user?.at ?? startedAt} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} quietWhenEmpty={toolVisibility === "zen"} />}
+              </VirtualTurn>;
+            });
+          })()}
           {bottomSpacer > 0 && <div aria-hidden="true" data-chat-virtual-spacer="bottom" style={{ height: bottomSpacer, flex: "0 0 auto" }} />}
         </div>
         {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <div key={p.id} data-chat-pending-turn={p.id}><PersonBubble text={shown} sending queued={working} composerTarget={quoteKey} /></div> : null; })}

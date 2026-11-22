@@ -34,15 +34,15 @@ export function DraftTeamPanel({ cards }: { cards: ConversationCard[] }) {
     return <p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.team.draft.noAgent")}</p>;
   }
 
-  const add = async ({ pick, role, policy, subagent, worktree, model, effort }: LinkValue) => {
+  const add = async ({ pick, role, policy, subagent, worktree, model, effort, account }: LinkValue) => {
     if (!pick) return;
     const base = { id: newDraftId(), role, policy, subagent };
     addToDraft(pick.kind === "new"
-      ? { ...base, kind: "new", agent: pick.agent, model, effort, worktree }
+      ? { ...base, kind: "new", agent: pick.agent, model, effort, account: account ?? null, worktree }
       : { ...base, kind: "existing", conv: conversationRefOf(pick.card) });
   };
-  const save = (member: DraftMember) => async ({ role, policy, subagent, worktree, model, effort }: LinkValue) => {
-    updateInDraft(member.id, member.kind === "new" ? { role, policy, subagent, worktree, model, effort } : { role, policy, subagent });
+  const save = (member: DraftMember) => async ({ role, policy, subagent, worktree, model, effort, account }: LinkValue) => {
+    updateInDraft(member.id, member.kind === "new" ? { role, policy, subagent, worktree, model, effort, account: account ?? null } : { role, policy, subagent });
   };
 
   return (
@@ -55,7 +55,7 @@ export function DraftTeamPanel({ cards }: { cards: ConversationCard[] }) {
       </p>
       {adding && (
         <div className="mt-2.5">
-          <LinkAgentFields usedAgentIds={usedAgentIds} taken={taken} cards={cards} dragHint={false}
+          <LinkAgentFields accountChoice usedAgentIds={usedAgentIds} taken={taken} cards={cards} dragHint={false}
             submitLabel={t("chat.team.draft.add")} onSubmit={add} onCancel={() => setDraftForm({ adding: false })} />
         </div>
       )}
@@ -70,7 +70,7 @@ export function DraftTeamPanel({ cards }: { cards: ConversationCard[] }) {
         </li>
         {members.map((member) => (editing === member.id ? (
           <li key={member.id} className="list-none -mx-3.5">
-            <LinkAgentFields usedAgentIds={usedAgentIds} taken={taken} cards={cards} initial={member} dragHint={false}
+            <LinkAgentFields accountChoice usedAgentIds={usedAgentIds} taken={taken} cards={cards} initial={member} dragHint={false}
               title={t("chat.team.draft.editTitle")} submitLabel={t("chat.team.draft.save")}
               onSubmit={save(member)} onCancel={() => setDraftForm({ editing: null })} />
           </li>

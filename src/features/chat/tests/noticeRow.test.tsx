@@ -4,12 +4,18 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key, i18n: { language: "pt-BR" } }),
+  useTranslation: () => ({
+    t: (key: string, opts?: Record<string, unknown>) => (opts && Object.keys(opts).some((k) => k !== "defaultValue") ? `${key}${JSON.stringify(opts)}` : key),
+    i18n: { language: "pt-BR" },
+  }),
 }));
 
-const pool = vi.hoisted(() => ({ accepted: [] as string[] }));
+const pool = vi.hoisted(() => ({
+  accepted: [] as string[],
+  pending: { kind: "join", to: null, toLabel: "Pool Teste", request: null } as { kind: string; to: string | null; toLabel: string; request: string | null } | null,
+}));
 vi.mock("@/features/accounts/chatPool", () => ({
-  chatPoolPending: () => Promise.resolve({ kind: "join", to: null, toLabel: "Pool Teste", request: null }),
+  chatPoolPending: () => Promise.resolve(pool.pending),
   chatPoolAccept: (id: string) => { pool.accepted.push(id); return Promise.resolve(); },
   chatPoolDismiss: () => Promise.resolve(),
 }));
@@ -79,10 +85,36 @@ describe("NoticeRow do pool de contas", () => {
   });
 
   it("a oferta de pool (conversa fora de pool) mostra «usar o pool» e aceitar chama o backend", async () => {
+    pool.accepted = [];
+    pool.pending = { kind: "join", to: null, toLabel: "Pool Teste", request: null };
     await render(<NoticeRow threadId="t1" item={notice("poolOffer", "A conta Ton esgotou o limite e esta conversa não está num pool.")} />);
     const accept = [...host.querySelectorAll("button")].find((b) => b.textContent === "chat.timeline.notice.poolJoinAccept");
     expect(accept).toBeTruthy();
     await act(async () => { accept!.click(); });
     expect(pool.accepted).toEqual(["t1"]);
+  });
+
+  it("não mostra botões quando o código do aviso não combina com pending.kind ou quando não é o aviso ativo", async () => {
+    pool.pending = { kind: "return", to: null, toLabel: "Principal", request: null };
+    // poolAsk antigo não pode mostrar botão de pending.kind === "return"
+    await render(<NoticeRow threadId="t1" item={notice("poolAsk", "A conta A esgotou.")} />);
+    expect(host.querySelectorAll("button").length).toBe(0);
+
+    // poolReturnAsk inativo (histórico) não pode mostrar botões
+    await render(<NoticeRow threadId="t1" activePoolNotice={false} item={notice("poolReturnAsk", "A conta A renovou.")} />);
+    expect(host.querySelectorAll("button").length).toBe(0);
+
+    // poolReturnAsk ativo com pending.kind === "return" mostra os botões
+    await render(<NoticeRow threadId="t1" activePoolNotice={true} item={notice("poolReturnAsk", "A conta A renovou.")} />);
+    expect(host.querySelectorAll("button").length).toBe(2);
+  });
+
+  it("traduz avisos estruturados em JSON do pool e da troca manual de conta", async () => {
+    await render(<NoticeRow threadId="t1" item={notice("poolSwitch", JSON.stringify({ from: "Ton", to: "Erist", resetsAt: "13:10" }))} />);
+    expect(host.textContent).toContain('chat.timeline.notice.poolSwitchBody{"from":"Ton","to":"Erist","resetsAt":"13:10"}');
+
+    await render(<NoticeRow threadId="t1" item={notice("accountSwitch", JSON.stringify({ to: "Erist" }))} />);
+    expect(host.textContent).toContain("chat.timeline.notice.accountSwitch");
+    expect(host.textContent).toContain('chat.timeline.notice.accountSwitchBody{"to":"Erist"}');
   });
 });

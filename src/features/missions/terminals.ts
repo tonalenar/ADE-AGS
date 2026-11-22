@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { priorContext } from "./abArm";
 import i18n from "i18next";
 
+import { resolveAccountChoice } from "@/features/accounts/pools";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 import { MESSAGE_RULES } from "@/features/canvas/agentRole";
@@ -460,8 +461,15 @@ export async function startMissionInTerminals(
 
   // Una cuenta sin login abriría el selector de login de la TUI, y el briefing se pegaría ahí.
   // Cada cuenta tiene su perfil aislado: el login se hace una vez, a mano, en Cuentas.
-  const leadAccountId = squad && !squad.lead.autoAccount ? squad.lead.accountId ?? null : mission.autoAccount ? null : mission.leadAccountId ?? null;
-  const missing = accountsNeedingLogin([leadAccountId, ...team.map((m) => m.accountId)], useAccountsStore.getState().accounts);
+  // Se o Squad/missão escolheu `pool:<Nome>`, resolve a conta concreta antes de validar login ou abrir abas (A-1).
+  const rawLeadAccountId = squad && !squad.lead.autoAccount ? squad.lead.accountId ?? null : mission.autoAccount ? null : mission.leadAccountId ?? null;
+  const leadAccountId = leadAgentId === "gemini-desktop"
+    ? undefined
+    : await resolveAccountChoice(leadAgentId, rawLeadAccountId ?? undefined);
+  const memberAccountIds = await Promise.all(
+    team.map((m) => (m.agentId === "gemini-desktop" ? Promise.resolve(undefined) : resolveAccountChoice(m.agentId, m.accountId ?? undefined))),
+  );
+  const missing = accountsNeedingLogin([leadAccountId ?? null, ...memberAccountIds.map((id) => id ?? null)], useAccountsStore.getState().accounts);
   if (missing.length > 0) {
     throw new Error(`Falta fazer login na conta: ${missing.join(", ")}. Entre nela uma vez em Contas (cada conta tem perfil isolado) e inicie a missão de novo.`);
   }
@@ -488,10 +496,10 @@ export async function startMissionInTerminals(
     agent: leadAgent,
     title: LEAD_NAME,
     titleIsCustom: true,
-    accountId: squad && !squad.lead.autoAccount ? squad.lead.accountId ?? undefined : mission.autoAccount ? undefined : mission.leadAccountId ?? undefined,
+    accountId: leadAccountId,
   });
   const memberTabIds = team.map((m, i) =>
-    m.agentId === "gemini-desktop" ? desktopNode() : addTab({ cwd: memberWorkspaces[i].cwd, prelaunch: [{ command: memberWorkspaces[i].prelaunch }], agent: memberAgents[i], title: m.name, titleIsCustom: true, accountId: m.accountId ?? undefined, scrubSecrets: m.scrubSecrets }),
+    m.agentId === "gemini-desktop" ? desktopNode() : addTab({ cwd: memberWorkspaces[i].cwd, prelaunch: [{ command: memberWorkspaces[i].prelaunch }], agent: memberAgents[i], title: m.name, titleIsCustom: true, accountId: memberAccountIds[i], scrubSecrets: m.scrubSecrets }),
   );
 
   canvasActions.buildMissionTeam(

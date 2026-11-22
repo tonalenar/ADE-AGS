@@ -77,3 +77,31 @@ it("avisa a falha de pré-aprovação sem impedir o início da missão", async (
   expect(mocks.invoke.mock.calls[1][0]).toBe("mission_start_terminals");
   expect(mocks.addTab).toHaveBeenCalledTimes(1);
 });
+
+it("resolve pool:Nome com resolveAccountChoice antes de abrir os terminais da missão", async () => {
+  mocks.invoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+    if (cmd === "pool_pick") {
+      if (args?.pool === "Trabalho") return "acc-lead";
+      if (args?.pool === "Equipe") return null;
+    }
+    if (cmd === "mission_prepare_team") {
+      return {
+        workspaces: [workspace("Orquestrador", "C:/wt/lead"), workspace("Backend", "C:/wt/backend")],
+        precheck: "",
+        memory: "",
+      };
+    }
+    return {};
+  });
+  const poolSquad = {
+    lead: { agentId: "codex", autoAccount: false, accountId: "pool:Trabalho" },
+    members: [{ roleId: "backend", agentId: "codex", autoAccount: false, accountId: "pool:Equipe" }],
+  } as Squad;
+
+  await startMissionInTerminals(mission, poolSquad, [{ id: "backend", label: "Backend", description: "API", instructions: "Build API" }]);
+
+  expect(mocks.invoke).toHaveBeenCalledWith("pool_pick", { agentId: "codex", pool: "Trabalho" });
+  expect(mocks.invoke).toHaveBeenCalledWith("pool_pick", { agentId: "codex", pool: "Equipe" });
+  expect(mocks.addTab.mock.calls[0][0].accountId).toBe("acc-lead");
+  expect(mocks.addTab.mock.calls[1][0].accountId).toBeUndefined();
+});

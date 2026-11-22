@@ -16,7 +16,7 @@ export type DraftMember = {
   policy: TeamPolicy;
   subagent: boolean;
 } & (
-  | { kind: "new"; agent: AgentInfo; model: string | null; effort: string | null; worktree: boolean }
+  | { kind: "new"; agent: AgentInfo; model: string | null; effort: string | null; account?: string | null; worktree: boolean }
   | { kind: "existing"; conv: ConversationRef }
 );
 
