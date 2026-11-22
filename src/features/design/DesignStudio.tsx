@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
+import { clearArtboardStorage, ensureArtboardStorage, useAllFrameErrors } from "@/features/canvas/design/artboardStore";
 import { designApi, type DesignComment } from "@/features/canvas/design/designApi";
 import { resolveOwner } from "@/features/canvas/design/owner";
-import { DESIGN_SANDBOX } from "@/features/canvas/design/srcdoc";
 import { insertIntoComposer } from "@/features/chat/store";
 import { useMissionIndex } from "@/features/missions/groups";
 import { useTabsStore } from "@/features/tabs/store";
@@ -15,14 +15,15 @@ import { clearAgentFlashIds, mergeAgentFlash } from "./agentFlash";
 import { clampAnchor, formatSendText, parentSelector, pinPosition, sendPayload, threadsOf } from "./anchor";
 import { shouldSendCommentToAgent } from "./commentSubmit";
 import { ArtboardFrame, type FrameHandlers, type StudioBoard } from "./ArtboardFrame";
+import { FocusedView } from "./FocusedView";
 import {
   boardFitBox, clampScale, DEFAULT_CAMERA, fitCamera, glideDuration, lerpCamera, liveBoards,
   panBy, readCamera, readLastPage, stepZoom, toScreen, toWorld, unionBox, wheelCamera, writeCamera, zoomAt,
   type Box, type Camera,
 } from "./camera";
 import { CommentComposer, CommentPins, CommentThread, popoverPlacement, type PinItem } from "./CommentLayer";
-import { exportHtml, printBoard } from "./exportBoard";
-import { parseFrameMessage, postToFrame, resolveNavTarget, studioSrcdoc, type FrameMessage, type FrameMode, type FrameRect, type TreeNode } from "./frameBridge";
+import { exportHtml, openInBrowser, printBoard } from "./exportBoard";
+import { parseFrameMessage, postToFrame, resolveNavTarget, type FrameMessage, type FrameMode, type FrameRect, type TreeNode } from "./frameBridge";
 import { createHistory, idRef, type HistoryEntry } from "./history";
 import { isVersionConflict, removeElement, replaceInner } from "./htmlEdit";
 import { QuickBar, quickBarPlacement } from "./QuickBar";
@@ -103,6 +104,7 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
   const [dragUi, setDragUi] = useState<DragUi | null>(null);
   const [pinned, setPinned] = useState<Set<string>>(() => new Set());
   const [focused, setFocused] = useState<{ id: string; fit: "fill" | "fit" } | null>(null);
+  const [focusWidth, setFocusWidth] = useState<number | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [thread, setThread] = useState<string | null>(null);
@@ -512,6 +514,13 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
   useEffect(() => { prevVersions.current = null; }, [designId]);
   useEffect(() => () => { for (const id of flashTimers.current) clearTimeout(id); }, []);
 
+  // Os erros de script das pranchetas desta página, do mais antigo para o mais novo (o agente lê no view state).
+  const allErrors = useAllFrameErrors();
+  const viewErrors = useMemo(() => boards
+    .flatMap((b) => (allErrors[b.id] ?? []).map((e) => ({ artboardId: b.id, title: b.title, message: e.message, at: e.at })))
+    .sort((a, b) => a.at - b.at)
+    .map(({ artboardId, title, message }) => ({ artboardId, title, message })), [boards, allErrors]);
+
   // ---------- view state (o que a pessoa vê) ----------
   const lastView = useRef<DesignViewState | null>(null);
   const publisher = useMemo(() => createDebouncer<DesignViewState>(VIEW_DEBOUNCE_MS, (state) => {
@@ -523,10 +532,10 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
     if (!page || size.w === 0) return;
     const state = fitViewState(buildViewState({
       mode: focused ? "focused" : "canvas", page: { id: page.id, name: page.name }, boards, camera: cam,
-      viewport: { width: size.w, height: size.h, top: 0 }, focusedId: focused?.id ?? null, selectedIds: selBoards, picked, now: Date.now(),
+      viewport: { width: size.w, height: size.h, top: 0 }, focusedId: focused?.id ?? null, selectedIds: selBoards, picked, errors: viewErrors, now: Date.now(),
     }));
     if (!sameViewState(lastView.current, state)) publisher.push(state);
-  }, [page, boards, cam, size, focused, selBoards, picked, publisher]);
+  }, [page, boards, cam, size, focused, selBoards, picked, viewErrors, publisher]);
 
   // ---------- teclado ----------
   const latest = useRef({ tool, selBoards, selNotes, selShapes, focused, menu, draft, thread, boards, notes, shapes, shapeBoxes, size, pen, playing, following, panelOpen, panelTab, picked });
@@ -549,6 +558,7 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
   const exitFocus = useCallback(() => {
     const f = latest.current.focused;
     setFocused(null);
+    setFocusWidth(null);
     if (f) requestAnimationFrame(() => fitBoard(f.id));
   }, [fitBoard]);
   const handleKey = useCallback((k: KeyLike): boolean => {
@@ -844,7 +854,7 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
       locate(id);
       if (latest.current.panelOpen && latest.current.panelTab === "layers") postToFrame(el, { kind: "tree" });
     },
-    onForceLoad: (id) => setPinned((p) => new Set(p).add(id)),
+    onForceLoad: (id) => { ensureArtboardStorage(id); setPinned((p) => new Set(p).add(id)); },
     register: (id, el) => { if (el) frames.current.set(id, el); else frames.current.delete(id); },
   };
   // O `memo` da prancheta só vê handlers estáveis; por dentro eles leem o `handlers.current` da vez.
@@ -928,6 +938,25 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
     };
   };
 
+  const openBrowserFor = (id: string) => {
+    const b = boardById.get(id);
+    if (b) openInBrowser(b).catch(fail);
+  };
+  const clearData = async (id: string) => {
+    const b = boardById.get(id);
+    const ok = await appConfirm({
+      title: t("design.studio.clearDataTitle"), lead: t("design.studio.clearDataLead"), items: b ? [b.title] : [],
+      confirmLabel: t("design.studio.clearData"), cancelLabel: t("design.studio.cancel"), tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await clearArtboardStorage(id);
+      AlertaToast(t("canvas.design.title"), t("design.studio.clearDataDone"), "success", 2500);
+    } catch (e) {
+      fail(e);
+    }
+  };
+
   boardMenu.current = (x, y, id) => {
     setSelBoards((s) => (s.includes(id) ? s : [id]));
     setMenu({
@@ -939,6 +968,8 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
         { key: "link", label: t("design.studio.copyLink"), onSelect: () => copy(openCommand(designId, { artboardId: id }), t("design.studio.linkCopied")) },
         { key: "exHtml", label: t("design.export.html"), separator: true, onSelect: () => exportFor(id)?.onHtml() },
         { key: "exPdf", label: t("design.export.pdf"), onSelect: () => exportFor(id)?.onPdf() },
+        { key: "browser", label: t("design.studio.openBrowser"), onSelect: () => openBrowserFor(id) },
+        { key: "clearData", label: t("design.studio.clearData"), separator: true, onSelect: () => void clearData(id) },
         { key: "del", label: t("design.studio.delete"), danger: true, separator: true, hint: "⌫", onSelect: () => void removeSelection(latest.current.selBoards.includes(id) ? latest.current.selBoards : [id], []) },
       ],
     });
@@ -1216,7 +1247,11 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
       scale={cam.scale} onZoomIn={() => zoomStep(1)} onZoomOut={() => zoomStep(-1)} onFit={() => { setFollowing(false); fitAll(); }} onPreset={zoomPreset}
       lastDraw={lastDraw} lastShape={lastShape} guides={guides} onToggleGuides={() => setGuides((g) => !g)}
       exportBoard={single ? exportFor(single) : null}
-      focused={focusedBoard ? { title: focusedBoard.title, fit: focused!.fit, onFit: (fit) => setFocused((f) => (f ? { ...f, fit } : f)), onBack: exitFocus } : null}
+      focused={focusedBoard ? {
+        title: focusedBoard.title, fit: focused!.fit, onFit: (fit) => setFocused((f) => (f ? { ...f, fit } : f)), onBack: exitFocus,
+        width: focusWidth, onWidth: setFocusWidth,
+        onDownload: () => exportFor(focusedBoard.id)?.onHtml(), onOpenBrowser: () => openBrowserFor(focusedBoard.id),
+      } : null}
     />
   );
 
@@ -1226,7 +1261,7 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
       {toolbar}
       <div className="relative flex flex-1 min-h-0">
       {focusedBoard ? (
-        <FocusedView board={focusedBoard} fit={focused!.fit} register={(el) => { if (el) frames.current.set(`focus:${focusedBoard.id}`, el); else frames.current.delete(`focus:${focusedBoard.id}`); }} />
+        <FocusedView board={focusedBoard} fit={focused!.fit} width={focusWidth} register={(el) => { if (el) frames.current.set(`focus:${focusedBoard.id}`, el); else frames.current.delete(`focus:${focusedBoard.id}`); }} />
       ) : (
         <div ref={surfaceRef} role="application" aria-label={t("design.studio.canvas")}
           className={`relative flex-1 min-h-0 overflow-hidden select-none bg-gray-100 dark:bg-surface-sunken ${cursor}`}
@@ -1399,45 +1434,6 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
       </div>
       <div aria-live="polite" className="sr-only">{announce}</div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
-    </div>
-  );
-}
-
-/**
- * O modo focado: uma prancheta só, viva como protótipo clicável (links entre pranchetas navegam).
- * Preencher = o tamanho da janela; Caber = o tamanho dela, reduzido para caber.
- */
-function FocusedView({ board, fit, register }: { board: StudioBoard; fit: "fill" | "fit"; register: (el: HTMLIFrameElement | null) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState({ w: 0, h: 0 });
-  const srcDoc = useMemo(() => studioSrcdoc(board.html), [board.html]);
-  const frame = useRef<HTMLIFrameElement | null>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setBox({ w: el.clientWidth, h: el.clientHeight }));
-    ro.observe(el);
-    setBox({ w: el.clientWidth, h: el.clientHeight });
-    return () => ro.disconnect();
-  }, []);
-  const pad = 24;
-  const k = fit === "fit" && box.w > 0 ? Math.min(1, (box.w - pad * 2) / board.w, (box.h - pad * 2) / board.h) : 1;
-  const w = fit === "fill" ? box.w : board.w;
-  const h = fit === "fill" ? box.h : board.h;
-  return (
-    <div ref={ref} className="relative flex-1 min-h-0 overflow-hidden bg-gray-100 dark:bg-surface-sunken">
-      {box.w > 0 && (
-        <div className={`absolute bg-white overflow-clip ${fit === "fit" ? "shadow-[0_2px_4px_rgba(24,24,27,0.07),0_6px_16px_rgba(24,24,27,0.08)] ring-1 ring-gray-200 dark:ring-white/10" : ""}`}
-          style={{
-            width: w, height: h, left: fit === "fill" ? 0 : (box.w - w * k) / 2, top: fit === "fill" ? 0 : (box.h - h * k) / 2,
-            transform: k !== 1 ? `scale(${k})` : undefined, transformOrigin: "0 0", borderRadius: fit === "fit" ? board.radius : 0,
-          }}>
-          <iframe key={board.id} title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc} referrerPolicy="no-referrer"
-            ref={(el) => { frame.current = el; register(el); }}
-            onLoad={() => postToFrame(frame.current, { kind: "mode", mode: "play" })}
-            className="block border-0 w-full h-full" />
-        </div>
-      )}
     </div>
   );
 }

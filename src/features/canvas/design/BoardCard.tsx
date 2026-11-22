@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
+import { isAppDark } from "./artboardBridge";
+import { resetFrameErrors, snapshotOf, useArtboardStorage } from "./artboardStore";
 import type { Artboard, ArtboardStatus } from "./designApi";
 import { CHOOSER_MODE, DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
 
@@ -33,7 +35,10 @@ export function BoardCard({ board, active, comments, live = true, dragHandle = f
   const { t } = useTranslation();
   const [choosing, setChoosing] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
-  const srcDoc = useMemo(() => (live ? buildSrcdoc(board.html) : ""), [live, board.html]);
+  // O storage vem antes do iframe (o script da página roda na montagem); o tema entra só na montagem.
+  const { ready, epoch } = useArtboardStorage(board.id, live);
+  const srcDoc = useMemo(() => (live && ready ? buildSrcdoc(board.html, { storage: snapshotOf(board.id), dark: isAppDark() }) : ""), [live, ready, epoch, board.id, board.html]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => { resetFrameErrors(board.id); }, [srcDoc, board.id]);
   const tellChooser = () => {
     frame.current?.contentWindow?.postMessage({ type: CHOOSER_MODE, on: choosing }, "*");
   };
@@ -67,9 +72,9 @@ export function BoardCard({ board, active, comments, live = true, dragHandle = f
         <Button variant="custom" className={`nodrag ${designBtn}`} disabled={board.status === "approved"} onClick={onApprove}>{t("canvas.design.approve")}</Button>
         <Button variant="custom" className={`nodrag ${designBtn}`} disabled={board.status === "rejected"} onClick={onReject}>{t("canvas.design.reject")}</Button>
       </div>
-      {live ? (
+      {live && ready ? (
         // No canvas, o iframe só recebe o mouse ao escolher: senão engoliria o zoom e o arrastar.
-        <iframe ref={frame} title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc} referrerPolicy="no-referrer" onLoad={tellChooser}
+        <iframe ref={frame} title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc} referrerPolicy="no-referrer" onLoad={tellChooser} data-artboard-id={board.id}
           className={`block bg-white rounded-sm shadow-md border-0 ${board.status === "rejected" ? "opacity-50" : ""} ${dragHandle && !choosing ? "pointer-events-none" : ""}`}
           style={size} />
       ) : (

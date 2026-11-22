@@ -6,6 +6,8 @@ import { AlertaToast } from "@/shared/ui/alerts";
 
 import { chooseOnBoard } from "./chooseProposal";
 import { BoardCard, designBtn as btn } from "./BoardCard";
+import { isAppDark } from "./artboardBridge";
+import { snapshotOf, useArtboardStorage } from "./artboardStore";
 import { buildTasks } from "./buildTasks";
 import { allApproved, buildable, formatQueueForAgent, pendingComments } from "./commentQueue";
 import { designApi, type Artboard, type ArtboardVersion, type DesignDetail } from "./designApi";
@@ -268,7 +270,8 @@ function EditPane({ board, versions, comments, onClose, onChanged, fail }: {
     scheduleDebounced(previewTimer.current, PREVIEW_DEBOUNCE_MS, () => setPreviewHtml(draft));
     return () => { if (previewTimer.current.id) clearTimeout(previewTimer.current.id); };
   }, [draft]);
-  const preview = useMemo(() => buildSrcdoc(previewHtml, { picker: true }), [previewHtml]);
+  const { ready, epoch } = useArtboardStorage(board.id, true);
+  const preview = useMemo(() => (ready ? buildSrcdoc(previewHtml, { picker: true, storage: snapshotOf(board.id), dark: isAppDark() }) : ""), [previewHtml, ready, epoch, board.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = draft !== board.html;
   const act = (p: Promise<unknown>) => p.then(onChanged).catch(fail);
   const addComment = () => {
@@ -300,7 +303,7 @@ function EditPane({ board, versions, comments, onClose, onChanged, fail }: {
           <div className="mb-1 text-[10.5px] text-gray-500">{t("canvas.design.preview")} — {t("canvas.design.pickHint")}</div>
           <div className="overflow-hidden rounded border border-gray-200 dark:border-white/10 bg-white"
             style={{ height: Math.min(260, board.height * (360 / board.width)) }}>
-            <iframe ref={frame} title={t("canvas.design.preview")} sandbox={DESIGN_SANDBOX} srcDoc={preview} referrerPolicy="no-referrer"
+            <iframe ref={frame} title={t("canvas.design.preview")} sandbox={DESIGN_SANDBOX} srcDoc={preview} referrerPolicy="no-referrer" data-artboard-id={board.id}
               className="border-0 origin-top-left"
               style={{ width: board.width, height: board.height, transform: `scale(${360 / board.width})` }} />
           </div>
