@@ -346,6 +346,29 @@ fn segredo_nunca_migra_mesmo_com_padrao_de_credencial() {
 }
 
 #[test]
+fn politica_de_senha_e_segredo_confirmado_pelo_usuario_migram() {
+    let env = Env::new();
+    approved(&env, "e-politica", "constraint", "senha: mínimo 12 caracteres");
+    approved(&env, "e-confirmado", "note", "password: hunter2");
+    env.with(|c| {
+        c.execute(
+            "INSERT INTO memory_secret_overrides(entry_id, revision, created_at) VALUES('e-confirmado', 1, 1)",
+            [],
+        )
+        .unwrap();
+    });
+    approved(&env, "e-bloqueado", "note", "password: hunter2");
+
+    let summary = env.run().unwrap();
+
+    assert_eq!(summary.written, 2, "política de senha e entrada confirmada devem migrar: {summary:?}");
+    assert_eq!(summary.skipped_secret, 1, "segredo sem confirmação continua pulado: {summary:?}");
+    assert!(env.page("ade/memoria/e-politica.md").exists());
+    assert!(env.page("ade/memoria/e-confirmado.md").exists());
+    assert!(!env.page("ade/memoria/e-bloqueado.md").exists());
+}
+
+#[test]
 fn pagina_que_ja_existia_sem_registro_vira_conflito_e_nao_e_sobrescrita() {
     let env = Env::new();
     approved(&env, "e1", "decision", "minha versão");

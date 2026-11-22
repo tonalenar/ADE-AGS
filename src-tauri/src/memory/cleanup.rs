@@ -311,7 +311,7 @@ fn delete_as_user(
         expected_revision: Some(revision),
         source_fact_id: None,
         reason: None,
-        acknowledge_secret: false,
+        acknowledge_secret: true,
     };
     let proposal = super::propose(
         conn,
@@ -914,5 +914,41 @@ mod tests {
         seed(&conn);
         let ids: Vec<String> = (0..=APPLY_MAX_IDS).map(|i| format!("id-{i}")).collect();
         assert!(apply_for(&conn, &sync(), "w1", &ids).is_err());
+    }
+
+    #[test]
+    fn apply_exclui_entrada_com_segredo_confirmado_pelo_usuario() {
+        let conn = db();
+        seed(&conn);
+        let entry = super::super::propose(
+            &conn,
+            "workspace",
+            "w1",
+            None,
+            &ProposalInput {
+                scope: "workspace".into(),
+                key: "segredo-confirmado".into(),
+                kind: "note".into(),
+                body: "password: hunter2".into(),
+                priority: 1,
+                operation: "create".into(),
+                expected_revision: None,
+                source_fact_id: None,
+                reason: None,
+                acknowledge_secret: true,
+            },
+            ProposalActor {
+                kind: "user",
+                run_id: None,
+                task_id: None,
+                fact_id: None,
+            },
+        )
+        .unwrap();
+        super::super::decide(&conn, &entry.entry_id, entry.revision, true).unwrap();
+
+        let out = apply_for(&conn, &sync(), "w1", &[entry.entry_id.clone()]).unwrap();
+        assert_eq!(out.deleted, 1, "limpeza precisa excluir entrada confirmada: {:?}", out.failed);
+        assert!(out.failed.is_empty(), "{:?}", out.failed);
     }
 }
