@@ -104,6 +104,8 @@ não há índice para manter em dia. O briefing do Orquestrador traz as 8 entrad
 prioridade (até 1,8 KB) marcadas como dados, não instruções. Só lê: propor continua passando
 pela aprovação do usuário.
 
+A resposta de `ags memory search`, `ags memory history`, `ags memory usage` e `ags swarm read` é `{"text": ...}`: os campos ficam dentro do envelope `UNTRUSTED DATA` (memória aprovada) ou `SESSION DATA — UNTRUSTED DATA` (quadro da missão, notas de sessão de agentes que não são memória aprovada). Crase, `<` e `>` são escapados, como na Frota MCP e em `memory index`/`open`.
+
 ## Validade temporal
 
 A validade não é armazenada nem calculada por migração. Ela é derivada em leitura a partir das

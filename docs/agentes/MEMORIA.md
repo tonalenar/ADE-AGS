@@ -101,6 +101,7 @@ As seções seguintes descrevem a memória própria do ADE, que fica só leitura
   - `ags memory open <página|id|key>`;
   - `ags memory usage`;
   - `ags memory export`.
+- Resposta de `search`, `history`, `usage` e `swarm read`: `{"text": envelope}`, com os campos dentro do envelope. Memória aprovada sai em `UNTRUSTED DATA`; o quadro da missão sai em `SESSION DATA — UNTRUSTED DATA`, porque são notas de sessão de agentes e não memória aprovada. O escape (crase, `<`, `>`) é o mesmo da Frota MCP e de `index`/`open`.
 - `memory.*` exige `ADE_SESSION` e um processo descendente do PTY.
 - Agente nunca aprova, compacta, faz purge ou restaura. Uma revisão pendente aparece só como metadado, sem corpo.
 - `ags recall` é o chat com o usuário, não a memória.

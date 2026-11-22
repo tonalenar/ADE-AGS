@@ -1,5 +1,9 @@
 # Roadmap ADE AGS
 
+## Envelope nas leituras de memória da CLI (auditoria de 2026-11-22)
+
+`ags memory search`, `ags memory history`, `ags memory usage` e `ags swarm read` deixam de devolver texto cru a agentes: a resposta é `{"text": envelope}`, com os campos dentro do bloco `UNTRUSTED DATA` (memória aprovada) ou `SESSION DATA — UNTRUSTED DATA` (quadro da missão, que não é memória aprovada). O escape de crase, `<` e `>` é o mesmo da Frota MCP e de `memory index`/`open`. Contrato em [SHARED_MEMORY.md](./SHARED_MEMORY.md#busca-e-missões-em-terminais); skill `ags-orchestrator` 1.91.0.
+
 ## Cofre de logins (F1)
 
 Cofre de logins por origem guardado exclusivamente no chaveiro do sistema operacional (`src-tauri/src/vault/`, serviço `ade-ags.vault.<hash>`), sem alterar o schema do `data.db`. Agentes interativos (abas e conversas por protocolo, nunca tarefas headless da frota) dispõem das tools MCP `vault_list` (metadados sem senha), `vault_request` (cartão seguro de cadastro) e `browser_fill_login` (preenchimento direto no navegador da aba, validando a origem contra phishing e pedindo confirmação no primeiro uso por par login/agente, com opção "Sempre permitir"). Depois de preencher, a aba fica blindada até mudar de origem (`eval`, `mock`, `console`, `storage` e `network` são recusados; `javascript:`/`data:` em `navigate` são bloqueados; `snapshot` e `describe` mascaram `input[type=password]` como `••••`; abas sujas por `eval`/`mock` são recarregadas antes de preencher; e `egressPolicy` redige qualquer ocorrência de senhas da sessão para `[cofre]`). Configurações → Cofre lista, adiciona, edita usuário/rótulo, troca senha sem exibi-la, apaga e revoga permissões por agente (skill `ags-orchestrator` 1.88.0).
