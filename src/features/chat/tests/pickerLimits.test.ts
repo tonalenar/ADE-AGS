@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { limitPercentFor, shouldShowRailLimit, type UsageSnapshot } from "@/features/chat/pickerLimits";
+import { limitPercentFor, shouldShowRailLimit, summarizeOtherAccounts, type UsageSnapshot } from "@/features/chat/pickerLimits";
 import type { RailItem } from "@/features/chat/pickerRail";
+import type { AccountEntry, AccountReading } from "@/features/chat/summary/limitsModel";
 
 const NOW = 1_700_000_000;
 const item = (over: Partial<RailItem>): RailItem => ({
@@ -69,5 +70,42 @@ describe("quando a barra aparece", () => {
     expect(shouldShowRailLimit(a, [a, b, c], 40)).toBe(true);
     expect(shouldShowRailLimit(a, [a, b, c], null)).toBe(false);
     expect(shouldShowRailLimit(c, [a, b, c], 40)).toBe(false);
+  });
+});
+
+describe("resumo de Outras contas no painel Limites de uso", () => {
+  const entry = (key: string, agentId = "claude-code"): AccountEntry => ({
+    key, agentId, accountId: key, account: null, who: [],
+  });
+  const measured = (percent: number, rejected = false): AccountReading => ({
+    state: "measured",
+    windows: [{ kind: "session", label: null, percent, resetsAt: null, resetsText: null, expired: false }],
+    rejected,
+  });
+
+  it("conta quantas contas passaram de 80% e distingue aviso âmbar de esgotado", () => {
+    const entries = [entry("a"), entry("b"), entry("c")];
+    const map: Record<string, AccountReading> = {
+      a: measured(40),
+      b: measured(80), // exatamente 80% não passa de 80
+      c: measured(85),
+    };
+    const s1 = summarizeOtherAccounts(entries, (e) => map[e.key]!);
+    expect(s1.count).toBe(3);
+    expect(s1.highUsageCount).toBe(1);
+    expect(s1.warningLevel).toBe("warn");
+
+    map.a = measured(100);
+    const s2 = summarizeOtherAccounts(entries, (e) => map[e.key]!);
+    expect(s2.highUsageCount).toBe(2);
+    expect(s2.warningLevel).toBe("full");
+  });
+
+  it("sem contas acima de 80%, não emite aviso", () => {
+    const entries = [entry("a"), entry("b")];
+    const s = summarizeOtherAccounts(entries, () => ({ state: "unmeasured", reason: "noQuotaSource" }));
+    expect(s.count).toBe(2);
+    expect(s.highUsageCount).toBe(0);
+    expect(s.warningLevel).toBeNull();
   });
 });

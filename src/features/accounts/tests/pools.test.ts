@@ -7,8 +7,11 @@ import {
   STRATEGIES,
   isPoolValue,
   poolNameOf,
+  poolPreviewPicks,
   poolSaveNew,
   poolSetFailover,
+  poolSetPaused,
+  poolUpdate,
   poolValue,
 } from "../pools";
 import {
@@ -141,6 +144,35 @@ describe("pools de cuentas (lado de la pantalla)", () => {
       enabled: false,
     });
     expect(res2.failover).toBe(false);
+  });
+
+  it("poolUpdate, poolSetPaused e poolPreviewPicks chamam os comandos Tauri certos", async () => {
+    mock.invoke.mockResolvedValueOnce({
+      id: "p1",
+      name: "Diário",
+      agentId: "claude-code",
+      members: ["acc-1", null],
+      strategy: "sticky",
+      failover: true,
+      paused: false,
+    });
+    const updated = await poolUpdate("p1", "Diário", ["acc-1", null], "sticky");
+    expect(mock.invoke).toHaveBeenCalledWith("pool_update", {
+      id: "p1",
+      name: "Diário",
+      members: ["acc-1", null],
+      strategy: "sticky",
+    });
+    expect(updated.id).toBe("p1");
+
+    mock.invoke.mockResolvedValueOnce({ id: "p1", paused: true });
+    await poolSetPaused("p1", true);
+    expect(mock.invoke).toHaveBeenCalledWith("pool_set_paused", { id: "p1", paused: true });
+
+    mock.invoke.mockResolvedValueOnce([{ poolId: "p1", accountId: "acc-1", available: true, swapsToday: 1 }]);
+    const previews = await poolPreviewPicks();
+    expect(mock.invoke).toHaveBeenCalledWith("pool_preview_picks");
+    expect(previews[0]?.accountId).toBe("acc-1");
   });
 });
 
