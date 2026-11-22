@@ -17,7 +17,7 @@ import {
 import { DRAW_TOOLS, SHAPE_TOOLS, TOOLS, type DrawTool, type ShapeTool, type Tool } from "./studioModel";
 
 /** O botão "ghost" da barra (altura de controle, sem borda). */
-export const ghostBtn = `h-7 px-2 rounded-md inline-flex items-center gap-1.5 text-[12.5px] text-gray-700 dark:text-white/80
+export const ghostBtn = `h-7 px-2 rounded-md inline-flex shrink-0 whitespace-nowrap items-center gap-1.5 text-[12.5px] text-gray-700 dark:text-white/80
   hover:bg-gray-100 dark:hover:bg-white/10 disabled:opacity-40 disabled:pointer-events-none`;
 const menuCls = `absolute top-full mt-1 z-50 p-1 rounded-lg bg-white dark:bg-surface-raised
   shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_8px_24px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.08)]`;
@@ -92,6 +92,8 @@ export function StudioToolbar(p: {
         </button>
         <span className="min-w-0 max-w-[40vw] truncate text-sm text-gray-800 dark:text-white/85" title={f.title}>{f.title}</span>
         <span className="flex-1" />
+        {/* No painel estreito os controles rolam na horizontal em vez de serem cortados. */}
+        <div data-focus-controls="" className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
         <Segmented label={t("design.studio.widthLabel")} value={widthKeyOf(f.width)} onChange={(k) => f.onWidth(WIDTH_OF[k])}
           options={[
             { value: "original", label: t("design.studio.widthOriginal") },
@@ -103,6 +105,7 @@ export function StudioToolbar(p: {
           options={[{ value: "fill", label: t("design.studio.fill") }, { value: "fit", label: t("design.studio.fit") }]} />
         <button type="button" className={ghostBtn} onClick={f.onDownload} title={t("design.studio.download")}>{t("design.studio.download")}</button>
         <button type="button" className={ghostBtn} onClick={f.onOpenBrowser} title={t("design.studio.openBrowser")}>{t("design.studio.openBrowserShort")}</button>
+        </div>
       </Bar>
     );
   }
