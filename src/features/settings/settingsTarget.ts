@@ -2,10 +2,11 @@ import { create } from "zustand";
 
 import type { SettingsPageId } from "@/features/settings/settingsNav";
 
-/** Para onde a busca mandou ir: a página, a aba (quando a página tem abas) e o bloco a rolar. */
+/** Para onde a busca (ou um link interno) mandou ir: a página, a aba, o provedor opcional e o bloco a rolar. */
 export interface SettingsTarget {
   readonly page: SettingsPageId;
   readonly tab?: string;
+  readonly provider?: string;
   readonly anchor: string;
   /** Muda a cada pedido, para o mesmo ajuste poder ser achado de novo depois de rolar. */
   readonly nonce: number;

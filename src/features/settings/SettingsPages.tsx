@@ -11,8 +11,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { useSkillsStore } from "@/features/skills/store";
 import { ProvidersSection } from "@/features/providers/ProvidersSection";
 import { ContasSection } from "@/features/accounts/ContasSection";
-import { DetectedAgents } from "@/features/agents/DetectedAgents";
-import { LocalAcpSection } from "@/features/agents/LocalAcpSection";
+import { PoolsTabPage } from "@/features/accounts/PoolsSection";
 import { GraphifySection } from "@/features/graphify/GraphifySection";
 import { SharedMemoryPanel } from "@/features/memory/SharedMemoryPanel";
 import { AiMemoryPanel } from "@/features/memory/AiMemoryPanel";
@@ -45,7 +44,6 @@ import { ConfirmationsSetting } from "@/features/settings/ConfirmationsSetting";
 import { SidebarSettings } from "@/features/settings/SidebarSettings";
 import { ScheduledTasksSection } from "@/features/settings/ScheduledTasksSection";
 import { AiMemoryTabsSetting } from "@/features/settings/AiMemoryTabsSetting";
-import { AgentAutoUpdateSetting } from "@/features/settings/AgentAutoUpdateSetting";
 import { SandboxSetting } from "@/features/settings/SandboxSetting";
 import { RenderingSetting } from "@/features/settings/RenderingSetting";
 import { FontPreferencesSetting } from "@/features/settings/FontPreferencesSetting";
@@ -57,7 +55,7 @@ import { TextRenderingSetting } from "@/features/settings/TextRenderingSetting";
 import { TimeFormatSetting } from "@/features/settings/TimeFormatSetting";
 import { DiffsSetting } from "@/features/settings/DiffsSetting";
 import { SettingsAnchor, SettingsGroup, SettingsRow, SettingsSection, SettingsSubTabs } from "@/features/settings/SettingsSection";
-import { CustomAgentsSection } from "@/features/settings/CustomAgentsSection";
+import { CustomProvidersSection } from "@/features/settings/CustomProvidersSection";
 import { ProjectDetailSettings, ProjectListSetting, ProjectOrderSetting, ProjectScopeBar } from "@/features/settings/ProjectsSettings";
 import { SourceControlSettings } from "@/features/settings/SourceControlSettings";
 import { ThreadsSettings } from "@/features/settings/ThreadsSettings";
@@ -152,8 +150,8 @@ function ChatSettingsPage() {
   );
 }
 
-type ProvidersTab = "provedores" | "contas" | "tuis" | "acp";
-const PROVIDERS_TABS = ["provedores", "contas", "tuis", "acp"] as const;
+type ProvidersTab = "agentes" | "contas" | "pools" | "personalizados";
+const PROVIDERS_TABS = ["agentes", "contas", "pools", "personalizados"] as const;
 
 type OrchestratorTab = "orquestrador" | "roteamento" | "prelaunch";
 const ORCHESTRATOR_TABS = ["orquestrador", "roteamento", "prelaunch"] as const;
@@ -168,37 +166,57 @@ function useTabFromTarget<T extends string>(page: SettingsPageId, tabs: readonly
   }, [target, page, tabs, setTab]);
 }
 
-/** Provedores e contas: a lista de provedores com login e liga/desliga (T3), as contas por agente, as TUIs (instaladas e as adicionadas à mão) e os agentes ACP. */
+/** Provedores e contas: Agentes instalados, Contas (agentes e Git), Pools e Personalizados (TUIs e ACP). */
 function ProvidersPage() {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<ProvidersTab>("provedores");
+  const [tab, setTab] = useState<ProvidersTab>("agentes");
+  const [pickedProvider, setPickedProvider] = useState<string | null>(null);
+  const target = useSettingsTargetStore((s) => s.target);
   useTabFromTarget("accounts", PROVIDERS_TABS, setTab);
+
+  useEffect(() => {
+    if (target?.page === "accounts" && target.provider) {
+      setPickedProvider(target.provider);
+    }
+  }, [target]);
+
+  const openAccounts = (agentId?: string) => {
+    if (agentId) setPickedProvider(agentId);
+    setTab("contas");
+  };
+
   return (
     <>
       <SettingsSubTabs<ProvidersTab>
         items={[
-          { id: "provedores", label: t("settings.providers.tab") },
+          { id: "agentes", label: t("providers.tab.agents") },
           { id: "contas", label: t("settings.accounts") },
-          { id: "tuis", label: t("settings.tuis") },
-          { id: "acp", label: t("settings.agents.acp.tab") },
+          { id: "pools", label: t("providers.tab.pools") },
+          { id: "personalizados", label: t("providers.tab.custom") },
         ]}
         value={tab}
         onChange={setTab}
       />
-      {tab === "provedores" && <SettingsAnchor id="providers-list"><ProvidersSection /></SettingsAnchor>}
-      {tab === "contas" && <SettingsAnchor id="providers-accounts"><ContasSection /></SettingsAnchor>}
-      {tab === "tuis" && (
-        <SettingsAnchor id="providers-tuis">
-          <SettingsSection title={t("settings.tuis")} description={t("settings.tuis.desc")}>
-            <SettingsGroup>
-              <AgentAutoUpdateSetting />
-            </SettingsGroup>
-            <DetectedAgents />
-            <CustomAgentsSection />
-          </SettingsSection>
+      {tab === "agentes" && (
+        <SettingsAnchor id="providers-agents">
+          <ProvidersSection onOpenAccounts={openAccounts} />
         </SettingsAnchor>
       )}
-      {tab === "acp" && <SettingsAnchor id="providers-acp"><LocalAcpSection /></SettingsAnchor>}
+      {tab === "contas" && (
+        <SettingsAnchor id="providers-accounts">
+          <ContasSection initialProvider={pickedProvider} onOpenPools={() => setTab("pools")} />
+        </SettingsAnchor>
+      )}
+      {tab === "pools" && (
+        <SettingsAnchor id="providers-pools">
+          <PoolsTabPage />
+        </SettingsAnchor>
+      )}
+      {tab === "personalizados" && (
+        <SettingsAnchor id="providers-custom">
+          <CustomProvidersSection />
+        </SettingsAnchor>
+      )}
     </>
   );
 }

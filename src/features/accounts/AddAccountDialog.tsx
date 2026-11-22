@@ -1,43 +1,42 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Badge, Button, Input,
-} from "neogestify-ui-components";
+import { AnimateSpin, Button, Input } from "neogestify-ui-components";
 
-import { accountFormMode, programPresent } from "@/features/agents/accountConnect";
-import { useAccountsStore } from "@/features/accounts/store";
-import { useTabsStore } from "@/features/tabs/store";
-import type { AgentAccount } from "@/features/accounts/types";
-import { LoginTerminal } from "@/features/accounts/LoginTerminal";
-import { AccountColorPicker } from "@/features/accounts/AccountColorPicker";
-import { MultipleAccountsNote } from "@/features/accounts/MultipleAccountsNote";
-import { agentIcon } from "@/features/agents/agentIcons";
-import { AppDialog } from "@/shared/ui/AppDialog";
 import { PanelBoundary } from "@/app/PanelBoundary";
+import { AccountColorPicker } from "@/features/accounts/AccountColorPicker";
+import { LoginTerminal } from "@/features/accounts/LoginTerminal";
+import { MultipleAccountsNote } from "@/features/accounts/MultipleAccountsNote";
+import { useAccountsStore } from "@/features/accounts/store";
+import type { AgentAccount } from "@/features/accounts/types";
+import { accountFormMode, programPresent } from "@/features/agents/accountConnect";
+import { agentIcon } from "@/features/agents/agentIcons";
+import { useTabsStore } from "@/features/tabs/store";
+import { AppDialog } from "@/shared/ui/AppDialog";
 
 interface AddAccountDialogProps {
-  /** El servicio para el que se crea. Viene de la sección en la que estás parado, y no se
-   *  vuelve a preguntar: ya lo elegiste al entrar ahí. */
+  /** Provedor pré-selecionado ao abrir o diálogo. */
   agentId: string;
   onClose: () => void;
-  /** Com qual forma de entrada o formulário abre (a página Providers já a escolheu). */
+  /** Com qual forma de entrada o formulário abre. */
   initialMode?: "login" | "api_key";
+  /** Permite escolher/trocar o provedor no passo 1 (usado na aba Contas). */
+  allowProviderPick?: boolean;
+  /** Quando informado, pula o passo 1 e abre direto o passo 2 para refazer o login desta conta. */
+  reloginAccount?: AgentAccount | null;
 }
 
 /**
- * Alta de una cuenta: ponerle nombre y loguearse.
- *
- * Antes preguntaba OTRA VEZ de qué TUI era, con un selector igual al de la pantalla desde
- * la que se abre. Estando en la sección de Claude Code, el botón de agregar solo puede
- * querer decir una cosa — y peor, el selector dejaba crear la cuenta en otro servicio y
- * aparecer en una sección distinta de la que estabas mirando.
- *
- * El login es una terminal de verdad y no un formulario de mail y contraseña: el de estas
- * CLIs es un flujo propio (abre el navegador, pide un código, elige plan) y cambia entre
- * versiones. Reimplementarlo significaría manejar credenciales acá adentro y romperse en la
- * próxima actualización de la TUI. Corriendo el login real, la app nunca ve una credencial.
+ * Diálogo "Adicionar conta" em 2 passos:
+ * 1) Provedor, nome, cor e como entrar (conta/assinatura ou chave de API no chaveiro);
+ * 2) Login no navegador com opção de expandir o terminal real da CLI (sem nunca desmontar o PTY).
  */
-export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: AddAccountDialogProps) {
+export function AddAccountDialog({
+  agentId: initialAgentId,
+  onClose,
+  initialMode = "login",
+  allowProviderPick = false,
+  reloginAccount = null,
+}: AddAccountDialogProps) {
   const { t } = useTranslation();
   const capable = useAccountsStore((s) => s.capable);
   const accounts = useAccountsStore((s) => s.accounts);
@@ -45,51 +44,51 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
   const createWithApiKey = useAccountsStore((s) => s.createWithApiKey);
   const checkHealth = useAccountsStore((s) => s.checkHealth);
   const setIdentity = useAccountsStore((s) => s.setIdentity);
+  const detectedAgents = useTabsStore((s) => s.detectedAgents);
+
+  const [agentId, setAgentId] = useState(reloginAccount?.agentId ?? initialAgentId);
   const [name, setName] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [color, setColor] = useState<string | null>(null);
   const [mode, setMode] = useState<"login" | "api_key">(initialMode);
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  /** Cuenta ya creada: pasamos a la terminal de login. */
-  const [created, setCreated] = useState<AgentAccount | null>(null);
+  const [created, setCreated] = useState<AgentAccount | null>(reloginAccount);
+  const [showTerminal, setShowTerminal] = useState(false);
 
-  const agent = capable.find((c) => c.agentId === agentId);
-  const seen = useTabsStore((s) => s.detectedAgents.some((a) => a.id === agentId && a.available));
-  const taken = accounts.some((a) => a.agentId === agentId && a.name === name.trim());
-  const form = agent ? accountFormMode(agentId, programPresent(agent.installed, seen), true) : "blocked";
+  const agent = capable.find((c) => c.agentId === agentId) ?? capable[0];
+  const effectiveAgentId = agent?.agentId ?? agentId;
+  const seen = detectedAgents.some((a) => a.id === effectiveAgentId && a.available);
+  const taken = accounts.some((a) => a.agentId === effectiveAgentId && a.name === name.trim());
+  const form = agent ? accountFormMode(effectiveAgentId, programPresent(agent.installed, seen), true) : "blocked";
   const showKey = form === "api-key" || form === "both";
   const showLogin = form === "login" || form === "both";
   const usingKey = showKey && (form === "api-key" || mode === "api_key");
   const canCreate = !!agent && form !== "blocked" && !!name.trim() && !taken && (!usingKey || apiKey.trim().length > 0);
 
-  // Nome de exibição e cor são opcionais e só enfeite: se gravar falhar, a conta já existe e
-  // dá para personalizá-la depois, então o erro não trava o fluxo.
   const applyIdentity = async (accountId: string) => {
-    if (!displayName.trim() && !color) return;
+    if (!color) return;
     try {
-      await setIdentity(accountId, displayName.trim() || null, color);
+      await setIdentity(accountId, null, color);
     } catch {
-      // Ver acima.
+      // A conta já existe; a cor pode ser ajustada depois.
     }
   };
 
   const handleCreate = async () => {
+    if (!agent) return;
     setBusy(true);
     setError("");
     try {
       if (usingKey) {
-        const account = await createWithApiKey(agentId, name.trim(), apiKey.trim(), baseUrl.trim() || null);
+        const account = await createWithApiKey(effectiveAgentId, name.trim(), apiKey.trim(), baseUrl.trim() || null);
         await applyIdentity(account.id);
-        // La lista ya la muestra; la verificación corre en segundo plano y su resultado
-        // aparece en la fila (ver `AgentAccountsPane`).
         void checkHealth(account.id);
         onClose();
         return;
       }
-      const account = await create(agentId, name.trim());
+      const account = await create(effectiveAgentId, name.trim());
       await applyIdentity(account.id);
       setCreated(account);
     } catch (e) {
@@ -99,26 +98,27 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
     }
   };
 
-  // ── Paso 2: login ─────────────────────────────────────────
+  const wayLoginTitle = (id: string) => {
+    if (id === "antigravity") return t("settings.accounts.add.way.google");
+    if (id === "claude-code") return t("settings.accounts.add.way.claude");
+    if (id === "codex") return t("settings.accounts.add.way.codex");
+    return t("settings.accounts.add.way.generic");
+  };
+
+  // ── Passo 2: login (terminal montado de forma estável para nunca matar o PTY) ──
   if (created) {
     return (
       <AppDialog
-        // O título é um nó dentro de fronteira: um erro nele cai no nome da conta (texto simples), e não sobe até
-        // a página. O nome acessível do diálogo vem do dado (o nome da conta), não de uma chamada de tradução.
         title={
           <PanelBoundary name="login-conta-titulo" fallback={<span>{created.name}</span>}>
-            <LoginStepTitle name={created.name} />
+            <LoginStepTitle name={created.name} relogin={Boolean(reloginAccount)} />
           </PanelBoundary>
         }
         ariaLabel={created.name}
         onClose={onClose}
-        size="lg"
-        // Cerrar sin querer a mitad de un login (un click fuera, un Esc) deja la cuenta
-        // creada pero vacía, y desde afuera parece que "no funcionó". Se sale por el botón.
+        size={showTerminal ? "lg" : "md"}
         closeOnBackdrop={false}
         closeOnEsc={false}
-        // O rodapé e o texto são partes que não são terminal: cada um numa fronteira própria, para um erro neles
-        // não subir até a página e derrubar o terminal de login (que é filho direto do diálogo, abaixo).
         footer={
           <PanelBoundary name="login-conta-rodape">
             <LoginStepDone onDone={onClose} />
@@ -126,23 +126,26 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
         }
       >
         <PanelBoundary name="login-conta-texto">
-          <LoginStepHelp command={created.loginCommand} />
+          <LoginStepIntro
+            command={created.loginCommand}
+            showTerminal={showTerminal}
+            onToggleTerminal={() => setShowTerminal((v) => !v)}
+          />
         </PanelBoundary>
-        <LoginTerminal account={created} />
+        {/* O container muda apenas visibilidade CSS: o LoginTerminal permanece montado no mesmo pai para preservar o PTY. */}
+        <div className={showTerminal ? "mt-3" : "sr-only h-0 overflow-hidden"} aria-hidden={!showTerminal}>
+          <LoginTerminal account={created} />
+        </div>
       </AppDialog>
     );
   }
 
-  // ── Paso 1: el nombre ─────────────────────────────────────
-  const Icon = agent ? agentIcon(agent.agentId, agent.label) : null;
-
+  // ── Passo 1: provedor, nome, cor e como entrar ─────────────────────────────
   return (
     <AppDialog
-      title={agent
-        ? t("settings.accounts.add.titleFor", { agent: agent.label })
-        : t("settings.accounts.add.title")}
+      title={t("settings.accounts.add.title")}
       onClose={onClose}
-      size="sm"
+      size="md"
       closeOnBackdrop={!busy}
       closeOnEsc={!busy}
       footer={
@@ -153,114 +156,155 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
           <Button
             variant="primary"
             disabled={busy || !canCreate}
-            onClick={handleCreate}
+            onClick={() => void handleCreate()}
           >
-            {usingKey ? t("settings.accounts.add.createApiKey") : t("settings.accounts.add.next")}
+            {usingKey ? t("settings.accounts.add.createApiKey") : t("settings.accounts.add.continue")}
           </Button>
         </>
       }
     >
       {!agent ? (
-        <p className="text-[12px] text-gray-500 dark:text-gray-400">
+        <p className="text-[12.5px] text-gray-500 dark:text-white/50">
           {t("settings.accounts.add.noneInstalled")}
         </p>
-      ) : form === "blocked" ? (
-        <p className="text-[12px] text-gray-500 dark:text-gray-400">
-          {t("settings.accounts.add.needsProgram")}
-        </p>
       ) : (
-        <div className="flex flex-col gap-3">
-          {/* Para qué servicio es. Va como dato, no como elección: es lo que estabas
-              mirando, y decirlo acá evita tener que confiar en haber leído el título. */}
-          <div className="flex items-center gap-2 h-9 px-3 rounded-lg
-            bg-gray-100/70 dark:bg-white/4">
-            {Icon && <Icon className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-gray-400" />}
-            <span className="flex-1 min-w-0 truncate text-[12px]
-              text-gray-700 dark:text-gray-300">
-              {agent.label}
-            </span>
-            <Badge variant="info" size="sm" className="font-mono shrink-0">
-              {agent.envVar}
-            </Badge>
-          </div>
-
-          <MultipleAccountsNote agentId={agentId} agentLabel={agent.label} />
-
-          <Input
-            label={t("settings.accounts.add.name")}
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              setError("");
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && canCreate && !busy) handleCreate();
-            }}
-            placeholder={t("settings.accounts.namePlaceholder")}
-            variant="outline"
-            autoFocus
-            error={taken ? t("settings.accounts.add.taken") : undefined}
-            helperText={t("settings.accounts.add.nameHelper", { envVar: agent.envVar })}
-          />
-
-          <Input
-            label={t("settings.accounts.add.displayName")}
-            value={displayName}
-            maxLength={40}
-            onChange={(e) => setDisplayName(e.target.value)}
-            variant="outline"
-          />
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium text-gray-700 dark:text-gray-300">
-              {t("settings.accounts.add.color")}
-            </span>
-            <AccountColorPicker value={color} onChange={setColor} label={t("settings.accounts.add.color")} />
-          </div>
-
-          {showKey && showLogin && (
-            <div className="flex gap-1.5" role="radiogroup">
-              {(["login", "api_key"] as const).map((m) => (
-                <Button
-                  key={m}
-                  size="sm"
-                  variant={mode === m ? "primary" : "outline"}
-                  role="radio"
-                  aria-checked={mode === m}
-                  onClick={() => { setMode(m); setError(""); }}
-                >
-                  {m === "login" ? t("settings.accounts.add.mode.login") : t("settings.accounts.add.mode.apiKey")}
-                </Button>
-              ))}
+        <div className="flex flex-col gap-3.5">
+          {allowProviderPick && capable.length > 1 && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[12px] font-medium text-gray-700 dark:text-gray-200">
+                {t("settings.accounts.add.provider")}
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5" role="radiogroup" aria-label={t("settings.accounts.add.provider")}>
+                {capable.map((c) => {
+                  const Icon = agentIcon(c.agentId, c.label);
+                  const active = c.agentId === effectiveAgentId;
+                  return (
+                    <button
+                      key={c.agentId}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => {
+                        setAgentId(c.agentId);
+                        setMode("login");
+                        setError("");
+                      }}
+                      className={`flex flex-col items-center gap-1.5 rounded-lg border px-2 py-2.5 text-[12px] transition-colors
+                        ${active
+                          ? "border-accent-500 bg-accent-500/10 text-gray-900 dark:text-white font-medium"
+                          : "border-gray-200 dark:border-white/[0.08] text-gray-600 dark:text-white/65 hover:bg-gray-50 dark:hover:bg-white/[0.04]"}`}
+                    >
+                      <Icon className="w-4 h-4 shrink-0" />
+                      <span className="truncate max-w-full">{c.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
-          {usingKey && (
+          {form === "blocked" ? (
+            <p className="m-0 text-[12.5px] text-gray-500 dark:text-white/50">
+              {t("settings.accounts.add.needsProgram")}
+            </p>
+          ) : (
             <>
+              <MultipleAccountsNote agentId={effectiveAgentId} agentLabel={agent.label} />
+
               <Input
-                label={t("settings.accounts.add.apiKey")}
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                value={apiKey}
-                onChange={(e) => { setApiKey(e.target.value); setError(""); }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && canCreate && !busy) handleCreate();
-                }}
-                placeholder={agentId === "codex" ? "sk-…" : "sk-ant-…"}
+                label={t("settings.accounts.add.name")}
+                value={name}
+                onChange={(e) => { setName(e.target.value); setError(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && canCreate && !busy) void handleCreate(); }}
+                placeholder={t("settings.accounts.namePlaceholder")}
                 variant="outline"
-                helperText={agentId === "codex"
-                  ? t("settings.accounts.add.apiKeyHelperCodex")
-                  : t("settings.accounts.add.apiKeyHelperClaude")}
+                autoFocus
+                error={taken ? t("settings.accounts.add.taken") : undefined}
               />
-              {agentId === "claude-code" && (
-                <Input
-                  label={t("settings.accounts.add.baseUrl")}
-                  value={baseUrl}
-                  onChange={(e) => { setBaseUrl(e.target.value); setError(""); }}
-                  placeholder="https://openrouter.ai/api"
-                  variant="outline"
-                  helperText={t("settings.accounts.add.baseUrlHelper")}
-                />
+
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[12px] font-medium text-gray-700 dark:text-gray-200">
+                  {t("settings.accounts.add.color")}
+                </span>
+                <AccountColorPicker value={color} onChange={setColor} label={t("settings.accounts.add.color")} />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[12px] font-medium text-gray-700 dark:text-gray-200">
+                  {t("providers.method.title")}
+                </span>
+                <div role="radiogroup" aria-label={t("providers.method.title")} className="flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={!usingKey}
+                    disabled={!showLogin}
+                    onClick={() => { setMode("login"); setError(""); }}
+                    className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors disabled:opacity-45 disabled:cursor-not-allowed
+                      ${!usingKey
+                        ? "border-accent-500 bg-accent-500/8 dark:bg-accent-500/12"
+                        : "border-gray-200 dark:border-white/[0.08] hover:bg-gray-50 dark:hover:bg-white/[0.03]"}`}
+                  >
+                    <span aria-hidden="true" className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${!usingKey ? "border-accent-500" : "border-gray-300 dark:border-white/25"}`}>
+                      {!usingKey && <span className="h-2 w-2 rounded-full bg-accent-500" />}
+                    </span>
+                    <span className="flex flex-col gap-0.5 min-w-0">
+                      <b className="text-[12.5px] font-semibold text-gray-900 dark:text-white">{wayLoginTitle(effectiveAgentId)}</b>
+                      <small className="text-[11.5px] text-gray-500 dark:text-white/50">{t("settings.accounts.add.way.browserHint")}</small>
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={usingKey}
+                    disabled={!showKey}
+                    onClick={() => { setMode("api_key"); setError(""); }}
+                    className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors disabled:opacity-45 disabled:cursor-not-allowed
+                      ${usingKey
+                        ? "border-accent-500 bg-accent-500/8 dark:bg-accent-500/12"
+                        : "border-gray-200 dark:border-white/[0.08] hover:bg-gray-50 dark:hover:bg-white/[0.03]"}`}
+                  >
+                    <span aria-hidden="true" className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${usingKey ? "border-accent-500" : "border-gray-300 dark:border-white/25"}`}>
+                      {usingKey && <span className="h-2 w-2 rounded-full bg-accent-500" />}
+                    </span>
+                    <span className="flex flex-col gap-0.5 min-w-0">
+                      <b className="text-[12.5px] font-semibold text-gray-900 dark:text-white">{t("settings.accounts.add.mode.apiKey")}</b>
+                      <small className="text-[11.5px] text-gray-500 dark:text-white/50">
+                        {showKey ? t("settings.accounts.add.way.apiKeyHint") : t("settings.accounts.add.way.apiKeyUnavailable")}
+                      </small>
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {usingKey && (
+                <>
+                  <Input
+                    label={t("settings.accounts.add.apiKey")}
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={apiKey}
+                    onChange={(e) => { setApiKey(e.target.value); setError(""); }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && canCreate && !busy) void handleCreate(); }}
+                    placeholder={effectiveAgentId === "codex" ? "sk-…" : "sk-ant-…"}
+                    variant="outline"
+                    helperText={effectiveAgentId === "codex"
+                      ? t("settings.accounts.add.apiKeyHelperCodex")
+                      : t("settings.accounts.add.apiKeyHelperClaude")}
+                  />
+                  {effectiveAgentId === "claude-code" && (
+                    <Input
+                      label={t("settings.accounts.add.baseUrl")}
+                      value={baseUrl}
+                      onChange={(e) => { setBaseUrl(e.target.value); setError(""); }}
+                      placeholder="https://openrouter.ai/api"
+                      variant="outline"
+                      helperText={t("settings.accounts.add.baseUrlHelper")}
+                    />
+                  )}
+                </>
               )}
             </>
           )}
@@ -274,32 +318,41 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
   );
 }
 
-/**
- * Título do passo de login. Componente próprio, para que o `t` dele rode dentro da fronteira do título, e não
- * na função do diálogo.
- */
-function LoginStepTitle({ name }: { name: string }) {
-  const { t } = useTranslation();
-  return <>{t("settings.accounts.login.title", { name })}</>;
-}
-
-/**
- * Texto do passo de login (o comando a rodar). Componente próprio: ele renderiza dentro da sua fronteira,
- * e não na função do diálogo, então um erro aqui fica aqui.
- */
-function LoginStepHelp({ command }: { command: string }) {
+function LoginStepIntro({ command, showTerminal, onToggleTerminal }: {
+  command: string;
+  showTerminal: boolean;
+  onToggleTerminal: () => void;
+}) {
   const { t } = useTranslation();
   return (
-    <p className="text-[11.5px] text-gray-500 dark:text-white/45 mb-3">
-      {t("settings.accounts.login.helper", { command })}
-    </p>
+    <div className="flex flex-col items-center text-center gap-2 py-2">
+      <AnimateSpin className="w-6 h-6 text-accent-500" />
+      <b className="text-[14px] font-semibold text-gray-900 dark:text-white">
+        {t("settings.accounts.login.browserTitle")}
+      </b>
+      <p className="m-0 max-w-md text-[12.5px] leading-relaxed text-gray-500 dark:text-white/55">
+        {t("settings.accounts.login.browserDesc")}
+      </p>
+      <p className="m-0 text-[11.5px] text-gray-400 dark:text-white/40">
+        {t("settings.accounts.login.helper", { command })}
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        className="mt-1"
+        onClick={onToggleTerminal}
+      >
+        {showTerminal ? t("settings.accounts.login.hideTerminal") : t("settings.accounts.login.showTerminal")}
+      </Button>
+    </div>
   );
 }
 
-/**
- * Botão de concluir o passo de login: recarrega a lista (mesmo se falhar, o login já foi feito) e fecha.
- * Componente próprio, pelo mesmo motivo de `LoginStepHelp`.
- */
+function LoginStepTitle({ name, relogin }: { name: string; relogin: boolean }) {
+  const { t } = useTranslation();
+  return <>{t(relogin ? "settings.accounts.relogin.title" : "settings.accounts.login.title", { name })}</>;
+}
+
 function LoginStepDone({ onDone }: { onDone: () => void }) {
   const { t } = useTranslation();
   const load = useAccountsStore((s) => s.load);
@@ -307,7 +360,6 @@ function LoginStepDone({ onDone }: { onDone: () => void }) {
     <Button
       variant="primary"
       onClick={async () => {
-        // Se recarregar a lista falhar, ainda assim se fecha: o login já foi feito.
         try { await load(); } finally { onDone(); }
       }}
     >

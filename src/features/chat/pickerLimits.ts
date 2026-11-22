@@ -2,7 +2,19 @@ import type { LiveUsage } from "@/features/accounts/usage";
 import type { AgyEntry, AntigravityEntry, CodexEntry } from "@/features/canvas/usageStore";
 
 import type { RailItem } from "./pickerRail";
-import { accountKeyOf, headlineOf, readAgy, readAntigravity, readClaude, readCodex, type AccountReading, type LimitLevel } from "./summary/limitsModel";
+import {
+  WARN_ABOVE,
+  accountKeyOf,
+  headlineOf,
+  limitLevel,
+  readAgy,
+  readAntigravity,
+  readClaude,
+  readCodex,
+  type AccountEntry,
+  type AccountReading,
+  type LimitLevel,
+} from "./summary/limitsModel";
 
 /** A cor do preenchimento por nível, a mesma do cartão "Limites de uso". */
 export const LIMIT_FILL: Record<LimitLevel, string> = {
@@ -52,4 +64,45 @@ export function limitPercentFor(item: RailItem, usage: UsageSnapshot, now: numbe
 export function shouldShowRailLimit(item: RailItem, rail: readonly RailItem[], percent: number | null): boolean {
   if (percent === null) return false;
   return rail.filter((other) => other.agentId === item.agentId).length > 1;
+}
+
+export interface OtherAccountSummaryItem {
+  entry: AccountEntry;
+  reading: AccountReading;
+  percent: number | null;
+  level: LimitLevel;
+}
+
+export interface OtherAccountsSummary {
+  count: number;
+  /** Quantas contas em "Outras contas" passaram de 80% (ou estão esgotadas). */
+  highUsageCount: number;
+  /** Maior nível entre as contas acima de 80% (`full` se alguma chegou a 100%, senão `warn`). */
+  warningLevel: "warn" | "full" | null;
+  items: OtherAccountSummaryItem[];
+}
+
+/** Resume o grupo recolhível "Outras contas" do cartão Limites de uso. Pura. */
+export function summarizeOtherAccounts(
+  entries: readonly AccountEntry[],
+  readEntry: (entry: AccountEntry) => AccountReading,
+): OtherAccountsSummary {
+  let highUsageCount = 0;
+  let hasFull = false;
+  const items: OtherAccountSummaryItem[] = entries.map((entry) => {
+    const reading = readEntry(entry);
+    const percent = headlineOf(reading);
+    const level = limitLevel(percent);
+    if (percent !== null && percent > WARN_ABOVE) {
+      highUsageCount += 1;
+      if (level === "full") hasFull = true;
+    }
+    return { entry, reading, percent, level };
+  });
+  return {
+    count: items.length,
+    highUsageCount,
+    warningLevel: highUsageCount > 0 ? (hasFull ? "full" : "warn") : null,
+    items,
+  };
 }

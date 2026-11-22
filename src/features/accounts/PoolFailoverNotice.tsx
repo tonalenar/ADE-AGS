@@ -15,6 +15,7 @@ import type { BusEvent } from "@/shared/bus";
  * jeito seguro de detectar isso numa TUI; ver docs/ade-ags/POOL_FAILOVER.md).
  */
 export const POOL_FAILOVER_TOPIC = "account.pool_failover";
+export const POOL_ASK_TOPIC = "account.pool_ask";
 
 export interface PoolFailoverEvent {
   taskId: string;
@@ -31,16 +32,42 @@ export interface PoolFailoverEvent {
   toModel?: string | null;
 }
 
+export interface PoolAskEvent {
+  taskId: string;
+  taskTitle?: string;
+  runId: string;
+  poolId: string;
+  poolName: string;
+  fromAccount: string | null;
+  reason: string;
+  kind: string;
+}
+
 /**
  * Já existe aviso por notificação do SO (`notifier.rs`); isto é o espelho dentro do app — um
- * toast dizendo que tarefa trocou de conta, em qual pool e por quê. Monta uma vez (ver
- * `AppShell.tsx`), do lado dos outros avisos de canto.
+ * toast dizendo que tarefa trocou de conta (ou pausou aguardando confirmação), em qual pool e por quê.
+ * Monta uma vez (ver `AppShell.tsx`), do lado dos outros avisos de canto.
  */
 export function PoolFailoverNotice() {
   const { t } = useTranslation();
 
   useEffect(() => {
     const off = listen<BusEvent>("ade-event", (e) => {
+      if (e.payload.topic === POOL_ASK_TOPIC) {
+        const data = e.payload.data as unknown as PoolAskEvent | undefined;
+        if (!data?.poolId) return;
+        const task = useRunsStore.getState().tasks.find((tk) => tk.id === data.taskId);
+        showBotToast({
+          title: data.poolName || t("accounts.pools.title"),
+          text: t("accounts.pools.ask.notice", {
+            task: data.taskTitle ?? task?.title ?? data.taskId,
+            pool: data.poolName,
+            reason: data.reason,
+          }),
+          ms: 9000,
+        });
+        return;
+      }
       if (e.payload.topic !== POOL_FAILOVER_TOPIC) return;
       const data = e.payload.data as unknown as PoolFailoverEvent | undefined;
       if (!data?.poolId) return;

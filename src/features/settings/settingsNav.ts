@@ -131,11 +131,11 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
 
   { id: "shortcuts", page: "shortcuts", anchor: "shortcuts-main", titleKey: "settings.shortcuts" },
 
-  { id: "providers.list", page: "accounts", tab: "provedores", anchor: "providers-list", titleKey: "providers.list", keywordKeys: ["providers.add"] },
+  { id: "providers.list", page: "accounts", tab: "agentes", anchor: "providers-agents", titleKey: "providers.tab.agents", keywordKeys: ["providers.list"] },
+  { id: "providers.autoUpdate", page: "accounts", tab: "agentes", anchor: "providers-agents", titleKey: "settings.agentUpdates.label" },
   { id: "providers.accounts", page: "accounts", tab: "contas", anchor: "providers-accounts", titleKey: "settings.accounts" },
-  { id: "providers.tuis", page: "accounts", tab: "tuis", anchor: "providers-tuis", titleKey: "settings.tuis" },
-  { id: "providers.autoUpdate", page: "accounts", tab: "tuis", anchor: "providers-tuis", titleKey: "settings.agentUpdates.label" },
-  { id: "providers.acp", page: "accounts", tab: "acp", anchor: "providers-acp", titleKey: "settings.agents.acp.tab" },
+  { id: "providers.pools", page: "accounts", tab: "pools", anchor: "providers-pools", titleKey: "providers.tab.pools", keywordKeys: ["accounts.pools.title"] },
+  { id: "providers.custom", page: "accounts", tab: "personalizados", anchor: "providers-custom", titleKey: "providers.tab.custom", keywordKeys: ["settings.tuis", "settings.agents.acp.tab"] },
 
   { id: "browser.behavior", page: "browser", anchor: "browser-behavior", titleKey: "settings.browser.autoShow", keywordKeys: ["settings.browser.autoShowHint"] },
   { id: "browser.search", page: "browser", anchor: "browser-search", titleKey: "settings.browserSearch.title" },
