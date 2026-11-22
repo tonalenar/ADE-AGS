@@ -20,15 +20,26 @@ pub(super) fn reserved_project(project: &str) -> bool {
 }
 const LIMIT: u64 = 2 * 1024 * 1024;
 
+fn contains_secret(value: &Value) -> bool {
+    match value {
+        Value::String(text) => crate::memory::agent::looks_like_user_secret(text),
+        Value::Array(items) => items.iter().any(contains_secret),
+        Value::Object(map) => map.values().any(contains_secret),
+        _ => false,
+    }
+}
+
 fn stamp(message: &mut Value, workspace: &str, project: &str) -> Result<(), &'static str> {
     match message["method"].as_str() {
         Some("initialize" | "notifications/initialized" | "ping" | "tools/list") => return Ok(()),
         Some("tools/call") => {}
         _ => return Err("Método indisponível neste intermediário."),
     }
-    if !TOOLS.contains(&message["params"]["name"].as_str().unwrap_or("")) {
+    let tool = message["params"]["name"].as_str().unwrap_or("");
+    if !TOOLS.contains(&tool) {
         return Err("Tool indisponível neste intermediário com escopo fixo.");
     }
+    let is_write = matches!(tool, "memory_write_page" | "memory_patch_page");
     let params = message["params"]
         .as_object_mut()
         .ok_or("Parâmetros inválidos.")?;
@@ -53,6 +64,13 @@ fn stamp(message: &mut Value, workspace: &str, project: &str) -> Result<(), &'st
             .is_some_and(|v| !v.is_null() && v != &json!([]))
     {
         return Err("Escopo global, perfil ou múltiplos projetos não permitido.");
+    }
+    if is_write
+        && args
+            .iter()
+            .any(|(key, value)| !matches!(key.as_str(), "workspace" | "project") && contains_secret(value))
+    {
+        return Err("Gravação recusada: o conteúdo parece conter uma credencial (chave, token ou senha). Remova o segredo antes de gravar na memória.");
     }
     args.remove("scope");
     args.insert("workspace".into(), json!(workspace));
