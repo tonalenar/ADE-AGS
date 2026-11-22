@@ -6,6 +6,8 @@ import { intersects, visibleWorld, type Box, type Camera } from "./camera";
  */
 export interface ViewArtboard { id: string; title: string }
 export interface ViewSelection { kind: "text" | "image" | "shape" | "line" | "other"; label: string }
+/** Um erro de script numa prancheta (o agente lê com `ags design view` e corrige). */
+export interface ViewError { artboardId: string; title: string; message: string }
 export interface DesignViewState {
   mode: "canvas" | "focused";
   pageId: string;
@@ -15,10 +17,12 @@ export interface DesignViewState {
   selected: string[];
   selection: ViewSelection[];
   zoom: number;
+  /** Os últimos erros de script das pranchetas desta página (o mais antigo primeiro). */
+  lastErrors: ViewError[];
   updatedAt: number;
 }
 
-export const VIEW_LIMITS = { visible: 20, selected: 20, selection: 5, label: 60, bytes: 3072 } as const;
+export const VIEW_LIMITS = { visible: 20, selected: 20, selection: 5, label: 60, bytes: 3072, errors: 3, errorMessage: 160 } as const;
 export const VIEW_DEBOUNCE_MS = 400;
 
 /** Um elemento escolhido dentro de uma prancheta (o clique no modo Seleção). */
@@ -33,6 +37,8 @@ export function buildViewState(input: {
   focusedId: string | null;
   selectedIds: string[];
   picked: PickedElement[];
+  /** Os erros de script das pranchetas, do mais antigo para o mais novo. */
+  errors?: ViewError[];
   now: number;
 }): DesignViewState {
   const { boards, camera, viewport } = input;
@@ -50,6 +56,11 @@ export function buildViewState(input: {
     selected: input.picked.slice(0, VIEW_LIMITS.selected).map((p) => `${p.artboardId}#${p.selector}`),
     selection: input.picked.slice(0, VIEW_LIMITS.selection).map((p) => ({ kind: p.kind, label: p.label.slice(0, VIEW_LIMITS.label) })),
     zoom: Math.round(input.mode === "focused" ? 100 : camera.scale * 100) / 100,
+    lastErrors: (input.errors ?? []).slice(-VIEW_LIMITS.errors).map((e) => ({
+      artboardId: e.artboardId,
+      title: e.title.slice(0, VIEW_LIMITS.label),
+      message: e.message.slice(0, VIEW_LIMITS.errorMessage),
+    })),
     updatedAt: input.now,
   };
 }
