@@ -151,6 +151,28 @@ describe("Redesenho de Configurações → Provedores e contas", () => {
     expect(host.querySelectorAll('[role="menuitem"]').length).toBe(2);
   });
 
+  it("sem cota guardada, abrir Contas do Antigravity busca a cota sozinho (sem precisar de Atualizar consumo)", async () => {
+    const base = invokeMock.getMockImplementation()!;
+    const forces: unknown[] = [];
+    invokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "antigravity_cli_usage") {
+        forces.push(args?.force);
+        // O cache começa vazio: só a leitura forçada traz os grupos.
+        if (!args?.force) return { installed: true, fetchedAt: 0, cached: false, groups: [] };
+      }
+      return base(cmd, args);
+    });
+    await mount();
+    await click(host.querySelector('button[aria-label*="Antigravity"]'));
+    const link = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("providers.detail.manageInAccounts"));
+    await click(link);
+    await act(async () => { await Promise.resolve(); });
+
+    expect(host.textContent).toContain("Gemini 4 Argon");
+    expect(forces).toContain(false);
+    expect(forces).toContain(true);
+  });
+
   it("o link Gerenciar em Contas no detalhe do agente troca para a aba Contas já no provedor certo", async () => {
     await mount();
     await click(host.querySelector('button[aria-label*="Antigravity"]'));

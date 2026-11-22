@@ -81,7 +81,12 @@ async function fetchInfo(account: AgentAccount, force: boolean, t: Translate): P
     }
     plan = usage.plan ?? null;
   } else if (account.agentId === "antigravity") {
-    const usage = await antigravityCliUsage(force, realId(account)).catch(() => null);
+    let usage = await antigravityCliUsage(force, realId(account)).catch(() => null);
+    // Sem `force` o backend só devolve o que está guardado; na primeira vez não há nada.
+    // Como no painel do chat (usageStore), cache vazio vira leitura de verdade.
+    if (!force && usage?.installed && usage.groups.length === 0) {
+      usage = await antigravityCliUsage(true, realId(account)).catch(() => null);
+    }
     if (usage && usage.installed && usage.groups.length > 0) {
       agyGroups = usage.groups;
       if (usage.fetchedAt > 0) fetchedAt = usage.fetchedAt;
@@ -711,7 +716,8 @@ function AccountCard({ account, isMain, reload, onLogin, onRename, onLimits, onM
   const byKey = account.kind === "api_key";
 
   const detailParts: string[] = [];
-  if (isMain) detailParts.push(t("chat.accounts.main"));
+  // O nome "Principal" já diz que é a principal: repetir "conta principal" embaixo não informa nada.
+  if (isMain && displayName !== t("accounts.principalName")) detailParts.push(t("chat.accounts.main"));
   if (byKey) {
     detailParts.push(account.baseUrl ? `${t("accounts.kind.apiKey")} · ${account.baseUrl}` : t("accounts.kind.apiKey"));
   } else {
@@ -720,6 +726,8 @@ function AccountCard({ account, isMain, reload, onLogin, onRename, onLimits, onM
     const planText = verified?.plan ?? plan;
     if (planText) detailParts.push(planText);
   }
+  // Sem e-mail nem plano ainda (não verificada): diz de onde a conta vem.
+  if (detailParts.length === 0 && account.id.startsWith("system:")) detailParts.push(t("providers.account.system"));
 
   const verify = async () => {
     const res = await checkHealth(account.id);
