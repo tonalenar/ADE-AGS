@@ -513,6 +513,17 @@ Cada conta ganha nome de exibição, cor (token do tema) e selo de iniciais; a c
 
 Na tela de um PR, um agente (somente leitura, uma chamada headless) monta um roteiro de leitura com paradas: arquivos e linhas, por que importa, o que olhar de perto, trecho e perguntas. JSON validado estrito, com uma tentativa de conserto; cache por commit da cabeça, com aviso de desatualizado; passo a passo com teclado e visitadas; diff do arquivo no painel; "Perguntar sobre isto" abre um agente com o texto pré-preenchido, sem enviar. Nada é publicado no GitHub. Desenho, contrato e limites: [GUIA_REVISAO_PR.md](./GUIA_REVISAO_PR.md).
 
+## Etapa 23 — Pranchetas com paridade de Artifacts
+
+- [x] **Play vivo**: scripts, abas, menus, formulários, foco e teclado rodam de verdade. Campo de texto nunca vira atalho do app; o Esc sai do Play, salvo quando a página já o tratou (`frameBridge.ts`).
+- [x] **Bibliotecas e fontes**: CSP com a lista exata (`DESIGN_CSP`); `connect-src 'none'`.
+- [x] **Armazenamento por prancheta**: `localStorage` e `sessionStorage` com shim, gravados em `design_artboard_storage` (1 MiB por prancheta); "Limpar dados da prancheta" no menu. Detalhes em [DESIGN_CANVAS.md](./DESIGN_CANVAS.md#pranchetas-vivas-paridade-com-artifacts-etapa-23).
+- [x] **Tema**: `data-theme`, `color-scheme` e `prefers-color-scheme` coerentes com o app; a troca não recarrega a prancheta.
+- [x] **Tela cheia**: o Play já entra ligado no foco; seletor de largura (desktop 1280, tablet 834, celular 390).
+- [x] **Abrir e baixar**: "Baixar .html" e "Abrir no navegador do sistema" (`design_open_external`, pelo opener do Tauri).
+- [x] **Erros de script**: aviso na moldura e `lastErrors` no `ags design view`.
+- [ ] **Pendente**: WKWebView real e o serving por URI scheme com a CSP no header (PR `fix/pranchetas-scripts-webkit`); Tailwind Play CDN com a CSP nova.
+
 ## Segurança local: editor, loopback, ambiente e aprovações
 
 Quatro pontos da análise do `deepseek-harness`. O editor salva só se o arquivo tem o mesmo token `tamanho:mtime_ns:inode` de quando abriu, e recria um arquivo apagado com `create_new`. O proxy do navegador recusa `Host` que não é loopback, `Origin` de fora e subrecurso `cross-site` (o HMR do Vite segue funcionando). O ambiente da frota, do MCP do ai-memory e das abas de missão que pedem perde toda variável com `KEY`/`TOKEN`/`SECRET`/`PASSWORD`, menos as do provider; a conta e as `AGS_*`/`ADE_*` entram depois. Frota e chat gravam o mesmo par `asked`/`decided` em `approval_events`, com resultado fechado (`allowed-once`, `rejected`, `cancelled`, `unavailable`). Pendente: onde escolher e guardar o filtro por integrante. Detalhes em [SEGURANCA_LOCAL.md](./SEGURANCA_LOCAL.md).

@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.89.0
+version: 1.90.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -730,8 +730,25 @@ the app instead of a loose HTML file, and show it to them:
 ags design create "Checkout"                       # returns the design id (reuses one with the same title)
 ags design artboard add <designId> "Cart" --page "Page 1" --file cart.html [--width 390 --height 844]
 ags design open <designId> [--artboard <id>] [--page <id>]   # shows the Design screen
-ags design view [<designId>]                       # what the person is looking at right now
+ags design view [<designId>]                       # what the person is looking at right now, and its lastErrors
 ```
+
+What an artboard can use, the same as a Claude Artifact:
+
+- Plain HTML, CSS and JavaScript. It runs for real in Play: tabs, menus, dialogs, forms, focus,
+  keyboard, scrolling inside the page and `position: fixed`.
+- Scripts only from `cdnjs.cloudflare.com`, `cdn.jsdelivr.net/npm/`, `unpkg.com`,
+  `cdn.tailwindcss.com` and `code.jquery.com`. Styles and fonts only from `fonts.googleapis.com`
+  and `fonts.gstatic.com`. Images as `data:` or `blob:`.
+- No other network: `fetch`, XHR and form submission do not work. `alert`, `confirm` and `prompt`
+  do nothing; use an HTML dialog instead.
+- `localStorage` and `sessionStorage` work and are kept per artboard (up to 1 MB), across reloads
+  and app restarts. The person can erase them with "Clear artboard data" in the artboard menu.
+- The page follows the app theme: `data-theme="dark"` on `<html>` (define your tokens on `:root`
+  and override them under `[data-theme="dark"]`) and `matchMedia("(prefers-color-scheme: dark)")`.
+  CSS `@media (prefers-color-scheme)` follows the operating system, not the app.
+- Script errors show on the artboard, and the last ones come back in `ags design view` under
+  `lastErrors`. After you change an artboard, read them and fix what they say.
 
 - **Open it when it is ready.** `ags design open` shows the Design screen: in chat mode, the
   Design tab of the right panel; with tabs or the canvas, the full screen. It also puts the
