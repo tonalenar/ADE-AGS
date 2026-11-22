@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ViewModal } from "@/shared/ui/ViewModal";
 import { useTranslation } from "react-i18next";
 
+import { useDesignFrame } from "@/shared/ipc/designFrame";
+
 import { appThemeDeclarations, ISOLATED_FRAME_CSP, ISOLATED_FRAME_SANDBOX } from "./isolatedFrame";
 
 /** Quem envia o aviso de saída de dentro da prévia: o script que `visualReplyDocument` injeta. */
@@ -36,7 +38,8 @@ export function VisualReplyPreview({ html, onClose }: { html: string; onClose: (
   // A prévia mostra o HTML como estava ao abrir. Se o bloco mudar com a janela aberta, o quadro não recarrega, e o
   // aviso de saída da página antiga não vira bloqueio falso.
   const [opened] = useState(() => html);
-  const srcDoc = useMemo(() => visualReplyDocument(opened), [opened]);
+  const docHtml = useMemo(() => visualReplyDocument(opened), [opened]);
+  const frameDoc = useDesignFrame(docHtml, "isolated");
   const [phase, setPhase] = useState<FramePhase>("ok");
   // Chave do iframe: cada restauração troca a chave, e o React monta um quadro novo (o documento de fora é descartado).
   const [frameKey, setFrameKey] = useState(0);
@@ -82,14 +85,15 @@ export function VisualReplyPreview({ html, onClose }: { html: string; onClose: (
             {t("chat.visualReply.blocked")}
           </p>
         )}
-        {phase !== "blocked" && (
+        {phase !== "blocked" && frameDoc.ready && (
           <iframe
             key={frameKey}
             ref={frame}
             title={t("chat.visualReply.frameTitle")}
             sandbox={ISOLATED_FRAME_SANDBOX}
             referrerPolicy="no-referrer"
-            srcDoc={srcDoc}
+            src={frameDoc.src}
+            srcDoc={frameDoc.srcDoc}
             onLoad={() => {
               if (loadedKey.current !== frameKey) {
                 loadedKey.current = frameKey;

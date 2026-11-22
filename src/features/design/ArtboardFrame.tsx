@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { DESIGN_SANDBOX } from "@/features/canvas/design/srcdoc";
+import { useDesignFrame } from "@/shared/ipc/designFrame";
 
 import { htmlHead, postToFrame, studioSrcdoc } from "./frameBridge";
 import { iframeSrcIdentity } from "./iframeSrc";
@@ -61,9 +62,10 @@ export const ArtboardFrame = memo(function ArtboardFrame({ board, live, selected
   const [name, setName] = useState(board.title);
   useEffect(() => { if (renaming) setName(board.title); }, [renaming]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir
   const srcIdentity = iframeSrcIdentity(board.id, live);
-  // O `replaceHtml` troca só o corpo. Se o <head> mudou (estilos), o documento é outro: o srcdoc recarrega.
+  // O `replaceHtml` troca só o corpo. Se o <head> mudou (estilos), o documento é outro: o frame recarrega.
   const head = htmlHead(board.html);
-  const srcDoc = useMemo(() => (live ? studioSrcdoc(board.html) : ""), [srcIdentity, head]); // eslint-disable-line react-hooks/exhaustive-deps
+  const documentHtml = useMemo(() => (live ? studioSrcdoc(board.html) : null), [srcIdentity, head]); // eslint-disable-line react-hooks/exhaustive-deps
+  const frameDoc = useDesignFrame(documentHtml, "design");
   const htmlRef = useRef({ html: board.html, head });
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   useEffect(() => {
@@ -123,9 +125,12 @@ export const ArtboardFrame = memo(function ArtboardFrame({ board, live, selected
           outlineOffset: selected ? "calc(-1px * var(--inv))" : undefined,
         }}>
         {live ? (
-          <iframe ref={(el) => { iframeRef.current = el; h.register(board.id, el); }} title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc}
-            referrerPolicy="no-referrer" onLoad={() => h.onFrameLoad(board.id)}
-            className="block border-0 w-full h-full" style={{ pointerEvents: passThrough ? "none" : "auto" }} />
+          frameDoc.ready ? (
+            <iframe ref={(el) => { iframeRef.current = el; h.register(board.id, el); }} title={board.title} sandbox={DESIGN_SANDBOX}
+              src={frameDoc.src} srcDoc={frameDoc.srcDoc}
+              referrerPolicy="no-referrer" onLoad={() => h.onFrameLoad(board.id)}
+              className="block border-0 w-full h-full" style={{ pointerEvents: passThrough ? "none" : "auto" }} />
+          ) : null
         ) : (
           <div className="w-full h-full flex items-center justify-center"
             style={{ backgroundImage: "repeating-linear-gradient(135deg, var(--color-gray-100) 0 10px, var(--color-gray-50) 10px 20px)" }}>

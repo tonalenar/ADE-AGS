@@ -21,6 +21,7 @@ mod bus;
 mod database;
 mod decisions;
 mod design;
+mod design_frame;
 pub mod desktop_apps;
 pub mod build_info;
 #[cfg_attr(not(test), allow(dead_code))]

@@ -5,6 +5,7 @@ import { useAskStore } from "@/features/ask/askStore";
 import { activeComposerCommandTarget } from "@/features/chat/composerCommands";
 import { insertIntoComposer } from "@/features/chat/store";
 import { appThemeDeclarations } from "@/features/chat/timeline/isolatedFrame";
+import { useDesignFrame } from "@/shared/ipc/designFrame";
 
 import { McpAppApprovalDialog } from "./McpAppApprovalDialog";
 import { createMcpAppSession } from "./mcpAppBridge";
@@ -64,10 +65,11 @@ function McpAppLive({ html, server = "?", toolHost, postToComposer = defaultPost
   const postRef = useRef(postToComposer);
   postRef.current = postToComposer;
   const theme = appThemeDeclarations();
-  const srcDoc = useMemo(
+  const docHtml = useMemo(
     () => mcpAppSrcdoc(html, theme),
     [html, theme.dark, theme.declarations],
   );
+  const frameDoc = useDesignFrame(docHtml, "isolated");
 
   const [fullscreen, setFullscreen] = useState(false);
   const fullscreenRef = useRef(false);
@@ -166,14 +168,17 @@ function McpAppLive({ html, server = "?", toolHost, postToComposer = defaultPost
           </button>
         )}
         {/* O mesmo iframe nos dois modos: só a classe do pai muda. Trocar o pai recarregaria o app. */}
-        <iframe
-          ref={frameRef}
-          title={t("chat.mcpApp.frameTitle")}
-          sandbox={MCP_APP_SANDBOX}
-          referrerPolicy="no-referrer"
-          srcDoc={srcDoc}
-          className="block h-full w-full border-0 bg-white dark:bg-surface-deep"
-        />
+        {frameDoc.ready && (
+          <iframe
+            ref={frameRef}
+            title={t("chat.mcpApp.frameTitle")}
+            sandbox={MCP_APP_SANDBOX}
+            referrerPolicy="no-referrer"
+            src={frameDoc.src}
+            srcDoc={frameDoc.srcDoc}
+            className="block h-full w-full border-0 bg-white dark:bg-surface-deep"
+          />
+        )}
       </div>
       {pending && <McpAppApprovalDialog request={pending.request} onDecide={(allowed) => pending.settle(allowed ? "approved" : "denied")} />}
     </div>

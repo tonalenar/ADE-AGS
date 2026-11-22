@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { designApi, type DesignComment } from "@/features/canvas/design/designApi";
 import { resolveOwner } from "@/features/canvas/design/owner";
 import { DESIGN_SANDBOX } from "@/features/canvas/design/srcdoc";
+import { useDesignFrame } from "@/shared/ipc/designFrame";
 import { insertIntoComposer } from "@/features/chat/store";
 import { useMissionIndex } from "@/features/missions/groups";
 import { useTabsStore } from "@/features/tabs/store";
@@ -1407,10 +1408,11 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
  * O modo focado: uma prancheta só, viva como protótipo clicável (links entre pranchetas navegam).
  * Preencher = o tamanho da janela; Caber = o tamanho dela, reduzido para caber.
  */
-function FocusedView({ board, fit, register }: { board: StudioBoard; fit: "fill" | "fit"; register: (el: HTMLIFrameElement | null) => void }) {
+export function FocusedView({ board, fit, register }: { board: StudioBoard; fit: "fill" | "fit"; register: (el: HTMLIFrameElement | null) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
-  const srcDoc = useMemo(() => studioSrcdoc(board.html), [board.html]);
+  const documentHtml = useMemo(() => studioSrcdoc(board.html), [board.html]);
+  const frameDoc = useDesignFrame(documentHtml, "design");
   const frame = useRef<HTMLIFrameElement | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -1432,10 +1434,12 @@ function FocusedView({ board, fit, register }: { board: StudioBoard; fit: "fill"
             width: w, height: h, left: fit === "fill" ? 0 : (box.w - w * k) / 2, top: fit === "fill" ? 0 : (box.h - h * k) / 2,
             transform: k !== 1 ? `scale(${k})` : undefined, transformOrigin: "0 0", borderRadius: fit === "fit" ? board.radius : 0,
           }}>
-          <iframe key={board.id} title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc} referrerPolicy="no-referrer"
-            ref={(el) => { frame.current = el; register(el); }}
-            onLoad={() => postToFrame(frame.current, { kind: "mode", mode: "play" })}
-            className="block border-0 w-full h-full" />
+          {frameDoc.ready && (
+            <iframe key={board.id} title={board.title} sandbox={DESIGN_SANDBOX} src={frameDoc.src} srcDoc={frameDoc.srcDoc} referrerPolicy="no-referrer"
+              ref={(el) => { frame.current = el; register(el); }}
+              onLoad={() => postToFrame(frame.current, { kind: "mode", mode: "play" })}
+              className="block border-0 w-full h-full" />
+          )}
         </div>
       )}
     </div>

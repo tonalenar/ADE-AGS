@@ -18,6 +18,7 @@ import { PREVIEW_DEBOUNCE_MS, scheduleDebounced } from "./previewDebounce";
 import { DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
 import { INITIAL_VIEWPORT, fitViewport, viewportReducer, zoomPercent } from "./viewport";
 import { designRoute } from "@/features/design/openRoute";
+import { useDesignFrame } from "@/shared/ipc/designFrame";
 
 /**
  * O canvas de Design: as pranchetas que o agente desenhou, para ver, comentar, editar e
@@ -269,6 +270,7 @@ function EditPane({ board, versions, comments, onClose, onChanged, fail }: {
     return () => { if (previewTimer.current.id) clearTimeout(previewTimer.current.id); };
   }, [draft]);
   const preview = useMemo(() => buildSrcdoc(previewHtml, { picker: true }), [previewHtml]);
+  const previewFrame = useDesignFrame(preview, "design");
   const dirty = draft !== board.html;
   const act = (p: Promise<unknown>) => p.then(onChanged).catch(fail);
   const addComment = () => {
@@ -300,9 +302,11 @@ function EditPane({ board, versions, comments, onClose, onChanged, fail }: {
           <div className="mb-1 text-[10.5px] text-gray-500">{t("canvas.design.preview")} — {t("canvas.design.pickHint")}</div>
           <div className="overflow-hidden rounded border border-gray-200 dark:border-white/10 bg-white"
             style={{ height: Math.min(260, board.height * (360 / board.width)) }}>
-            <iframe ref={frame} title={t("canvas.design.preview")} sandbox={DESIGN_SANDBOX} srcDoc={preview} referrerPolicy="no-referrer"
-              className="border-0 origin-top-left"
-              style={{ width: board.width, height: board.height, transform: `scale(${360 / board.width})` }} />
+            {previewFrame.ready && (
+              <iframe ref={frame} title={t("canvas.design.preview")} sandbox={DESIGN_SANDBOX} src={previewFrame.src} srcDoc={previewFrame.srcDoc} referrerPolicy="no-referrer"
+                className="border-0 origin-top-left"
+                style={{ width: board.width, height: board.height, transform: `scale(${360 / board.width})` }} />
+            )}
           </div>
         </div>
         <div className="space-y-1.5">
