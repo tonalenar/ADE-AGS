@@ -1,6 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { AiMemoryHandoff, AiMemoryMigrationRow, AiMemoryMigrationSummary, AiMemoryPage, AiMemoryProbe, AiMemoryProject, AiMemoryRecentPage, AiMemorySession, AiMemoryUntrusted } from "./aiMemory";
+import type {
+  AiMemoryForgetSweep,
+  AiMemoryHandoff,
+  AiMemoryMigrationRow,
+  AiMemoryMigrationSummary,
+  AiMemoryPage,
+  AiMemoryProbe,
+  AiMemoryProject,
+  AiMemoryRecentPage,
+  AiMemorySearchHit,
+  AiMemorySession,
+  AiMemoryUntrusted,
+} from "./aiMemory";
 
 /** Leitura do ai-memory externo pelo binário (`src-tauri/src/ai_memory/commands.rs`). `cwd` é a pasta da aba. */
 export const aiMemoryProbe = (cwd: string) =>
@@ -12,8 +24,31 @@ export const aiMemoryHandoffs = (cwd: string) =>
 export const aiMemoryRecent = (cwd: string) =>
   invoke<AiMemoryUntrusted<AiMemoryRecentPage[]>>("ai_memory_recent", { cwd });
 
+export const aiMemorySearch = (
+  cwd: string,
+  query: string,
+  workspace?: string | null,
+  project?: string | null,
+) =>
+  invoke<AiMemoryUntrusted<AiMemorySearchHit[]>>("ai_memory_search", {
+    cwd,
+    query,
+    workspace: workspace ?? null,
+    project: project ?? null,
+  });
+
 export const aiMemoryReadPage = (cwd: string, path: string) =>
   invoke<AiMemoryUntrusted<AiMemoryPage>>("ai_memory_read_page", { cwd, path });
+
+export const aiMemoryRenewPage = (cwd: string, path: string) =>
+  invoke<AiMemoryUntrusted<AiMemoryPage>>("ai_memory_renew_page", { cwd, path });
+
+export const aiMemoryPinPage = (cwd: string, path: string) =>
+  invoke<AiMemoryUntrusted<AiMemoryPage>>("ai_memory_pin_page", { cwd, path });
+
+/** Só deve ser chamado após clique e confirmação explícita do usuário. */
+export const aiMemoryDisableForgetSweep = (cwd: string) =>
+  invoke<AiMemoryForgetSweep>("ai_memory_disable_forget_sweep", { cwd });
 
 export const aiMemoryProjects = (cwd: string) =>
   invoke<AiMemoryUntrusted<AiMemoryProject[]>>("ai_memory_projects", { cwd });

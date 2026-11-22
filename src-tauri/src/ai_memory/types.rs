@@ -27,6 +27,14 @@ pub enum Availability {
     Ok,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ForgetSweepStatus {
+    pub enabled: bool,
+    pub interval_secs: Option<u64>,
+    pub config_path: String,
+    pub config_exists: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Probe {
     pub state: Availability,
@@ -34,11 +42,15 @@ pub struct Probe {
     pub installation_instruction: Option<String>,
     pub status: Option<Status>,
     pub sessions_supported: bool,
+    #[serde(default)]
+    pub forget_sweep: Option<ForgetSweepStatus>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Status {
     pub version: String,
+    #[serde(default)]
+    pub data_dir: Option<String>,
     pub counts: Counts,
     #[serde(default)]
     pub client: Option<StatusClient>,
@@ -113,6 +125,12 @@ pub struct RecentPage {
     pub workspace: Option<String>,
     #[serde(default)]
     pub project: Option<String>,
+    #[serde(default)]
+    pub expired: bool,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -128,6 +146,10 @@ pub struct Page {
     pub frontmatter: serde_json::Value,
     #[serde(default)]
     pub expired: bool,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

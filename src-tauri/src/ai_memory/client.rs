@@ -37,6 +37,11 @@ pub(super) enum Read {
     Handoffs,
     Recent,
     Search(String),
+    SearchScoped {
+        query: String,
+        workspace: String,
+        project: String,
+    },
     Page(String),
     Projects,
 }
@@ -54,6 +59,26 @@ impl Read {
                 }
                 // O terminador impede uma consulta como `--expire-all` virar opção.
                 vec!["search", "--json", "--limit", "50", "--", query]
+            }
+            Self::SearchScoped {
+                query,
+                workspace,
+                project,
+            } => {
+                if query.trim().is_empty() || query.len() > 4096 || query.contains('\0') {
+                    return Err("Informe uma busca de 1 a 4096 bytes.".into());
+                }
+                super::sessions::validate_scope(workspace, project)?;
+                return Ok(vec![
+                    "search".into(),
+                    "--json".into(),
+                    "--limit".into(),
+                    "50".into(),
+                    format!("--workspace={workspace}"),
+                    format!("--project={project}"),
+                    "--".into(),
+                    query.clone(),
+                ]);
             }
             Self::Page(path) => {
                 check_page_path(path)?;
@@ -316,8 +341,12 @@ impl Client {
     /// Escreve uma página com o corpo na entrada padrão. Qualquer falha do processo é erro.
     pub(super) fn write_page(&self, write: &PageWrite<'_>, body: Vec<u8>) -> Result<(), String> {
         let args = write.args()?;
+        self.run_write_page(&args, body)
+    }
+
+    fn run_write_page(&self, args: &[String], body: Vec<u8>) -> Result<(), String> {
         let mut command = self
-            .command(&args)
+            .command(args)
             .map_err(|_| "Não foi possível iniciar o ai-memory.".to_string())?;
         let output = spawn::output_with_input(&mut command, Some(body), self.timeout).map_err(
             |_| "Não foi possível escrever no ai-memory (limite de 10 segundos).".to_string(),
@@ -328,6 +357,118 @@ impl Client {
         Err("O ai-memory recusou a escrita; confira se o servidor está em execução.".into())
     }
 
+    /// Renova uma página existente (ou a fixa com `--pinned`) preservando corpo e metadados.
+    pub fn renew_page(&self, path: &str, pin: bool) -> Result<Untrusted<Page>, String> {
+        self.version().map_err(|failure| failure.message())?;
+        check_page_path(path)?;
+        let current: Page = self.json(Read::Page(path.into()))?;
+        let plain = |text: &str, max: usize| {
+            !text.is_empty() && text.len() <= max && !text.chars().any(char::is_control)
+        };
+        let title = current
+            .title
+            .as_deref()
+            .or_else(|| current.frontmatter.get("title").and_then(|v| v.as_str()))
+            .filter(|t| plain(t, 128));
+        let kind_raw = current
+            .frontmatter
+            .get("kind")
+            .or_else(|| current.frontmatter.get("type"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_ascii_lowercase());
+        let kind = kind_raw
+            .as_deref()
+            .filter(|k| matches!(*k, "fact" | "rule" | "decision" | "gotcha"));
+        let tier = current
+            .frontmatter
+            .get("tier")
+            .and_then(|v| v.as_str())
+            .filter(|t| matches!(*t, "working" | "episodic" | "semantic" | "procedural"))
+            .unwrap_or("semantic");
+        let tags: Vec<String> = current
+            .frontmatter
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .filter(|t| plain(t, 96) && !t.contains(char::is_whitespace))
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let pinned = pin
+            || current.pinned
+            || current
+                .frontmatter
+                .get("pinned")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+        let mut args = vec![
+            "write-page".to_string(),
+            format!("--path={path}"),
+            format!("--tier={tier}"),
+            "--body".to_string(),
+            "-".to_string(),
+        ];
+        if let Some(t) = title {
+            args.push(format!("--title={t}"));
+        }
+        if let Some(k) = kind {
+            args.push(format!("--kind={k}"));
+        }
+        for tag in &tags {
+            args.push(format!("--tag={tag}"));
+        }
+        if pinned {
+            args.push("--pinned".into());
+        }
+        // Escopo explícito: sem ele o ai-memory deduz o projeto pela pasta do processo e a
+        // página renovada poderia ir parar em outro projeto.
+        if plain(&current.workspace, 128) {
+            args.push(format!("--workspace={}", current.workspace));
+        }
+        if plain(&current.project, 128) {
+            args.push(format!("--project={}", current.project));
+        }
+        // Entradas de perfil guardam a quem se aplicam e o que já as garante; reescrever sem
+        // esses campos os apagaria.
+        if path.starts_with("profile/") {
+            let field = |a: &str, b: &str| current.frontmatter.get(a).or_else(|| current.frontmatter.get(b)).cloned();
+            match field("applies_to", "applies-to") {
+                Some(serde_json::Value::Array(items)) => {
+                    for item in items.iter().filter_map(|v| v.as_str()).filter(|t| plain(t, 64)) {
+                        args.push(format!("--applies-to={item}"));
+                    }
+                }
+                Some(serde_json::Value::String(item)) if plain(&item, 64) => args.push(format!("--applies-to={item}")),
+                _ => {}
+            }
+            if let Some(serde_json::Value::String(by)) = field("enforced_by", "enforced-by") {
+                if plain(&by, 128) {
+                    args.push(format!("--enforced-by={by}"));
+                }
+            }
+        }
+        self.run_write_page(&args, current.body.into_bytes())?;
+        self.json(Read::Page(path.into())).map(Untrusted::new)
+    }
+
+    /// Desliga `forget_sweep_interval_secs` na config do ai-memory após confirmação explícita do usuário.
+    pub fn disable_forget_sweep(&self) -> Result<ForgetSweepStatus, String> {
+        self.version().map_err(|failure| failure.message())?;
+        let status: Status = self.json(Read::Status)?;
+        let data_dir = status
+            .data_dir
+            .ok_or_else(|| "O ai-memory não informou o diretório de dados (data_dir).".to_string())?;
+        let path = PathBuf::from(&data_dir);
+        if !path.is_absolute() {
+            return Err("O diretório de dados informado pelo ai-memory não é absoluto.".into());
+        }
+        super::config::disable_forget_sweep(&path)
+    }
+
     pub fn probe(&self) -> Result<Untrusted<Probe>, String> {
         let mut probe = Probe {
             state: Availability::ServerDown,
@@ -335,6 +476,7 @@ impl Client {
             installation_instruction: None,
             status: None,
             sessions_supported: true,
+            forget_sweep: None,
         };
         match self.version() {
             Err(Failure::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
@@ -350,7 +492,13 @@ impl Client {
             Err(_) => {}
             Ok(version) => {
                 probe.version = Some(version);
-                if let Ok(status) = self.json(Read::Status) {
+                if let Ok(status) = self.json::<Status>(Read::Status) {
+                    if let Some(ref data_dir) = status.data_dir {
+                        let path = Path::new(data_dir);
+                        if path.is_absolute() {
+                            probe.forget_sweep = super::config::read_forget_sweep(path).ok();
+                        }
+                    }
                     probe.status = Some(status);
                     probe.state = Availability::Ok;
                 }

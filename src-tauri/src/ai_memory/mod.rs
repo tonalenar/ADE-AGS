@@ -1,13 +1,14 @@
-//! Conector externo e integração efêmera de novas abas; não importa memória.
+//! Conector externo e integração efêmera de novas abas com o ai-memory.
 mod client;
-mod marker;
 mod commands;
+mod config;
 pub(crate) mod continuation;
+mod marker;
 mod migracao;
-mod sessions;
 pub mod scoped_bridge;
-mod types;
+mod sessions;
 pub(crate) mod tabs;
+mod types;
 
 pub use commands::*;
 
