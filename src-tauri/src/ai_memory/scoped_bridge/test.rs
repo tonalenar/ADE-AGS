@@ -140,3 +140,87 @@ fn projetos_reservados_nao_podem_virar_escopo_fixo() {
     }
     assert!(!reserved_project("repo"));
 }
+
+#[test]
+fn escrita_com_segredo_e_bloqueada_sem_ecoar_o_segredo_e_politica_de_senha_passa() {
+    let secrets = [
+        "sk-ant-api03-abcdefghijklmnopqrstuvwxyz",
+        "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        "-----BEGIN PRIVATE KEY-----",
+        "Authorization: Bearer tok.secreto.123",
+        "https://admin:s3cret@example.com/db",
+        "password: hunter2",
+        "api_key=chaveSuperSecreta123",
+    ];
+    for tool in ["memory_write_page", "memory_patch_page"] {
+        for secret in secrets {
+            for payload in [
+                json!({"path":"notes/a.md","body":secret}),
+                json!({"path":"notes/a.md","title":secret,"body":"ok"}),
+                json!({"path":format!("notes/{secret}.md"),"body":"ok"}),
+                json!({"path":"notes/a.md","edits":[{"old_text":"x","new_text":secret}]}),
+                json!({"path":"notes/a.md","body":"ok","tags":[secret]}),
+            ] {
+                let mut req = json!({"method":"tools/call","params":{"name":tool,"arguments":payload}});
+                let err = stamp(&mut req, "w", "p").unwrap_err();
+                assert!(!err.contains(secret), "erro vazou segredo em {tool}: {err}");
+            }
+        }
+        // Critério do usuário: frases de política de senha não são bloqueadas.
+        for policy in [
+            "senha: mínimo 12 caracteres",
+            "password: use uma senha forte",
+            "token: não compartilhe com terceiros",
+            "secret: nunca grave segredos na memória do projeto",
+        ] {
+            let mut req = json!({"method":"tools/call","params":{"name":tool,"arguments":{"path":"notes/policy.md","body":policy}}});
+            stamp(&mut req, "w", "p").unwrap();
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn bridge_recusa_gravacao_com_segredo_sem_repassar_ao_filho() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("ade-scoped-secret-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let fake = root.join("bridge");
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\nwhile IFS= read -r line; do printf '%s\\n' \"$line\" >> requests; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[]}}'; done\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let (mut client, input) = tokio::io::duplex(8192);
+    let (output, response) = tokio::io::duplex(8192);
+    let task = serve_with(&fake, &root, "w", "p", input, output);
+    let secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz";
+    let client_task = async {
+        let mut response = BufReader::new(response);
+        send(
+            &mut client,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {
+                    "name": "memory_write_page",
+                    "arguments": { "path": "notes/leak.md", "body": format!("chave: {secret}") }
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        let rejected = line(&mut response, &mut Vec::new()).await.unwrap().unwrap();
+        assert_eq!(rejected["id"], 9);
+        assert_eq!(rejected["error"]["code"], -32602);
+        let msg = rejected["error"]["message"].as_str().unwrap();
+        assert!(!msg.contains(secret), "erro ecoou segredo: {msg}");
+        drop(client);
+    };
+    let (result, ()) = tokio::join!(task, client_task);
+    result.unwrap();
+    assert!(!root.join("requests").exists(), "pedido com segredo não pode chegar ao filho");
+    std::fs::remove_dir_all(root).unwrap();
+}
