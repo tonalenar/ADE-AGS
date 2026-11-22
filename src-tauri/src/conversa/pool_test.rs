@@ -479,11 +479,15 @@ fn sessao_substituida_no_mapa_nao_limpa_nem_emite_no_closed() {
 #[test]
 fn apply_account_env_remove_overriding_env_dos_motores() {
     use std::collections::HashMap;
-    for (profile_var, value, removed) in [
+    let mut casos = vec![
         ("CLAUDE_CONFIG_DIR", "/tmp/c", &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"][..]),
         ("CODEX_HOME", "/tmp/x", &["CODEX_API_KEY"][..]),
-        ("HOME", "/tmp/a", &["JETSKI_OAUTH_TOKEN", "AGY_ADC_AUTH", "GEMINI_API_KEY"][..]),
-    ] {
+    ];
+    // O perfil por HOME do Antigravity só existe no macOS (ver `agents/registry.rs`).
+    if cfg!(target_os = "macos") {
+        casos.push(("HOME", "/tmp/a", &["JETSKI_OAUTH_TOKEN", "AGY_ADC_AUTH", "GEMINI_API_KEY"][..]));
+    }
+    for (profile_var, value, removed) in casos {
         let mut cmd = crate::util::spawn::hidden_command("echo");
         let env = HashMap::from([(profile_var.to_string(), value.to_string())]);
         crate::agents::apply_account_env(&mut cmd, &env);
