@@ -1,3 +1,4 @@
+import { needsSecretConfirmation } from "./secretConfirm";
 import type { MemoryReviewItem } from "./types";
 
 export const HIGH_VALUE_SCORE = 70;
@@ -24,6 +25,7 @@ export function sortReviewItems(items: MemoryReviewItem[]): MemoryReviewItem[] {
 export interface BatchResult {
   done: number;
   failed: string[];
+  needsSecretConfirmation?: MemoryReviewItem[];
 }
 
 /** Decide um a um (sempre pedido do usuário); um erro não interrompe os outros. */
@@ -31,15 +33,28 @@ export async function decideAll(
   items: MemoryReviewItem[],
   approve: boolean,
   decide: (entryId: string, revision: number, approve: boolean, acknowledgeSecret?: boolean) => Promise<unknown>,
+  acknowledgeSecret = false,
 ): Promise<BatchResult> {
   const result: BatchResult = { done: 0, failed: [] };
+  const secretItems: MemoryReviewItem[] = [];
   for (const item of items) {
     try {
-      await decide(item.entryId, item.revision, approve);
+      if (acknowledgeSecret) {
+        await decide(item.entryId, item.revision, approve, true);
+      } else {
+        await decide(item.entryId, item.revision, approve);
+      }
       result.done += 1;
-    } catch {
-      result.failed.push(item.key);
+    } catch (cause) {
+      if (approve && !acknowledgeSecret && needsSecretConfirmation(cause)) {
+        secretItems.push(item);
+      } else {
+        result.failed.push(item.key);
+      }
     }
+  }
+  if (secretItems.length > 0) {
+    result.needsSecretConfirmation = secretItems;
   }
   return result;
 }

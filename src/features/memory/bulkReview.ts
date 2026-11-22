@@ -58,6 +58,8 @@ export function planBulk(items: MemoryReviewItem[]): BulkPlan {
 export interface BulkOutcome {
   done: number;
   failed: string[];
+  /** Propostas cuja aprovação exige confirmação consciente de credencial. */
+  needsSecretConfirmation?: MemoryReviewItem[];
   /** Contradicciones que NO se aceptaron porque el usuario no confirmó el aviso. */
   skippedContradictions: string[];
   /** Exclusiones que NO se aceptaron por la misma razón. */
@@ -89,14 +91,20 @@ export function inboxKeyAction(key: string, confirmOpen: boolean): InboxKeyActio
 export async function approveBulk(
   items: MemoryReviewItem[],
   decide: (entryId: string, revision: number, approve: boolean, acknowledgeSecret?: boolean) => Promise<unknown>,
-  opts: { acknowledgeContradictions: boolean; /** Decisión puntual sobre UN item: permite duplicados. */ explicit?: boolean },
+  opts: {
+    acknowledgeContradictions: boolean;
+    /** Decisión puntual sobre UN item: permite duplicados. */
+    explicit?: boolean;
+    /** Confirmação consciente de credencial ao aprovar. */
+    acknowledgeSecret?: boolean;
+  },
 ): Promise<BulkOutcome> {
   const dupes = opts.explicit ? [] : items.filter((i) => reviewFlag(i) === "duplicate");
   const dupeSet = new Set(dupes.map(itemId));
   items = items.filter((i) => !dupeSet.has(itemId(i)));
   const skipped = opts.acknowledgeContradictions ? [] : items.filter((i) => reviewFlag(i) === "contradiction" || isDeletion(i));
   const skipSet = new Set(skipped.map(itemId));
-  const result = await decideAll(items.filter((i) => !skipSet.has(itemId(i))), true, decide);
+  const result = await decideAll(items.filter((i) => !skipSet.has(itemId(i))), true, decide, opts.acknowledgeSecret ?? false);
   return {
     ...result,
     skippedContradictions: skipped.filter((i) => !isDeletion(i)).map((i) => i.key),
