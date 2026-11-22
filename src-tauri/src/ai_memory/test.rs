@@ -699,4 +699,149 @@ while :; do :; done
         fs::write(&settings, r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"ai-memory hook --event session-start"}]}]}}"#).unwrap();
         assert!(crate::ai_memory::tabs::configured_hooks(&[settings]));
     }
+
+    #[test]
+    fn recent_page_e_page_trazem_campos_de_vencimento() {
+        let recent: Vec<RecentPage> = serde_json::from_value(serde_json::json!([
+            {
+                "path": "notes/expiring.md",
+                "title": "Expiring",
+                "snippet": "vai vencer",
+                "updated_at": "2026-11-20T00:00:00Z",
+                "expired": true,
+                "expires_at": "2026-11-25T00:00:00Z",
+                "pinned": false
+            },
+            {
+                "path": "notes/legacy.md",
+                "title": "Legacy",
+                "snippet": "sem campos extras",
+                "updated_at": "2026-11-20T00:00:00Z"
+            }
+        ]))
+        .unwrap();
+        assert!(recent[0].expired);
+        assert_eq!(recent[0].expires_at.as_deref(), Some("2026-11-25T00:00:00Z"));
+        assert!(!recent[0].pinned);
+        assert!(!recent[1].expired);
+        assert!(recent[1].expires_at.is_none());
+        assert!(!recent[1].pinned);
+
+        let page: Page = serde_json::from_value(serde_json::json!({
+            "path": "notes/expiring.md",
+            "body": "corpo",
+            "frontmatter": {},
+            "expired": false,
+            "expires_at": "2026-11-25T00:00:00Z",
+            "pinned": true
+        }))
+        .unwrap();
+        assert_eq!(page.expires_at.as_deref(), Some("2026-11-25T00:00:00Z"));
+        assert!(page.pinned);
+    }
+
+    #[test]
+    fn probe_detecta_forget_sweep_e_desliga_preservando_config_toml() {
+        let fake = Fake::new("ai-memory 3.3.0", "cat \"$(dirname \"$0\")/result.json\"");
+        let data_dir = fake.root.join("aim-data");
+        fs::create_dir_all(&data_dir).unwrap();
+        let status_json = serde_json::json!({
+            "version": "3.3.0",
+            "data_dir": data_dir.to_string_lossy(),
+            "counts": { "pages_latest": 1, "pages_all": 1, "sessions": 0, "observations": 0 }
+        });
+        fs::write(
+            fake.root.join("result.json"),
+            serde_json::to_vec(&status_json).unwrap(),
+        )
+        .unwrap();
+
+        // Sem config.toml: padrão do ai-memory é ligado (24 h).
+        let probe_default = fake.client().probe().unwrap();
+        let sweep = probe_default.data.forget_sweep.unwrap();
+        assert!(sweep.enabled);
+        assert!(sweep.interval_secs.is_none());
+        assert!(!sweep.config_exists);
+
+        // Com config.toml existente contendo comentários e outras seções.
+        let cfg_path = data_dir.join("config.toml");
+        let original = "# comentário do usuário\n[server]\nbind = \"127.0.0.1:49374\"\n\n[maintenance]\n# comentário interno\nforget_sweep_interval_secs = 86400\nother_opt = true\n";
+        fs::write(&cfg_path, original).unwrap();
+
+        let probe_on = fake.client().probe().unwrap();
+        let sweep_on = probe_on.data.forget_sweep.unwrap();
+        assert!(sweep_on.enabled);
+        assert_eq!(sweep_on.interval_secs, Some(86400));
+        assert!(sweep_on.config_exists);
+
+        // Desligar explicitamente deve alterar apenas forget_sweep_interval_secs para 0 e preservar o resto.
+        let disabled = fake.client().disable_forget_sweep().unwrap();
+        assert!(!disabled.enabled);
+        assert_eq!(disabled.interval_secs, Some(0));
+        let updated_raw = fs::read_to_string(&cfg_path).unwrap();
+        assert!(updated_raw.contains("# comentário do usuário"));
+        assert!(updated_raw.contains("bind = \"127.0.0.1:49374\""));
+        assert!(updated_raw.contains("# comentário interno"));
+        assert!(updated_raw.contains("other_opt = true"));
+        assert!(updated_raw.contains("forget_sweep_interval_secs = 0"));
+
+        let probe_off = fake.client().probe().unwrap();
+        let sweep_off = probe_off.data.forget_sweep.unwrap();
+        assert!(!sweep_off.enabled);
+        assert_eq!(sweep_off.interval_secs, Some(0));
+    }
+
+    #[test]
+    fn renovar_e_fixar_pagina_chamam_write_page_com_corpo_no_stdin() {
+        let script = r#"
+case "$1" in
+  read-page)
+    cat "$(dirname "$0")/page.json"
+    ;;
+  write-page)
+    cat > "$(dirname "$0")/written-body.txt"
+    printf '{"ok":true}\n'
+    ;;
+  *)
+    exit 42
+    ;;
+esac
+"#;
+        let fake = Fake::new("ai-memory 3.3.0", script);
+        let page_json = serde_json::json!({
+            "path": "notes/regra.md",
+            "workspace": "default",
+            "project": "ADE-AGS",
+            "title": "Regra importante",
+            "body": "Corpo preservado da memória.",
+            "frontmatter": {
+                "title": "Regra importante",
+                "tier": "semantic",
+                "kind": "rule",
+                "tags": ["arquitetura"]
+            },
+            "expired": true,
+            "pinned": false
+        });
+        fs::write(
+            fake.root.join("page.json"),
+            serde_json::to_vec(&page_json).unwrap(),
+        )
+        .unwrap();
+
+        let renewed = fake.client().renew_page("notes/regra.md", false).unwrap();
+        assert_eq!(renewed.data.path, "notes/regra.md");
+        assert_eq!(
+            fs::read_to_string(fake.root.join("written-body.txt")).unwrap(),
+            "Corpo preservado da memória."
+        );
+        let argv_renew = fs::read_to_string(fake.root.join("argv")).unwrap();
+        assert!(argv_renew.contains("write-page"));
+        assert!(argv_renew.contains("--path=notes/regra.md"));
+        assert!(!argv_renew.contains("--pinned"));
+
+        let _pinned = fake.client().renew_page("notes/regra.md", true).unwrap();
+        let argv_pin = fs::read_to_string(fake.root.join("argv")).unwrap();
+        assert!(argv_pin.contains("--pinned"));
+    }
 }

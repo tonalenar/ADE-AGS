@@ -38,13 +38,39 @@ pub async fn ai_memory_recent(cwd: String) -> Result<Untrusted<Vec<RecentPage>>,
 pub async fn ai_memory_search(
     cwd: String,
     query: String,
+    workspace: Option<String>,
+    project: Option<String>,
 ) -> Result<Untrusted<Vec<SearchHit>>, String> {
-    blocking(move || Client::installed(&cwd)?.read(Read::Search(query))).await
+    let read = match (workspace, project) {
+        (Some(workspace), Some(project)) => Read::SearchScoped {
+            query,
+            workspace,
+            project,
+        },
+        (None, None) => Read::Search(query),
+        _ => return Err("Informe workspace e project juntos para filtrar a busca.".into()),
+    };
+    blocking(move || Client::installed(&cwd)?.read(read)).await
 }
 
 #[tauri::command]
 pub async fn ai_memory_read_page(cwd: String, path: String) -> Result<Untrusted<Page>, String> {
     blocking(move || Client::installed(&cwd)?.read(Read::Page(path))).await
+}
+
+#[tauri::command]
+pub async fn ai_memory_renew_page(cwd: String, path: String) -> Result<Untrusted<Page>, String> {
+    blocking(move || Client::installed(&cwd)?.renew_page(&path, false)).await
+}
+
+#[tauri::command]
+pub async fn ai_memory_pin_page(cwd: String, path: String) -> Result<Untrusted<Page>, String> {
+    blocking(move || Client::installed(&cwd)?.renew_page(&path, true)).await
+}
+
+#[tauri::command]
+pub async fn ai_memory_disable_forget_sweep(cwd: String) -> Result<ForgetSweepStatus, String> {
+    blocking(move || Client::installed(&cwd)?.disable_forget_sweep()).await
 }
 
 #[tauri::command]
