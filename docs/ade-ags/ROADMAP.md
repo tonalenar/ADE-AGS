@@ -301,7 +301,7 @@ A integração nativa oferece Lead e Worker, model discovery via `agy models` e 
 Ponto 1: precheck de instalação, sessão, catálogo por conta e limite antes do lançamento. Ver [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
 
 Ponto 1, revisão QA: aviso de erro traduzido na lista de missões e bloqueio preventivo quando a conta principal não está exposta no roster.
-Ponto 2: failover opcional por autenticação, modelo ou saldo no mesmo pool/TUI, com uma troca por task, cooldown e auditoria traduzida. Ver [MISSION_SUCCESS.md](./MISSION_SUCCESS.md) e [POOL_FAILOVER.md](./POOL_FAILOVER.md). O mesmo pool agora vale para conversas do modo chat por protocolo (desligado por padrão; `avisar e perguntar` ou `automático`).
+Ponto 2: failover opcional por autenticação, modelo ou saldo no mesmo pool/TUI, com uma troca por task, cooldown e auditoria traduzida. Ver [MISSION_SUCCESS.md](./MISSION_SUCCESS.md) e [POOL_FAILOVER.md](./POOL_FAILOVER.md). O modo global de pools (`chat.pool.mode`: `off` | `ask` padrão | `auto`) agora vale para conversas e tarefas em segundo plano (com `paused` por pool e migração aditiva sem perda de dados), e a página **Configurações → Provedores e contas** foi redesenhada nas abas **Agentes | Contas | Pools | Personalizados**, com edição de pool (`pool_update` na UI, IPC, CLI e MCP), cotas por grupo de modelos no Antigravity e "Outras contas" recolhido por padrão em Limites de uso.
 
 ## 17. Classificação de falhas (Etapa 10, ponto 3)
 

@@ -116,3 +116,17 @@ Independe do pool: em qualquer conversa por protocolo a pessoa escolhe a conta d
 ### Onde
 
 Backend: `conversa/pool.rs` (pura: `decide`, `reset_at`, `can_return`, `recent`, `handoff_text`; app: `after_turn`, `accept`, `before_send`), ganchos em `turn::finish` e `claude::finish_turn`, comandos `chat_pool_pending|accept|dismiss|state` (`state` alimenta a linha de pool do cartão «Limites de uso»). Frontend: `accounts/chatPool.ts`, `ChatPoolMode.tsx`, `chat/timeline/NoticeRow.tsx` (`PoolNotice`). Testes: `conversa/pool_test.rs`, `accounts/tests/chatPool.test.ts`, `chat/tests/noticeRow.test.tsx`.
+
+## Unificação do modo global, pausa por pool e edição (`pool_update`)
+
+A página **Configurações → Provedores e contas → Pools** passou a unificar a política de troca de conta entre conversas e tarefas em segundo plano:
+
+- **Chave única `chat.pool.mode`** (`accounts/pools.rs::PoolMode` e `accounts/chatPool.ts`): `off` (Não trocar) | `ask` (Perguntar) | `auto` (Trocar sozinho). Sem valor salvo, o padrão é **`ask` (Perguntar)**; um valor já salvo é sempre respeitado.
+- **Em tarefas em segundo plano (`runs/pool_failover.rs::task_action`, `runs/scheduler.rs`)**:
+  - `off`: não troca sozinho.
+  - `ask`: pausa a tarefa aguardando decisão (`runs.pool_ask.<task_id>` + tag na tarefa) e notifica via barramento (`account.pool_ask`), notificação do SO (`notifier.rs::Notice::PoolAsk`) e toast no app (`PoolFailoverNotice.tsx`).
+  - `auto`: executa o failover automático dentro do mesmo pool respeitando todos os limites (1 por tarefa, 3 por pool/hora, cooldown de 30 min).
+- **Pausa por pool (`Pool.paused`, default `false`)**: substitui a chave antiga `failover` por pool. Um pool pausado (`paused: true`) não troca de conta nem no modo `ask` nem no modo `auto`.
+- **Migração aditiva sem perda de dados (`accounts/pools.rs::parse_pools_migrated`)**: pools salvos antes do campo `paused` que tinham `failover: false` (ou ausente) carregam com `paused: true`, continuando sem troca automática nas tarefas daquele pool. Pools com `failover: true` carregam com `paused: false`. Nenhum dado salvo é apagado.
+- **Edição preservando `pool.id` (`pool_update`)**: disponível no backend (`accounts/pools.rs::update`), no comando Tauri (`pool_update`), no IPC (`pool.update`), na CLI (`ags pool update <nome> [--new-name …] [--accounts …] [--strategy …] [--paused true|false]`) e no MCP (`pool_update`). Permite alterar nome, membros, ordem e estratégia mantendo o mesmo `pool.id` e `agent_id`.
+- **Prévia somente leitura (`pool_preview_picks`)**: a aba Pools exibe "Agora escolheria X" chamando `pool_preview_picks` (`accounts/pools.rs::spec_preview` + `runs/routing.rs::pick_in_pool`) sem avançar o cursor de `round_robin` e sem duplicar a regra de escolha no frontend.

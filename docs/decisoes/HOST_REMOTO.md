@@ -359,7 +359,7 @@ Alvos de escopo: *aba* (a própria, as ligadas no canvas, as que abriu) · *conv
 - **note**: list escopo:chamador, read escopo:chamador, create escopo:chamador, write escopo:chamador, edit escopo:chamador
 - **notify**: send escopo:chamador
 - **peer**: answer pessoa-ou-escopo:coroa, list escopo:chamador, ask escopo:chamador, tell escopo:chamador, deliver escopo:chamador, handoff escopo:chamador, check escopo:chamador, recruit escopo:chamador, connect escopo:chamador, disconnect escopo:chamador, role escopo:chamador, queue escopo:chamador, receipt escopo:chamador, pending escopo:chamador
-- **pool**: list livre, create escopo:chamador-ou-fora, delete escopo:fora
+- **pool**: list livre, create escopo:chamador-ou-fora, update escopo:chamador-ou-fora, delete escopo:fora
 - **portal**: list escopo:chamador, create escopo:chamador, open escopo:chamador, close escopo:chamador, navigate escopo:chamador, history escopo:chamador, snapshot escopo:chamador, click escopo:chamador, hover escopo:chamador, type escopo:chamador, press escopo:chamador, select escopo:chamador, scroll escopo:chamador, wait escopo:chamador, screenshot escopo:chamador, console escopo:chamador, layout escopo:chamador, act escopo:chamador, reset escopo:chamador
 - **prelaunch**: list livre, exceto o comando digitado (`pre` ou `command` cru), que só a pessoa ou o orquestrador do canvas onde a tab está pedem (A222). Um item salvo (`presetName`) segue livre.
 - **recall**: get escopo:chamador

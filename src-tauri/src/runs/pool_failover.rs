@@ -6,12 +6,13 @@ use std::sync::Mutex;
 
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::accounts::pools::PoolOrigin;
+use crate::accounts::pools::{PoolMode, PoolOrigin};
 use crate::database::DbConnection;
 
 pub(crate) const MAX_FAILOVERS_PER_POOL_HOUR: usize = 3;
 pub(crate) const WINDOW_SECS: i64 = 60 * 60;
 pub(crate) const COOLDOWN_SECS: i64 = 30 * 60;
+const DAY_SECS: i64 = 24 * 60 * 60;
 
 fn task_pool_key(task_id: &str) -> String {
     format!("runs.task_pool.{task_id}")
@@ -21,8 +22,70 @@ fn task_failover_key(task_id: &str) -> String {
     format!("runs.pool_failover.{task_id}")
 }
 
+fn task_ask_key(task_id: &str) -> String {
+    format!("runs.pool_ask.{task_id}")
+}
+
 fn pool_window_key(pool_id: &str) -> String {
     format!("runs.pool_failover.pool.{pool_id}")
+}
+
+/// Decisão unificada para falha de conta numa tarefa ligada a um pool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskPoolAction {
+    /// Não troca: modo `off`, pool pausado, erro não elegível ou tarefa já trocou.
+    None,
+    /// Modo `ask`: pausa a tarefa e notifica a pessoa para decidir.
+    PauseAndAsk,
+    /// Modo `auto`: faz failover automático dentro do mesmo pool.
+    AutoSwitch,
+}
+
+/// Decide o que fazer com uma tarefa de pool quando a conta falha, unificando `chat.pool.mode`
+/// e o estado `paused` do pool.
+pub(crate) fn task_action(
+    mode: PoolMode,
+    pool_paused: bool,
+    kind: super::failure::FailureKind,
+    already_failed_over: bool,
+) -> TaskPoolAction {
+    if pool_paused || already_failed_over || kind == super::failure::FailureKind::Other {
+        return TaskPoolAction::None;
+    }
+    match mode {
+        PoolMode::Off => TaskPoolAction::None,
+        PoolMode::Ask => TaskPoolAction::PauseAndAsk,
+        PoolMode::Auto => TaskPoolAction::AutoSwitch,
+    }
+}
+
+/// Registra que a tarefa foi pausada aguardando decisão de troca no modo "Perguntar".
+pub(crate) fn record_pool_ask(
+    db: &DbConnection,
+    task_id: &str,
+    pool_id: &str,
+    pool_name: &str,
+    from_account: Option<&str>,
+    reason: &str,
+    now: i64,
+) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "poolId": pool_id,
+        "poolName": pool_name,
+        "fromAccount": from_account,
+        "reason": reason,
+        "at": now,
+    });
+    let raw = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
+    crate::database::set_setting(db, &task_ask_key(task_id), &raw)
+}
+
+/// Quantas trocas este pool registrou nas últimas 24 horas (para exibir na tela de Pools).
+pub(crate) fn swaps_in_last_day(db: &DbConnection, pool_id: &str, now: i64) -> usize {
+    let raw = crate::database::get_setting(db, &pool_window_key(pool_id)).ok().flatten();
+    let Some(raw) = raw else { return 0; };
+    let Ok(history) = serde_json::from_str::<Vec<i64>>(&raw) else { return 0; };
+    history.into_iter().filter(|at| now.saturating_sub(*at) < DAY_SECS).count()
 }
 
 /// Falhas de limite, autenticação, modelo ou saldo só acionam failover no pool que
@@ -183,7 +246,8 @@ pub(crate) fn replacement(
     use super::roster::{ModelAvailability, ModelDiscoveryState};
     use super::routing::AccountChoice;
     let AccountChoice::Pool(spec) = &request.account else { return Err("failover requires a pool".into()); };
-    if !failure_eligible(kind, spec.failover, false) || request.agent_id.as_deref() != Some(spec.agent_id.as_str()) || !spec.members.contains(original) {
+    let allowed = !spec.paused && spec.failover;
+    if !failure_eligible(kind, allowed, false) || request.agent_id.as_deref() != Some(spec.agent_id.as_str()) || !spec.members.contains(original) {
         return Err("pool no longer authorizes this assignment".into());
     }
     let agent = roster.agent(&spec.agent_id).ok_or("agent missing")?;

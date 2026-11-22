@@ -27,7 +27,7 @@ use super::peers::{
     ci_watch, peer_ask, peer_check, peer_connect, peer_deliver, peer_disconnect, peer_handoff,
     peer_list, peer_recruit, peer_role, peer_tell,
 };
-use super::pool::{pool_create, pool_delete, pool_list};
+use super::pool::{pool_create, pool_delete, pool_list, pool_update_ipc};
 use super::portals::{portal_action, portal_close, portal_create, portal_list, portal_open};
 use super::renders::{render_list, render_publish};
 use super::replay::{replay_start, replay_status, replay_stop};
@@ -240,6 +240,7 @@ pub(crate) fn dispatch_with_principal(
         // Grupos de cuentas con una estrategia de reparto (ver `pool`).
         "pool.list" => pool_list(app, args),
         "pool.create" => pool_create(app, args),
+        "pool.update" => pool_update_ipc(app, args),
         "pool.delete" => pool_delete(app, args),
         "device.list" => device_list(app, args),
         "device.act" => super::devices::device_act(app, args),

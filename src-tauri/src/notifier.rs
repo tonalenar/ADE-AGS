@@ -84,6 +84,7 @@ pub enum Notice {
     ApprovalWaiting { pending: u64 },
     AccountProblem { reason: String },
     PoolFailover { pool_name: String, from_account: String, to_account: String },
+    PoolAsk { pool_name: String, task_title: String, reason: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -136,6 +137,18 @@ pub fn text(notice: &Notice, lang: Lang) -> (String, String) {
         (Notice::PoolFailover { pool_name, from_account, to_account }, Es) => (
             "Cambio de cuenta del pool".into(),
             format!("La tarea pasó de la cuenta {from_account} a {to_account} en el pool {pool_name}."),
+        ),
+        (Notice::PoolAsk { pool_name, task_title, reason }, Pt) => (
+            format!("Pool {pool_name} aguardando decisão"),
+            format!("A tarefa «{task_title}» pausou ({reason}). Confirme se deseja trocar de conta."),
+        ),
+        (Notice::PoolAsk { pool_name, task_title, reason }, En) => (
+            format!("Pool {pool_name} waiting for decision"),
+            format!("Task \"{task_title}\" paused ({reason}). Confirm whether to switch accounts."),
+        ),
+        (Notice::PoolAsk { pool_name, task_title, reason }, Es) => (
+            format!("Pool {pool_name} esperando decisión"),
+            format!("La tarea «{task_title}» se pausó ({reason}). Confirmá si querés cambiar de cuenta."),
         ),
     }
 }
@@ -214,6 +227,7 @@ pub fn start(app: AppHandle) {
                 "approvals.changed".into(),
                 "account.failure".into(),
                 "account.pool_failover".into(),
+                "account.pool_ask".into(),
             ],
             ..Default::default()
         };
@@ -243,6 +257,14 @@ pub fn start(app: AppHandle) {
                             pool_name: text("poolName").unwrap_or("pool").to_string(),
                             from_account: text("fromAccount").unwrap_or("principal").to_string(),
                             to_account: text("toAccount").unwrap_or("principal").to_string(),
+                        })
+                    }
+                    "account.pool_ask" => {
+                        let text = |key: &str| event.data.get(key).and_then(|value| value.as_str());
+                        Some(Notice::PoolAsk {
+                            pool_name: text("poolName").unwrap_or("pool").to_string(),
+                            task_title: text("taskTitle").unwrap_or("tarefa").to_string(),
+                            reason: text("reason").unwrap_or("cota esgotada").to_string(),
                         })
                     }
                     _ => None,

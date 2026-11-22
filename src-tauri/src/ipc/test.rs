@@ -4174,7 +4174,7 @@ mod autorizacao {
         );
     }
     const LIVRE: usize = 28;
-    const ESCOPO: usize = 193;
+    const ESCOPO: usize = 194;
     const PESSOA: usize = 4;
     const PAPEL: usize = 2;
 

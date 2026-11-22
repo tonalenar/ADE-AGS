@@ -213,6 +213,7 @@ pub(crate) fn tool_names() -> Vec<&'static str> {
     names.extend(COMPUTER_USE_TOOLS.iter().map(|t| t.name));
     names.extend(DEVICE_TOOLS.iter().map(|t| t.name));
     names.extend(CHAT_TOOLS.iter().map(|t| t.name));
+    names.extend(POOL_TOOLS.iter().map(|t| t.name));
     names.push(ASK_TOOL);
     names.extend([SECRET_REQUEST_TOOL, SECRET_RUN_TOOL, SECRET_REVOKE_TOOL]);
     names.extend([VAULT_LIST_TOOL, VAULT_REQUEST_TOOL, BROWSER_FILL_LOGIN_TOOL]);
@@ -1400,6 +1401,8 @@ where
         design(context, tool, args, send)
     } else if let Some(tool) = RENDER_TOOLS.iter().find(|t| t.name == name) {
         render(context, tool, args, send)
+    } else if let Some(tool) = POOL_TOOLS.iter().find(|t| t.name == name) {
+        pool(tool, args, send)
     } else if name == ASK_TOOL {
         ask(context, args, send)
     } else if name == SECRET_REQUEST_TOOL {
@@ -1453,6 +1456,7 @@ pub(crate) fn remote_preset_allows(preset: crate::remote::Preset, name: &str) ->
         || PEER_TOOLS.iter().any(|(tool, _)| *tool == name)
         || DESIGN_TOOLS.iter().any(|t| t.name == name)
         || RENDER_TOOLS.iter().any(|t| t.name == name)
+        || POOL_TOOLS.iter().any(|t| t.name == name)
         || matches!(name, SECRET_REQUEST_TOOL | SECRET_REVOKE_TOOL);
     if matches!(preset, Preset::Agents | Preset::All) && is_agents {
         return true;
@@ -1964,6 +1968,7 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
     if matches!(context, McpContext::Cwd { .. } | McpContext::Remote { .. }) {
         let read_only = allowed_powers.is_some_and(|powers| !powers.contains(&OrchestrationPower::Spawn));
         tools.extend(chat_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
+        tools.extend(pool_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
         tools.extend(design_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
         // As páginas HTML são da aba: sem aba (`--cwd` puro) não há dono para a página, então a família não se oferece.
         if matches!(context, McpContext::Cwd { tab: Some(_), .. } | McpContext::Remote { .. }) {
@@ -2040,6 +2045,7 @@ pub(crate) fn is_read_only(name: &str) -> bool {
         || CHAT_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || DESIGN_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || RENDER_TOOLS.iter().any(|t| t.name == name && t.read_only)
+        || POOL_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || DEVICE_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || TEAM_READ_ONLY.contains(&name)
         || name == VAULT_LIST_TOOL
@@ -2967,6 +2973,49 @@ where
         args.insert("from".into(), json!(tab));
     }
     match send(tool.cli, Value::Object(args)) {
+        Ok(data) => content(data),
+        Err(e) => tool_error(&e),
+    }
+}
+
+struct PoolTool {
+    name: &'static str,
+    cli: &'static str,
+    read_only: bool,
+}
+
+const POOL_TOOLS: &[PoolTool] = &[
+    PoolTool { name: "pool_update", cli: "pool.update", read_only: false },
+];
+
+fn pool_schemas() -> Vec<Value> {
+    vec![json!({
+        "name": "pool_update",
+        "description": "Update an existing account pool (name, members order, strategy, or paused state), preserving pool.id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "id": { "type": "string", "description": "Pool id to edit (or pass name)." },
+                "name": { "type": "string", "description": "Current pool name (or new name when id is provided)." },
+                "newName": { "type": "string", "description": "New pool name." },
+                "accounts": { "type": "string", "description": "Comma-separated account names in preference order (e.g. 'principal,trabalho')." },
+                "strategy": { "type": "string", "enum": ["least_used", "round_robin", "sticky"], "description": "Account selection rule." },
+                "paused": { "type": "boolean", "description": "Pause or resume account switching for this pool." }
+            },
+            "required": []
+        }
+    })]
+}
+
+fn pool<F>(tool: &PoolTool, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let args = match arguments {
+        Value::Object(map) => Value::Object(map),
+        _ => json!({}),
+    };
+    match send(tool.cli, args) {
         Ok(data) => content(data),
         Err(e) => tool_error(&e),
     }

@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.89.0
+version: 1.90.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -857,30 +857,29 @@ ags portal close Docs                       # clean up what you created
 
 A pool is a named group of the accounts of one TUI plus a rule for picking one each time
 (`least-used`: the one with the most free window; `round-robin`: one after another;
-`sticky`: the first on the list that can run, the next only as a fallback). The user makes them
-in Settings › Accounts, or:
+`sticky`: the first on the list that can run, the next only as a fallback). The user manages them
+in Settings › Providers & accounts › Pools, or:
 
 ```bash
 ags pools
 ags pool create Work --agent claude-code --accounts primary,work --strategy sticky   # "primary" = the system account
-ags tab create --agent claude-code --account pool:Work   # the pool picks the account now
+ags pool update Work --new-name Daily --accounts work,primary --strategy least-used # preserves pool.id
+ags pool update Daily --paused true                                                 # pauses switches in this pool
+ags tab create --agent claude-code --account pool:Daily   # the pool picks the account now
 ```
 
-Ask for a pool with `pool:<name>` wherever an account goes: `--account`, the `account` of a plan
-task or of a Squad member. The pick uses the last known quota, sessions and running tasks. A task
-routed through a pool is pinned to the account it got: if that one runs out mid-task it is not
-moved to an account outside the pool — unless the pool opted into failover.
+MCP also exposes `pool_update` (preserves `pool.id` when changing name, members order, strategy or `paused`).
 
-**Failover (opt-in, off by default)**: a pool can turn on `failover` so a headless fleet task
-that hits a quota/rate-limit on its pool account gets ONE retry on the next eligible account of
-the **same** pool, instead of failing outright. It never fires for other failure kinds (a code
-error, a timeout, denied permissions, an expired login) and never crosses into another pool or
-TUI. Hard limits, all enforced server-side: 1 failover per task, 3 per pool per hour (sliding
-window), and the account that ran out gets a 30-minute cooldown before it can be picked again in
-that pool. If no other eligible account is left, the task just fails as it always did. Interactive
-terminal tabs never switch accounts on their own — only fleet tasks failover; a successful one
-publishes `account.pool_failover` (task, pool, from/to account) as an audit event and a system
-notification. See `docs/ade-ags/POOL_FAILOVER.md` for the full limits table.
+Ask for a pool with `pool:<name>` wherever an account goes: `--account`, the `account` of a plan
+task or of a Squad member. The pick uses the last known quota, sessions and running tasks.
+
+**Unified switch mode (`chat.pool.mode`)**: one global setting controls what happens when a pool
+account runs out of quota, for both protocol conversations and background fleet tasks — `off`
+(never switch), `ask` (default: ask in chat; pause and notify in background tasks) or `auto`
+(switch automatically inside the same pool, up to 3 times per hour, with a 30-minute cooldown on
+the exhausted account). Each pool also has a `paused` flag (default `false`; legacy pools with
+`failover: false` migrate additively as `paused: true`) to pause switches only in that pool.
+Interactive terminal tabs never switch accounts on their own. See `docs/ade-ags/POOL_FAILOVER.md`.
 
 ### Android devices on the canvas
 
@@ -1695,7 +1694,7 @@ flags of each command.
 | AGENTES CONECTADOS | `peers`, `peer ask`, `peer tell`, `peer check`, `peer deliver`, `peer handoff`, `peer queue`, `peer receipt`, `peer pending`, `peer answer`, `ci watch`, `notify`, `peer recruit`, `peer connect`, `peer disconnect`, `peer role` |
 | TIME DO MODO CHAT | `team list`, `team candidates`, `team create`, `team link`, `team unlink`, `team role`, `team delegate` |
 | CORREÇÕES | `fix list`, `fix decide` |
-| POOLS DE CONTAS | `pools`, `pool create`, `pool delete` |
+| POOLS DE CONTAS | `pools`, `pool create`, `pool update`, `pool delete` |
 | DISPOSITIVOS DO CANVAS | `devices`, `device create`, `device start`, `device tap`, `device swipe`, `device type`, `device apps`, `device launch`, `device close`, `device`, `device open`, `device button`, `device rotate`, `device clipboard`, `device say` |
 | PORTAIS DO CANVAS | `portals`, `portal create`, `portal close`, `open`, `portal navigate`, `portal snapshot`, `portal`, `portal type`, `portal press`, `portal reset`, `portal act` |
 | SIMULADOR IOS | `sim act` |
@@ -1733,6 +1732,7 @@ flags of each command.
 | Git account | every session | `git_account`, `git_repos`, `git_pr_list`, `git_pr_view`, `git_checks`, `git_pr_files`, `git_issue_list`, `git_issue_view`, `git_fetch`, `git_pull`, `git_push`, `git_pr_create`, `git_issue_create`, `git_tag`, `git_release_list`, `git_release_create`, `git_comment` |
 | Peers and team | interactive tabs (`--tab`) | `peer_ask`, `peer_tell`, `peer_deliver`, `peer_handoff`, `peer_receipt`, `team_list`, `team_candidates`, `team_create`, `team_link`, `team_unlink`, `team_role` |
 | Chat-mode conversations | interactive sessions (`--cwd`) | `chat_list`, `chat_providers`, `harness_graph`, `chat_compact`, `chat_goal`, `chat_new`, `delegate_agent`, `chat_send`, `chat_wait`, `chat_show`, `chat_stop`, `chat_pending` |
+| Account pools | interactive sessions (`--cwd`) | `pool_update` |
 | Designs | interactive sessions (`--cwd`) | `design_list`, `design_get`, `design_view`, `design_create`, `design_open`, `design_page_add`, `design_page_rename`, `design_page_delete`, `design_artboard_add`, `design_artboard_update`, `design_artboard_duplicate`, `design_artboard_delete`, `design_comment_add`, `design_comment_resolve`, `design_note_add` |
 | HTML pages | interactive tabs (`--tab`) | `render_publish`, `render_list` |
 | Computer use | interactive sessions (`--cwd`); the app checks the caller's tab or conversation | `sim_act`, `desk_act` |

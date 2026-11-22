@@ -141,6 +141,7 @@ fn limite_3_cooldown_30_minutos_conta_nao_e_escolhida() {
         strategy: Strategy::Sticky,
         start: 0,
         failover: true,
+        paused: false,
     };
 
     let (chosen, notes) = routing::pick_in_pool(&roster.agents[0], &spec, now + 60).unwrap();
@@ -207,6 +208,7 @@ fn limite_5_nunca_failover_outra_tui_nem_fora_do_pool() {
         strategy: Strategy::LeastUsed,
         start: 0,
         failover: true,
+        paused: false,
     };
     let err = routing::pick_in_pool(&roster.agents[0], &spec_outra_tui, now).unwrap_err();
     assert!(err.contains("é de 'codex', não de Claude Code"), "{err}");
@@ -220,6 +222,7 @@ fn limite_5_nunca_failover_outra_tui_nem_fora_do_pool() {
         strategy: Strategy::Sticky,
         start: 0,
         failover: true,
+        paused: false,
     };
     cool_down_account("claude-code:acc-5a", now);
     let err_fora = routing::pick_in_pool(&roster.agents[0], &spec_acotado, now + 10).unwrap_err();
@@ -251,6 +254,7 @@ fn limite_6_conta_bloqueada_ou_sem_login_recusada() {
         strategy: Strategy::Sticky,
         start: 0,
         failover: true,
+        paused: false,
     };
 
     let err = routing::pick_in_pool(&roster.agents[0], &spec, now + 10).unwrap_err();
@@ -280,6 +284,7 @@ fn limite_7_pool_sem_optin_nao_muda_nada() {
         strategy: Strategy::LeastUsed,
         start: 0,
         failover: false,
+        paused: false,
     };
     assert!(!spec.failover);
 
@@ -290,6 +295,7 @@ fn limite_7_pool_sem_optin_nao_muda_nada() {
         members: vec![None, Some("a".into())],
         strategy: Strategy::LeastUsed,
         failover: false,
+        paused: false,
     };
     assert!(!p.failover, "padrão de failover deve ser false");
 }
@@ -366,7 +372,7 @@ fn replacement_preserves_pool_and_account_catalog_and_changes_model_only_for_mod
     outside.models = vec![available_model("requested")];
     let mut roster = mock_roster_con_cuentas(vec![a, b, outside]);
     let spec = PoolSpec { id: "replacement-pool".into(), name: "pool".into(), agent_id: "claude-code".into(),
-        members: vec![original.clone(), Some("replacement-b".into())], strategy: Strategy::Sticky, start: 0, failover: true };
+        members: vec![original.clone(), Some("replacement-b".into())], strategy: Strategy::Sticky, start: 0, failover: true, paused: false };
     let request = routing::RouteRequest { agent_id: Some("claude-code".into()), model: Some("requested".into()),
         complexity: None, account: routing::AccountChoice::Pool(spec.clone()) };
     let tiers = routing::Tiers::default();
@@ -387,8 +393,31 @@ fn replacement_preserves_pool_and_account_catalog_and_changes_model_only_for_mod
     assert!(replacement(&roster, &tiers, &request, &original, FailureKind::ModelUnavailable, 900_001).is_err());
     assert!(replacement(&roster, &tiers, &request, &original, FailureKind::ModelUnavailable, 900_000 + COOLDOWN_SECS).is_ok());
     let mut disabled = request.clone();
-    disabled.account = routing::AccountChoice::Pool(PoolSpec { failover: false, ..spec });
+    disabled.account = routing::AccountChoice::Pool(PoolSpec { failover: false, ..spec.clone() });
+    assert!(replacement(&roster, &tiers, &disabled, &original, FailureKind::ModelUnavailable, 1_000_000).is_err());
+    disabled.account = routing::AccountChoice::Pool(PoolSpec { paused: true, ..spec });
     assert!(replacement(&roster, &tiers, &disabled, &original, FailureKind::ModelUnavailable, 1_000_000).is_err());
     disabled.account = routing::AccountChoice::Fixed(original.clone());
     assert!(replacement(&roster, &tiers, &disabled, &original, FailureKind::ModelUnavailable, 1_000_000).is_err());
+}
+
+#[test]
+fn modo_unificado_e_pausa_decidem_acao_da_tarefa() {
+    use crate::accounts::pools::PoolMode;
+
+    // Modo Off nunca troca.
+    assert_eq!(task_action(PoolMode::Off, false, FailureKind::RateLimited, false), TaskPoolAction::None);
+    // Modo Ask pausa e pergunta para erros elegíveis quando o pool não está pausado.
+    assert_eq!(task_action(PoolMode::Ask, false, FailureKind::RateLimited, false), TaskPoolAction::PauseAndAsk);
+    assert_eq!(task_action(PoolMode::Ask, false, FailureKind::AuthExpired, false), TaskPoolAction::PauseAndAsk);
+    // Modo Auto troca automaticamente quando não está pausado.
+    assert_eq!(task_action(PoolMode::Auto, false, FailureKind::RateLimited, false), TaskPoolAction::AutoSwitch);
+    // Pool pausado bloqueia tanto Ask quanto Auto.
+    assert_eq!(task_action(PoolMode::Ask, true, FailureKind::RateLimited, false), TaskPoolAction::None);
+    assert_eq!(task_action(PoolMode::Auto, true, FailureKind::RateLimited, false), TaskPoolAction::None);
+    // Erros comuns (Other) e tarefa que já fez failover nunca trocam nem pausam.
+    assert_eq!(task_action(PoolMode::Auto, false, FailureKind::Other, false), TaskPoolAction::None);
+    assert_eq!(task_action(PoolMode::Ask, false, FailureKind::Other, false), TaskPoolAction::None);
+    assert_eq!(task_action(PoolMode::Auto, false, FailureKind::RateLimited, true), TaskPoolAction::None);
+    assert_eq!(task_action(PoolMode::Ask, false, FailureKind::RateLimited, true), TaskPoolAction::None);
 }
