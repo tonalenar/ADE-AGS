@@ -235,6 +235,11 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
     if local_config.is_some() && row.access != "ask" {
         return Err("Agentes ACP locais aceitam somente o modo Supervisionado".into());
     }
+    if local_config.is_none()
+        && let Some(a) = row.account_id.as_deref()
+    {
+        crate::accounts::ensure_supported_outside_pty(db, a)?;
+    }
     let env = if local_config.is_some() { None } else { row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a)) };
 
     let fresh = || {
@@ -572,7 +577,7 @@ fn spawn(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(env) = env {
-        cmd.envs(env);
+        crate::agents::apply_account_env(&mut cmd, &env);
     }
     if !crate::local_acp::is_local_acp_id(&row.agent_id) && row.agent_id != "antigravity" {
         let mut launch_env: HashMap<String, String> = map::launch_env(row).into_iter().collect();
@@ -671,6 +676,20 @@ async fn read_loop(app: AppHandle, db: DbConnection, session: Arc<Session>, stdo
     closed(&app, &db, &session);
 }
 
+pub(super) fn unregister_closed(session: &Arc<Session>) -> turn::ClosedOwnership {
+    sessions()
+        .lock()
+        .map(|mut map| match map.get(&session.thread_id) {
+            Some(current) if Arc::ptr_eq(current, session) => {
+                map.remove(&session.thread_id);
+                turn::ClosedOwnership::Owned
+            }
+            Some(_) => turn::ClosedOwnership::Replaced,
+            None => turn::ClosedOwnership::Absent,
+        })
+        .unwrap_or(turn::ClosedOwnership::Absent)
+}
+
 fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     let killed = !session.alive.swap(false, Ordering::SeqCst);
     session.gate(StopGate::reset);
@@ -678,15 +697,10 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     for reply in waiting {
         let _ = reply.send(Err(format!("O processo de {} fechou", session.provider_label)));
     }
-    let registered = sessions().lock().is_ok_and(|mut map| {
-        let mine = map.get(&session.thread_id).is_some_and(|s| Arc::ptr_eq(s, session));
-        if mine {
-            map.remove(&session.thread_id);
-        }
-        mine
-    });
-    // Uma sessão que nunca entrou no mapa (a abertura que falhou) não mexe na conversa.
-    if !registered && session.remote().is_none() {
+    let ownership = unregister_closed(session);
+    // Uma sessão substituída no mapa (failover/troca) ou que nunca entrou nele (abertura falha) não mexe na conversa.
+    let other_live = ownership == turn::ClosedOwnership::Absent && super::api::has_live_session(&session.thread_id);
+    if !turn::should_cleanup_on_close(ownership, session.remote().is_some(), other_live) {
         return;
     }
     let thread_id = session.thread_id.as_str();
@@ -697,17 +711,21 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     for id in expired {
         emit(app, thread_id, "requestResolved", json!({ "id": id }));
     }
-    if let Some(turn_id) = session.take_turn() {
+    let dropped_result = session.take_turn().map(|turn_id| {
         let tail = session.stderr.lock().ok().and_then(|t| turn::stderr_reason(t.iter()));
         let (result, message) = turn::dropped(killed, tail.as_deref(), &session.provider_label);
         turn::finish(app, db, thread_id, &turn_id, &result);
         if let Some(message) = message {
             emit(app, thread_id, "error", json!({ "message": message }));
         }
-    }
+        result
+    });
     session.discard_queue();
     emit(app, thread_id, "phase", json!({ "phase": "idle" }));
     emit(app, thread_id, "closed", json!({}));
+    if let Some(result) = dropped_result {
+        turn::after_turn_hooks(app, db, thread_id, &result);
+    }
 }
 
 fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Value) {
@@ -934,8 +952,10 @@ fn end_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id:
     emit(app, thread_id, "phase", json!({ "phase": "idle" }));
     if session.stale.load(Ordering::SeqCst) {
         close(thread_id);
+        turn::after_turn_hooks(app, db, thread_id, &result);
         return;
     }
+    turn::after_turn_hooks(app, db, thread_id, &result);
     // A mensagem da fila entra no fio agora, que é quando o turno dela começa (`save`).
     if let Some((next_turn, next)) = session.lane.advance()
         && let Err(e) = start_turn(app, db, session, &next, next_turn, true)

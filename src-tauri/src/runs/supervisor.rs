@@ -259,8 +259,11 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     // el arranque de una tab (`Terminal.tsx`), y por el mismo motivo: correr con otra
     // cuenta que la pedida gasta cupo ajeno sin avisar.
     let mut account_env = match &task.account_id {
-        Some(id) => crate::accounts::env_for_account(&db, id)
-            .ok_or_else(|| format!("a conta '{id}' não existe mais"))?,
+        Some(id) => {
+            crate::accounts::ensure_supported_outside_pty(&db, id)?;
+            crate::accounts::env_for_account(&db, id)
+                .ok_or_else(|| format!("a conta '{id}' não existe mais"))?
+        }
         None => Default::default(),
     };
 

@@ -358,6 +358,29 @@ pub fn kind_for_account_for_agent(
     Ok(AccountKind::parse(&kind))
 }
 
+/// Contas por API key usam o broker de credenciais por PTY (`ags credential`). Fora de PTY
+/// (chat estruturado e Frota headless), falha fechado com mensagem clara em vez de subir sem credencial.
+pub fn ensure_supported_outside_pty(db: &DbConnection, account_id: &str) -> Result<(), String> {
+    let kind: Option<String> = {
+        let conn = db
+            .lock()
+            .map_err(|_| "Não foi possível acessar as contas locais.".to_string())?;
+        conn.query_row(
+            "SELECT kind FROM agent_accounts WHERE id = ?1",
+            [account_id],
+            |row| row.get(0),
+        )
+        .ok()
+    };
+    if kind.as_deref().map(AccountKind::parse) == Some(AccountKind::ApiKey) {
+        return Err(
+            "Contas por API key estão disponíveis apenas em abas de terminal (PTY). No chat estruturado e na Frota, escolha uma conta com login."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 /// Agente dono da conta, sem carregar as credenciais do chaveiro.
 pub fn agent_id_for_account(db: &DbConnection, account_id: &str) -> Option<String> {
     let conn = db.lock().ok()?;

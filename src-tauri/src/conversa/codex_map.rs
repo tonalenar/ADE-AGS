@@ -282,6 +282,32 @@ pub fn turn_end(turn: &Value, at: Option<i64>) -> Option<Item> {
     Some(it)
 }
 
+/// O desfecho de um `Turn` finalizado do Codex no formato comum aos ganchos de fim de turno (`turn::after_turn_hooks`).
+pub fn turn_result(turn: &Value) -> super::claude_map::TurnResult {
+    let status = str_of(turn, "status").unwrap_or("completed");
+    let interrupted = status == "interrupted";
+    let error = (status == "failed").then(|| {
+        let message = turn.pointer("/error/message").and_then(Value::as_str).map(str::trim).filter(|m| !m.is_empty());
+        let details = turn.pointer("/error/additionalDetails").and_then(Value::as_str).map(str::trim).filter(|m| !m.is_empty());
+        let info = turn.pointer("/error/codexErrorInfo").and_then(Value::as_str).map(str::trim).filter(|m| !m.is_empty());
+        let raw = match (message, details, info) {
+            (Some(m), Some(d), _) if !m.contains(d) => format!("{m} ({d})"),
+            (Some(m), _, Some("usageLimitExceeded")) if !m.to_lowercase().contains("limit") => format!("{m} (usage limit exceeded)"),
+            (Some(m), _, _) => m.to_string(),
+            (None, Some(d), _) => d.to_string(),
+            (None, None, Some("usageLimitExceeded")) => "usage limit exceeded".to_string(),
+            (None, None, Some(i)) => i.to_string(),
+            (None, None, None) => "erro do Codex".to_string(),
+        };
+        clip(&raw, OUTPUT_MAX)
+    });
+    super::claude_map::TurnResult {
+        interrupted,
+        error,
+        duration_ms: turn.get("durationMs").and_then(Value::as_i64),
+    }
+}
+
 /// O acesso do chat (`ask`, `edits`, `safe`, `full`) em política de aprovação e sandbox do Codex.
 /// Supervisionado pede aprovação para o que não é confiável; Auto (e Aceitar edições, que o Codex
 /// não separa) escreve na pasta e pede quando precisa; Acesso total não pede nada.

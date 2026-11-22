@@ -353,6 +353,9 @@ pub async fn session_with_fast_mode(app: &AppHandle, db: &DbConnection, thread_i
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
     };
+    if let Some(a) = row.account_id.as_deref() {
+        crate::accounts::ensure_supported_outside_pty(db, a)?;
+    }
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
 
     let fresh = || {
@@ -407,6 +410,9 @@ pub async fn open_forked(app: &AppHandle, db: &DbConnection, thread_id: &str, fr
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
     };
+    if let Some(a) = row.account_id.as_deref() {
+        crate::accounts::ensure_supported_outside_pty(db, a)?;
+    }
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
     let id = uuid::Uuid::new_v4().to_string();
     let session = open(app, db, &row, env, Start::Fork { from, id: &id, at }, false).await?;
@@ -466,7 +472,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(env) = env {
-        cmd.envs(env);
+        crate::agents::apply_account_env(&mut cmd, &env);
     }
     if let Some(mcp) = mcp.as_ref() {
         cmd.envs(mcp.tab.env.iter().map(|(k, v)| (k, v)));
@@ -560,6 +566,20 @@ async fn read_loop(app: AppHandle, db: DbConnection, session: Arc<Session>, stdo
     closed(&app, &db, &session);
 }
 
+pub(super) fn unregister_closed(session: &Arc<Session>) -> turn::ClosedOwnership {
+    sessions()
+        .lock()
+        .map(|mut map| match map.get(&session.thread_id) {
+            Some(current) if Arc::ptr_eq(current, session) => {
+                map.remove(&session.thread_id);
+                turn::ClosedOwnership::Owned
+            }
+            Some(_) => turn::ClosedOwnership::Replaced,
+            None => turn::ClosedOwnership::Absent,
+        })
+        .unwrap_or(turn::ClosedOwnership::Absent)
+}
+
 fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     let killed = !session.alive.swap(false, Ordering::SeqCst);
     session.gate(StopGate::reset);
@@ -567,15 +587,10 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     for reply in waiting {
         let _ = reply.send(Err("O processo do Claude fechou".into()));
     }
-    let registered = sessions().lock().is_ok_and(|mut map| {
-        let mine = map.get(&session.thread_id).is_some_and(|s| Arc::ptr_eq(s, session));
-        if mine {
-            map.remove(&session.thread_id);
-        }
-        mine
-    });
-    // Uma sessão que nunca entrou no mapa (o `--resume` que falhou) não mexe na conversa.
-    if !registered && session.remote().is_none() {
+    let ownership = unregister_closed(session);
+    // Uma sessão substituída no mapa (failover/troca) ou que nunca entrou nele (`--resume` falho) não mexe na conversa.
+    let other_live = ownership == turn::ClosedOwnership::Absent && super::api::has_live_session(&session.thread_id);
+    if !turn::should_cleanup_on_close(ownership, session.remote().is_some(), other_live) {
         return;
     }
     let thread_id = session.thread_id.as_str();
@@ -583,7 +598,7 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     for id in expired {
         emit(app, thread_id, "requestResolved", json!({ "id": id }));
     }
-    if let Some(turn) = session.close_turn() {
+    let dropped_result = session.close_turn().map(|turn| {
         session.auto_compacting.store(false, Ordering::SeqCst);
         let tail = session.stderr.lock().ok().and_then(|t| turn::stderr_reason(t.iter()));
         let (result, message) = turn::dropped(killed, tail.as_deref(), "Claude");
@@ -592,9 +607,13 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
         if let Some(message) = message {
             emit(app, thread_id, "error", json!({ "message": message }));
         }
-    }
+        result
+    });
     emit(app, thread_id, "phase", json!({ "phase": "idle" }));
     emit(app, thread_id, "closed", json!({}));
+    if let Some(result) = dropped_result {
+        super::turn::after_turn_hooks(app, db, thread_id, &result);
+    }
 }
 
 fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Value) {
@@ -706,7 +725,6 @@ fn finish_turn(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, 
         emit(app, thread_id, "item", json!({ "item": item }));
     }
     save_items(app, db, thread_id, Some(turn), vec![claude_map::turn_end(turn, result, Some(now))]);
-    super::turn::after_turn_hooks(app, db, thread_id, result);
 }
 
 /// O que o banco guarda quando o turno do Claude acaba: o status, os pedidos pendentes que expiram (devolve os ids) e as
@@ -805,9 +823,12 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
                 .then(|| super::autocompact::plan(app, db, thread_id))
                 .flatten();
             emit(app, thread_id, "phase", json!({ "phase": "idle" }));
-            if session.stale.load(Ordering::SeqCst) {
+            let stale = session.stale.load(Ordering::SeqCst);
+            if stale {
                 close(thread_id);
-            } else if let Some(planned) = compaction {
+            }
+            super::turn::after_turn_hooks(app, db, thread_id, &result);
+            if !stale && let Some(planned) = compaction {
                 super::autocompact::execute(app, db, thread_id, planned);
             }
         }

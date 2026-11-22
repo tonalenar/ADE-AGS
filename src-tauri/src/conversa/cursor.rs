@@ -172,8 +172,9 @@ pub fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str) -> 
     tauri::async_runtime::spawn(async move {
         let mut next = Some((turn_id, text));
         while let Some((turn_id, text)) = next.take() {
-            run_turn(&app, &db, &session, &turn_id, &text).await;
+            let result = run_turn(&app, &db, &session, &turn_id, &text).await;
             next = next_turn(&app, &db, &session);
+            turn::after_turn_hooks(&app, &db, &session.thread_id, &result);
         }
     });
     Ok(())
@@ -215,7 +216,7 @@ fn next_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) -> Opti
 }
 
 /// Um turno: sobe o `cursor-agent`, lê a saída até o fim e fecha o turno no banco.
-async fn run_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str) {
+async fn run_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str) -> TurnResult {
     let thread_id = session.thread_id.as_str();
     let started = std::time::Instant::now();
     let result = match drive(app, db, session, turn_id, text).await {
@@ -233,6 +234,7 @@ async fn run_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, tu
     if let Some(error) = result.error.as_deref().filter(|_| !result.interrupted) {
         emit(app, thread_id, "error", json!({ "message": error }));
     }
+    result
 }
 
 /// O turno com a retomada guardada: um processo por turno, então o prompt sai junto com o `--resume`. Só cai numa
