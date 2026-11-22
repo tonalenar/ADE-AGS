@@ -14,13 +14,30 @@ impl Root {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!("ade-conversa-memoria-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(root.join("home/.claude")).unwrap();
+        fs::create_dir_all(root.join("repo")).unwrap();
         Self(root)
+    }
+    fn with_scope() -> Self {
+        let root = Self::new();
+        fs::write(
+            root.cwd().join(".ai-memory.toml"),
+            "workspace = \"w\"\nproject = \"p\"\n",
+        )
+        .unwrap();
+        fs::write(root.ags(), "").unwrap();
+        root
     }
     fn mcp(&self) -> PathBuf {
         self.0.join("mcp")
     }
     fn home(&self) -> PathBuf {
         self.0.join("home")
+    }
+    fn cwd(&self) -> PathBuf {
+        self.0.join("repo")
+    }
+    fn ags(&self) -> PathBuf {
+        self.0.join("ags")
     }
 }
 impl Drop for Root {
@@ -43,7 +60,9 @@ fn run(root: &Root, enabled: bool, binary: Option<&str>, argv: &[String]) -> Mem
     prepare(Inputs {
         enabled,
         binary: binary.map(PathBuf::from),
+        ags: root.ags().is_file().then(|| root.ags()),
         thread_id: "abc-123",
+        cwd: &root.cwd(),
         dir: &root.mcp(),
         home: &root.home(),
         argv,
@@ -70,7 +89,7 @@ fn o_nome_da_conversa_vira_um_arquivo_seguro_e_proprio() {
 
 #[test]
 fn a_conversa_nasce_com_os_hooks_e_o_mcp_do_ai_memory() {
-    let root = Root::new();
+    let root = Root::with_scope();
     let memory = run(&root, true, Some("/opt/ai-memory"), &claude_argv());
     assert_eq!(memory.state, "on");
     assert!(memory.notice.is_none());
@@ -78,8 +97,22 @@ fn a_conversa_nasce_com_os_hooks_e_o_mcp_do_ai_memory() {
     let mcp = value_of(&memory.args, "--mcp-config").expect("falta --mcp-config");
     assert_eq!(Path::new(mcp), root.mcp().join("tab-thread-abc-123.json"));
     let config: serde_json::Value = serde_json::from_slice(&fs::read(mcp).unwrap()).unwrap();
-    assert_eq!(config["mcpServers"]["ai-memory"]["command"], "/opt/ai-memory");
-    assert_eq!(config["mcpServers"]["ai-memory"]["args"][0], "mcp-bridge");
+    assert_eq!(
+        config["mcpServers"]["ai-memory"]["command"],
+        root.ags().to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        config["mcpServers"]["ai-memory"]["args"],
+        serde_json::json!([
+            "ai-memory-bridge",
+            "--cwd",
+            root.cwd().to_string_lossy(),
+            "--workspace",
+            "w",
+            "--project",
+            "p"
+        ])
+    );
 
     let settings = value_of(&memory.args, "--settings").expect("falta --settings");
     assert!(Path::new(settings).file_name().unwrap().to_string_lossy().starts_with("tab-thread-abc-123.ai-memory-"));
@@ -91,7 +124,7 @@ fn a_conversa_nasce_com_os_hooks_e_o_mcp_do_ai_memory() {
 
 #[test]
 fn as_configuracoes_fast_da_sessao_somam_aos_hooks_temporarios() {
-    let root = Root::new();
+    let root = Root::with_scope();
     let mut memory = run(&root, true, Some("/opt/ai-memory"), &claude_argv());
     let settings = PathBuf::from(value_of(&memory.args, "--settings").unwrap());
     merge_session_settings(&mut memory, &serde_json::json!({ "fastMode": true, "ultracode": true }))
@@ -107,7 +140,7 @@ fn as_configuracoes_fast_da_sessao_somam_aos_hooks_temporarios() {
 
 #[test]
 fn o_ambiente_do_filho_nunca_deixa_o_autowire_reescrever_a_configuracao() {
-    let root = Root::new();
+    let root = Root::with_scope();
     for (enabled, binary) in [(true, Some("/opt/ai-memory")), (false, Some("/opt/ai-memory")), (true, None)] {
         let memory = run(&root, enabled, binary, &claude_argv());
         assert!(memory.env.contains(&("AI_MEMORY_RUN_AUTOWIRE".to_string(), "false".to_string())), "{enabled} {binary:?}");
@@ -116,7 +149,7 @@ fn o_ambiente_do_filho_nunca_deixa_o_autowire_reescrever_a_configuracao() {
 
 #[test]
 fn o_arquivo_temporario_some_quando_a_conversa_solta_a_injecao() {
-    let root = Root::new();
+    let root = Root::with_scope();
     let memory = run(&root, true, Some("/opt/ai-memory"), &claude_argv());
     let settings = PathBuf::from(value_of(&memory.args, "--settings").unwrap());
     assert!(settings.exists());
@@ -126,7 +159,7 @@ fn o_arquivo_temporario_some_quando_a_conversa_solta_a_injecao() {
 
 #[test]
 fn reabrir_reinjeta_e_o_arquivo_anterior_some_sem_duplicar_o_servidor() {
-    let root = Root::new();
+    let root = Root::with_scope();
     let first = run(&root, true, Some("/opt/ai-memory"), &claude_argv());
     let old = PathBuf::from(value_of(&first.args, "--settings").unwrap());
     // Troca de modelo/acesso: o processo novo nasce antes de o antigo ser solto.
@@ -141,7 +174,7 @@ fn reabrir_reinjeta_e_o_arquivo_anterior_some_sem_duplicar_o_servidor() {
 
 #[test]
 fn settings_explicito_no_comando_nao_e_substituido() {
-    let root = Root::new();
+    let root = Root::with_scope();
     let mut argv = claude_argv();
     argv.extend(["--settings".into(), "/meu/settings.json".into()]);
     let memory = run(&root, true, Some("/opt/ai-memory"), &argv);
@@ -155,7 +188,7 @@ fn settings_explicito_no_comando_nao_e_substituido() {
 
 #[test]
 fn hooks_do_ai_memory_que_o_usuario_ja_tem_nao_sao_duplicados() {
-    let root = Root::new();
+    let root = Root::with_scope();
     fs::write(
         root.home().join(".claude/settings.json"),
         r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"ai-memory hook --event session-start"}]}]}}"#,
@@ -168,7 +201,7 @@ fn hooks_do_ai_memory_que_o_usuario_ja_tem_nao_sao_duplicados() {
 
 #[test]
 fn o_ajuste_desligado_nao_injeta_e_tira_o_servidor_que_ficou() {
-    let root = Root::new();
+    let root = Root::with_scope();
     drop(run(&root, true, Some("/opt/ai-memory"), &claude_argv()));
     let memory = run(&root, false, Some("/opt/ai-memory"), &claude_argv());
     assert!(memory.args.is_empty());
@@ -179,7 +212,7 @@ fn o_ajuste_desligado_nao_injeta_e_tira_o_servidor_que_ficou() {
 
 #[test]
 fn sem_ai_memory_aceito_a_conversa_abre_sem_memoria_e_sem_aviso() {
-    let root = Root::new();
+    let root = Root::with_scope();
     let memory = run(&root, true, None, &claude_argv());
     assert!(memory.args.is_empty());
     assert_eq!(memory.state, "off:unavailable");
@@ -188,7 +221,7 @@ fn sem_ai_memory_aceito_a_conversa_abre_sem_memoria_e_sem_aviso() {
 
 #[test]
 fn falha_ao_gravar_os_arquivos_nao_impede_abrir_e_avisa() {
-    let root = Root::new();
+    let root = Root::with_scope();
     // A pasta do MCP é um arquivo: não dá para criar nem gravar nela.
     fs::write(root.mcp(), "não sou uma pasta").unwrap();
     let memory = run(&root, true, Some("/opt/ai-memory"), &claude_argv());
@@ -200,7 +233,7 @@ fn falha_ao_gravar_os_arquivos_nao_impede_abrir_e_avisa() {
 
 #[test]
 fn os_argumentos_finais_do_claude_somam_os_da_memoria_sem_mexer_nos_da_conversa() {
-    let root = Root::new();
+    let root = Root::with_scope();
     let base = launch_args(&row(), Start::New("s-1"));
     let memory = run(&root, true, Some("/opt/ai-memory"), &claude_argv());
     let mut finais = base.clone();
@@ -259,4 +292,55 @@ fn ponta_a_ponta_a_conversa_por_protocolo_grava_sessao_no_ai_memory() {
     // 4. `ai-memory recent --json` lista a sessão/página da pasta da conversa; o painel Memória das Configurações a mostra.
     // 5. Fechar a conversa: o `tab-thread-<id>.ai-memory-*.settings.json` some de `~/.ags/mcp`.
     unimplemented!("roteiro manual; ver docs/ade-ags/AI_MEMORY_CONNECTOR.md");
+}
+
+#[test]
+fn todos_os_motores_de_conversa_protegem_o_autowire() {
+    for (name, src) in [
+        ("codex.rs", include_str!("codex.rs")),
+        ("opencode.rs", include_str!("opencode.rs")),
+        ("agy.rs", include_str!("agy.rs")),
+        ("cursor.rs", include_str!("cursor.rs")),
+        ("claude.rs", include_str!("claude.rs")),
+    ] {
+        assert!(
+            src.contains("protect_command_env("),
+            "{name} precisa chamar protect_command_env antes de iniciar o processo"
+        );
+    }
+}
+
+#[test]
+fn conversa_claude_sem_escopo_nao_injeta_mcp_direto_nem_hooks() {
+    let root = Root::new();
+    fs::write(root.ags(), "").unwrap();
+    let memory = run(&root, true, Some("/opt/ai-memory"), &claude_argv());
+    assert!(memory.args.is_empty(), "{:?}", memory.args);
+    assert!(memory.guard.settings_file.is_none());
+    assert_eq!(memory.state, "off:nothing");
+    assert!(!root.mcp().join("tab-thread-abc-123.json").exists());
+
+    // Marcador reservado também é bloqueado sem fallback.
+    fs::write(
+        root.cwd().join(".ai-memory.toml"),
+        "workspace = \"default\"\nproject = \"_global\"\n",
+    )
+    .unwrap();
+    let reserved = run(&root, true, Some("/opt/ai-memory"), &claude_argv());
+    assert!(reserved.args.is_empty(), "{:?}", reserved.args);
+    assert!(reserved.guard.settings_file.is_none());
+    assert!(!root.mcp().join("tab-thread-abc-123.json").exists());
+
+    // Mesmo com marcador válido, sem binário `ags` não cai no `ai-memory mcp-bridge` direto.
+    fs::write(
+        root.cwd().join(".ai-memory.toml"),
+        "workspace = \"w\"\nproject = \"p\"\n",
+    )
+    .unwrap();
+    fs::remove_file(root.ags()).unwrap();
+    let without_ags = run(&root, true, Some("/opt/ai-memory"), &claude_argv());
+    assert!(without_ags.args.is_empty(), "{:?}", without_ags.args);
+    assert!(without_ags.guard.settings_file.is_none());
+    assert_eq!(without_ags.state, "off:nothing");
+    assert!(!root.mcp().join("tab-thread-abc-123.json").exists());
 }

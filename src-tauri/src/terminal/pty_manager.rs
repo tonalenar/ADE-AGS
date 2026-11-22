@@ -1381,8 +1381,8 @@ fn criar_pty(args: PtyCreateArgs, app: AppHandle) -> Result<u32, String> {
         // tarefas desta thread enquanto o processo roda.
         let (extras, cwd_path) = (memory_env, std::path::PathBuf::from(&cwd));
         let prepared = tokio::task::block_in_place(|| {
-            crate::ai_memory::tabs::prepare_new_tab(
-                &tab, agent, &dir, &home, &cwd_path, &argv, &extras,
+            crate::ai_memory::tabs::prepare_new_tab_for_app(
+                &app, &tab, agent, &dir, &home, &cwd_path, &argv, &extras,
             )
         });
         continuity_hooks = prepared.hooks_configured;

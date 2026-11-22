@@ -9,6 +9,8 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const invokeMock = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invokeMock(...a) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => undefined) }));
+// Toasts do sweetalert2 deixam timers que disparam depois do teardown do ambiente (`window is not defined`).
+vi.mock("sweetalert2", () => ({ default: { fire: () => Promise.resolve({ isConfirmed: false }) } }));
 const i18nResult = {
   t: (k: string, o?: Record<string, unknown>) => (o ? `${k} ${JSON.stringify(o)}` : k),
   i18n: { language: "pt-BR" },

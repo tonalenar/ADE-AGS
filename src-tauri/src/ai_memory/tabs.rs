@@ -46,7 +46,8 @@ pub(crate) struct NewTab {
 
 /// Prepara hooks e MCP de uma nova aba. Faz subprocesso (`--version`) e I/O de arquivo: quem chama de
 /// um contexto assíncrono deve usar `spawn_blocking`.
-pub(crate) fn prepare_new_tab(
+pub(crate) fn prepare_new_tab_for_app(
+    app: &tauri::AppHandle,
     tab: &str,
     agent: &str,
     dir: &Path,
@@ -55,10 +56,12 @@ pub(crate) fn prepare_new_tab(
     argv: &[String],
     extras: &HashMap<String, String>,
 ) -> NewTab {
-    prepare_new_tab_with(supported_binary(cwd), tab, agent, dir, home, cwd, argv, extras)
+    let ags = crate::ipc::install::source_binary(app).or_else(ags_binary);
+    prepare_new_tab_with_ags(supported_binary(cwd), ags, tab, agent, dir, home, cwd, argv, extras)
 }
 
-/// O miolo de [`prepare_new_tab`], com o binário já resolvido (`None` = ausente ou antigo): só grava arquivos.
+/// O miolo de [`prepare_new_tab_for_app`], com `binary` já resolvido (`None` = ausente ou antigo): só grava arquivos.
+#[cfg(test)]
 pub(crate) fn prepare_new_tab_with(
     binary: Option<PathBuf>,
     tab: &str,
@@ -69,18 +72,48 @@ pub(crate) fn prepare_new_tab_with(
     argv: &[String],
     extras: &HashMap<String, String>,
 ) -> NewTab {
+    prepare_new_tab_with_ags(binary, ags_binary(), tab, agent, dir, home, cwd, argv, extras)
+}
+
+/// Igual a [`prepare_new_tab_with`], permitindo injetar o binário `ags` (usado no runtime e nos testes).
+pub(crate) fn prepare_new_tab_with_ags(
+    binary: Option<PathBuf>,
+    ags: Option<PathBuf>,
+    tab: &str,
+    agent: &str,
+    dir: &Path,
+    home: &Path,
+    cwd: &Path,
+    argv: &[String],
+    extras: &HashMap<String, String>,
+) -> NewTab {
     let mut out = NewTab { plan: TabInjection::default(), binary: None, hooks_configured: false, failed: false };
     let Some(binary) = binary else {
+        if agent == "claude" {
+            remove_owned_server(dir, tab);
+        }
+        return out;
+    };
+    let Some((workspace, project)) = resolve_scope(&binary, cwd, home) else {
+        if agent == "claude" {
+            remove_owned_server(dir, tab);
+        }
+        return out;
+    };
+    let Some(ags) = ags else {
+        if agent == "claude" {
+            remove_owned_server(dir, tab);
+        }
         return out;
     };
     if agent != "claude" {
-        out.plan = static_plan(&binary, cwd, agent, extras).unwrap_or_default();
+        out.plan = scoped_plan(&ags, cwd, agent, extras, &workspace, &project).unwrap_or_default();
         return out;
     }
     let settings = user_settings(home, extras);
     out.hooks_configured = configured_hooks(&settings);
     out.binary = Some(binary.clone());
-    match prepare(&binary, dir, tab, agent, argv, extras, &settings) {
+    match prepare(&ags, &binary, dir, tab, (cwd, &workspace, &project), argv, &settings) {
         Ok(plan) => out.plan = plan,
         Err(_) => {
             out.failed = true;
@@ -205,26 +238,31 @@ fn read_owned_config(path: &Path) -> Result<Value, String> {
 
 /// Todos os caminhos recebidos são do ADE; configurações de agente só são lidas.
 pub(crate) fn prepare(
+    ags: &Path,
     program: &Path,
     dir: &Path,
     tab_id: &str,
-    agent: &str,
+    scope: (&Path, &str, &str),
     argv: &[String],
-    _env: &HashMap<String, String>,
     settings: &[PathBuf],
 ) -> Result<TabInjection, String> {
+    let (cwd, workspace, project) = scope;
     let name = crate::ipc::mcp::tab_config_name(tab_id);
     if name == "tab-" {
         return Err("Identificador de aba inválido.".into());
     }
     // Flags depois de `--` virariam parte do prompt; não alteramos esse comando.
-    // Sem pin de escopo nativo, só Claude session-aware pode receber MCP.
-    if agent != "claude" || argv.iter().any(|arg| arg == "--") {
+    if argv.iter().any(|arg| arg == "--") {
         return Ok(TabInjection::default());
     }
-    let binary = crate::util::external_path(program)
+    super::sessions::validate_scope(workspace, project)?;
+    if super::scoped_bridge::reserved_project(project) {
+        return Err("Projeto reservado não permitido.".into());
+    }
+    let ags_exe = crate::util::external_path(ags)
         .to_string_lossy()
         .into_owned();
+    let bridge = bridge_args(cwd, workspace, project);
     let mut plan = TabInjection::default();
     std::fs::create_dir_all(dir)
         .map_err(|_| "Não foi possível preparar o MCP da aba.".to_string())?;
@@ -238,10 +276,10 @@ pub(crate) fn prepare(
         .or_insert_with(|| json!({}))
         .as_object_mut()
         .ok_or("Servidores MCP da aba inválidos.")?;
-    // Claude define CLAUDE_CODE_SESSION_ID ao abrir seu servidor MCP.
+    // Claude também passa pelo proxy `ags ai-memory-bridge` com projeto e tools fixos.
     servers.insert(
         "ai-memory".into(),
-        json!({"command":binary,"args":["mcp-bridge"]}),
+        json!({"command": ags_exe, "args": bridge}),
     );
     std::fs::write(&config_path, config.to_string())
         .map_err(|_| "Não foi possível gravar o MCP da aba.".to_string())?;
@@ -324,6 +362,12 @@ pub(crate) const PROTECT_ENV: (&str, &str) = ("AI_MEMORY_RUN_AUTOWIRE", "false")
 
 pub(crate) fn protect_pty_env(command: &mut portable_pty::CommandBuilder) {
     command.env(PROTECT_ENV.0, PROTECT_ENV.1);
+    command.env_remove("AI_MEMORY_SCOPE_CWD");
+}
+
+pub(crate) fn protect_command_env(command: &mut std::process::Command) {
+    command.env(PROTECT_ENV.0, PROTECT_ENV.1);
+    command.env_remove("AI_MEMORY_SCOPE_CWD");
 }
 
 pub(crate) fn remove_owned_server(dir: &Path, tab_id: &str) {
@@ -341,43 +385,30 @@ pub(crate) fn configured_hooks(paths: &[PathBuf]) -> bool {
     UserHooks::read(paths).complete()
 }
 
-/// Prefere o par explícito do marcador; sem ele, guessProject exige correspondência única.
-fn static_plan(
-    binary: &Path,
-    cwd: &Path,
-    agent: &str,
-    extras: &HashMap<String, String>,
-) -> Option<TabInjection> {
-    let (workspace, project) = match super::marker::scope(cwd, dirs::home_dir().as_deref()) {
-        Some(scope) => scope,
-        None => {
-            let projects = super::client::Client::at(Some(binary.to_path_buf()), cwd.to_path_buf())
-                .ok()?.read::<Vec<super::types::Project>>(super::client::Read::Projects).ok()?.data;
-            let project = unique_project(&projects, cwd)?;
-            (project.workspace_name.clone(), project.project_name.clone())
-        }
-    };
-    let ags = std::env::current_exe()
-        .ok()?
-        .with_file_name(if cfg!(windows) { "ags.exe" } else { "ags" });
-    if !ags.is_file() {
-        return None;
-    }
-    scoped_plan(&ags, cwd, agent, extras, &workspace, &project).ok()
+fn ags_binary() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    crate::ipc::install::source_binary_in(exe.parent()?)
 }
-pub(super) fn scoped_plan(
-    ags: &Path,
-    cwd: &Path,
-    agent: &str,
-    extras: &HashMap<String, String>,
-    workspace: &str,
-    project: &str,
-) -> Result<TabInjection, String> {
-    super::sessions::validate_scope(workspace, project)?;
-    let exe = crate::util::external_path(ags)
-        .to_string_lossy()
-        .into_owned();
-    let args = vec![
+
+/// Prefere o par explícito do marcador; projeto reservado bloqueia sem fallback; sem marcador, exige correspondência única.
+fn resolve_scope(binary: &Path, cwd: &Path, home: &Path) -> Option<(String, String)> {
+    match super::marker::resolve(cwd, Some(home)) {
+        super::marker::Scope::Pair(workspace, project) => Some((workspace, project)),
+        super::marker::Scope::Reserved => None,
+        super::marker::Scope::Missing => {
+            let projects = super::client::Client::at(Some(binary.to_path_buf()), cwd.to_path_buf())
+                .ok()?
+                .read::<Vec<super::types::Project>>(super::client::Read::Projects)
+                .ok()?
+                .data;
+            let project = unique_project(&projects, cwd)?;
+            Some((project.workspace_name.clone(), project.project_name.clone()))
+        }
+    }
+}
+
+fn bridge_args(cwd: &Path, workspace: &str, project: &str) -> Vec<String> {
+    vec![
         "ai-memory-bridge".to_string(),
         "--cwd".into(),
         crate::util::external_path(cwd)
@@ -387,7 +418,25 @@ pub(super) fn scoped_plan(
         workspace.into(),
         "--project".into(),
         project.into(),
-    ];
+    ]
+}
+
+pub(super) fn scoped_plan(
+    ags: &Path,
+    cwd: &Path,
+    agent: &str,
+    extras: &HashMap<String, String>,
+    workspace: &str,
+    project: &str,
+) -> Result<TabInjection, String> {
+    super::sessions::validate_scope(workspace, project)?;
+    if super::scoped_bridge::reserved_project(project) {
+        return Err("Projeto reservado não permitido.".into());
+    }
+    let exe = crate::util::external_path(ags)
+        .to_string_lossy()
+        .into_owned();
+    let args = bridge_args(cwd, workspace, project);
     let mut plan = TabInjection::default();
     match agent {
         "codex" => {

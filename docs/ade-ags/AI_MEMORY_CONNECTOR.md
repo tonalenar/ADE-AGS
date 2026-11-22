@@ -102,10 +102,10 @@ A descoberta usa o PATH do app e aceita apenas `--version` ≥3.3.0, sem consult
 
 | Agente | Injeção no nascimento do PTY |
 |---|---|
-| Claude | Soma `mcpServers.ai-memory` ao `tab-<id>.json` do ADE, preservando `ags`; comando absoluto do binário e `args: ["mcp-bridge"]`. Claude fornece `CLAUDE_CODE_SESSION_ID` ao iniciar esse MCP. Se não existir o config do ADE, cria somente o registro adicional e acrescenta `--mcp-config`. |
-| Claude (captura) | `--settings <ADE-data>/mcp/tab-<id>.ai-memory-<nonce>.settings.json`. JSON `{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"'<binário>' hook --event session-start --agent claude-code"}]}], ...}}`. Windows usa exec form: `command` é o binário, `args` é o vetor nativo. Sem token ou URL no arquivo. |
-| OpenCode | MCP automático do ai-memory desativado: o bridge estático não fixa o escopo da pasta. O MCP `ags`, permissões e conteúdo configurado pela pessoa permanecem intactos. |
-| Codex | MCP automático do ai-memory desativado pelo mesmo limite de escopo. Sem hooks ou novos `-c mcp_servers.ai-memory.*`; configurações globais da pessoa não são removidas. |
+| Claude | Soma `mcpServers.ai-memory` ao `tab-<id>.json` do ADE, preservando `ags`; comando absoluto do `ags` e `args: ["ai-memory-bridge", "--cwd", <cwd>, "--workspace", <W>, "--project", <P>]`, só quando há escopo válido (marcador ou match único, sem projeto reservado) e `ags` disponível. Se não existir o config do ADE, cria somente o registro adicional e acrescenta `--mcp-config`. |
+| Claude (captura) | Só quando o escopo e o `ags` são válidos: `--settings <ADE-data>/mcp/tab-<id>.ai-memory-<nonce>.settings.json`. JSON `{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"'<binário>' hook --event session-start --agent claude-code"}]}], ...}}`. Windows usa exec form: `command` é o binário, `args` é o vetor nativo. Sem token ou URL no arquivo. Os hooks nativos ainda chamam `ai-memory hook` direto e não passam pelo filtro de segredos do proxy MCP. |
+| OpenCode | `OPENCODE_CONFIG_CONTENT` mesclado com `ags ai-memory-bridge` quando o escopo é resolvido; `mcp.ags`, permissões e conteúdo da pessoa intactos. |
+| Codex | `-c mcp_servers.ai-memory.command/args` com `ags ai-memory-bridge` quando o escopo é resolvido; configurações globais da pessoa intactas. |
 
 Os hooks nativos foram conferidos na tag v3.3.0: `cli.rs::HookArgs`, `commands/render_shared.rs::CLAUDE_CODE_EVENTS` e `HookCommandPlatform::for_bash_runner`. macOS/Linux usam `PosixNative` por padrão e Windows usa `WindowsNative`. Existe o subcomando `hook`, portanto **não é necessário instalar os scripts `.sh`** para esta injeção. Eventos: SessionStart/session-start, UserPromptSubmit/user-prompt-submit, PreToolUse/pre-tool-use, PostToolUse/post-tool-use, PreCompact/pre-compact, Stop/stop, SessionEnd/session-end, SubagentStart/subagent-start e SubagentStop/subagent-stop. SessionEnd recebe timeout de 15s, como o instalador nativo. Não se habilita captura de resposta do assistente por flags adicionais.
 
@@ -149,7 +149,7 @@ Prova desta fase: `ags test affected` aprovado (86 testes Rust e 131 frontend re
 
 As conversas do modo chat que falam com o agente por protocolo (sem TUI) não passam por `pty_create`; abrem o processo em `conversa/*.rs`. A injeção por processo, a mesma das abas, existe só para o **Claude Code** (`claude -p` em stream-json), em `conversa::memoria`, chamada por `conversa::claude::spawn`:
 
-- **O que entra:** `--settings <ADE-data>/mcp/tab-thread-<id>.ai-memory-<nonce>.settings.json` (hooks) e `--mcp-config <ADE-data>/mcp/tab-thread-<id>.json` (`mcpServers.ai-memory`, `mcp-bridge`). O nome vem de `thread-<id>` passado por `tab_config_name`, que só deixa letras, números, `-` e `_`. O ambiente do filho leva `AI_MEMORY_RUN_AUTOWIRE=false` sempre, também com o ajuste desligado ou o binário ausente.
+- **O que entra:** `--settings <ADE-data>/mcp/tab-thread-<id>.ai-memory-<nonce>.settings.json` (hooks) e `--mcp-config <ADE-data>/mcp/tab-thread-<id>.json` (`mcpServers.ai-memory` apontando para `ags ai-memory-bridge --cwd <cwd> --workspace <W> --project <P>`), apenas quando o `cwd` da conversa resolve um escopo válido (não reservado) e o `ags` está disponível. O nome vem de `thread-<id>` passado por `tab_config_name`, que só deixa letras, números, `-` e `_`. O ambiente de todos os motores (`claude`, `codex`, `opencode`, `agy`, `cursor`) e da Frota (`supervisor`, `oneshot`, `roster`) recebe `AI_MEMORY_RUN_AUTOWIRE=false` e remoção de `AI_MEMORY_SCOPE_CWD` via `protect_command_env`.
 - **Quando:** a cada abertura do processo. A primeira mensagem, a retomada (`--resume`) e a troca de modelo, esforço ou acesso (que fecham e reabrem o processo) preparam de novo; o servidor `ai-memory` que ficou no arquivo é retirado antes, então o ajuste desligado não deixa rastro. Nada muda num processo vivo.
 - **O que respeita:** o ajuste `ai_memory_tabs_enabled` (padrão ligado), a versão mínima 3.3.0 (cache só de sucesso), um `--settings` já presente no comando (não é substituído) e o `SessionStart` do ai-memory que a pessoa já tenha nos próprios settings (os hooks dela não são duplicados; o MCP continua).
 - **Limpeza:** o arquivo de hooks pertence ao `Session` do processo e some quando ele é solto; a varredura de configs do arranque (`sweep_configs_in`) remove o que sobrar de uma queda, e só poupa o `tab-thread-<id>.json` de uma conversa que ainda existe em `chat_thread`.
@@ -166,17 +166,18 @@ Prova: `conversa/test_memoria.rs` (hooks e MCP, ambiente, remoção do arquivo, 
 
 ## Intermediário MCP de projeto fixo (substitui a mitigação dos bridges estáticos)
 
-Novas abas Codex/OpenCode podem receber `ags ai-memory-bridge --cwd <pasta> --workspace <W> --project <P>`.
-O ADE consulta `list-projects --json` no cwd da aba e usa o equivalente conservador de guessProject:
+Novas abas e conversas do Claude e novas abas Codex/OpenCode podem receber `ags ai-memory-bridge --cwd <pasta> --workspace <W> --project <P>`.
+O ADE consulta primeiro `.ai-memory.toml` (bloqueando projetos reservados `_global`, `_profile`, `_profile.*` sem cair no fallback) e, na ausência do marcador, consulta `list-projects --json` no cwd da aba usando o equivalente conservador de guessProject:
 exatamente um projeto cujo nome corresponde ao último componente da pasta, sem diferenciar maiúsculas.
-Nenhum match, homônimos entre workspaces, erro de CLI, versão antiga ou ausência do CLI `ags` ao lado
-do app omitem a injeção. Isso é uma escolha por nome, não uma prova de associação por marker; o par
+Nenhum match, homônimos entre workspaces, projeto reservado, erro de CLI, versão antiga ou ausência do CLI `ags` ao lado
+do app omitem a injeção (incluindo os hooks `--settings` do Claude). Isso é uma escolha por nome quando não há marcador, não uma prova de associação; o par
 selecionado fica fixo durante a vida do processo. Não usa o projeto padrão do servidor.
 
 O intermediário abre apenas `ai-memory mcp-bridge --no-session-id`, no cwd explícito, com
 `AI_MEMORY_HOST_CWD` explícito, `AI_MEMORY_RUN_AUTOWIRE=false` e embeddings desabilitados no filho.
-Nenhum token/config do ai-memory é lido pelo ADE. Codex recebe `-c mcp_servers.ai-memory.command/args`;
-OpenCode recebe `OPENCODE_CONFIG_CONTENT` mesclado, preservando `mcp.ags`. Claude mantém o caminho com sessão.
+Nenhum token/config do ai-memory é lido pelo ADE. Claude recebe `mcpServers.ai-memory` no `tab-<id>.json` (ou `tab-thread-<id>.json`); Codex recebe `-c mcp_servers.ai-memory.command/args`;
+OpenCode recebe `OPENCODE_CONFIG_CONTENT` mesclado, preservando `mcp.ags`.
+Gravações (`memory_write_page`, `memory_patch_page`) são inspecionadas em `stamp()` com `looks_like_user_secret` (mesmo critério do painel do usuário) e recusadas com `-32602` sem ecoar o segredo nem repassar ao filho.
 Nenhuma aba viva ou configuração global é alterada.
 
 Lista fechada auditada na tag v3.3.0, commit `4d4d9ca389145bf16dcb56122626162833335ec8`,

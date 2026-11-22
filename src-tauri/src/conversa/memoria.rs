@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::store::ThreadRow;
-use crate::ai_memory::tabs::{enabled as tabs_enabled, prepare_new_tab_with, remove_owned_server, supported_binary, TabInjection, PROTECT_ENV, TABS_SETTING};
+use crate::ai_memory::tabs::{enabled as tabs_enabled, prepare_new_tab_with_ags, remove_owned_server, supported_binary, TabInjection, PROTECT_ENV, TABS_SETTING};
 use crate::database::{get_setting, DbConnection};
 use tauri::AppHandle;
 
@@ -30,7 +30,9 @@ pub struct Memory {
 pub struct Inputs<'a> {
     pub enabled: bool,
     pub binary: Option<PathBuf>,
+    pub ags: Option<PathBuf>,
     pub thread_id: &'a str,
+    pub cwd: &'a Path,
     pub dir: &'a Path,
     pub home: &'a Path,
     pub argv: &'a [String],
@@ -82,8 +84,18 @@ pub fn prepare(inputs: Inputs<'_>) -> Memory {
         memory.state = "off:unavailable".into();
         return memory;
     };
-    // A pasta (`cwd`) só decide o projeto do MCP de Codex e OpenCode; o Claude, o único daqui, vai por hooks.
-    let tab = prepare_new_tab_with(Some(binary), &id, "claude", inputs.dir, inputs.home, inputs.dir, inputs.argv, inputs.extras);
+    // A pasta (`cwd`) decide o projeto do MCP (marcador ou match único); `dir` guarda os configs temporários.
+    let tab = prepare_new_tab_with_ags(
+        Some(binary),
+        inputs.ags,
+        &id,
+        "claude",
+        inputs.dir,
+        inputs.home,
+        inputs.cwd,
+        inputs.argv,
+        inputs.extras,
+    );
     if tab.failed {
         memory.state = "off:failed".into();
         memory.notice = Some("A memória do ai-memory ficou fora desta conversa: não consegui preparar os hooks e o MCP dela. A conversa segue normalmente.".into());
@@ -108,21 +120,33 @@ fn blocking<T>(f: impl FnOnce() -> T) -> T {
 
 /// A injeção da conversa que vai abrir: lê o ajuste, confere o binário (`--version`, em cache quando deu certo) e
 /// prepara os arquivos. `program` e `args` são os do `claude` que será executado.
-pub fn for_thread(db: &DbConnection, row: &ThreadRow, program: &Path, args: &[String], extras: Option<&HashMap<String, String>>) -> Memory {
+pub fn for_thread(app: &AppHandle, db: &DbConnection, row: &ThreadRow, program: &Path, args: &[String], extras: Option<&HashMap<String, String>>) -> Memory {
     let enabled = get_setting(db, TABS_SETTING).map(|v| tabs_enabled(v.as_deref())).unwrap_or(false);
     let dir = crate::util::datadir::ags_home().map(|h| h.join("mcp"));
+    let cwd = Path::new(&row.cwd);
     let (Some(dir), Some(home)) = (dir, dirs::home_dir()) else {
-        let mut memory = prepare(Inputs { enabled: false, binary: None, thread_id: &row.id, dir: Path::new(""), home: Path::new(""), argv: &[], extras: &HashMap::new() });
+        let mut memory = prepare(Inputs {
+            enabled: false,
+            binary: None,
+            ags: None,
+            thread_id: &row.id,
+            cwd,
+            dir: Path::new(""),
+            home: Path::new(""),
+            argv: &[],
+            extras: &HashMap::new(),
+        });
         memory.state = "off:unavailable".into();
         return memory;
     };
+    let ags = crate::ipc::install::source_binary(app);
     let mut argv = vec![program.to_string_lossy().into_owned()];
     argv.extend(args.iter().cloned());
     let empty = HashMap::new();
     let extras = extras.unwrap_or(&empty);
     blocking(|| {
-        let binary = if enabled { supported_binary(Path::new(&row.cwd)) } else { None };
-        prepare(Inputs { enabled, binary, thread_id: &row.id, dir: &dir, home: &home, argv: &argv, extras })
+        let binary = if enabled { supported_binary(cwd) } else { None };
+        prepare(Inputs { enabled, binary, ags, thread_id: &row.id, cwd, dir: &dir, home: &home, argv: &argv, extras })
     })
 }
 

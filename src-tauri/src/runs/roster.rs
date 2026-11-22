@@ -592,6 +592,7 @@ pub(super) fn account_command(program: &str, args: &[&str], env: &HashMap<String
     let mut command = crate::util::program(program);
     command.args(args);
     crate::agents::apply_account_env(&mut command, env);
+    crate::ai_memory::tabs::protect_command_env(&mut command);
     command
 }
 

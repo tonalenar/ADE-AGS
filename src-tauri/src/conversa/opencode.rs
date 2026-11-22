@@ -593,6 +593,7 @@ fn spawn(
     }
     // Quem a conversa é para o `ags` (`thread:<id>`), para ela delegar e responder num time (`chat_team`).
     cmd.envs(crate::chat_team::env::thread_env(&row.id));
+    crate::ai_memory::tabs::protect_command_env(&mut cmd);
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
     // O próprio ACP nasce líder do grupo Unix; os descendentes herdam o PGID.

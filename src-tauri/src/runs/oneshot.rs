@@ -123,6 +123,7 @@ pub fn run_read_only(db: &DbConnection, req: &OneShot) -> Result<TaskOutcome, St
         super::sandbox::scrub_env(&mut command);
     }
     crate::agents::apply_account_env(&mut command, &launch.env);
+    crate::ai_memory::tabs::protect_command_env(&mut command);
     command.current_dir(cwd);
     let input = via_stdin.then(|| req.prompt.as_bytes().to_vec());
     let out = crate::util::spawn::output_with_input(&mut command, input, req.timeout).map_err(|e| {
