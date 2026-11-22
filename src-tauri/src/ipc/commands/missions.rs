@@ -434,10 +434,10 @@ pub(super) fn memory_search_on(
             entry_keys: &keys,
         },
     );
-    Ok(match at {
+    Ok(crate::memory::untrusted_memory_value(&match at {
         Some(at) => json!({ "query": query, "at": at, "results": hits }),
         None => json!({ "query": query, "results": hits }),
-    })
+    }))
 }
 
 pub(super) fn memory_repo_read(
@@ -508,7 +508,8 @@ pub(super) fn memory_usage(app: &AppHandle, args: &Value) -> Result<Value, Strin
 
 /// O núcleo de `memory_usage`: quem leu a memória do workspace, desde `since` (se houver).
 pub(super) fn memory_usage_on(conn: &rusqlite::Connection, workspace: &str, since: Option<i64>) -> Result<Value, String> {
-    Ok(json!(crate::memory::usage::report(conn, workspace, since)?))
+    let report = crate::memory::usage::report(conn, workspace, since)?;
+    Ok(crate::memory::untrusted_memory_value(&json!(report)))
 }
 
 pub(super) fn swarm_write(app: &AppHandle, args: &Value, question: bool) -> Result<Value, String> {
@@ -556,7 +557,8 @@ pub(super) fn swarm_read(app: &AppHandle, args: &Value) -> Result<Value, String>
 pub(super) fn swarm_read_on(conn: &rusqlite::Connection, id: &str) -> Result<Value, String> {
     let mission = crate::missions::store::get(conn, id)?.ok_or("mission not found")?;
     let notes = crate::memory::lifecycle::swarm_read(conn, &mission.workspace_id, id)?;
-    Ok(json!({ "text": crate::memory::lifecycle::render_board(&notes), "notes": notes }))
+    let board = crate::memory::lifecycle::render_board(&notes);
+    Ok(crate::memory::untrusted_session_value(&json!({ "text": board, "notes": notes })))
 }
 
 pub(super) fn swarm_promote(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -667,7 +669,8 @@ pub(super) fn memory_history_on(
         &entry_id,
         repository_key,
     )?;
-    Ok(json!({ "entryId": entry_id, "scope": scope, "key": key, "history": history }))
+    let campos = json!({ "entryId": entry_id, "scope": scope, "key": key, "history": history });
+    Ok(crate::memory::untrusted_memory_value(&campos))
 }
 
 /// `ags mission precheck <id>`: lo que el repositorio y las misiones anteriores ya dicen del objetivo.

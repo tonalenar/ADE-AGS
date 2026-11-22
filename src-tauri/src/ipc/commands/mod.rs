@@ -51,6 +51,8 @@ pub(crate) use agents::{match_account_id, match_preset_id};
 pub(crate) use tabs::{init_prompt, match_skill_ids, skill_names, InstalledSkill};
 
 #[cfg(test)]
+mod missions_test;
+#[cfg(test)]
 mod replay_test;
 #[cfg(test)]
 mod tabs_test;
