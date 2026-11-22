@@ -133,7 +133,7 @@ fn a_troca_passa_a_conta_esquece_a_sessao_e_guarda_a_origem() {
     move_account(&db, "t1", &Some("b".into()), &Some("c".into()), 9_000, 2_000).unwrap();
     let saved = crate::database::get_setting(&db, "chat.pool.switched.t1").unwrap().unwrap();
     let saved: Switched = serde_json::from_str(&saved).unwrap();
-    assert_eq!(saved, Switched { origin: Some("a".into()), origin_resets_at: Some(5_000), history: vec![1_000, 2_000] });
+    assert_eq!(saved, Switched { origin: Some("a".into()), origin_resets_at: Some(5_000), history: vec![1_000, 2_000], switched_turn_pending: true });
 }
 
 #[test]
@@ -153,15 +153,22 @@ fn pool(id: &str, agent: &str, members: &[Option<&str>]) -> crate::accounts::poo
 
 #[test]
 fn oferece_o_pool_que_tem_a_conta_da_conversa() {
+    let existing: std::collections::HashSet<String> = ["ton", "x"].into_iter().map(String::from).collect();
     let pools = [pool("p1", "claude", &[None, Some("ton")]), pool("p2", "codex", &[Some("ton"), Some("x")])];
-    assert_eq!(offer_pool(&pools, "claude", &Some("ton".into())).map(|p| p.id.as_str()), Some("p1"));
-    assert_eq!(offer_pool(&pools, "claude", &None).map(|p| p.id.as_str()), Some("p1"));
+    assert_eq!(offer_pool(&pools, "claude", &Some("ton".into()), &existing).map(|p| p.id.as_str()), Some("p1"));
+    assert_eq!(offer_pool(&pools, "claude", &None, &existing).map(|p| p.id.as_str()), Some("p1"));
 }
 
 #[test]
-fn nao_oferece_pool_de_outro_agente_ou_sem_a_conta_ou_de_uma_so() {
-    let pools = [pool("p2", "codex", &[Some("ton"), Some("x")]), pool("p3", "claude", &[Some("a"), Some("b")]), pool("p4", "claude", &[Some("ton")])];
-    assert!(offer_pool(&pools, "claude", &Some("ton".into())).is_none());
+fn nao_oferece_pool_de_outro_agente_ou_sem_a_conta_ou_de_uma_so_ou_com_membro_apagado() {
+    let existing: std::collections::HashSet<String> = ["ton", "a", "b", "x"].into_iter().map(String::from).collect();
+    let pools = [
+        pool("p2", "codex", &[Some("ton"), Some("x")]),
+        pool("p3", "claude", &[Some("a"), Some("b")]),
+        pool("p4", "claude", &[Some("ton")]),
+        pool("p5", "claude", &[Some("ton"), Some("apagada")]),
+    ];
+    assert!(offer_pool(&pools, "claude", &Some("ton".into()), &existing).is_none());
 }
 
 #[test]
@@ -329,6 +336,7 @@ fn move_account_preserva_pending_e_handoff_ate_confirmacao_do_envio() {
             pool_id: None,
             agent_id: None,
             model: None,
+            resets_at: Some(5_000),
         },
     );
     move_account(&db, "t1", &Some("a".into()), &Some("b".into()), 5_000, 1_000).unwrap();
@@ -361,6 +369,7 @@ fn accept_e_before_send_respeitam_turno_em_andamento() {
         pool_id: None,
         agent_id: None,
         model: None,
+        resets_at: Some(9_000),
     };
     assert!(check_accept(true, Some(p.clone())).is_err(), "accept deve recusar durante turno ativo");
     assert!(check_accept(false, None).is_err(), "accept sem pending deve recusar");
@@ -589,4 +598,139 @@ fn codex_turn_completed_chama_after_turn_hooks_depois_de_idle() {
         .find("turn::after_turn_hooks")
         .expect("turn/completed do Codex deve chamar turn::after_turn_hooks (C-1)");
     assert!(pos_idle < pos_hooks, "idle deve ser emitido antes de after_turn_hooks (C-2B)");
+}
+
+#[test]
+fn accept_return_guarda_handoff_key_e_limpa_pending_sem_enviar_so_contexto() {
+    let db = db_with_accounts();
+    move_account(&db, "t1", &Some("a".into()), &Some("b".into()), 2_000, 1_000).unwrap();
+    commit_switch_sent(&db, "t1");
+    set_pending(
+        &db,
+        "t1",
+        &Pending {
+            kind: "return".into(),
+            to: Some("a".into()),
+            to_label: "Ton".into(),
+            request: None,
+            pool_id: None,
+            agent_id: None,
+            model: None,
+            resets_at: None,
+        },
+    );
+
+    accept_return_db(None, &db, "t1", 3_000).unwrap();
+
+    let row = super::api::thread(&db, "t1").unwrap();
+    assert_eq!(row.account_id.as_deref(), Some("a"), "voltou à conta original");
+    assert_eq!(row.remote_id, None, "sessão antiga limpa");
+    assert!(pending(&db, "t1").is_none(), "pending limpo após aceitar retorno");
+    assert!(
+        crate::database::get_setting(&db, "chat.account.handoff.t1")
+            .unwrap()
+            .is_some_and(|v| !v.is_empty()),
+        "handoff_key permanece gravado para a próxima mensagem da pessoa (M-3)"
+    );
+    assert!(
+        crate::database::get_setting(&db, "chat.pool.switched.t1")
+            .unwrap()
+            .unwrap_or_default()
+            .is_empty(),
+        "switched limpo após voltar à conta original"
+    );
+}
+
+#[test]
+fn pending_preserva_resets_at_real_e_switched_legado_carrega_sem_encadeamento() {
+    // M-3: Pending serializa e desserializa resets_at real; registros antigos sem o campo continuam lendo.
+    let p = Pending {
+        kind: "switch".into(),
+        to: Some("b".into()),
+        to_label: "Erist".into(),
+        request: Some("oi".into()),
+        pool_id: None,
+        agent_id: None,
+        model: None,
+        resets_at: Some(1_793_550_000),
+    };
+    let raw = serde_json::to_string(&p).unwrap();
+    let decoded: Pending = serde_json::from_str(&raw).unwrap();
+    assert_eq!(decoded.resets_at, Some(1_793_550_000));
+    let old_pending: Pending = serde_json::from_str(
+        r#"{"kind":"switch","to":"b","toLabel":"Erist","request":"oi"}"#,
+    )
+    .unwrap();
+    assert_eq!(old_pending.resets_at, None);
+
+    // M-4: migração aditiva de Switched sem switchedTurnPending.
+    let old_switched: Switched = serde_json::from_str(
+        r#"{"origin":"a","originResetsAt":5000,"history":[1000]}"#,
+    )
+    .unwrap();
+    assert!(!old_switched.switched_turn_pending);
+}
+
+#[test]
+fn switched_turn_pending_substitui_heuristica_de_relogio() {
+    let db = db_with_accounts();
+    move_account(&db, "t1", &Some("a".into()), &Some("b".into()), 5_000, 1_000).unwrap();
+    let s1: Switched = serde_json::from_str(
+        &crate::database::get_setting(&db, "chat.pool.switched.t1").unwrap().unwrap(),
+    )
+    .unwrap();
+    assert!(s1.switched_turn_pending, "logo após trocar, turno encadeado está ativo");
+
+    // Mesmo após >300s sem turno concluir, switched_turn_pending continua true (impede encadeamento em turno longo).
+    // Quando um turno termina sem erro de limite, limpa switched_turn_pending (permite nova troca mesmo <300s).
+    clear_switched_turn_pending(&db, "t1");
+    let s2: Switched = serde_json::from_str(
+        &crate::database::get_setting(&db, "chat.pool.switched.t1").unwrap().unwrap(),
+    )
+    .unwrap();
+    assert!(!s2.switched_turn_pending, "turno concluído limpa switched_turn_pending");
+
+    // Nova troca liga novamente; envio explícito da pessoa (`commit_before_send`) também limpa.
+    move_account(&db, "t1", &Some("b".into()), &Some("a".into()), 9_000, 1_050).unwrap();
+    commit_before_send(
+        &db,
+        "t1",
+        &PreparedSend { text: "oi".into(), clear_manual_handoff: false, clear_pending: false },
+    );
+    let s3: Switched = serde_json::from_str(
+        &crate::database::get_setting(&db, "chat.pool.switched.t1").unwrap().unwrap(),
+    )
+    .unwrap();
+    assert!(!s3.switched_turn_pending, "nova mensagem explícita limpa switched_turn_pending");
+}
+
+#[test]
+fn avisos_do_pool_sao_json_estruturado_e_emite_thread_account_id() {
+    let offer: serde_json::Value = serde_json::from_str(&notice_pool_offer("Ton", "Trabalho")).unwrap();
+    assert_eq!(offer["from"], "Ton");
+    assert_eq!(offer["pool"], "Trabalho");
+
+    let blocked: serde_json::Value = serde_json::from_str(&notice_pool_blocked("Ton", "motivo", Some("chained"))).unwrap();
+    assert_eq!(blocked["reasonCode"], "chained");
+
+    let ask: serde_json::Value = serde_json::from_str(&notice_pool_ask("Ton", "Erist", "13:10")).unwrap();
+    assert_eq!(ask["resetsAt"], "13:10");
+
+    let acc: serde_json::Value = serde_json::from_str(&notice_account_switch("Erist")).unwrap();
+    assert_eq!(acc["to"], "Erist");
+
+    // Garante que move_account_inner, return_to_origin_inner e set_account_manual_inner emitem evento `thread` com `accountId` (M-2).
+    let src = include_str!("pool.rs");
+    for fn_name in ["fn move_account_inner(", "fn return_to_origin_inner(", "fn set_account_manual_inner("] {
+        let start = src.find(fn_name).expect(fn_name);
+        let tail = &src[start..];
+        let end = tail[fn_name.len()..]
+            .find("\nfn ")
+            .or_else(|| tail[fn_name.len()..].find("\npub"))
+            .map(|idx| fn_name.len() + idx)
+            .unwrap_or(tail.len());
+        let slice = &tail[..end];
+        assert!(slice.contains("emit_account_changed("), "{fn_name} deve emitir accountId no evento thread");
+    }
+    assert!(!src.contains("const CHAIN_SECS"), "heurística CHAIN_SECS deve ter sido removida (M-4)");
 }

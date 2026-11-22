@@ -53,6 +53,30 @@ fn clean(value: &Option<String>) -> Option<String> {
         .map(str::to_string)
 }
 
+fn pool_has_live_member(
+    conn: &Connection,
+    pool: &crate::accounts::pools::Pool,
+) -> rusqlite::Result<bool> {
+    for member in &pool.members {
+        match member {
+            None => return Ok(true),
+            Some(id) => {
+                let exists: Option<String> = conn
+                    .query_row(
+                        "SELECT agent_id FROM agent_accounts WHERE id = ?1",
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if exists.as_deref() == Some(pool.agent_id.as_str()) {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
 fn validate_provider(
     conn: &Connection,
     agent_id: &str,
@@ -73,6 +97,20 @@ fn validate_provider(
         crate::runs::ensure_headless(agent_id)?;
     }
     if let Some(id) = account_id {
+        if let Some(pool_name) = crate::accounts::pools::pool_ref(id) {
+            let pools = crate::accounts::pools::load_with_conn(conn);
+            let pool = crate::accounts::pools::find(&pools, pool_name)?;
+            if pool.agent_id != agent_id {
+                return Err(format!(
+                    "pool '{}' belongs to '{}', not '{agent_id}'",
+                    pool.name, pool.agent_id
+                ));
+            }
+            if !pool_has_live_member(conn, pool).map_err(|error| error.to_string())? {
+                return Err(format!("pool '{}' has no available accounts", pool.name));
+            }
+            return Ok(());
+        }
         let owner: Option<String> = conn
             .query_row(
                 "SELECT agent_id FROM agent_accounts WHERE id = ?1",
@@ -284,29 +322,57 @@ fn assignment_status(
         ));
     }
     if let Some(id) = account_id {
-        let owner: Option<String> = conn
-            .query_row(
-                "SELECT agent_id FROM agent_accounts WHERE id = ?1",
-                [id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        match owner {
-            None => {
-                return Ok((
-                    AssignmentAvailability::AccountMissing,
-                    Some(format!("account '{id}' is unavailable")),
-                ));
+        if let Some(pool_name) = crate::accounts::pools::pool_ref(id) {
+            let pools = crate::accounts::pools::load_with_conn(conn);
+            match crate::accounts::pools::find(&pools, pool_name) {
+                Err(_) => {
+                    return Ok((
+                        AssignmentAvailability::AccountMissing,
+                        Some(format!("pool '{pool_name}' is unavailable")),
+                    ));
+                }
+                Ok(pool) if pool.agent_id != agent_id => {
+                    return Ok((
+                        AssignmentAvailability::AccountProviderMismatch,
+                        Some(format!(
+                            "pool '{}' belongs to '{}', not '{agent_id}'",
+                            pool.name, pool.agent_id
+                        )),
+                    ));
+                }
+                Ok(pool) if !pool_has_live_member(conn, pool)? => {
+                    return Ok((
+                        AssignmentAvailability::AccountMissing,
+                        Some(format!("pool '{}' has no available accounts", pool.name)),
+                    ));
+                }
+                Ok(_) => {}
             }
-            Some(owner) if owner != agent_id => {
-                return Ok((
-                    AssignmentAvailability::AccountProviderMismatch,
-                    Some(format!(
-                        "account '{id}' belongs to '{owner}', not '{agent_id}'"
-                    )),
-                ));
+        } else {
+            let owner: Option<String> = conn
+                .query_row(
+                    "SELECT agent_id FROM agent_accounts WHERE id = ?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match owner {
+                None => {
+                    return Ok((
+                        AssignmentAvailability::AccountMissing,
+                        Some(format!("account '{id}' is unavailable")),
+                    ));
+                }
+                Some(owner) if owner != agent_id => {
+                    return Ok((
+                        AssignmentAvailability::AccountProviderMismatch,
+                        Some(format!(
+                            "account '{id}' belongs to '{owner}', not '{agent_id}'"
+                        )),
+                    ));
+                }
+                Some(_) => {}
             }
-            Some(_) => {}
         }
     }
     if model.is_some_and(|value| !value.trim().is_empty()) {

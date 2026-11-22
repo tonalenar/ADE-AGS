@@ -283,6 +283,7 @@ pub async fn create_agent_api_key_account(
 pub async fn delete_agent_account(
     id: String,
     delete_files: bool,
+    app: AppHandle,
     db: tauri::State<'_, DbConnection>,
 ) -> Result<(), String> {
     let db = db.inner().clone();
@@ -300,6 +301,13 @@ pub async fn delete_agent_account(
                 .map_err(|e| e.to_string())?;
             dir
         };
+        // Remove referências desta conta em quaisquer pools salvos e avisa a UI (M-1).
+        if let Ok(affected) = super::pools::remove_account_from_pools(&db, &id) {
+            if !affected.is_empty() {
+                use tauri::Emitter;
+                let _ = app.emit(crate::ipc::commands::pool::CHANGED_EVENT, &id);
+            }
+        }
         // A credencial do broker fica no keyring, não na pasta do perfil.
         super::secrets::delete(&id);
 

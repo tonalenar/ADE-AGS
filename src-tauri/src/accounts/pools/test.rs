@@ -209,3 +209,70 @@ fn migracao_aditiva_respeita_failover_legado_e_modo_salvo_com_padrao_perguntar()
     assert!(!loaded[2].paused, "legado com failover=true continua sem pausa");
     assert!(!loaded[3].paused, "pool com paused=false explícito é respeitado");
 }
+
+#[test]
+fn remove_account_from_pools_limpa_referencia_e_lista_afetados() {
+    let db = test_db_conn();
+    save(
+        &db,
+        &[
+            pool("Trabalho", &[None, Some("a"), Some("b")], Strategy::RoundRobin),
+            pool("Pessoal", &[None, Some("b")], Strategy::Sticky),
+        ],
+    )
+    .unwrap();
+
+    let affected = remove_account_from_pools(&db, "a").unwrap();
+    assert_eq!(affected, vec!["Trabalho".to_string()]);
+    let reloaded = load(&db);
+    assert_eq!(reloaded[0].members, vec![None, Some("b".into())]);
+    assert_eq!(reloaded[1].members, vec![None, Some("b".into())]);
+
+    // Conta inexistente não altera nada.
+    assert!(remove_account_from_pools(&db, "nao-existe").unwrap().is_empty());
+}
+
+#[test]
+fn with_pool_pick_so_avanca_cursor_no_sucesso_e_sem_modulo_prematuro() {
+    let db = test_db_conn();
+    save(
+        &db,
+        &[pool("Rodizio", &[None, Some("a"), Some("apagada")], Strategy::RoundRobin)],
+    )
+    .unwrap();
+
+    // Falha na escolha não avança o cursor (M-6).
+    let err: Result<(), String> = with_pool_pick(&db, "Rodizio", |_| Err("sem conta livre".into()));
+    assert!(err.is_err());
+    assert_eq!(spec_preview(&db, "Rodizio").unwrap().start, 0);
+
+    // Sucesso avança monotonicamente (0 -> 1 -> 2 -> 3 -> 4), sem módulo prematuro em members.len()=3.
+    // Assim, com 2 contas existentes (None e "a"), start % 2 alterna 0,1,0,1 sem viés!
+    let mut starts = Vec::new();
+    for _ in 0..4 {
+        let s = with_pool_pick(&db, "Rodizio", |spec| Ok(spec.start)).unwrap();
+        starts.push(s);
+    }
+    assert_eq!(starts, vec![0, 1, 2, 3]);
+    assert_eq!(starts.iter().map(|s| s % 2).collect::<Vec<_>>(), vec![0, 1, 0, 1]);
+}
+
+#[test]
+fn with_pool_pick_serializa_concorrencia_sem_repetir_start() {
+    let db = test_db_conn();
+    save(
+        &db,
+        &[pool("Paralelo", &[None, Some("a"), Some("b")], Strategy::RoundRobin)],
+    )
+    .unwrap();
+
+    let handles: Vec<_> = (0..8)
+        .map(|_| {
+            let db = db.clone();
+            std::thread::spawn(move || with_pool_pick(&db, "Paralelo", |spec| Ok(spec.start)).unwrap())
+        })
+        .collect();
+    let mut got: Vec<usize> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    got.sort_unstable();
+    assert_eq!(got, vec![0, 1, 2, 3, 4, 5, 6, 7]);
+}

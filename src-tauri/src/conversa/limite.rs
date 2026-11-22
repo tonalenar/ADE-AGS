@@ -337,6 +337,7 @@ fn offer_fallback(app: &AppHandle, db: &DbConnection, row: &ThreadRow, resets_at
             pool_id: None,
             agent_id: Some(target.agent_id),
             model: target.model,
+            resets_at,
         },
     );
     turn::save_notice(

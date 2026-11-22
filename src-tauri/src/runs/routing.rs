@@ -115,17 +115,60 @@ pub enum AccountChoice {
     Pool(crate::accounts::pools::PoolSpec),
 }
 
+/// Converte um `account_id` vindo da UI/CLI/API (`None`, vazio, id de conta ou `pool:<Nome>`)
+/// na escolha de roteamento, sem avançar o cursor de `round_robin` antes de a escolha suceder.
+pub fn resolve_account_choice(
+    db: &DbConnection,
+    account_id: Option<String>,
+) -> Result<AccountChoice, String> {
+    let Some(raw) = account_id.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) else {
+        return Ok(AccountChoice::Auto);
+    };
+    if let Some(name) = crate::accounts::pools::pool_ref(&raw) {
+        let spec = crate::accounts::pools::spec_preview(db, name)?;
+        return Ok(AccountChoice::Pool(spec));
+    }
+    Ok(AccountChoice::Fixed(Some(raw)))
+}
+
 /// El pedido con `pool:Nombre` (que llega como una cuenta fija con ese texto) resuelto a su
 /// pool. Sin pool, el mismo pedido. Va antes de rutear: leer el pool es de la base, y el ruteo
-/// es puro.
+/// es puro. Usa leitura sem avançar o cursor (M-6); para avançar apenas quando o roteamento
+/// suceder, use [`route_with_pool_cursor`].
 pub fn resolve_pool(db: &DbConnection, request: &RouteRequest) -> Result<RouteRequest, String> {
     if let AccountChoice::Fixed(Some(raw)) = &request.account {
         if let Some(name) = crate::accounts::pools::pool_ref(raw) {
-            let spec = crate::accounts::pools::spec_for(db, name)?;
+            let spec = crate::accounts::pools::spec_preview(db, name)?;
             return Ok(RouteRequest { account: AccountChoice::Pool(spec), ..request.clone() });
         }
     }
     Ok(request.clone())
+}
+
+/// Roteia o pedido avançando o cursor de `round_robin` atomicamente e somente quando a escolha
+/// dá certo (M-6). Não faz I/O de roster: quem chama já montou `roster` antes.
+pub fn route_with_pool_cursor(
+    db: &DbConnection,
+    roster: &Roster,
+    tiers: &Tiers,
+    request: &RouteRequest,
+    now: i64,
+) -> Result<Assignment, String> {
+    let pool_wanted: Option<String> = match &request.account {
+        AccountChoice::Pool(spec) => Some(spec.id.clone()),
+        AccountChoice::Fixed(Some(raw)) => crate::accounts::pools::pool_ref(raw).map(str::to_string),
+        AccountChoice::Auto | AccountChoice::Fixed(None) => None,
+    };
+    match pool_wanted {
+        Some(wanted) => crate::accounts::pools::with_pool_pick(db, &wanted, |spec| {
+            let resolved = RouteRequest {
+                account: AccountChoice::Pool(spec.clone()),
+                ..request.clone()
+            };
+            route(roster, tiers, &resolved, now)
+        }),
+        None => route(roster, tiers, request, now),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -319,6 +362,10 @@ fn pick_account(
                 "{} não gerencia contas: '{id}' não existe",
                 agent.label
             )),
+            AccountChoice::Pool(spec) => Err(format!(
+                "{} não suporta pools de contas na frota (pool '{}')",
+                agent.label, spec.name
+            )),
             _ => Ok((None, Vec::new())),
         };
     }
@@ -451,7 +498,7 @@ fn account_problem(account: &RosterAccount, now: i64) -> Option<String> {
         return Some(format!("a conta {name} não tem sessão iniciada"));
     }
     if let Some(limit) = &account.limit {
-        return Some(format!("la cuenta {name} {limit}"));
+        return Some(format!("a conta {name} {limit}"));
     }
     let quota = account.quota.as_ref()?;
     if !quota.exhausted_at(now) {

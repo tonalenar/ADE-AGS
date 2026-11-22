@@ -452,6 +452,16 @@ pub(crate) fn validate_launch(
     assignment: &crate::runs::routing::Assignment,
     now: i64,
 ) -> Result<(), String> {
+    validate_launch_with_pools(roster, assignment, &[], now)
+}
+
+/// Como [`validate_launch`], mas também valida referências `pool:<Nome>` contra a lista de pools (A-1).
+pub(crate) fn validate_launch_with_pools(
+    roster: &crate::runs::roster::Roster,
+    assignment: &crate::runs::routing::Assignment,
+    pools: &[crate::accounts::pools::Pool],
+    now: i64,
+) -> Result<(), String> {
     use crate::runs::roster::{ModelAvailability, ModelDiscoveryState};
     let agent = roster
         .agent(&assignment.agent_id)
@@ -464,6 +474,55 @@ pub(crate) fn validate_launch(
     if !agent.installed {
         return Err("missions.error.agentMissing".into());
     }
+
+    if let Some(pool_name) = assignment
+        .account_id
+        .as_deref()
+        .and_then(crate::accounts::pools::pool_ref)
+    {
+        let pool = crate::accounts::pools::find(pools, pool_name)
+            .map_err(|_| "missions.error.accountMissing".to_string())?;
+        if pool.agent_id != assignment.agent_id {
+            return Err("missions.error.accountMissing".into());
+        }
+        let members: Vec<&crate::runs::roster::RosterAccount> = pool
+            .members
+            .iter()
+            .filter_map(|m| agent.accounts.iter().find(|a| &a.account_id == m))
+            .collect();
+        if members.is_empty() {
+            return Err("missions.error.accountMissing".into());
+        }
+        let logged: Vec<&crate::runs::roster::RosterAccount> =
+            members.into_iter().filter(|a| a.logged_in).collect();
+        if logged.is_empty() {
+            return Err("missions.error.loginRequired".into());
+        }
+        let usable: Vec<&crate::runs::roster::RosterAccount> = logged
+            .into_iter()
+            .filter(|a| a.limit.is_none() && !a.quota.as_ref().is_some_and(|q| q.exhausted_at(now)))
+            .collect();
+        if usable.is_empty() {
+            return Err("missions.error.usageExhausted".into());
+        }
+        if let Some(id) = assignment.model.as_deref() {
+            let model_ok = usable.iter().any(|a| match a.models.iter().find(|m| m.id == id) {
+                Some(m)
+                    if m.availability == ModelAvailability::Unavailable
+                        || m.unavailable.is_some() =>
+                {
+                    false
+                }
+                None if a.model_discovery == ModelDiscoveryState::Available => false,
+                _ => true,
+            });
+            if !model_ok {
+                return Err("missions.error.modelUnavailable".into());
+            }
+        }
+        return Ok(());
+    }
+
     let account = if agent.capabilities.accounts || !agent.accounts.is_empty() {
         // An absent system/default account is missing login state, not an accountless
         // provider. Terminals with Auto open the system account and cannot substitute one.
