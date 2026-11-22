@@ -260,3 +260,28 @@ fn ponta_a_ponta_a_conversa_por_protocolo_grava_sessao_no_ai_memory() {
     // 5. Fechar a conversa: o `tab-thread-<id>.ai-memory-*.settings.json` some de `~/.ags/mcp`.
     unimplemented!("roteiro manual; ver docs/ade-ags/AI_MEMORY_CONNECTOR.md");
 }
+
+#[test]
+fn todos_os_motores_de_conversa_protegem_o_autowire() {
+    for (name, src) in [
+        ("codex.rs", include_str!("codex.rs")),
+        ("opencode.rs", include_str!("opencode.rs")),
+        ("agy.rs", include_str!("agy.rs")),
+        ("cursor.rs", include_str!("cursor.rs")),
+        ("claude.rs", include_str!("claude.rs")),
+    ] {
+        assert!(
+            src.contains("protect_command_env("),
+            "{name} precisa chamar protect_command_env antes de iniciar o processo"
+        );
+    }
+}
+
+#[test]
+fn conversa_claude_sem_escopo_nao_injeta_mcp_direto_nem_hooks() {
+    let root = Root::new();
+    let memory = run(&root, true, Some("/opt/ai-memory"), &claude_argv());
+    assert!(memory.args.is_empty(), "{:?}", memory.args);
+    assert!(memory.guard.settings_file.is_none());
+    assert!(!root.mcp().join("tab-thread-abc-123.json").exists());
+}

@@ -699,4 +699,51 @@ while :; do :; done
         fs::write(&settings, r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"ai-memory hook --event session-start"}]}]}}"#).unwrap();
         assert!(crate::ai_memory::tabs::configured_hooks(&[settings]));
     }
+
+    #[test]
+    fn claude_sem_escopo_ou_com_projeto_reservado_nao_recebe_mcp_direto_nem_hooks() {
+        let fake = Fake::new("ai-memory 3.3.0", "cat \"$(dirname \"$0\")/result.json\"");
+        let dir = fake.root.join("mcp");
+        let home = fake.root.join("home");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        let config_path = dir.join("tab-abc.json");
+        fs::write(&config_path, r#"{"mcpServers":{"ags":{"command":"ags"}}}"#).unwrap();
+        let argv = vec!["claude".into(), "--mcp-config".into(), config_path.to_string_lossy().into_owned()];
+
+        // 1) Sem marcador e sem projeto único em list-projects.
+        fs::write(fake.root.join("result.json"), "[]").unwrap();
+        let empty = crate::ai_memory::tabs::prepare_new_tab_with(
+            Some(fake.program.clone()),
+            "abc",
+            "claude",
+            &dir,
+            &home,
+            &fake.cwd,
+            &argv,
+            &Default::default(),
+        );
+        assert!(empty.plan.args.is_empty(), "{:?}", empty.plan.args);
+        assert!(empty.plan.settings_file.is_none());
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+        assert!(saved["mcpServers"].get("ai-memory").is_none(), "{saved}");
+        assert!(saved["mcpServers"].get("ags").is_some());
+
+        // 2) Marcador apontando para projeto reservado (_global).
+        fs::write(fake.cwd.join(".ai-memory.toml"), "workspace = \"default\"\nproject = \"_global\"\n").unwrap();
+        let reserved = crate::ai_memory::tabs::prepare_new_tab_with(
+            Some(fake.program.clone()),
+            "abc",
+            "claude",
+            &dir,
+            &home,
+            &fake.cwd,
+            &argv,
+            &Default::default(),
+        );
+        assert!(reserved.plan.args.is_empty(), "{:?}", reserved.plan.args);
+        assert!(reserved.plan.settings_file.is_none());
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+        assert!(saved["mcpServers"].get("ai-memory").is_none(), "{saved}");
+    }
 }
