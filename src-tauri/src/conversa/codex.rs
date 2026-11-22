@@ -279,6 +279,9 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
     };
+    if let Some(a) = row.account_id.as_deref() {
+        crate::accounts::ensure_supported_outside_pty(db, a)?;
+    }
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
 
     let fresh = || {
@@ -407,6 +410,9 @@ pub async fn open_forked(app: &AppHandle, db: &DbConnection, thread_id: &str, fr
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
     };
+    if let Some(a) = row.account_id.as_deref() {
+        crate::accounts::ensure_supported_outside_pty(db, a)?;
+    }
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
     let session = started(app, db, &row, env).await?;
     let result = session.request("thread/fork", fork_params(&row, from, last_turn_id)).await.inspect_err(|_| session.kill())?;
@@ -463,7 +469,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(env) = env {
-        cmd.envs(env);
+        crate::agents::apply_account_env(&mut cmd, &env);
     }
     // Quem a conversa é para o `ags` (`thread:<id>`), para ela delegar e responder num time (`chat_team`).
     cmd.envs(crate::chat_team::env::thread_env(&row.id));
@@ -525,6 +531,20 @@ async fn read_loop(app: AppHandle, db: DbConnection, session: Arc<Session>, stdo
     closed(&app, &db, &session);
 }
 
+pub(super) fn unregister_closed(session: &Arc<Session>) -> turn::ClosedOwnership {
+    sessions()
+        .lock()
+        .map(|mut map| match map.get(&session.thread_id) {
+            Some(current) if Arc::ptr_eq(current, session) => {
+                map.remove(&session.thread_id);
+                turn::ClosedOwnership::Owned
+            }
+            Some(_) => turn::ClosedOwnership::Replaced,
+            None => turn::ClosedOwnership::Absent,
+        })
+        .unwrap_or(turn::ClosedOwnership::Absent)
+}
+
 fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     // `kill` (fechar a conversa, trocar o acesso) já baixou `alive`: o fim por conta própria é queda.
     let killed = !session.alive.swap(false, Ordering::SeqCst);
@@ -533,27 +553,32 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     for reply in waiting {
         let _ = reply.send(Err(CLOSED.into()));
     }
+    let ownership = unregister_closed(session);
+    // Uma sessão substituída no mapa (failover/troca) ou que nunca abriu não pode expirar pedidos nem derrubar `working`.
+    let other_live = ownership == turn::ClosedOwnership::Absent && super::api::has_live_session(&session.thread_id);
+    if !turn::should_cleanup_on_close(ownership, session.remote().is_some(), other_live) {
+        return;
+    }
     let expired = db.lock().ok().and_then(|conn| store::expire_requests(&conn, &session.thread_id).ok()).unwrap_or_default();
     for id in expired {
         emit(app, &session.thread_id, "requestResolved", json!({ "id": id }));
     }
-    if let Ok(mut map) = sessions().lock()
-        && map.get(&session.thread_id).is_some_and(|s| Arc::ptr_eq(s, session))
-    {
-        map.remove(&session.thread_id);
-    }
     // O turno que o processo deixou aberto fecha aqui, como no Claude e no OpenCode: sem o `turnEnd` o
     // `chat_run` ficava `inProgress` e a tela, sem saber por que o agente parou.
-    if let Some(turn_id) = session.turn() {
+    let dropped_result = session.turn().map(|turn_id| {
         session.set_turn(None);
         let (result, message) = turn::dropped(killed, None, "Codex");
         turn::finish(app, db, &session.thread_id, &turn_id, &result);
         if let Some(message) = message {
             emit(app, &session.thread_id, "error", json!({ "message": message }));
         }
-    }
+        result
+    });
     emit(app, &session.thread_id, "phase", json!({ "phase": "idle" }));
     emit(app, &session.thread_id, "closed", json!({}));
+    if let Some(result) = dropped_result {
+        turn::after_turn_hooks(app, db, &session.thread_id, &result);
+    }
 }
 
 fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Value) {
@@ -659,12 +684,14 @@ fn on_notification(app: &AppHandle, db: &DbConnection, session: &Session, method
                 emit(app, thread_id, "item", json!({ "item": item }));
             }
             save_items(app, db, thread_id, Some(id), codex_map::turn_end(turn, Some(now)).into_iter().collect());
+            let result = codex_map::turn_result(turn);
             let ok = turn.get("status").and_then(Value::as_str).unwrap_or("completed") == "completed";
             super::autocompact::on_event(app, db, thread_id, super::autocompact::Event::TurnEnded { ok });
             // Fim de turno: o autocompact decide ANTES de a conversa ficar ociosa para a tela (a fila só solta a próxima
             // mensagem depois da compactação). Nunca no meio de um turno.
             let compaction = ok.then(|| super::autocompact::plan(app, db, thread_id)).flatten();
             emit(app, thread_id, "phase", json!({ "phase": "idle" }));
+            turn::after_turn_hooks(app, db, thread_id, &result);
             if let Some(planned) = compaction {
                 super::autocompact::execute(app, db, thread_id, planned);
             }

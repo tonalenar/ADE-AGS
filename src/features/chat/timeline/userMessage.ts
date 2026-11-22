@@ -45,7 +45,7 @@ export function isSystemInjection(text: string): boolean {
  */
 export function displayUserText(text: string): string | null {
   let out = text.replace(BACKEND_NOTE, "").replace(SIDE_CHAT_PREFACE, "");
-  if (isSystemInjection(out)) {
+  while (isSystemInjection(out)) {
     const cut = out.search(/\n\s*\n/);
     const head = cut < 0 ? out : out.slice(0, cut);
     if (cut < 0 || !ROSTER_TAILS.some((tail) => head.trimEnd().endsWith(tail))) return null;

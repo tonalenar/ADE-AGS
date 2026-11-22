@@ -225,6 +225,16 @@ fn close(thread_id: &str) {
     cursor::close(thread_id);
 }
 
+/// Há alguma sessão viva desta conversa em qualquer motor? Usado pelo `closed()` de uma sessão antiga
+/// para não emitir `idle`/`closed` nem expirar pedidos quando outro motor já assumiu a conversa.
+pub(super) fn has_live_session(thread_id: &str) -> bool {
+    codex::get(thread_id).is_some()
+        || claude::get(thread_id).is_some()
+        || opencode::get(thread_id).is_some()
+        || agy::get(thread_id).is_some()
+        || cursor::get(thread_id).is_some()
+}
+
 /// Fecha o processo do agente (a troca de conta do pool usa).
 pub(super) fn close_process(thread_id: &str) {
     close(thread_id);
@@ -383,6 +393,9 @@ fn create_inner(
         }
         None => (input.account_id.clone(), None),
     };
+    if let Some(id) = account_id.as_deref() {
+        crate::accounts::ensure_supported_outside_pty(db, id)?;
+    }
     let (row, created) = {
         let mut conn = db.lock().map_err(db_err)?;
         crate::project_chat_policy::ensure_agent_enabled(&conn, &input.cwd, &input.agent_id)?;
@@ -655,12 +668,31 @@ pub async fn send_with_fast_mode(
     send_with_class(app, db, thread_id, text, images, fast_mode).await.map_err(String::from)
 }
 
+/// Envio interno já sob `pool::pool_gate(thread_id)` (usado por `pool::switch_to`, `pool::accept` e
+/// `limite::accept_fallback`): não tenta readquirir `pool_gate` nem reaplica `pool::before_send`.
+pub(super) async fn send_without_pool_before_send(
+    app: &AppHandle,
+    db: &DbConnection,
+    thread_id: &str,
+    text: &str,
+) -> Result<(), String> {
+    send_mode_with_fast_mode(app, db, thread_id, text, SendMode::SteerActive, &[], None)
+        .await
+        .map_err(String::from)
+}
+
 /// Como [`send_with`], mas com a classe do erro (ver [`SendError`]): o envio com recibo precisa saber se a
 /// mensagem pode ter chegado.
 async fn send_with_class(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, images: &[String], fast_mode: Option<bool>) -> Result<(), SendError> {
-    // A conta original renovou (conversa que trocou pelo pool)? Volta antes de enviar, só com a conversa livre.
-    let text = if status(thread_id).working { text.to_string() } else { super::pool::before_send(app, db, thread_id, text) };
-    send_mode_with_fast_mode(app, db, thread_id, &text, SendMode::SteerActive, images, fast_mode).await
+    // Serializa `before_send` com `on_failure`, `accept` e `switch_manual` por conversa, sempre antes de `send_gate`.
+    let gate = super::pool::pool_gate(thread_id);
+    let _pool_held = gate.lock().await;
+    let prepared = super::pool::before_send(app, db, thread_id, text);
+    let sent = send_mode_with_fast_mode(app, db, thread_id, &prepared.text, SendMode::SteerActive, images, fast_mode).await;
+    if sent.is_ok() {
+        super::pool::commit_before_send(db, thread_id, &prepared);
+    }
+    sent
 }
 
 /// O envio da pessoa com `client_request_id` (Fase 2, contrato §11.7): um reenvio idêntico devolve o recibo

@@ -224,8 +224,9 @@ fn start_runner_task(
     tauri::async_runtime::spawn(async move {
         let mut next = Some((turn_id, text));
         while let Some((turn_id, text)) = next.take() {
-            run_turn(&app, &db, &session, &turn_id, &text).await;
+            let result = run_turn(&app, &db, &session, &turn_id, &text).await;
             next = next_turn(&app, &db, &session);
+            turn::after_turn_hooks(&app, &db, &session.thread_id, &result);
         }
     });
 }
@@ -289,7 +290,7 @@ async fn run_turn(
     session: &Arc<Session>,
     turn_id: &str,
     text: &str,
-) {
+) -> TurnResult {
     let thread_id = session.thread_id.as_str();
     let started = std::time::Instant::now();
     let result = match drive(app, db, session, turn_id, text).await {
@@ -322,6 +323,7 @@ async fn run_turn(
     if let Some(error) = result.error.as_deref().filter(|_| !result.interrupted) {
         emit(app, thread_id, "error", json!({ "message": error }));
     }
+    result
 }
 
 /// O turno com a retomada guardada: um processo por conversa, então o prompt entra no stdin e o `--conversation` só
@@ -547,7 +549,7 @@ async fn ensure_process(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(env) = env {
-        cmd.envs(env);
+        crate::agents::apply_account_env(&mut cmd, &env);
     }
     // Quem a conversa é para o `ags` (`thread:<id>`), para ela delegar e responder num time (`chat_team`).
     cmd.envs(crate::chat_team::env::thread_env(&row.id));

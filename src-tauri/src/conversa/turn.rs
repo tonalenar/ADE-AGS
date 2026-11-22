@@ -40,6 +40,8 @@ pub fn save_items(app: &AppHandle, db: &DbConnection, thread_id: &str, run_id: O
 
 /// Fecha o turno: o status e a duração no banco, os pedidos pendentes expiram, as ferramentas sem desfecho viram
 /// «desfecho desconhecido» e o fim do turno entra na timeline. A janela recebe o que o banco mudou.
+/// Quem chama deve emitir `phase: "idle"` antes de acionar [`after_turn_hooks`], para que um failover de pool
+/// nunca emita `working` antes do `idle` do turno falho.
 pub fn finish(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, result: &TurnResult) {
     let now = crate::util::now_ts_ms();
     let (expired, marked) = db.lock().ok().map(|conn| record_end(&conn, thread_id, turn, result, now)).unwrap_or_default();
@@ -50,14 +52,33 @@ pub fn finish(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, r
         emit(app, thread_id, "item", json!({ "item": item }));
     }
     emit(app, thread_id, "item", json!({ "item": claude_map::turn_end(turn, result, Some(now)) }));
-    after_turn_hooks(app, db, thread_id, result);
 }
 
-/// O que roda no fim de cada turno, nos motores todos: o pool de contas, o limite de uso (modelo reserva e retomada) e o
-/// título por modelo. Cada um só age no caso dele e volta na hora nos outros.
+/// Posição de uma sessão no mapa do motor quando seu processo fecha (`closed`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ClosedOwnership {
+    /// Era a sessão dona do `thread_id` no mapa (e acabou de ser removida).
+    Owned,
+    /// Outra sessão já assumiu este `thread_id` no mapa.
+    Replaced,
+    /// Não estava no mapa (falhou na abertura ou já foi retirada por `close()`).
+    Absent,
+}
+
+/// Pura: o `closed()` desta sessão pode expirar pedidos e emitir `idle`/`closed`?
+/// Uma sessão substituída no mapa (ou em outro motor) jamais interfere na sessão nova.
+pub(super) fn should_cleanup_on_close(ownership: ClosedOwnership, has_remote: bool, other_engine_live: bool) -> bool {
+    match ownership {
+        ClosedOwnership::Owned => true,
+        ClosedOwnership::Replaced => false,
+        ClosedOwnership::Absent => has_remote && !other_engine_live,
+    }
+}
+
+/// O que roda no fim de cada turno, nos motores todos: o pool de contas coordenado com o limite de uso
+/// (modelo reserva e retomada) e o título por modelo. Deve ser chamado DEPOIS de emitir `phase: "idle"`.
 pub fn after_turn_hooks(app: &AppHandle, db: &DbConnection, thread_id: &str, result: &TurnResult) {
-    super::pool::after_turn(app, db, thread_id, result);
-    super::limite::after_turn(app, db, thread_id, result);
+    super::pool::after_turn_with_limit(app, db, thread_id, result);
     super::titulo::after_turn(app, db, thread_id, result);
 }
 

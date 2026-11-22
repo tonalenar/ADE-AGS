@@ -210,8 +210,9 @@ pub fn chat_pool_pending(db: State<'_, DbConnection>, thread_id: String) -> Opti
 }
 
 #[tauri::command]
-pub fn chat_account_set(app: AppHandle, db: State<'_, DbConnection>, thread_id: String, account_id: Option<String>) -> Result<(), String> {
-    super::pool::switch_manual(&app, &db, &thread_id, account_id)
+pub async fn chat_account_set(app: AppHandle, db: State<'_, DbConnection>, thread_id: String, account_id: Option<String>) -> Result<(), String> {
+    let db = db.inner().clone();
+    super::pool::switch_manual(&app, &db, &thread_id, account_id).await
 }
 
 #[tauri::command]

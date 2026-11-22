@@ -387,6 +387,12 @@ pub(super) async fn accept_fallback(
         )
         .await?;
     }
+    let text = pending
+        .request
+        .clone()
+        .filter(|request| !request.trim().is_empty())
+        .unwrap_or_else(|| "Continue de onde parou.".into());
+    api::send_without_pool_before_send(app, db, thread_id, &text).await?;
     pool::dismiss(db, thread_id);
     turn::save_notice(
         app,
@@ -395,12 +401,7 @@ pub(super) async fn accept_fallback(
         "fallbackSwitched",
         &format!("Seguindo com o modelo reserva: {}.", pending.to_label),
     );
-    let text = pending
-        .request
-        .clone()
-        .filter(|request| !request.trim().is_empty())
-        .unwrap_or_else(|| "Continue de onde parou.".into());
-    api::send(app, db, thread_id, &text).await
+    Ok(())
 }
 
 // ── O gancho do fim do turno ────────────────────────────────────────────────────────────────────────────────
