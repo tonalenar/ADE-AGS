@@ -257,4 +257,196 @@ describe("AiMemoryPanel", () => {
 
     expect(host.querySelector("article")?.textContent).toContain("aiMemory.expired");
   });
+
+  it("busca no ai-memory exibe resultados agrupados por projeto como texto puro e abre a página ao clicar", async () => {
+    route({
+      ai_memory_probe: () => envelope(probeOk(false)),
+      ai_memory_recent: () => envelope([]),
+      ai_memory_handoffs: () => envelope([]),
+      ai_memory_search: () => envelope([
+        {
+          path: "notes/auth.md",
+          title: "Auth",
+          snippet: "<img src=x onerror=alert(1)> usa <mark>keyring</mark>",
+          rank: -1,
+          workspace: "default",
+          project: "ADE-AGS",
+        },
+      ]),
+      ai_memory_read_page: () => envelope({ ...readPageFixture, path: "notes/auth.md", title: "Auth" }),
+    });
+
+    await render();
+    const input = host.querySelector('input[type="search"]') as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+    const form = input!.closest("form") as HTMLFormElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "keyring");
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    expect(invoke).toHaveBeenCalledWith("ai_memory_search", { cwd: CWD, query: "keyring", workspace: null, project: null });
+    expect(host.textContent).toContain("default/ADE-AGS");
+    expect(host.querySelector("img")).toBeNull();
+    expect(host.querySelector("mark")?.textContent).toBe("keyring");
+
+    const hitBtn = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("Auth"));
+    await act(async () => { hitBtn!.click(); });
+    expect(invoke).toHaveBeenCalledWith("ai_memory_read_page", { cwd: CWD, path: "notes/auth.md" });
+  });
+
+  it("mostra aviso de vencimento próximo na lista e permite renovar ou fixar a página aberta", async () => {
+    const soon = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    route({
+      ai_memory_probe: () => envelope(probeOk(false)),
+      ai_memory_recent: () => envelope([{ ...recentFixture[0], expires_at: soon, expired: false, pinned: false }]),
+      ai_memory_handoffs: () => envelope([]),
+      ai_memory_read_page: () => envelope({ ...readPageFixture, expires_at: soon, expired: false, pinned: false }),
+      ai_memory_renew_page: () => envelope({ ...readPageFixture, expires_at: null, expired: false, pinned: false }),
+      ai_memory_pin_page: () => envelope({ ...readPageFixture, expires_at: null, expired: false, pinned: true }),
+    });
+
+    await render();
+    expect(host.textContent).toContain("aiMemory.expiresInDays");
+
+    const pageButton = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("Probe"));
+    await act(async () => { pageButton!.click(); });
+
+    const renewBtn = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("aiMemory.renewPage"));
+    expect(renewBtn).toBeDefined();
+    await act(async () => { renewBtn!.click(); });
+    expect(invoke).toHaveBeenCalledWith("ai_memory_renew_page", { cwd: CWD, path: "notes/probe.md" });
+
+    const pinBtn = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("aiMemory.pinPage"));
+    expect(pinBtn).toBeDefined();
+    await act(async () => { pinBtn!.click(); });
+    expect(invoke).toHaveBeenCalledWith("ai_memory_pin_page", { cwd: CWD, path: "notes/probe.md" });
+  });
+
+  it("alerta quando forget_sweep está ligado e só desliga após clique e confirmação do usuário", async () => {
+    route({
+      ai_memory_probe: () => envelope({
+        ...probeOk(false),
+        forget_sweep: {
+          enabled: true,
+          interval_secs: 86400,
+          config_path: "/tmp/aim/config.toml",
+          config_exists: true,
+        },
+      }),
+      ai_memory_recent: () => envelope([]),
+      ai_memory_handoffs: () => envelope([]),
+      ai_memory_disable_forget_sweep: () => ({
+        enabled: false,
+        interval_secs: 0,
+        config_path: "/tmp/aim/config.toml",
+        config_exists: true,
+      }),
+    });
+
+    await render();
+    expect(host.textContent).toContain("aiMemory.forgetSweep.alert");
+    expect(commands()).not.toContain("ai_memory_disable_forget_sweep");
+
+    const openBtn = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("aiMemory.forgetSweep.disable"));
+    expect(openBtn).toBeDefined();
+    await act(async () => { openBtn!.click(); });
+
+    // Ainda não chamou o backend antes da confirmação no diálogo.
+    expect(commands()).not.toContain("ai_memory_disable_forget_sweep");
+    expect(document.body.textContent).toContain("/tmp/aim/config.toml");
+
+    const confirmBtn = [...document.body.querySelectorAll("button")].find((b) => b.textContent?.includes("aiMemory.forgetSweep.confirm"));
+    expect(confirmBtn).toBeDefined();
+    await act(async () => { confirmBtn!.click(); });
+
+    expect(invoke).toHaveBeenCalledWith("ai_memory_disable_forget_sweep", { cwd: CWD });
+    expect(host.textContent).toContain("aiMemory.forgetSweep.disabled");
+  });
+
+  it("expõe memory_compact com explicação e confirmação explícita do usuário", async () => {
+    route({
+      ai_memory_probe: () => envelope(probeOk(false)),
+      ai_memory_recent: () => envelope([]),
+      ai_memory_handoffs: () => envelope([]),
+      memory_compact: () => 7,
+    });
+
+    await render();
+    const compactBtn = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("aiMemory.compact.action"));
+    expect(compactBtn).toBeDefined();
+    await act(async () => { compactBtn!.click(); });
+
+    expect(commands()).not.toContain("memory_compact");
+    expect(document.body.textContent).toContain("aiMemory.compact.explain");
+
+    const confirmBtn = [...document.body.querySelectorAll("button")].find((b) => b.textContent?.includes("aiMemory.compact.confirm"));
+    expect(confirmBtn).toBeDefined();
+    await act(async () => { confirmBtn!.click(); });
+
+    expect(invoke).toHaveBeenCalledWith("memory_compact", { retentionDays: 30 });
+    expect(host.textContent).toContain('aiMemory.compact.done {"count":7}');
+  });
+
+  it("ignora respostas antigas ao trocar de pasta (cwd) e ao clicar rápido em páginas", async () => {
+    let resolveProbeA!: (v: unknown) => void;
+    let resolveProbeB!: (v: unknown) => void;
+    let resolvePage1!: (v: unknown) => void;
+    let resolvePage2!: (v: unknown) => void;
+
+    route({
+      ai_memory_probe: (args) => {
+        const { cwd } = args as { cwd: string };
+        return new Promise((resolve) => {
+          if (cwd === "/pasta-a") resolveProbeA = resolve;
+          else resolveProbeB = resolve;
+        });
+      },
+      ai_memory_recent: (args) => {
+        const { cwd } = args as { cwd: string };
+        return envelope(
+          cwd === "/pasta-a"
+            ? [{ ...recentFixture[0], path: "a.md", title: "PaginaPastaA" }]
+            : [
+                { ...recentFixture[0], path: "b1.md", title: "PaginaB1" },
+                { ...recentFixture[0], path: "b2.md", title: "PaginaB2" },
+              ],
+        );
+      },
+      ai_memory_handoffs: () => envelope([]),
+      ai_memory_read_page: (args) => {
+        const { path } = args as { path: string };
+        return new Promise((resolve) => {
+          if (path === "b1.md") resolvePage1 = resolve;
+          else resolvePage2 = resolve;
+        });
+      },
+    });
+
+    // Inicia na pasta A, troca rápido para pasta B antes de A responder.
+    await act(async () => { root.render(<AiMemoryPanel cwd="/pasta-a" />); });
+    await act(async () => { root.render(<AiMemoryPanel cwd="/pasta-b" />); });
+
+    // B responde primeiro, depois A (obsoleta) responde atrasada.
+    await act(async () => { resolveProbeB(envelope(probeOk(false))); });
+    await act(async () => { resolveProbeA(envelope(probeOk(false))); });
+
+    expect(host.textContent).toContain("PaginaB1");
+    expect(host.textContent).not.toContain("PaginaPastaA");
+
+    // Clica rápido em b1 e logo em seguida em b2; b2 resolve antes de b1.
+    const btn1 = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("PaginaB1"))!;
+    const btn2 = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("PaginaB2"))!;
+    await act(async () => { btn1.click(); });
+    await act(async () => { btn2.click(); });
+
+    await act(async () => { resolvePage2(envelope({ ...readPageFixture, path: "b2.md", title: "PaginaB2", body: "CORPO_B2" })); });
+    await act(async () => { resolvePage1(envelope({ ...readPageFixture, path: "b1.md", title: "PaginaB1", body: "CORPO_B1" })); });
+
+    expect(host.querySelector("article pre")?.textContent).toBe("CORPO_B2");
+  });
 });

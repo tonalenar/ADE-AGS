@@ -80,6 +80,10 @@ export const getWorkspaceReviewSummary = (workspaceId: string) =>
 export const purgeMemoryUser = (entryId: string, revision: number | null) =>
   invoke<void>("memory_purge_user", { entryId, revision });
 
+/** Compacta corpos de revisões rejeitadas há pelo menos `retentionDays` (mínimo 30). Só pela UI do usuário. */
+export const compactMemory = (retentionDays = 30) =>
+  invoke<number>("memory_compact", { retentionDays });
+
 export const startDream = (workspaceId: string) =>
   invoke<{ dreamId: string; runId: string }>("memory_dream_start", { workspaceId });
 

@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { formatCreatedAt, groupPendingHandoffs, guessProject, parseSnippet, splitMigrationReport, type AiMemoryHandoff } from "../aiMemory";
+import {
+  forgetSweepHours,
+  formatCreatedAt,
+  groupPendingHandoffs,
+  groupSearchHitsByProject,
+  guessProject,
+  pageExpiryStatus,
+  parseSnippet,
+  splitMigrationReport,
+  type AiMemoryHandoff,
+  type AiMemorySearchHit,
+} from "../aiMemory";
 
 describe("parseSnippet (snippet do ai-memory search --json)", () => {
   it("destaca o <mark> do fixture real e mantém o resto como texto", () => {
@@ -148,5 +159,54 @@ describe("splitMigrationReport", () => {
 
   it("status desconhecido não some: vai para falhas", () => {
     expect(splitMigrationReport([row("x", "novo")]).left).toEqual([{ status: "failed", rows: [row("x", "novo")] }]);
+  });
+});
+
+describe("pageExpiryStatus", () => {
+  const now = Date.parse("2026-11-22T12:00:00Z");
+
+  it("identifica fixada, vencida, vencendo em N dias e normal", () => {
+    expect(pageExpiryStatus({ pinned: true, expired: true }, now)).toEqual({ kind: "pinned" });
+    expect(pageExpiryStatus({ expired: true }, now)).toEqual({ kind: "expired" });
+    expect(pageExpiryStatus({ expires_at: "2026-11-21T00:00:00Z" }, now)).toEqual({ kind: "expired" });
+    expect(pageExpiryStatus({ expires_at: "2026-11-25T12:00:00Z" }, now)).toEqual({ kind: "expiring_soon", daysLeft: 3 });
+    expect(pageExpiryStatus({ expires_at: "2026-11-22T18:00:00Z" }, now)).toEqual({ kind: "expiring_soon", daysLeft: 0 });
+    expect(pageExpiryStatus({ expires_at: "2027-02-01T00:00:00Z" }, now)).toEqual({ kind: "ok" });
+    expect(pageExpiryStatus({}, now)).toEqual({ kind: "ok" });
+  });
+
+  it("lê pinned e expires_at do frontmatter quando ausentes no topo", () => {
+    expect(pageExpiryStatus({ frontmatter: { pinned: true } }, now)).toEqual({ kind: "pinned" });
+    expect(pageExpiryStatus({ frontmatter: { expires_at: "2026-11-26T12:00:00Z" } }, now)).toEqual({ kind: "expiring_soon", daysLeft: 4 });
+  });
+});
+
+describe("groupSearchHitsByProject", () => {
+  const hit = (path: string, workspace: string | null, project: string | null): AiMemorySearchHit => ({
+    path,
+    title: path,
+    snippet: "s",
+    rank: -1,
+    workspace,
+    project,
+  });
+
+  it("agrupa resultados por workspace/project mantendo o projeto atual separado", () => {
+    const groups = groupSearchHitsByProject([
+      hit("a.md", "default", "ADE-AGS"),
+      hit("b.md", null, null),
+      hit("c.md", "default", "ADE-AGS"),
+      hit("d.md", "work", "api"),
+    ]);
+    expect(groups.map((g) => g.projectLabel)).toEqual(["default/ADE-AGS", null, "work/api"]);
+    expect(groups[0].hits.map((h) => h.path)).toEqual(["a.md", "c.md"]);
+  });
+});
+
+describe("forgetSweepHours", () => {
+  it("usa 24 h quando interval_secs é null e arredonda para pelo menos 1 h", () => {
+    expect(forgetSweepHours({ enabled: true, interval_secs: null, config_path: "/x", config_exists: false })).toBe(24);
+    expect(forgetSweepHours({ enabled: true, interval_secs: 43200, config_path: "/x", config_exists: true })).toBe(12);
+    expect(forgetSweepHours({ enabled: true, interval_secs: 300, config_path: "/x", config_exists: true })).toBe(1);
   });
 });

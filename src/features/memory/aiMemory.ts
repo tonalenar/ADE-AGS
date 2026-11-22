@@ -107,10 +107,18 @@ export interface AiMemoryProvider {
 
 export interface AiMemoryStatus {
   version: string;
+  data_dir?: string | null;
   counts: AiMemoryCounts;
   client: { version: string } | null;
   providers: { embedding: AiMemoryProvider | null; llm: AiMemoryProvider | null } | null;
   capture_mode: string | null;
+}
+
+export interface AiMemoryForgetSweep {
+  enabled: boolean;
+  interval_secs: number | null;
+  config_path: string;
+  config_exists: boolean;
 }
 
 export type AiMemoryProbeState = "missing" | "outdated" | "server_down" | "ok";
@@ -121,6 +129,16 @@ export interface AiMemoryProbe {
   installation_instruction: string | null;
   status: AiMemoryStatus | null;
   sessions_supported: boolean;
+  forget_sweep?: AiMemoryForgetSweep | null;
+}
+
+export interface AiMemorySearchHit {
+  path: string;
+  title: string;
+  snippet: string;
+  rank: number;
+  workspace: string | null;
+  project: string | null;
 }
 
 export interface AiMemoryRecentPage {
@@ -130,6 +148,9 @@ export interface AiMemoryRecentPage {
   updated_at: string;
   workspace: string | null;
   project: string | null;
+  expired?: boolean;
+  expires_at?: string | null;
+  pinned?: boolean;
 }
 
 export interface AiMemoryPage {
@@ -140,6 +161,65 @@ export interface AiMemoryPage {
   body: string;
   frontmatter: unknown;
   expired: boolean;
+  expires_at?: string | null;
+  pinned?: boolean;
+}
+
+export type PageExpiryStatus =
+  | { kind: "pinned" }
+  | { kind: "expired" }
+  | { kind: "expiring_soon"; daysLeft: number }
+  | { kind: "ok" };
+
+const EXPIRY_WARN_DAYS = 14;
+const MS_PER_DAY = 86_400_000;
+
+/** Classifica o vencimento de uma página (recente ou aberta), considerando frontmatter como fallback. */
+export function pageExpiryStatus(
+  page: { expired?: boolean; expires_at?: string | null; pinned?: boolean; frontmatter?: unknown },
+  nowMs = Date.now(),
+): PageExpiryStatus {
+  const fm = page.frontmatter && typeof page.frontmatter === "object"
+    ? (page.frontmatter as Record<string, unknown>)
+    : null;
+  const pinned = page.pinned === true || fm?.pinned === true;
+  if (pinned) return { kind: "pinned" };
+  if (page.expired) return { kind: "expired" };
+  const rawExpires = page.expires_at ?? (typeof fm?.expires_at === "string" ? fm.expires_at : null);
+  if (!rawExpires) return { kind: "ok" };
+  const expiresMs = Date.parse(rawExpires);
+  if (!Number.isFinite(expiresMs)) return { kind: "ok" };
+  const diffMs = expiresMs - nowMs;
+  if (diffMs <= 0) return { kind: "expired" };
+  const daysLeft = Math.floor(diffMs / MS_PER_DAY);
+  if (daysLeft <= EXPIRY_WARN_DAYS) return { kind: "expiring_soon", daysLeft };
+  return { kind: "ok" };
+}
+
+export interface AiMemorySearchGroup {
+  /** null representa resultados do projeto atual da pasta (quando o hit não traz workspace/project). */
+  projectLabel: string | null;
+  hits: AiMemorySearchHit[];
+}
+
+/** Agrupa hits de busca por `workspace/project` preservando a ordem original de relevância. */
+export function groupSearchHitsByProject(hits: readonly AiMemorySearchHit[]): AiMemorySearchGroup[] {
+  const groups = new Map<string | null, AiMemorySearchHit[]>();
+  for (const hit of hits) {
+    const label = hit.workspace && hit.project
+      ? `${hit.workspace}/${hit.project}`
+      : (hit.project || hit.workspace || null);
+    const list = groups.get(label) ?? [];
+    list.push(hit);
+    groups.set(label, list);
+  }
+  return [...groups].map(([projectLabel, groupHits]) => ({ projectLabel, hits: groupHits }));
+}
+
+/** Intervalo do forget_sweep em horas (padrão do ai-memory: 24 h). */
+export function forgetSweepHours(sweep: AiMemoryForgetSweep): number {
+  const secs = sweep.interval_secs ?? 86400;
+  return Math.max(1, Math.round(secs / 3600));
 }
 
 export interface AiMemoryProject {
