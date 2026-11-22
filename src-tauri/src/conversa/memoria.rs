@@ -99,12 +99,12 @@ pub fn prepare(inputs: Inputs<'_>) -> Memory {
     if tab.failed {
         memory.state = "off:failed".into();
         memory.notice = Some("A memória do ai-memory ficou fora desta conversa: não consegui preparar os hooks e o MCP dela. A conversa segue normalmente.".into());
-    } else if tab.plan.args.is_empty() {
-        memory.state = "off:nothing".into();
-    } else {
+    } else if !tab.plan.args.is_empty() || tab.plan.mcp_injected || tab.hooks_configured {
         memory.state = "on".into();
         memory.args = tab.plan.args.clone();
         memory.env.extend(tab.plan.env.clone());
+    } else {
+        memory.state = "off:nothing".into();
     }
     memory.guard = tab.plan;
     memory
