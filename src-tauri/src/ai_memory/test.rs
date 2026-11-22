@@ -569,6 +569,34 @@ while :; do :; done
         assert_eq!(argv.matches("--version\n").count(), 1, "{argv}");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn contexto_de_projeto_le_pagina_do_ai_memory_com_envelope_e_limite() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::{fs, path::PathBuf};
+
+        let root = std::env::temp_dir().join(format!("ade-ai-memory-context-{}", uuid::Uuid::new_v4()));
+        let cwd = root.join("probe");
+        fs::create_dir_all(&cwd).unwrap();
+        let program = root.join("fake-ai-memory");
+        fs::write(root.join("search.json"), r#"[{"path":"notes/probe.md","title":"Probe","snippet":"durable","rank":1,"workspace":"ade-test","project":"probe"}]"#).unwrap();
+        fs::write(root.join("page.json"), r#"{"path":"notes/probe.md","workspace":"ade-test","project":"probe","title":"Probe","body":"Dado de projeto","frontmatter":{}}"#).unwrap();
+        let script = format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'ai-memory 3.3.0'; exit 0; fi\nif [ \"$1\" = search ]; then cat '{}/search.json'; exit 0; fi\nif [ \"$1\" = read-page ]; then cat '{}/page.json'; exit 0; fi\nexit 8\n",
+            root.display(), root.display()
+        );
+        fs::write(&program, script).unwrap();
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o700)).unwrap();
+        let client = Client::at(Some(program), PathBuf::from(&cwd)).unwrap();
+
+        let context = client.project_context("objective", "ade-test", "probe").unwrap().unwrap();
+        assert!(context.contains("UNTRUSTED DATA"));
+        assert!(context.contains("Dado de projeto"));
+        assert!(context.len() <= 6 * 1024);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn hooks_do_usuario_so_em_parte_ganham_so_os_eventos_que_faltam() {
         let fake = Fake::new("ai-memory 3.3.0", "exit 99");

@@ -53,9 +53,9 @@ describe("injectTabMemory", () => {
 });
 
 describe("MEMORY_SUGGEST_HINT", () => {
-  it("ensina a sugerir memória do projeto sem missão, sempre pendente do usuário", () => {
+  it("ensina a gravar memória no ai-memory do projeto sem aprovação item a item", () => {
     expect(MEMORY_SUGGEST_HINT).toContain("ags memory suggest --scope workspace");
     expect(MEMORY_SUGGEST_HINT).not.toContain("--mission");
-    expect(MEMORY_SUGGEST_HINT).toContain("pendente até o usuário aprovar");
+    expect(MEMORY_SUGGEST_HINT).toContain("sem aprovação item a item");
   });
 });

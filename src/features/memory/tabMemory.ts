@@ -7,9 +7,9 @@ import { SHELL_AGENT_ID, type Tab } from "@/features/tabs/types";
 type TabLike = Pick<Tab, "id" | "agentId" | "memoryBlock">;
 
 /**
- * Mensagem com o índice da memória aprovada para a tab, ou `null` se não deve mandar nada:
+ * Mensagem com o índice histórico do SQLite para a tab, ou `null` se não deve mandar nada:
  * desligado (padrão), tab de shell (texto não confiável nunca vira entrada de um shell), falha
- * ou índice vazio. O envelope ("DADOS, NAO INSTRUCOES") vem pronto do núcleo (`memory_index`);
+ * ou índice vazio. O envelope ("DADOS, NAO INSTRUCOES") vem pronto do índice histórico (`memory_index`);
  * aqui só se ajusta ao formato da TUI.
  */
 export async function tabMemoryMessage(tab: TabLike, workspaceId: string): Promise<string | null> {
@@ -25,7 +25,7 @@ export async function tabMemoryMessage(tab: TabLike, workspaceId: string): Promi
 
 /**
  * Tab interativa fora de missão: se `memoryBlock` está ligado (padrão: desligado), manda UMA vez,
- * ao abrir a sessão, o índice da memória aprovada do workspace. Se falhar ou vier vazio, a tab
+ * ao abrir a sessão, o índice histórico do SQLite do workspace. Se falhar ou vier vazio, a tab
  * abre normal. Devolve se mandou algo. Quem também tem um prompt inicial deve juntar os dois
  * (`tabMemoryMessage`) e fazer um único `sendWhenReady`.
  */
@@ -37,14 +37,12 @@ export async function injectTabMemory(tab: TabLike, workspaceId: string): Promis
 }
 
 /**
- * A linha que ensina um agente FORA de missão a sugerir memória. Só os briefings de missão diziam isso
- * (`terminals.ts`), e numa conversa de projeto nenhum agente sugeria nada: a caixa de sugestões do
- * workspace ficava vazia. Sem `--mission`, a proposta vai para a memória do projeto e espera o usuário.
+ * A linha que ensina um agente FORA de missão a gravar memória durável diretamente no ai-memory.
  */
 export const MEMORY_SUGGEST_HINT =
-  "MEMÓRIA: se aprender algo durável e não óbvio sobre este projeto (uma decisão, uma restrição, uma armadilha), sugira até 1 memória ao terminar a tarefa: "
+  "MEMÓRIA: se aprender algo durável e não óbvio sobre este projeto (uma decisão, uma restrição, uma armadilha), grave até 1 memória no ai-memory ao terminar a tarefa: "
   + "`ags memory suggest --scope workspace --kind decision|constraint|finding --key <nome-curto> --body \"...\"`. "
-  + "Fica pendente até o usuário aprovar; a mesma chave de uma memória existente propõe a correção dela. Nunca segredos.";
+  + "A mesma chave atualiza a página do projeto, sem aprovação item a item. Nunca inclua segredos.";
 
 /** A memória nunca vai para um shell, mesmo que o interruptor tenha ficado ligado antes de trocar de agente. */
 export const memoryBlockFor = (agentId: string, memoryBlock: boolean): boolean => memoryBlock && agentId !== SHELL_AGENT_ID;

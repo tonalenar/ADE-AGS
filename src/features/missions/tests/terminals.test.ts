@@ -391,8 +391,12 @@ describe("memória nos briefings", () => {
   it("sem entradas não há bloco", () => {
     expect(memoryEnvelope("MEMÓRIA DO PROJETO\nsó cabeçalho")).toBe("");
   });
-  it("cada integrante sabe como buscar na memória da sua missão", () => {
-    expect(memberBriefing(mission, member)).toContain("ags memory search");
+  it("cada integrante consulta a memória durável pelo ai-memory e reconhece o SQLite histórico", () => {
+    const text = memberBriefing(mission, member);
+    expect(text).toContain("memory_query");
+    expect(text).toContain("memory_recent");
+    expect(text).toContain("memory_read_page");
+    expect(text).toContain("histórico antigo do SQLite");
     expect(memberBriefing(mission, member)).toContain("--mission m-9");
     expect(memberBriefing({ title: "t", objective: "o" }, member)).not.toContain("ags memory search");
   });
@@ -424,15 +428,15 @@ describe("memória nos briefings", () => {
 });
 
 describe("sugestão de memória ao terminar", () => {
-  it("o orquestrador sabe como sugerir, com o id da missão, e que só sugere", () => {
+  it("o orquestrador sabe gravar no ai-memory, com o id da missão e sem aprovação item a item", () => {
     const text = leadBriefing({ id: "m-9", title: "T", objective: "O" }, []);
     expect(text).toContain("ags memory suggest --mission m-9");
-    expect(text).toContain("SUGERE");
-    expect(text).toContain("Nunca sugira segredos");
+    expect(text).toContain("ai-memory");
+    expect(text).toContain("Nunca inclua segredos");
     expect(text).toContain("--scope workspace");
     expect(text).toContain("Use mission para conhecimento duradouro desta missão");
     expect(text).toContain("use workspace só para algo que vale no projeto todo");
-    expect(text).toContain("só entra na busca após aprovação");
+    expect(text).toContain("sem aprovação item a item");
     expect(text).toContain("Handoff Structured");
     // Vem depois das instruções de coordenação.
     expect(text.indexOf("AO TERMINAR")).toBeGreaterThan(text.indexOf("COMO COORDENAR"));

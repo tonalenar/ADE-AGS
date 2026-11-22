@@ -2,6 +2,7 @@
 mod client;
 mod marker;
 mod commands;
+pub(crate) use commands::{project_context, write_agent_memory};
 pub(crate) mod continuation;
 mod migracao;
 mod sessions;

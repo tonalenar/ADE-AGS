@@ -1192,7 +1192,7 @@ they need, a constraint. Tasks that start later receive the run's facts in their
         name: "memory_propose",
         command: "memory.propose",
         power: OrchestrationPower::Note,
-        description: "Propose a new Workspace or Mission memory entry. It stays pending until the user approves it; it never becomes active automatically.",
+        description: "Save a new page directly to the ai-memory project selected by this Run's cwd. The ADE applies the project scope and secret filter; no per-item approval queue is used.",
         properties: || {
             json!({
                 "scope": { "type": "string", "enum": ["workspace", "mission"] },
@@ -1209,7 +1209,7 @@ they need, a constraint. Tasks that start later receive the run's facts in their
         name: "memory_update",
         command: "memory.update",
         power: OrchestrationPower::Note,
-        description: "Propose an update against an exact approved revision. The active revision remains unchanged until the user approves the proposal.",
+        description: "Update the ai-memory project page for an existing entry key. The ADE checks the expected legacy revision, applies the project scope and secret filter, and saves without per-item approval.",
         properties: || {
             json!({
                 "entry_id": { "type": "string" },
@@ -1226,7 +1226,7 @@ they need, a constraint. Tasks that start later receive the run's facts in their
         name: "memory_delete",
         command: "memory.delete",
         power: OrchestrationPower::Note,
-        description: "Propose a tombstone against an exact approved revision. The entry remains active until the user approves the proposal.",
+        description: "Retire an existing entry by saving a tombstone page in the ai-memory project. The ADE checks the expected legacy revision, applies the project scope and secret filter, and saves without per-item approval.",
         properties: || {
             json!({
                 "entry_id": { "type": "string" },
@@ -1240,7 +1240,7 @@ they need, a constraint. Tasks that start later receive the run's facts in their
         name: "memory_promote_fact",
         command: "memory.promoteFact",
         power: OrchestrationPower::Note,
-        description: "Explicitly propose promoting one Run Fact into Workspace or Mission Memory. Only facts from this Run are eligible, and the user must approve the resulting proposal.",
+        description: "Save a Run Fact as a page in the ai-memory project. Only facts from this Run are eligible; the ADE applies the project scope and secret filter, without per-item approval.",
         properties: || {
             json!({
                 "fact_id": { "type": "string" },

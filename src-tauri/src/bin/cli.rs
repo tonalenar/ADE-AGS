@@ -336,12 +336,12 @@ MISSÕES (também sem interface: `ade-ags --headless`)
   mission precheck <id>                       O que o repositório e as missões anteriores já dizem sobre o objetivo
   mission startcheck <id>                     Evidência de briefing e atividade por agente; limite de 2 minutos
   memory search \"<tema>\" --mission <id> [--limit 5] [--at <YYYY-MM-DD|YYYY-MM-DDTHH:MM|unix-seconds>]
-                                              Busca a memória vigente agora ou nesse instante (datas em UTC)
+                                              Busca o histórico legado do SQLite (datas em UTC)
   memory history --mission <id> --key <nome> --scope workspace|mission
-                                              Revisões aprovadas e seus intervalos de validade
+                                              Revisões e intervalos de validade do histórico legado
   memory suggest [--mission <id>] --key <nome> --body \"...\" [--scope workspace|mission]
                  [--kind decision|constraint|finding|file|note] [--priority 0-3]
-                                              SUGERE uma memória (fica pendente; o usuário aprova); fora de missão, só --scope workspace
+                                              Grava no ai-memory do projeto (sem aprovação item a item); fora de missão, só --scope workspace
   mission accept <id> <tarefa>                Junta na integração da missão
   mission apply <id>                          Leva o aceito para o projeto
   mission redeliver <id> [--pr <N>] [--test passed|failed|not_run]
@@ -378,14 +378,13 @@ FROTA (agentes headless, os do console)
 
 MEMÓRIA COMPARTILHADA (os agentes usam por MCP; veja docs/ade-ags/SHARED_MEMORY.md)
   memory list|get|propose|update|delete|promote-fact --json-args '{...}'
-                                              O aprovado do workspace e da missão;
-                                              o que se propõe espera aprovação.
-  memory index                              Índice aprovado da tab ou missão atual
+                                              Histórico antigo do SQLite; gravações novas vão ao ai-memory.
+  memory index                              Índice histórico do SQLite da tab ou missão atual
   memory usage [--since <unix-seconds>]      Quem leu a memória: buscas, aberturas e memórias nunca lidas
   memory open <página|entryId|chave>         Página do índice ou UMA entrada inteira (DADOS NÃO CONFIÁVEIS)
   swarm note|question <texto>                Dados de sessão da missão, não memória durável
   swarm read                                  O quadro da missão: as notas publicadas, numeradas (#1, #2...)
-  swarm promote <note-id> <key>              Propõe a nota; aprovação exclusiva do usuário
+  swarm promote <note-id> <key>              Grava a nota no ai-memory do projeto
   memory export                             Exporta Markdown e revisões JSON do workspace da tab (só leitura)
   memory compact [retentionDays]             Só na interface do app; um terminal de agente não pode
   workspace restore <id|nome>                Só na interface do app; um terminal de agente não pode

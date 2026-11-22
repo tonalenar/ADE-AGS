@@ -3575,6 +3575,7 @@
   "memoryInbox.button": "Sugerencias de memoria",
   "memoryInbox.open": "Ver todas las sugerencias de memoria ({{count}} pendientes)",
   "memoryInbox.title": "Sugerencias de memoria pendientes",
+  "memoryInbox.aiMemoryNotice": "Las memorias nuevas se guardan en ai-memory sin aprobación una por una. El historial antiguo de SQLite sigue disponible en la vista Memoria.",
   "memoryInbox.close": "Cerrar",
   "memoryInbox.count": "{{count}} pendientes",
   "memoryInbox.empty": "No hay sugerencias pendientes.",

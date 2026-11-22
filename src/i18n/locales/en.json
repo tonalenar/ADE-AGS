@@ -3575,6 +3575,7 @@
   "memoryInbox.button": "Memory suggestions",
   "memoryInbox.open": "See all memory suggestions ({{count}} pending)",
   "memoryInbox.title": "Pending memory suggestions",
+  "memoryInbox.aiMemoryNotice": "New memories are saved to ai-memory without per-item approval. Legacy SQLite history remains available in the Memory view.",
   "memoryInbox.close": "Close",
   "memoryInbox.count": "{{count}} pending",
   "memoryInbox.empty": "No pending suggestions.",

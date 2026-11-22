@@ -54,6 +54,90 @@ fn context_metrics_recovers_legacy_token_cost_without_changing_sealed_metadata()
 }
 
 #[test]
+fn snapshot_falls_back_to_historical_sqlite_when_ai_memory_is_unavailable() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_run(&conn, "r-fallback", "w1", None);
+    conn.execute("INSERT INTO run_memory_snapshot(run_id,entry_id,revision,scope,key,kind,body,priority,content_hash,selection_order,truncated) VALUES('r-fallback','legacy',1,'workspace','legacy-key','note','historical sqlite value',0,?1,0,0)", [hash("note", "historical sqlite value")]).unwrap();
+    let db = std::sync::Arc::new(std::sync::Mutex::new(conn));
+
+    let context = snapshot_context_for_run_preferred_with(&db, "r-fallback", |_, _| {
+        Err("ai-memory indisponível".into())
+    }).unwrap();
+
+    assert!(context.contains("historical sqlite value"));
+    assert!(context.contains("UNTRUSTED DATA"));
+}
+
+#[test]
+fn fleet_memory_writes_prepare_ai_memory_pages_without_writing_sqlite() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_run(&conn, "r-ai-memory", "w1", None);
+    seed_task(&conn, "worker-ai-memory", "r-ai-memory", Some("worker"));
+    seed_fact(&conn, "fact-ai-memory", "r-ai-memory", Some("worker-ai-memory"), "Retry uses a bounded delay");
+    let old = activate(&conn, "workspace", None, "legacy-entry", "historical body");
+
+    let counts = || {
+        conn.query_row(
+            "SELECT (SELECT COUNT(*) FROM memory_entries), (SELECT COUNT(*) FROM memory_revisions)",
+            [],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .unwrap()
+    };
+    let before = counts();
+
+    let created = task_memory_write_with_repo(
+        &conn,
+        "worker-ai-memory",
+        "memory.propose",
+        json!({"scope":"workspace","key":"retry-policy","kind":"finding","body":"Retry uses a bounded delay"}),
+        None,
+    )
+    .unwrap();
+    assert_eq!(created.key, "retry-policy");
+    assert_eq!(created.kind, "finding");
+    assert_eq!(created.body, "Retry uses a bounded delay");
+
+    let updated = task_memory_write_with_repo(
+        &conn,
+        "worker-ai-memory",
+        "memory.update",
+        json!({"entry_id":old.entry_id,"expected_revision":old.revision,"kind":"decision","body":"Use bounded retries","priority":2}),
+        None,
+    )
+    .unwrap();
+    assert_eq!(updated.key, "legacy-entry");
+    assert_eq!(updated.kind, "decision");
+    assert_eq!(updated.body, "Use bounded retries");
+
+    let retired = task_memory_write_with_repo(
+        &conn,
+        "worker-ai-memory",
+        "memory.delete",
+        json!({"entry_id":old.entry_id,"expected_revision":old.revision,"reason":"replaced by the project page"}),
+        None,
+    )
+    .unwrap();
+    assert_eq!(retired.key, "legacy-entry");
+    assert!(retired.body.contains("retired"));
+
+    let promoted = task_memory_write_with_repo(
+        &conn,
+        "worker-ai-memory",
+        "memory.promoteFact",
+        json!({"fact_id":"fact-ai-memory","scope":"workspace","key":"retry-fact"}),
+        None,
+    )
+    .unwrap();
+    assert_eq!(promoted.key, "retry-fact");
+    assert_eq!(promoted.kind, "finding");
+    assert_eq!(promoted.body, "Retry uses a bounded delay");
+    assert_eq!(counts(), before, "tools de escrita para agente não alteram o SQLite histórico");
+}
+
+#[test]
 fn v40_to_v41_is_additive_idempotent_and_preserves_the_delete_guard() {
     let conn=db();seed_workspace(&conn,"w1");let approved=activate(&conn,"workspace",None,"upgrade","preserved revision");
     for (table,column) in [("memory_entries","last_verified"),("memory_entries","ttl_days"),("workspaces","deleted_at"),("workspaces","delete_after"),("run_memory_snapshot_meta","context_tokens"),("run_memory_snapshot_meta","baseline_bytes"),("run_memory_snapshot_meta","baseline_tokens"),("run_memory_snapshot_meta","memory_index"),("run_memory_snapshot_meta","repository_commit")] {

@@ -327,7 +327,7 @@ export function TabDialogs() {
             wantsMemory ? tabMemoryMessage({ id: tabId, agentId: agent.id, memoryBlock }, workspaceId).catch(() => null) : Promise.resolve(null),
           ]).then(([briefing, memory]) => {
             // Um shell não lê isto; um agente fica sabendo que abre o navegador no canvas, ligado a ele,
-            // e que pode sugerir memória ao projeto. Num rascunho o aviso fica de fora: é a pergunta da
+            // e que pode gravar memória no projeto. Num rascunho o aviso fica de fora: é a pergunta da
             // pessoa, não um briefing.
             const desk = computerUseHint();
             const hint = agent.id === "bash" || draft ? null : `[ADE AGS] ${BROWSER_HINT}\n${desk ? `${desk}\n` : ""}${MEMORY_SUGGEST_HINT}`;

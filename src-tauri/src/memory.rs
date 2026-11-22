@@ -25,9 +25,9 @@ pub const WORKSPACE_ACTIVE_MAX: i64 = 256;
 pub const OWNER_QUOTA_BYTES: i64 = 8 * 1024 * 1024;
 pub const LIST_LIMIT: usize = 32;
 pub const LIST_BYTES: usize = 32 * 1024;
-pub const SNAPSHOT_LIMIT: usize = 16;
-pub const SNAPSHOT_BYTES: usize = 16 * 1024;
-pub const RELEVANT_LIMIT: usize = 5;
+pub const SNAPSHOT_LIMIT: usize = 10;
+pub const SNAPSHOT_BYTES: usize = 6 * 1024;
+pub const RELEVANT_LIMIT: usize = 10;
 
 const KINDS: &[&str] = &["decision", "finding", "file", "constraint", "note"];
 
@@ -1065,6 +1065,38 @@ pub fn snapshot_context_for_run(conn: &Connection, run_id: &str) -> Result<Strin
     Ok(snapshot_block(&snapshot_for_run(conn, run_id)?))
 }
 
+/// Lê o snapshot do ai-memory sem manter o mutex do SQLite durante o subprocesso. O snapshot
+/// nativo continua como fallback de leitura para instalações sem ai-memory disponível.
+pub fn snapshot_context_for_run_preferred(
+    db: &crate::database::DbConnection,
+    run_id: &str,
+) -> Result<String, String> {
+    snapshot_context_for_run_preferred_with(db, run_id, |cwd, query| {
+        crate::ai_memory::project_context(cwd, query)
+    })
+}
+
+fn snapshot_context_for_run_preferred_with(
+    db: &crate::database::DbConnection,
+    run_id: &str,
+    read_ai_memory: impl FnOnce(&str, &str) -> Result<Option<String>, String>,
+) -> Result<String, String> {
+    let (cwd, objective) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
+            "SELECT cwd, objective FROM runs WHERE id=?1",
+            [run_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .map_err(|_| "Run memory snapshot unavailable".to_string())?
+    };
+    if let Ok(Some(context)) = read_ai_memory(&cwd, &objective) {
+        return Ok(context);
+    }
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    snapshot_context_for_run(&conn, run_id)
+}
+
 pub fn context_metrics(conn: &Connection, run_id: Option<&str>, mission_id: Option<&str>) -> Result<serde_json::Value, String> {
     if run_id.is_some() == mission_id.is_some() { return Err("provide exactly one Run or Mission".into()); }
     let mut stmt = conn.prepare("SELECT s.run_id,s.baseline_bytes,s.context_bytes,s.baseline_tokens,s.context_tokens,s.repository_commit,(SELECT COUNT(*) FROM run_memory_snapshot i WHERE i.run_id=s.run_id) FROM run_memory_snapshot_meta s JOIN runs r ON r.id=s.run_id WHERE (?1 IS NOT NULL AND r.id=?1) OR (?2 IS NOT NULL AND r.mission_id=?2) ORDER BY r.created_at,r.id").map_err(|e|e.to_string())?;
@@ -1252,6 +1284,94 @@ struct TaskFactPromotion {
     #[serde(default)]
     priority: i64,
     reason: Option<String>,
+}
+
+/// Conteúdo validado de uma tool legada, pronto para a gravação no ai-memory.
+pub struct AiMemoryAgentWrite {
+    pub key: String,
+    pub kind: String,
+    pub body: String,
+    pub reason: Option<String>,
+    pub tags: Vec<String>,
+}
+
+/// Interpreta as tools MCP de escrita antigas sem alterar `memory_entries` ou `memory_revisions`.
+/// A leitura de referências SQLite existentes continua autorizada e escopada ao Run.
+pub fn task_memory_write_with_repo(
+    conn: &Connection,
+    task_id: &str,
+    command: &str,
+    args: serde_json::Value,
+    repo_key: Option<&str>,
+) -> Result<AiMemoryAgentWrite, String> {
+    let (workspace_id, mission_id, _actor, run_id) = task_memory_owner(conn, task_id)?;
+    let (key, kind, body, reason) = match command {
+        "memory.propose" => {
+            let input: TaskCreateProposal = serde_json::from_value(args)
+                .map_err(|_| "invalid memory.propose arguments".to_string())?;
+            if !matches!(input.scope.as_str(), "workspace" | "mission") {
+                return Err("scope must be workspace or mission".into());
+            }
+            if input.scope == "mission" && mission_id.is_none() {
+                return Err("this Run is not attached to a Mission".into());
+            }
+            (input.key, input.kind, input.body, input.reason)
+        }
+        "memory.update" | "memory.delete" => {
+            let (entry_id, expected_revision, body, reason, update_kind) = if command == "memory.update" {
+                let input: TaskUpdateProposal = serde_json::from_value(args)
+                    .map_err(|_| "invalid memory.update arguments".to_string())?;
+                (input.entry_id, input.expected_revision, Some(input.body), input.reason, Some(input.kind))
+            } else {
+                let input: TaskDeleteProposal = serde_json::from_value(args)
+                    .map_err(|_| "invalid memory.delete arguments".to_string())?;
+                (input.entry_id, input.expected_revision, None, input.reason, None)
+            };
+            let (owner, entry_mission, _actor, _entry_run, scope) =
+                task_authorized_entry(conn, task_id, &entry_id, repo_key)?;
+            let detail = detail_with_repo(
+                conn,
+                &entry_id,
+                &owner,
+                if scope == "mission" { entry_mission.as_deref() } else { None },
+                &scope,
+                repo_key.map(str::to_owned),
+                true,
+            )?;
+            if detail.entry.current_revision != Some(expected_revision) {
+                return Err("memory revision is no longer current".into());
+            }
+            let key = detail.entry.key;
+            let kind = update_kind.unwrap_or(detail.entry.kind);
+            let body = body.unwrap_or_else(|| format!(
+                "This legacy memory is retired. Do not use its previous content.\n{}",
+                reason.as_deref().unwrap_or("Retired by a Fleet memory_delete request.")
+            ));
+            (key, kind, body, reason)
+        }
+        "memory.promoteFact" => {
+            let input: TaskFactPromotion = serde_json::from_value(args)
+                .map_err(|_| "invalid memory.promoteFact arguments".to_string())?;
+            if !matches!(input.scope.as_str(), "workspace" | "mission") {
+                return Err("scope must be workspace or mission".into());
+            }
+            if input.scope == "mission" && mission_id.is_none() {
+                return Err("this Run is not attached to a Mission".into());
+            }
+            let (fact_run, kind, body): (String, String, String) = conn.query_row(
+                "SELECT run_id,kind,body FROM run_facts WHERE id=?1",
+                [&input.fact_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).map_err(|_| "Run Fact is unavailable")?;
+            if fact_run != run_id { return Err("Run Fact must belong to the caller's Run".into()); }
+            (input.key, kind, body, input.reason)
+        }
+        _ => return Err("unknown Shared Memory write tool".into()),
+    };
+    let mut tags = vec!["ade-ags".to_string()];
+    if let Some(mission) = mission_id { tags.push(format!("mission-{}", mission.chars().take(32).collect::<String>())); }
+    let _ = workspace_id; // Escopo efetivo do ai-memory é o projeto resolvido do cwd do Run.
+    Ok(AiMemoryAgentWrite { key, kind, body, reason, tags })
 }
 
 fn task_memory_owner(

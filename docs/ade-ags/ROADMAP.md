@@ -76,9 +76,9 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 - **Fingerprint** SHA-256 do schema SQLite e do protocolo IPC, com registro de reconhecimento obrigatório no CI: [FINGERPRINT.md](../decisoes/FINGERPRINT.md).
 - **Bench de complexidade** com gate por razão e orçamento calibrado (`digest`, transcript do canal, scrollback do PTY): [bench/COMPLEXIDADE.md](./bench/COMPLEXIDADE.md). Achou e corrigiu um O(n²) no `digest` (13,26× → 1,22×).
 
-## Conector opcional de leitura do ai-memory
+## Conector de memória do ai-memory
 
-Backend com detecção de versão, status e leitura de bastões/páginas por subprocesso, sempre marcado `UNTRUSTED`. Não instala, captura, aceita bastões nem importa memória. Sessões recentes usam bridge MCP temporário com workspace/projeto explícitos e apenas `memory_briefing`. Novas abas do Claude podem somar MCP session-aware e hooks nativos; Codex/OpenCode usam intermediário MCP com workspace/projeto fixos, somente quando a pasta identifica um único projeto, com ajuste `ai_memory_tabs_enabled` e sem escrita nas configurações globais dos agentes. A ação explícita “Continuar com outro agente” apresenta preview não consumidor e, após confirmação, abre uma nova aba Claude via `ai-memory run`, preservando a origem; sem handoff abre normalmente. Contrato dos comandos e DTOs em [AI_MEMORY_CONNECTOR.md](./AI_MEMORY_CONNECTOR.md).
+Backend com detecção de versão, status, leitura e escrita de páginas por subprocesso. Briefings de missão e Frota leem até 10 páginas/6 KiB no escopo do projeto, com envelope `UNTRUSTED DATA`; quando o binário falta ou está indisponível, usam o SQLite legado só para leitura. As tools de gravação compatíveis salvam no ai-memory sem aprovação item a item e filtram segredos. O SQLite histórico permanece visível e a migração existente continua sem apagar dados. Novas abas do Claude podem somar MCP session-aware e hooks nativos; Codex/OpenCode usam intermediário MCP com workspace/projeto fixos, sem escrita nas configurações globais dos agentes. A ação explícita “Continuar com outro agente” apresenta preview não consumidor e, após confirmação, abre uma nova aba Claude via `ai-memory run`, preservando a origem; sem handoff abre normalmente. Contrato dos comandos e DTOs em [AI_MEMORY_CONNECTOR.md](./AI_MEMORY_CONNECTOR.md).
 
 ## Computer use em múltiplas superfícies — iOS
 
@@ -241,7 +241,7 @@ Não inclui fallback silencioso, troca automática de modelo, scoring ou marketp
 
 **Shared Memory v0: mergeada no master (PR #4), com gates e E2E real concluídos em 01/10/2026. Etapa 23: higiene de memória, repositório Markdown local e Dreaming v0 (só propõe), documentados em `MEMORY_REPO.md`.**
 
-`run_facts` continua sendo colaboração append-only de um Run. Shared Memory v0 adiciona Workspace Memory e Mission Memory em SQLite local, com propostas e aprovação explícita do usuário. Cada Run congela um snapshot das memórias aprovadas no início; workers e Lead recebem esse snapshot como dado não confiável. Detalhes e limites em [SHARED_MEMORY.md](./SHARED_MEMORY.md).
+`run_facts` continua sendo colaboração append-only de um Run. O SQLite da Shared Memory é legado para consulta, histórico e migração; novas gravações persistentes vão ao ai-memory. Briefings e prompts da Frota priorizam o ai-memory do projeto, com fallback de leitura ao SQLite antigo. Detalhes e limites legados em [SHARED_MEMORY.md](./SHARED_MEMORY.md) e [MEMORIA.md](../agentes/MEMORIA.md).
 
 O E2E confirmou retry com snapshot atualizado, histórico antigo preservado, Lead e worker Codex, publicação de Fact e handoff, proposta de memória aprovada pelo usuário e persistência após restart. Banco original restaurado e evidências preservadas fora do repositório. O Event Bus unificado e Map Mode continuam etapas separadas.
 

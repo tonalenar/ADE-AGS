@@ -1015,6 +1015,9 @@ pub(crate) fn memory_briefing(db: &DbConnection, mission_id: &str) -> Result<Str
         store::get(&conn, mission_id)?
             .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?
     };
+    if let Ok(Some(context)) = crate::ai_memory::project_context(&mission.cwd, &mission.objective) {
+        return Ok(context);
+    }
     let repo = crate::memory::repo_scope::repo_key(Path::new(&mission.cwd));
     let docs = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -1077,6 +1080,9 @@ pub(crate) fn mission_memory_context_now(app: &AppHandle, mission_id: String) ->
         store::get(&conn, &mission_id)?
             .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?
     };
+    if let Ok(Some(context)) = crate::ai_memory::project_context(&mission.cwd, &mission.objective) {
+        return Ok(context);
+    }
     let repo = crate::memory::repo_scope::repo_key(Path::new(&mission.cwd));
     let conn = db.lock().map_err(|e| e.to_string())?;
     memory_context_text(

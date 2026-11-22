@@ -60,6 +60,10 @@ vi.mock("../ipc", async (importOriginal) => {
 });
 
 describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
+  it("explica que as novas memórias ficam no ai-memory e preserva as antigas para revisão", async () => {
+    await act(async () => { root.render(<MemoryInbox workspaceId="w1" onClose={vi.fn()} />); });
+    expect(document.body.textContent).toContain("memoryInbox.aiMemoryNotice");
+  });
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
 
