@@ -16,6 +16,8 @@ const tauriMocks = vi.hoisted(() => {
       registered.push({ id, html: args?.html ?? "", policy: args?.policy ?? "" });
       return id;
     }
+    // O storage da prancheta (paridade com Artifacts) carrega antes do iframe: começa vazio.
+    if (cmd === "design_storage_get") return null;
     throw new Error(`comando inesperado: ${cmd}`);
   });
   const convertFileSrc = vi.fn((path: string, protocol = "asset") =>
@@ -56,7 +58,7 @@ import { DESIGN_SANDBOX } from "@/features/canvas/design/srcdoc";
 import { clearDesignFrameCache, DESIGN_FRAME_SCHEME } from "@/shared/ipc/designFrame";
 
 import { ArtboardFrame, type FrameHandlers, type StudioBoard } from "../ArtboardFrame";
-import { FocusedView } from "../DesignStudio";
+import { FocusedView } from "../FocusedView";
 import { FRAME_MSG, HOST_MSG } from "../frameBridge";
 
 const handlers: FrameHandlers = {
@@ -181,7 +183,7 @@ describe("ArtboardFrame e FocusedView com protocolo ags-design", () => {
     try {
       const register = vi.fn();
       await act(async () => {
-        root.render(<FocusedView board={makeBoard("<button onclick=\"1\">play</button>")} fit="fit" register={register} />);
+        root.render(<FocusedView board={makeBoard("<button onclick=\"1\">play</button>")} fit="fit" width={null} register={register} />);
       });
       const iframe = host.querySelector("iframe");
       expect(iframe).not.toBeNull();

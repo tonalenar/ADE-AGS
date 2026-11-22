@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
-
 import { useDesignFrame } from "@/shared/ipc/designFrame";
 
+import { isAppDark } from "./artboardBridge";
+import { resetFrameErrors, snapshotOf, useArtboardStorage } from "./artboardStore";
 import type { Artboard, ArtboardStatus } from "./designApi";
 import { CHOOSER_MODE, DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
 
@@ -35,8 +36,11 @@ export function BoardCard({ board, active, comments, live = true, dragHandle = f
   const { t } = useTranslation();
   const [choosing, setChoosing] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
-  const documentHtml = useMemo(() => (live ? buildSrcdoc(board.html) : null), [live, board.html]);
-  const frameDoc = useDesignFrame(documentHtml, "design");
+  // O storage vem antes do iframe (o script da página roda na montagem); o tema entra só na montagem.
+  const { ready, epoch } = useArtboardStorage(board.id, live);
+  const srcDoc = useMemo(() => (live && ready ? buildSrcdoc(board.html, { storage: snapshotOf(board.id), dark: isAppDark() }) : ""), [live, ready, epoch, board.id, board.html]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => { resetFrameErrors(board.id); }, [srcDoc, board.id]);
+  const frameDoc = useDesignFrame(srcDoc || null, "design");
   const tellChooser = () => {
     frame.current?.contentWindow?.postMessage({ type: CHOOSER_MODE, on: choosing }, "*");
   };
@@ -53,7 +57,7 @@ export function BoardCard({ board, active, comments, live = true, dragHandle = f
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
   }, [choosing, onChoose]);
-  useEffect(() => { tellChooser(); }, [choosing, frameDoc.src, frameDoc.srcDoc]);
+  useEffect(() => { tellChooser(); }, [choosing, srcDoc]);
   const size = { width: board.width, height: board.height };
   return (
     <div style={{ width: board.width }}>
@@ -70,15 +74,11 @@ export function BoardCard({ board, active, comments, live = true, dragHandle = f
         <Button variant="custom" className={`nodrag ${designBtn}`} disabled={board.status === "approved"} onClick={onApprove}>{t("canvas.design.approve")}</Button>
         <Button variant="custom" className={`nodrag ${designBtn}`} disabled={board.status === "rejected"} onClick={onReject}>{t("canvas.design.reject")}</Button>
       </div>
-      {live ? (
-        frameDoc.ready ? (
-          // No canvas, o iframe só recebe o mouse ao escolher: senão engoliria o zoom e o arrastar.
-          <iframe ref={frame} title={board.title} sandbox={DESIGN_SANDBOX} src={frameDoc.src} srcDoc={frameDoc.srcDoc} referrerPolicy="no-referrer" onLoad={tellChooser}
-            className={`block bg-white rounded-sm shadow-md border-0 ${board.status === "rejected" ? "opacity-50" : ""} ${dragHandle && !choosing ? "pointer-events-none" : ""}`}
-            style={size} />
-        ) : (
-          <div className="bg-white rounded-sm shadow-md" style={size} />
-        )
+      {live && ready && frameDoc.ready ? (
+        // No canvas, o iframe só recebe o mouse ao escolher: senão engoliria o zoom e o arrastar.
+        <iframe ref={frame} title={board.title} sandbox={DESIGN_SANDBOX} src={frameDoc.src} srcDoc={frameDoc.srcDoc} referrerPolicy="no-referrer" onLoad={tellChooser} data-artboard-id={board.id}
+          className={`block bg-white rounded-sm shadow-md border-0 ${board.status === "rejected" ? "opacity-50" : ""} ${dragHandle && !choosing ? "pointer-events-none" : ""}`}
+          style={size} />
       ) : (
         <div className="bg-white/70 dark:bg-white/5 rounded-sm shadow-md flex items-center justify-center text-[12px] text-gray-400" style={size}>{board.title}</div>
       )}

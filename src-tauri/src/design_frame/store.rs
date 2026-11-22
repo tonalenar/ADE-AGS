@@ -10,7 +10,9 @@ use sha2::{Digest, Sha256};
 pub const SCHEME: &str = "ags-design";
 
 /// CSP aplicada por header HTTP nas pranchetas de Design: sem rede, sem formulário, sem `<base>`.
-pub const DESIGN_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'unsafe-inline'; form-action 'none'; base-uri 'none'";
+/// Mesma lista de `DESIGN_CSP` em `src/features/canvas/design/srcdoc.ts`: bibliotecas de CDN
+/// permitidas (como nos Artifacts), Google Fonts, sem rede (`connect-src 'none'`) e sem formulário.
+pub const DESIGN_CSP: &str = "default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net/npm/ https://unpkg.com https://cdn.tailwindcss.com https://code.jquery.com; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'";
 
 /// CSP aplicada por header HTTP em quadros isolados (renders publicados, apps MCP e prévias visuais).
 pub const ISOLATED_FRAME_CSP: &str = "default-src 'none'; connect-src 'none'; img-src data: blob:; media-src data: blob:; font-src data:; style-src 'unsafe-inline' data:; script-src 'unsafe-inline'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";

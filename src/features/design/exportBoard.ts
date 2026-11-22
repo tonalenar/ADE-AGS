@@ -1,9 +1,25 @@
 import { save } from "@tauri-apps/plugin-dialog";
 
+import { designApi } from "@/features/canvas/design/designApi";
 import { writeFile } from "@/features/editor/ipc";
-import { buildSrcdoc } from "@/features/canvas/design/srcdoc";
+import { DESIGN_CSP, buildSrcdoc, stripUnsafeHead } from "@/features/canvas/design/srcdoc";
 
 import { exportDocument, exportFileName } from "./htmlEdit";
+
+/**
+ * A cópia que abre no navegador do sistema: o mesmo documento do "Baixar .html", com a CSP da prancheta
+ * (sem rede, salvo as bibliotecas permitidas). Fora do app ela não sai mais do que sai dentro dele.
+ */
+export function browserDocument(board: { title: string; html: string }): string {
+  const doc = exportDocument(stripUnsafeHead(board.html), board.title);
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${DESIGN_CSP}">`;
+  return /<head\b[^>]*>/i.test(doc) ? doc.replace(/<head\b[^>]*>/i, (m) => m + meta) : meta + doc;
+}
+
+/** Abre a prancheta no navegador do sistema: arquivo temporário, aberto pelo opener do Tauri. Sem servidor. */
+export async function openInBrowser(board: { id: string; title: string; html: string }): Promise<void> {
+  await designApi.openExternal(board.id, browserDocument(board));
+}
 
 /**
  * Exportar uma prancheta. HTML: o diálogo de salvar do sistema e o mesmo comando de escrita do editor

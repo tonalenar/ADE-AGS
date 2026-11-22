@@ -1,8 +1,10 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-
-import { DESIGN_SANDBOX } from "@/features/canvas/design/srcdoc";
 import { useDesignFrame } from "@/shared/ipc/designFrame";
+
+import { isAppDark } from "@/features/canvas/design/artboardBridge";
+import { type FrameError, resetFrameErrors, snapshotOf, useArtboardStorage, useFrameErrors } from "@/features/canvas/design/artboardStore";
+import { DESIGN_SANDBOX } from "@/features/canvas/design/srcdoc";
 
 import { htmlHead, postToFrame, studioSrcdoc } from "./frameBridge";
 import { iframeSrcIdentity } from "./iframeSrc";
@@ -62,10 +64,17 @@ export const ArtboardFrame = memo(function ArtboardFrame({ board, live, selected
   const [name, setName] = useState(board.title);
   useEffect(() => { if (renaming) setName(board.title); }, [renaming]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir
   const srcIdentity = iframeSrcIdentity(board.id, live);
-  // O `replaceHtml` troca só o corpo. Se o <head> mudou (estilos), o documento é outro: o frame recarrega.
+  // O iframe só nasce com o storage da prancheta já carregado: o script da página roda na montagem.
+  const { ready, epoch } = useArtboardStorage(board.id, live);
+  const errors = useFrameErrors(board.id);
+  // O `replaceHtml` troca só o corpo. Se o <head> mudou (estilos), o documento é outro: o srcdoc recarrega.
   const head = htmlHead(board.html);
-  const documentHtml = useMemo(() => (live ? studioSrcdoc(board.html) : null), [srcIdentity, head]); // eslint-disable-line react-hooks/exhaustive-deps
-  const frameDoc = useDesignFrame(documentHtml, "design");
+  // O tema entra só na montagem; depois ele chega por mensagem, então trocar de tema não recarrega a prancheta.
+  const srcDoc = useMemo(() => (live && ready ? studioSrcdoc(board.html, { storage: snapshotOf(board.id), dark: isAppDark() }) : ""), [srcIdentity, head, ready, epoch]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Documento novo, erros novos: o que ficou do anterior sai antes de o script do novo rodar.
+  useLayoutEffect(() => { resetFrameErrors(board.id); }, [srcDoc, board.id]);
+  // No WebKit o srcdoc herdaria a CSP do app e nenhum script rodaria: o documento vai pelo scheme ags-design.
+  const frameDoc = useDesignFrame(srcDoc || null, "design");
   const htmlRef = useRef({ html: board.html, head });
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   useEffect(() => {
@@ -102,6 +111,7 @@ export const ArtboardFrame = memo(function ArtboardFrame({ board, live, selected
             <span className="min-w-0 truncate" title={board.title}>{board.title}</span>
           )}
           <span className="flex-1" />
+          {errors.length > 0 && <FrameErrorBadge errors={errors} />}
           <button type="button" aria-pressed={playing} title={playing ? (editing ? t("design.studio.editHint") : t("design.studio.stop")) : t("design.studio.playOnCanvas")}
             onPointerDown={(e) => e.stopPropagation()} onClick={() => h.onPlay(board.id)}
             className={`h-5 px-1.5 shrink-0 rounded inline-flex items-center gap-1 text-[11px] font-medium
@@ -124,13 +134,10 @@ export const ArtboardFrame = memo(function ArtboardFrame({ board, live, selected
           outline: selected ? "calc(2px * var(--inv)) solid var(--color-accent-500)" : undefined,
           outlineOffset: selected ? "calc(-1px * var(--inv))" : undefined,
         }}>
-        {live ? (
-          frameDoc.ready ? (
-            <iframe ref={(el) => { iframeRef.current = el; h.register(board.id, el); }} title={board.title} sandbox={DESIGN_SANDBOX}
-              src={frameDoc.src} srcDoc={frameDoc.srcDoc}
-              referrerPolicy="no-referrer" onLoad={() => h.onFrameLoad(board.id)}
-              className="block border-0 w-full h-full" style={{ pointerEvents: passThrough ? "none" : "auto" }} />
-          ) : null
+        {live && ready && frameDoc.ready ? (
+          <iframe ref={(el) => { iframeRef.current = el; h.register(board.id, el); }} title={board.title} sandbox={DESIGN_SANDBOX} src={frameDoc.src} srcDoc={frameDoc.srcDoc} data-artboard-id={board.id}
+            referrerPolicy="no-referrer" onLoad={() => h.onFrameLoad(board.id)}
+            className="block border-0 w-full h-full" style={{ pointerEvents: passThrough ? "none" : "auto" }} />
         ) : (
           <div className="w-full h-full flex items-center justify-center"
             style={{ backgroundImage: "repeating-linear-gradient(135deg, var(--color-gray-100) 0 10px, var(--color-gray-50) 10px 20px)" }}>
@@ -167,3 +174,15 @@ export const ArtboardFrame = memo(function ArtboardFrame({ board, live, selected
     </div>
   );
 });
+
+/** O aviso discreto dos erros de script da prancheta: a contagem, e o último erro no tooltip. */
+export function FrameErrorBadge({ errors }: { errors: FrameError[] }) {
+  const { t } = useTranslation();
+  const last = errors[errors.length - 1];
+  return (
+    <span role="status" title={t("design.studio.frameErrorHint", { message: last.message })}
+      className="h-5 px-1.5 shrink-0 rounded inline-flex items-center text-[11px] font-medium bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/40">
+      ⚠ {t("design.studio.frameErrors", { count: errors.length })}
+    </span>
+  );
+}

@@ -52,6 +52,9 @@ pub(crate) fn migrate(c: &Connection) -> rusqlite::Result<()> {
         kind TEXT NOT NULL CHECK(kind IN ('rect','oval','line','arrow','pencil','pen','text')),
         x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL,
         data TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS design_artboard_storage (
+        artboard_id TEXT PRIMARY KEY REFERENCES design_artboard(id) ON DELETE CASCADE,
+        data TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0);
     CREATE INDEX IF NOT EXISTS design_note_idx ON design_note(page_id);
     CREATE INDEX IF NOT EXISTS design_shape_idx ON design_shape(page_id);")
 }
@@ -412,6 +415,9 @@ fn aggregate(c: &Connection, id: &str) -> Result<()> {
 }
 /// Single shared transaction path for Tauri and the CLI. Backend never loads HTML URLs.
 pub(crate) fn execute(c: &mut Connection, op: &str, a: &Value) -> Result<Value> {
+    if let Some(result) = storage_op(c, op, a) {
+        return result;
+    }
     if op == "list" {
         let workspace = optional(a, "workspace")?;
         return Ok(json!(
@@ -869,6 +875,15 @@ fn sanitize_view(state: &Value) -> Result<Value> {
     });
     let zoom = s.get("zoom").and_then(Value::as_f64).filter(|z| z.is_finite() && *z > 0.0 && *z <= 1000.0);
     let updated = s.get("updatedAt").and_then(Value::as_f64).filter(|t| t.is_finite() && *t >= 0.0);
+    // Os erros chegam do mais antigo para o mais novo: ficam os 5 mais recentes.
+    let errors: Vec<Value> = s.get("lastErrors").and_then(Value::as_array).map_or_else(Vec::new, |list| {
+        let list: Vec<&Value> = list.iter().filter(|e| e.is_object()).collect();
+        list.iter().skip(list.len().saturating_sub(5)).map(|e| json!({
+            "artboardId": short(e.get("artboardId"), 128),
+            "title": short(e.get("title"), 512),
+            "message": short(e.get("message"), 300),
+        })).collect()
+    });
     Ok(json!({
         "mode": mode,
         "pageId": short(s.get("pageId"), 128),
@@ -878,13 +893,123 @@ fn sanitize_view(state: &Value) -> Result<Value> {
         "selected": selected,
         "selection": selection,
         "zoom": zoom,
+        "lastErrors": errors,
         "updatedAt": updated.map_or_else(|| json!(crate::util::now_ts_ms()), |t| json!(t as i64)),
     }))
 }
 
-/// Ops que não escrevem no banco: não emitem `design-changed`.
+/// Ops que não mudam o que as listas mostram (leituras e o armazenamento da prancheta): não emitem `design-changed`.
 fn is_read(op: &str) -> bool {
-    matches!(op, "get" | "list" | "open_target" | "view" | "view_set")
+    matches!(op, "get" | "list" | "open_target" | "view" | "view_set" | "storage_get" | "storage_set" | "storage_clear")
+}
+
+/// O armazenamento de uma prancheta (localStorage/sessionStorage do boot): até 1 MiB em bytes UTF-8.
+pub(crate) const STORAGE_LIMIT_BYTES: usize = 1024 * 1024;
+const STORAGE_KEY_LIMIT: usize = 1024;
+/// A cópia que abre no navegador do sistema é um documento inteiro: teto de 4 MiB.
+const EXTERNAL_HTML_LIMIT: usize = 4 * 1024 * 1024;
+
+/// Confere o que a prancheta mandou guardar: só texto por chave, e o total das duas áreas até 1 MiB.
+fn storage_snapshot(data: &Value) -> Result<(Value, usize)> {
+    let obj = data.as_object().ok_or("O armazenamento precisa ser um objeto")?;
+    let mut out = serde_json::Map::new();
+    let mut total = 0;
+    for area in ["local", "session"] {
+        let mut items = serde_json::Map::new();
+        if let Some(entries) = obj.get(area).filter(|v| !v.is_null()) {
+            let entries = entries.as_object().ok_or(format!("{area} precisa ser um objeto"))?;
+            for (key, value) in entries {
+                let value = value.as_str().ok_or("Os valores do armazenamento precisam ser texto")?;
+                if key.len() > STORAGE_KEY_LIMIT {
+                    return Err("Chave do armazenamento grande demais".into());
+                }
+                total += key.len() + value.len();
+                items.insert(key.clone(), json!(value));
+            }
+        }
+        out.insert(area.to_string(), Value::Object(items));
+    }
+    if total > STORAGE_LIMIT_BYTES {
+        return Err("A prancheta passou do limite de 1 MB de armazenamento".into());
+    }
+    Ok((Value::Object(out), total))
+}
+
+fn artboard_exists(c: &Connection, id: &str) -> Result<()> {
+    c.query_row("SELECT 1 FROM design_artboard WHERE id=?1", [id], |_| Ok(()))
+        .optional()
+        .map_err(err)?
+        .ok_or_else(|| format!("Prancheta não encontrada: {id}"))
+}
+
+/// As ops `storage_*`. `None` = não é uma delas.
+fn storage_op(c: &mut Connection, op: &str, a: &Value) -> Option<Result<Value>> {
+    if !matches!(op, "storage_get" | "storage_set" | "storage_clear") {
+        return None;
+    }
+    Some((|| {
+        let id = text(a, "artboardId")?.to_string();
+        artboard_exists(c, &id)?;
+        match op {
+            "storage_get" => {
+                let stored: Option<String> = c
+                    .query_row("SELECT data FROM design_artboard_storage WHERE artboard_id=?1", [&id], |r| r.get(0))
+                    .optional()
+                    .map_err(err)?;
+                let data = match stored {
+                    Some(s) => serde_json::from_str::<Value>(&s).map_err(|e| e.to_string())?,
+                    None => json!({"local": {}, "session": {}}),
+                };
+                Ok(json!({"artboardId": id, "local": data["local"], "session": data["session"]}))
+            }
+            "storage_set" => {
+                let (data, bytes) = storage_snapshot(a.get("data").unwrap_or(&Value::Null))?;
+                c.execute(
+                    "INSERT INTO design_artboard_storage(artboard_id,data,bytes,updated_at) VALUES(?1,?2,?3,?4) \
+                     ON CONFLICT(artboard_id) DO UPDATE SET data=excluded.data, bytes=excluded.bytes, updated_at=excluded.updated_at",
+                    rusqlite::params![id, data.to_string(), bytes as i64, crate::util::now_ts_ms()],
+                )
+                .map_err(err)?;
+                Ok(json!({"artboardId": id, "bytes": bytes}))
+            }
+            _ => {
+                c.execute("DELETE FROM design_artboard_storage WHERE artboard_id=?1", [&id]).map_err(err)?;
+                Ok(json!({"artboardId": id, "cleared": true}))
+            }
+        }
+    })())
+}
+
+/// Grava a cópia num arquivo temporário com o id da prancheta (sanitizado) no nome. Sempre a mesma
+/// cópia por prancheta: abrir de novo sobrescreve, sem acumular arquivos.
+pub(crate) fn write_external_copy(dir: &std::path::Path, artboard_id: &str, html: &str) -> Result<std::path::PathBuf> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let stem: String = artboard_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .take(80)
+        .collect();
+    let path = dir.join(format!("{stem}.html"));
+    std::fs::write(&path, html).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// Abre a cópia da prancheta no navegador do sistema, pelo opener do Tauri. Sem servidor.
+fn open_external(app: &tauri::AppHandle, args: &Value) -> Result<Value> {
+    let id = text(args, "artboardId")?.to_string();
+    let html = text(args, "html")?;
+    if html.len() > EXTERNAL_HTML_LIMIT {
+        return Err("A prancheta é grande demais para abrir fora do app".into());
+    }
+    {
+        let db = app.state::<DbConnection>();
+        let connection = db.lock().map_err(|e| e.to_string())?;
+        artboard_exists(&connection, &id)?;
+    }
+    let path = write_external_copy(&std::env::temp_dir().join("ade-ags-pranchetas"), &id, html)?;
+    let shown = crate::util::external_path::external_path(&path).to_string_lossy().into_owned();
+    tauri_plugin_opener::OpenerExt::opener(app).open_path(shown.clone(), None::<&str>).map_err(|e| e.to_string())?;
+    Ok(json!({"artboardId": id, "path": shown}))
 }
 
 fn notify_after_commit<T, E>(result: &T, notify: impl FnOnce(&T) -> std::result::Result<(), E>) {
@@ -911,6 +1036,9 @@ pub(crate) fn dispatch(app: &tauri::AppHandle, op: &str, args: &Value) -> Result
             }
             (_, design) => Ok(views.get(design.as_deref())),
         };
+    }
+    if op == "open_external" {
+        return open_external(app, args);
     }
     let result = {
         let mut connection = db.lock().map_err(|e| e.to_string())?;
@@ -966,6 +1094,10 @@ command!(design_shape_update, "shape_update");
 command!(design_shape_delete, "shape_delete");
 command!(design_view_set, "view_set");
 command!(design_view_get, "view");
+command!(design_storage_get, "storage_get");
+command!(design_storage_set, "storage_set");
+command!(design_storage_clear, "storage_clear");
+command!(design_open_external, "open_external");
 
 #[cfg(test)]
 fn design_audit_db_path() -> std::path::PathBuf {
@@ -1701,5 +1833,61 @@ mod tests {
         super::notify_after_commit(&committed, |_| Err("falha de evento"));
 
         assert_eq!(committed["title"], "Rascunho");
+    }
+
+    #[test]
+    fn storage_guarda_o_que_a_prancheta_mandou_por_prancheta() {
+        let (mut c, _, _, bid) = setup();
+        let saved = execute(
+            &mut c,
+            "storage_set",
+            &json!({"artboardId":bid,"data":{"local":{"nome":"Ana"},"session":{"aba":"1"}}}),
+        )
+        .unwrap();
+        assert_eq!(saved["bytes"], 11);
+        let got = execute(&mut c, "storage_get", &json!({"artboardId":bid})).unwrap();
+        assert_eq!(got["local"]["nome"], "Ana");
+        assert_eq!(got["session"]["aba"], "1");
+    }
+
+    #[test]
+    fn storage_recusa_mais_de_1_mib_e_valor_que_nao_e_texto() {
+        let (mut c, _, _, bid) = setup();
+        let grande = "x".repeat(STORAGE_LIMIT_BYTES);
+        assert!(execute(&mut c, "storage_set", &json!({"artboardId":bid,"data":{"local":{"k":grande}}})).is_err());
+        assert!(execute(&mut c, "storage_set", &json!({"artboardId":bid,"data":{"local":{"k":1}}})).is_err());
+        assert_eq!(execute(&mut c, "storage_get", &json!({"artboardId":bid})).unwrap()["local"], json!({}));
+    }
+
+    #[test]
+    fn storage_limpa_e_some_junto_com_a_prancheta() {
+        let (mut c, _, _, bid) = setup();
+        execute(&mut c, "storage_set", &json!({"artboardId":bid,"data":{"local":{"a":"1"}}})).unwrap();
+        execute(&mut c, "storage_clear", &json!({"artboardId":bid})).unwrap();
+        assert_eq!(execute(&mut c, "storage_get", &json!({"artboardId":bid})).unwrap()["local"], json!({}));
+        execute(&mut c, "storage_set", &json!({"artboardId":bid,"data":{"local":{"b":"2"}}})).unwrap();
+        execute(&mut c, "artboard_delete", &json!({"artboardId":bid})).unwrap();
+        let left: i64 = c.query_row("SELECT count(*) FROM design_artboard_storage", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn view_guarda_so_os_ultimos_erros_com_texto_cortado() {
+        let erros: Vec<Value> = (0..7).map(|i| json!({"artboardId":format!("b{i}"),"title":"Tela","message":"e".repeat(400)})).collect();
+        let state = sanitize_view(&json!({"mode":"canvas","lastErrors":erros})).unwrap();
+        let kept = state["lastErrors"].as_array().unwrap();
+        assert_eq!(kept.len(), 5);
+        assert_eq!(kept[0]["artboardId"], "b2");
+        assert_eq!(kept[4]["artboardId"], "b6");
+        assert_eq!(kept[0]["message"].as_str().unwrap().len(), 300);
+    }
+
+    #[test]
+    fn copia_para_abrir_fora_vai_para_um_arquivo_com_nome_seguro() {
+        let dir = std::env::temp_dir().join(format!("ade-ags-pranchetas-teste-{}", crate::util::now_ts_ms()));
+        let path = write_external_copy(&dir, "../bo ard", "<p>oi</p>").unwrap();
+        assert_eq!(path.parent(), Some(dir.as_path()));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "<p>oi</p>");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

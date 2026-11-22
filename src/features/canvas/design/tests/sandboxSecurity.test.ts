@@ -15,7 +15,19 @@ describe("Testes de Segurança do Sandbox de Design (CSP e Iframe Isolation)", (
       expect(DESIGN_CSP).toContain("default-src 'none'");
       expect(DESIGN_CSP).toContain("img-src data:");
       expect(DESIGN_CSP).toContain("form-action 'none'");
-      expect(DESIGN_CSP).not.toMatch(/\bhttps?:\/\//);
+    });
+
+    it("CSP da prancheta: só as bibliotecas e fontes permitidas; nenhuma outra origem", () => {
+      const policy = Object.fromEntries(DESIGN_CSP.split(";").map((d) => d.trim().split(/\s+/)).map(([name, ...sources]) => [name, sources]));
+      expect(policy["script-src"]).toEqual(["'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net/npm/", "https://unpkg.com", "https://cdn.tailwindcss.com", "https://code.jquery.com"]);
+      expect(policy["style-src"]).toEqual(["'unsafe-inline'", "https://fonts.googleapis.com"]);
+      expect(policy["font-src"]).toEqual(["https://fonts.gstatic.com"]);
+      expect(policy["img-src"]).toEqual(["data:", "blob:"]);
+      expect(policy["connect-src"]).toEqual(["'none'"]);
+      expect(policy["default-src"]).toEqual(["'none'"]);
+      expect(policy["form-action"]).toEqual(["'none'"]);
+      expect(policy["base-uri"]).toEqual(["'none'"]);
+      expect(Object.keys(policy).sort()).toEqual(["base-uri", "connect-src", "default-src", "font-src", "form-action", "img-src", "script-src", "style-src"]);
     });
 
     it("o srcdoc embute a CSP do módulo e corta meta/base hostis", () => {

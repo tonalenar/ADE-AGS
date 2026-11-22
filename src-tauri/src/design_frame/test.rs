@@ -75,11 +75,25 @@ fn csp_das_politicas_bloqueia_rede_e_ipc() {
         assert!(csp.contains("form-action 'none'"), "faltou form-action 'none': {csp}");
         assert!(csp.contains("base-uri 'none'"), "faltou base-uri 'none': {csp}");
         assert!(csp.contains("script-src 'unsafe-inline'"), "faltou script-src inline: {csp}");
-        assert!(!csp.contains("http:"), "não pode liberar rede http: {csp}");
-        assert!(!csp.contains("https:"), "não pode liberar rede https: {csp}");
+        // Curinga de esquema (`https:` sozinho) liberaria qualquer host; só hosts exatos entram.
+        let tokens: Vec<&str> = csp.split([' ', ';']).collect();
+        assert!(!tokens.contains(&"http:"), "não pode liberar rede http: {csp}");
+        assert!(!tokens.contains(&"https:"), "não pode liberar rede https: {csp}");
+        assert!(!csp.contains("http://"), "nada por http sem TLS: {csp}");
         assert!(!csp.contains("ipc:"), "não pode liberar ipc: {csp}");
         assert!(!csp.contains("unsafe-eval"), "não pode liberar unsafe-eval: {csp}");
+        assert!(csp.contains("connect-src 'none'") || csp.starts_with("default-src 'none'"), "sem rede: {csp}");
     }
+    // Quadros isolados (renders, apps MCP, prévias) não carregam nada de fora.
+    assert!(!ISOLATED_FRAME_CSP.contains("https://"), "isolado sem hosts: {ISOLATED_FRAME_CSP}");
+    // Pranchetas: só as bibliotecas da lista, como nos Artifacts.
+    let hosts: Vec<&str> = DESIGN_CSP.split([' ', ';']).filter(|t| t.starts_with("https://")).collect();
+    assert_eq!(hosts, [
+        "https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net/npm/", "https://unpkg.com",
+        "https://cdn.tailwindcss.com", "https://code.jquery.com",
+        "https://fonts.googleapis.com", "https://fonts.gstatic.com",
+    ]);
+    assert!(DESIGN_CSP.contains("connect-src 'none'"));
 }
 
 #[test]

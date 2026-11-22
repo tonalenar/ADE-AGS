@@ -8,6 +8,10 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const t = vi.hoisted(() => (key: string) => key);
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
+// O iframe só nasce depois que o storage da prancheta carrega (vazio aqui).
+vi.mock("@/features/canvas/design/designApi", () => ({
+  designApi: { storageGet: vi.fn(async () => ({ local: {}, session: {} })), storageSet: vi.fn(), storageClear: vi.fn() },
+}));
 
 import { ArtboardFrame, type FrameHandlers, type StudioBoard } from "../ArtboardFrame";
 
@@ -25,13 +29,14 @@ const board = (html: string): StudioBoard => ({ id: "b1", title: "Prancheta", x:
 let host: HTMLDivElement;
 let root: Root;
 
-function render(html: string) {
-  return act(async () => {
+async function render(html: string) {
+  await act(async () => {
     root.render(
       <ArtboardFrame board={board(html)} live selected={false} grips={false} passThrough={false} agent={null}
         renaming={false} playing={false} guides={false} h={handlers} />,
     );
   });
+  await act(async () => {});
 }
 
 function srcdocOf(): string {
