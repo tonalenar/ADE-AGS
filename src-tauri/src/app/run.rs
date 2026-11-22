@@ -272,6 +272,10 @@ pub fn run() {
             crate::design::design_view_set,
             crate::design::design_view_get,
             crate::design_frame::design_frame_register,
+            crate::design::design_storage_get,
+            crate::design::design_storage_set,
+            crate::design::design_storage_clear,
+            crate::design::design_open_external,
             // Terminal embebida (PTY)
             crate::terminal::pty_create,
             crate::terminal::pty_attach,

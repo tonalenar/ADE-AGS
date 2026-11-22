@@ -1,3 +1,4 @@
+import type { StorageSnapshot } from "@/features/canvas/design/artboardBoot";
 import { buildSrcdoc } from "@/features/canvas/design/srcdoc";
 
 /**
@@ -126,15 +127,19 @@ addEventListener("gesturechange",function(e){e.preventDefault();post({kind:"gest
 addEventListener("gestureend",function(e){e.preventDefault();post({kind:"gesture",phase:"end",scale:e.scale||1,cx:0,cy:0});},{passive:false});
 function onKey(phase){return function(e){
   if(editing)return;
-  if(editable(e.target)&&e.key!=="Escape")return;
-  if(mode==="play"&&e.key!=="Escape")return;
+  /* No Play a página é dona do teclado (campos, atalhos próprios); só o Esc volta ao app, ver abaixo. */
+  if(mode==="play")return;
+  /* Digitar num campo de texto é do campo: nada vai ao app nem é cancelado. */
+  if(editable(e.target))return;
   var mod=e.metaKey||e.ctrlKey;
   /* As teclas que o estúdio usa não fazem a ação nativa aqui dentro (rolar, mudar o foco, zoom). */
-  if(mode!=="play"&&(e.key===" "||e.key==="Tab"||e.key==="Backspace"||e.key==="Delete"||(mod&&/^[0=+\\-zZdDaA\\\\]$/.test(e.key))))e.preventDefault();
+  if(e.key===" "||e.key==="Tab"||e.key==="Backspace"||e.key==="Delete"||(mod&&/^[0=+\\-zZdDaA\\\\]$/.test(e.key)))e.preventDefault();
   post({kind:"key",phase:phase,key:e.key,meta:e.metaKey,ctrl:e.ctrlKey,shift:e.shiftKey,alt:e.altKey});
 };}
 addEventListener("keydown",onKey("down"),true);
 addEventListener("keyup",onKey("up"),true);
+/* No Play, o Esc sai do Play, a não ser que a página já o tenha tratado (um diálogo que fecha com Esc). */
+addEventListener("keydown",function(e){if(mode==="play"&&!editing&&e.key==="Escape"&&!e.defaultPrevented)post({kind:"key",phase:"down",key:"Escape",meta:e.metaKey,ctrl:e.ctrlKey,shift:e.shiftKey,alt:e.altKey});});
 addEventListener("mousemove",function(e){
   if(editing||!(mode==="comment"||(mode==="edit"&&active))){clearHover();return;}
   var el=mode==="comment"?e.target:target(e.target);
@@ -148,7 +153,7 @@ addEventListener("pointerdown",function(e){
   post({kind:"pointer",cx:e.clientX,cy:e.clientY,button:e.button,shift:e.shiftKey});
   if(mode==="edit"||mode==="comment")e.preventDefault();
 },true);
-addEventListener("contextmenu",function(e){e.preventDefault();post({kind:"context",cx:e.clientX,cy:e.clientY});},true);
+addEventListener("contextmenu",function(e){if(mode==="play"&&editable(e.target))return;e.preventDefault();post({kind:"context",cx:e.clientX,cy:e.clientY});},true);
 addEventListener("click",function(e){
   var t=e.target;
   if(editing&&editing.contains(t))return;
@@ -253,8 +258,9 @@ addEventListener("message",function(e){
 later();
 })();`;
 
-/** O srcdoc de uma prancheta na tela de Design: CSP + HTML do agente + o nosso script. */
-export const studioSrcdoc = (html: string) => buildSrcdoc(html, { script: FRAME_SCRIPT });
+/** O srcdoc de uma prancheta na tela de Design: CSP + boot (storage, tema) + HTML do agente + o nosso script. */
+export const studioSrcdoc = (html: string, opts: { storage?: StorageSnapshot; dark?: boolean } = {}) =>
+  buildSrcdoc(html, { ...opts, script: FRAME_SCRIPT });
 
 export interface FrameRect { x: number; y: number; w: number; h: number }
 /** Um nó da árvore de camadas (DFS dentro do body, até 400 nós e 12 níveis). */

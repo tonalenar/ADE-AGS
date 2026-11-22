@@ -15,6 +15,8 @@ const tauriMocks = vi.hoisted(() => {
       registered.push({ id, html: args?.html ?? "", policy: args?.policy ?? "" });
       return id;
     }
+    // O storage da prancheta (paridade com Artifacts) carrega antes do iframe: começa vazio.
+    if (cmd === "design_storage_get") return null;
     throw new Error(`comando inesperado: ${cmd}`);
   });
   const convertFileSrc = vi.fn((path: string, protocol = "asset") => `${protocol}://localhost/${encodeURIComponent(path)}`);

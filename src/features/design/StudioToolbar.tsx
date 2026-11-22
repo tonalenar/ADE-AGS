@@ -9,6 +9,7 @@ import { Segmented } from "@/shared/ui/Segmented";
 
 import { chromeInsets } from "./chromeInsets";
 import { canZoomIn, canZoomOut, presetOf, ZOOM_LIMITS, ZOOM_PRESETS, zoomReadout } from "./camera";
+import { FRAME_WIDTHS } from "./focusGeometry";
 import {
   ArrowIcon, BackIcon, CaretIcon, CheckIcon, CommentIcon, DotsIcon, ExportIcon, FrameIcon, HandIcon, LineIcon, NoteIcon, OvalIcon,
   PenIcon, PencilIcon, PlusIcon, RectIcon, SelectIcon, TextIcon,
@@ -16,7 +17,7 @@ import {
 import { DRAW_TOOLS, SHAPE_TOOLS, TOOLS, type DrawTool, type ShapeTool, type Tool } from "./studioModel";
 
 /** O botão "ghost" da barra (altura de controle, sem borda). */
-export const ghostBtn = `h-7 px-2 rounded-md inline-flex items-center gap-1.5 text-[12.5px] text-gray-700 dark:text-white/80
+export const ghostBtn = `h-7 px-2 rounded-md inline-flex shrink-0 whitespace-nowrap items-center gap-1.5 text-[12.5px] text-gray-700 dark:text-white/80
   hover:bg-gray-100 dark:hover:bg-white/10 disabled:opacity-40 disabled:pointer-events-none`;
 const menuCls = `absolute top-full mt-1 z-50 p-1 rounded-lg bg-white dark:bg-surface-raised
   shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_8px_24px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.08)]`;
@@ -30,11 +31,27 @@ export const TOOL_ICON: Record<Tool, (p: { className?: string }) => ReactNode> =
 const toolBtn = (on: boolean) => `w-8 h-7 rounded-md flex items-center justify-center
   ${on ? "bg-accent-500/15 text-accent-600 dark:text-accent-300" : "text-gray-600 dark:text-white/70 hover:bg-gray-100 dark:hover:bg-white/10"}`;
 
-export interface FocusedBar { title: string; fit: "fill" | "fit"; onFit: (v: "fill" | "fit") => void; onBack: () => void }
+export interface FocusedBar {
+  title: string;
+  fit: "fill" | "fit";
+  onFit: (v: "fill" | "fit") => void;
+  onBack: () => void;
+  /** A largura escolhida (desktop, tablet, celular), ou `null` para a original. */
+  width: number | null;
+  onWidth: (w: number | null) => void;
+  onDownload: () => void;
+  onOpenBrowser: () => void;
+}
+
+type WidthKey = "original" | "desktop" | "tablet" | "mobile";
+const WIDTH_OF: Record<WidthKey, number | null> = { original: null, desktop: FRAME_WIDTHS.desktop, tablet: FRAME_WIDTHS.tablet, mobile: FRAME_WIDTHS.mobile };
+const widthKeyOf = (w: number | null): WidthKey =>
+  w === FRAME_WIDTHS.desktop ? "desktop" : w === FRAME_WIDTHS.tablet ? "tablet" : w === FRAME_WIDTHS.mobile ? "mobile" : "original";
 
 /**
  * A barra de 40 px: Páginas à esquerda, as ferramentas no centro e o Zoom à direita. No modo focado
- * vira "Voltar ao canvas" + nome da prancheta e o segmentado Preencher | Caber.
+ * vira "Voltar ao canvas" + nome da prancheta, a largura (original, desktop, tablet, celular), o
+ * segmentado Preencher | Caber e as ações de baixar e abrir no navegador.
  */
 export function StudioToolbar(p: {
   leading?: ReactNode;
@@ -75,8 +92,20 @@ export function StudioToolbar(p: {
         </button>
         <span className="min-w-0 max-w-[40vw] truncate text-sm text-gray-800 dark:text-white/85" title={f.title}>{f.title}</span>
         <span className="flex-1" />
+        {/* No painel estreito os controles rolam na horizontal em vez de serem cortados. */}
+        <div data-focus-controls="" className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
+        <Segmented label={t("design.studio.widthLabel")} value={widthKeyOf(f.width)} onChange={(k) => f.onWidth(WIDTH_OF[k])}
+          options={[
+            { value: "original", label: t("design.studio.widthOriginal") },
+            { value: "desktop", label: t("design.studio.widthDesktop", { w: FRAME_WIDTHS.desktop }) },
+            { value: "tablet", label: t("design.studio.widthTablet", { w: FRAME_WIDTHS.tablet }) },
+            { value: "mobile", label: t("design.studio.widthMobile", { w: FRAME_WIDTHS.mobile }) },
+          ]} />
         <Segmented label={t("design.studio.fitMode")} value={f.fit} onChange={f.onFit}
           options={[{ value: "fill", label: t("design.studio.fill") }, { value: "fit", label: t("design.studio.fit") }]} />
+        <button type="button" className={ghostBtn} onClick={f.onDownload} title={t("design.studio.download")}>{t("design.studio.download")}</button>
+        <button type="button" className={ghostBtn} onClick={f.onOpenBrowser} title={t("design.studio.openBrowser")}>{t("design.studio.openBrowserShort")}</button>
+        </div>
       </Bar>
     );
   }

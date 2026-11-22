@@ -3,9 +3,12 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { useTranslation } from "react-i18next";
 import { Button, CloseIcon } from "neogestify-ui-components";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { useDesignFrame } from "@/shared/ipc/designFrame";
 
 import { chooseOnBoard } from "./chooseProposal";
 import { BoardCard, designBtn as btn } from "./BoardCard";
+import { isAppDark } from "./artboardBridge";
+import { snapshotOf, useArtboardStorage } from "./artboardStore";
 import { buildTasks } from "./buildTasks";
 import { allApproved, buildable, formatQueueForAgent, pendingComments } from "./commentQueue";
 import { designApi, type Artboard, type ArtboardVersion, type DesignDetail } from "./designApi";
@@ -18,7 +21,6 @@ import { PREVIEW_DEBOUNCE_MS, scheduleDebounced } from "./previewDebounce";
 import { DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
 import { INITIAL_VIEWPORT, fitViewport, viewportReducer, zoomPercent } from "./viewport";
 import { designRoute } from "@/features/design/openRoute";
-import { useDesignFrame } from "@/shared/ipc/designFrame";
 
 /**
  * O canvas de Design: as pranchetas que o agente desenhou, para ver, comentar, editar e
@@ -269,8 +271,9 @@ function EditPane({ board, versions, comments, onClose, onChanged, fail }: {
     scheduleDebounced(previewTimer.current, PREVIEW_DEBOUNCE_MS, () => setPreviewHtml(draft));
     return () => { if (previewTimer.current.id) clearTimeout(previewTimer.current.id); };
   }, [draft]);
-  const preview = useMemo(() => buildSrcdoc(previewHtml, { picker: true }), [previewHtml]);
-  const previewFrame = useDesignFrame(preview, "design");
+  const { ready, epoch } = useArtboardStorage(board.id, true);
+  const preview = useMemo(() => (ready ? buildSrcdoc(previewHtml, { picker: true, storage: snapshotOf(board.id), dark: isAppDark() }) : ""), [previewHtml, ready, epoch, board.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const previewFrame = useDesignFrame(preview || null, "design");
   const dirty = draft !== board.html;
   const act = (p: Promise<unknown>) => p.then(onChanged).catch(fail);
   const addComment = () => {
@@ -303,7 +306,7 @@ function EditPane({ board, versions, comments, onClose, onChanged, fail }: {
           <div className="overflow-hidden rounded border border-gray-200 dark:border-white/10 bg-white"
             style={{ height: Math.min(260, board.height * (360 / board.width)) }}>
             {previewFrame.ready && (
-              <iframe ref={frame} title={t("canvas.design.preview")} sandbox={DESIGN_SANDBOX} src={previewFrame.src} srcDoc={previewFrame.srcDoc} referrerPolicy="no-referrer"
+              <iframe ref={frame} title={t("canvas.design.preview")} sandbox={DESIGN_SANDBOX} src={previewFrame.src} srcDoc={previewFrame.srcDoc} referrerPolicy="no-referrer" data-artboard-id={board.id}
                 className="border-0 origin-top-left"
                 style={{ width: board.width, height: board.height, transform: `scale(${360 / board.width})` }} />
             )}

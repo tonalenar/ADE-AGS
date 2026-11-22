@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import type { StorageSnapshot } from "./artboardBoot";
+
 // A única camada que fala com o backend de Design (comandos design_*). Se um nome ou campo
 // mudar, é só aqui.
 
@@ -133,6 +135,12 @@ export const designApi = {
     call<RawDesign & { commentAdded?: boolean }>("design_comment_add", { ...c, author: "user" }),
   /** Publica o que a pessoa vê (memória do backend; o agente lê com `ags design view`). */
   setView: (designId: string, state: unknown) => call<unknown>("design_view_set", { designId, state }),
+  /** O localStorage/sessionStorage da prancheta (até 1 MiB no backend). */
+  storageGet: (artboardId: string) => call<StorageSnapshot>("design_storage_get", { artboardId }),
+  storageSet: (artboardId: string, data: StorageSnapshot) => call<unknown>("design_storage_set", { artboardId, data }),
+  storageClear: (artboardId: string) => call<unknown>("design_storage_clear", { artboardId }),
+  /** Grava o documento num arquivo temporário e o abre no navegador do sistema (opener do Tauri). */
+  openExternal: (artboardId: string, html: string) => call<unknown>("design_open_external", { artboardId, html }),
   /** Volta ao conteúdo de uma versão anterior (gera uma versão nova, em rascunho). */
   revert: (artboardId: string, version: number, expectedVersion?: number) =>
     call<RawDesign>("design_artboard_revert", { artboardId, version, expectedVersion }),

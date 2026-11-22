@@ -99,6 +99,30 @@ A mesma tela (`DesignStudio`) abre na rota `/design/:id` e na aba Design do pain
 
 Cada prancheta renderiza em `iframe` com `sandbox="allow-scripts"` (sem `allow-same-origin`). No app Tauri, o HTML montado é registrado em memória no backend (`design_frame_register`, com hash SHA-256, TTL e limite de tamanho) e servido pelo URI scheme próprio `ags-design` (`ags-design://localhost/<id>` no macOS/Linux; `http://ags-design.localhost/<id>` no Windows) com CSP restritiva enviada por **header HTTP** (`default-src 'none'`, estilos e scripts inline, imagens `data:`, `form-action 'none'` e `base-uri 'none'`). A origem própria evita que o WKWebView/WebKitGTK herde `script-src 'self'` do documento principal (o que acontecia em `srcdoc` e bloqueava protótipos e o `FRAME_SCRIPT`), mantendo origem opaca, sem rede, sem acesso ao DOM e sem acesso ao IPC do Tauri; o iframe só fala com o painel por `postMessage` validado. No backend o HTML tem limite de tamanho e nunca é executado. No prompt de construção o HTML é escapado e truncado.
 
+Cada prancheta renderiza em `iframe` com `sandbox="allow-scripts"` (sem `allow-same-origin`) e `srcdoc` com a CSP `DESIGN_CSP` (`src/features/canvas/design/srcdoc.ts`), a lista exata da seção [Pranchetas vivas](#pranchetas-vivas-paridade-com-artifacts-etapa-23). Sem rede além dessas bibliotecas e sem acesso ao app; o iframe só fala com o app por `postMessage`, validado nos dois lados. No backend o HTML tem limite de tamanho e nunca é executado. No prompt de construção o HTML é escapado e truncado.
+
+## Pranchetas vivas: paridade com Artifacts (Etapa 23)
+
+A prancheta se comporta como um Artifact: JS e estado de verdade no Play. Código: `artboardBoot.ts` (o que roda no head da prancheta), `artboardStore.ts` (estado por prancheta no app), `artboardBridge.ts` (listeners e tema), `frameBridge.ts` (o script do Play) e `FocusedView.tsx` (a tela cheia).
+
+| O quê | Como |
+|---|---|
+| Rede | `DESIGN_CSP` é a única constante. Scripts: `cdnjs.cloudflare.com`, `cdn.jsdelivr.net/npm/`, `unpkg.com`, `cdn.tailwindcss.com`, `code.jquery.com`. Estilos: `fonts.googleapis.com`. Fontes: `fonts.gstatic.com`. Imagens: `data:` e `blob:`. `connect-src 'none'`, `form-action 'none'`, `base-uri 'none'`. Sandbox segue `allow-scripts`. |
+| Teclado | No Play a página é dona do teclado: digitar num campo nunca aciona atalho do app (Space, Backspace, Delete, Tab). O Esc sai do Play, a não ser que a página já tenha cancelado o evento (um diálogo que fecha com Esc). No Play, o botão direito num campo mantém o menu nativo (colar). |
+| Armazenamento | `localStorage` e `sessionStorage` por prancheta, por um shim no head. Gravar, apagar ou limpar vai ao app por `postMessage`; o app valida tipo e tamanho e grava em `design_artboard_storage` (uma linha por prancheta, com `ON DELETE CASCADE`). Limite de 1 MiB: bytes UTF-8 das chaves e dos valores das duas áreas, o mesmo cálculo no shim e no Rust. Passar do limite lança `QuotaExceededError` na página. O storage carrega ANTES do iframe (o script da página roda na montagem), então sobrevive a recarregar e a reabrir o app. Menu da prancheta → "Limpar dados da prancheta" (pede confirmação; o HTML não muda). |
+| Tema | O boot põe `data-theme="dark|light"` no html, `color-scheme` e o `matchMedia("(prefers-color-scheme: …)")` coerentes com o app. Trocar o tema do app manda a mensagem às pranchetas vivas, sem recarregar o srcdoc. `@media (prefers-color-scheme)` em CSS continua seguindo o sistema operacional: a prancheta usa `data-theme` para os tokens. |
+| Tela cheia | O expand (Abrir em tela cheia) entra com o Play ligado. Seletor de largura: original, desktop 1280, tablet 834, celular 390 (`focusGeometry.ts`). Preencher e Caber continuam valendo para a largura escolhida. |
+| Abrir e baixar | "Baixar .html" abre o diálogo de salvar (como antes). "Abrir no navegador do sistema" chama `design_open_external`: o backend grava `ade-ags-pranchetas/<id>.html` no temporário (sempre a mesma cópia por prancheta) e abre pelo opener do Tauri, direto da API Rust do plugin. Não há permissão nova na capability, nem servidor. A cópia leva a mesma CSP da prancheta. |
+| Erros | O boot relata erro não tratado, rejeição e `console.error` da prancheta (até 20 por documento). O app guarda os 5 últimos; a moldura mostra "⚠ n erros" no cabeçalho, com o último no tooltip. Zera ao criar um documento novo. O view state leva `lastErrors` (os 3 mais recentes, mensagem com 160 caracteres) e `ags design view` mostra. |
+
+Limitações, por decisão ou não verificadas:
+
+- `alert`, `confirm` e `prompt` ficam bloqueados: o sandbox continua sem `allow-modals`. Use um diálogo em HTML.
+- O Tailwind Play CDN não foi testado com a CSP nova (ela não tem `unsafe-eval`).
+- Links externos não saem da prancheta. Links locais viram navegação entre pranchetas.
+- Duas janelas da mesma prancheta (canvas e tela cheia) compartilham o último valor gravado.
+- Não verificado nesta etapa: WKWebView real, e o serving da prancheta por URI scheme com a CSP no header, que vem do PR `fix/pranchetas-scripts-webkit`.
+
 ## Fora do escopo
 
 Preview real do app em dev server por worktree e compartilhamento por link ficam para a etapa seguinte.
