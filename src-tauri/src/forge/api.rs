@@ -441,6 +441,16 @@ impl Api {
         Ok(Api { kind, base: kind.api_base(host), token: token.to_string(), http })
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_base(kind: ForgeKind, base: String, token: &str) -> Result<Self, ForgeError> {
+        let http = reqwest::Client::builder()
+            .user_agent("ADE AGS")
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| ForgeError::Api(e.to_string()))?;
+        Ok(Api { kind, base, token: token.to_string(), http })
+    }
+
     async fn call(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value, ForgeError> {
         let url = format!("{}{}", self.base, path);
         let mut req = self.http.request(method, &url);

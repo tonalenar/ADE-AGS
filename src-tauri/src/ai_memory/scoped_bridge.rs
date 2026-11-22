@@ -14,7 +14,7 @@ const TOOLS: &[&str] = &[
     "memory_write_page",
     "memory_patch_page",
 ];
-pub(super) fn reserved_project(project: &str) -> bool {
+pub(crate) fn reserved_project(project: &str) -> bool {
     let name = project.trim().to_ascii_lowercase();
     name == "_global" || name == "_profile" || name.starts_with("_profile.")
 }

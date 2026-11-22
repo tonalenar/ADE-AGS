@@ -3,7 +3,7 @@ use std::{io::Read, path::Path};
 
 /// Mesma fronteira de docs/marker-file.md v3.3.0. Um marcador parcial governa a busca,
 /// mas não fornece par seguro: nesse caso o chamador pode usar seu fallback único.
-pub(super) fn scope(cwd: &Path, home: Option<&Path>) -> Option<(String, String)> {
+pub(crate) fn scope(cwd: &Path, home: Option<&Path>) -> Option<(String, String)> {
     let start = std::fs::canonicalize(cwd).ok()?;
     let home = home.map(|h| std::fs::canonicalize(h).unwrap_or_else(|_| h.to_path_buf()));
     let boundary = match home {

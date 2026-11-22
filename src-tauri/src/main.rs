@@ -18,6 +18,9 @@ fn main() {
         }
         return;
     }
+    if let Some(code) = ade_ags_lib::memory_sync::askpass_entry() {
+        std::process::exit(code);
+    }
     if ade_ags_lib::desktop_apps::recovery_entry() { return; }
     ade_ags_lib::run()
 }

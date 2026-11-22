@@ -488,6 +488,9 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
 // END GENERATED: mcp-tools-help
 
 pub(crate) fn main() -> ExitCode {
+    if let Some(code) = ade_ags_lib::memory_sync::askpass_entry() {
+        return ExitCode::from(code as u8);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
