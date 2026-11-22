@@ -391,6 +391,7 @@ while :; do :; done
     #[test]
     fn claude_soma_mcp_preserva_ags_e_remove_settings_ao_encerrar() {
         let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+        let ags = fake.root.join("ags");
         let dir = fake.root.join("mcp");
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("tab-abc.json");
@@ -405,12 +406,12 @@ while :; do :; done
             path.to_string_lossy().into_owned(),
         ];
         let plan = crate::ai_memory::tabs::prepare(
+            &ags,
             &fake.program,
             &dir,
             "abc",
-            "claude",
+            (&fake.cwd, "w", "p"),
             &argv,
-            &Default::default(),
             &[],
         )
         .unwrap();
@@ -418,8 +419,20 @@ while :; do :; done
         let config: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(config["mcpServers"]["ags"]["command"], "ags");
         assert_eq!(
+            config["mcpServers"]["ai-memory"]["command"],
+            ags.to_string_lossy().as_ref()
+        );
+        assert_eq!(
             config["mcpServers"]["ai-memory"]["args"],
-            serde_json::json!(["mcp-bridge"])
+            serde_json::json!([
+                "ai-memory-bridge",
+                "--cwd",
+                fake.cwd.to_string_lossy(),
+                "--workspace",
+                "w",
+                "--project",
+                "p"
+            ])
         );
         let settings = plan.settings_file.clone().unwrap();
         let hooks: serde_json::Value =
@@ -444,28 +457,29 @@ while :; do :; done
     #[test]
     fn hooks_globais_ou_do_perfil_e_settings_explicito_nao_sao_duplicados() {
         let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+        let ags = fake.root.join("ags");
         let settings = fake.root.join("settings.json");
         let bytes = r#"{"hooks":{"SessionStart":[{"hooks":[{"command":"ai-memory hook --event session-start --agent claude-code"}]}]}}"#;
         fs::write(&settings, bytes).unwrap();
         let plan = crate::ai_memory::tabs::prepare(
+            &ags,
             &fake.program,
             &fake.root.join("mcp"),
             "abc",
-            "claude",
+            (&fake.cwd, "w", "p"),
             &[],
-            &Default::default(),
             &[settings.clone()],
         )
         .unwrap();
         assert!(plan.settings_file.is_none());
         assert_eq!(fs::read_to_string(settings).unwrap(), bytes);
         let plan = crate::ai_memory::tabs::prepare(
+            &ags,
             &fake.program,
             &fake.root.join("mcp"),
             "abc",
-            "claude",
+            (&fake.cwd, "w", "p"),
             &["--settings".into(), "user.json".into()],
-            &Default::default(),
             &[],
         )
         .unwrap();
@@ -474,7 +488,9 @@ while :; do :; done
 
     #[test]
     fn bridges_estaticos_nao_recebem_mcp_automatico_sem_escopo_imposto() {
-        let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+        let fake = Fake::new("ai-memory 3.3.0", "cat \"$(dirname \"$0\")/result.json\"");
+        fs::write(fake.root.join("result.json"), "[]").unwrap();
+        let ags = fake.root.join("ags");
         let env = std::collections::HashMap::from([(
             "OPENCODE_CONFIG_CONTENT".into(),
             r#"{"mcp":{"ags":{"command":["ags"]}},"permission":{"bash":"ask"}}"#.into(),
@@ -482,12 +498,20 @@ while :; do :; done
         let before = env.clone();
         let dir = fake.root.join("mcp");
         for agent in ["opencode", "codex"] {
-            let plan =
-                crate::ai_memory::tabs::prepare(&fake.program, &dir, "abc", agent, &[], &env, &[])
-                    .unwrap();
-            assert!(plan.args.is_empty());
-            assert!(plan.env.is_empty());
-            assert!(plan.settings_file.is_none());
+            let new_tab = crate::ai_memory::tabs::prepare_new_tab_with_ags(
+                Some(fake.program.clone()),
+                Some(ags.clone()),
+                "abc",
+                agent,
+                &dir,
+                &fake.root,
+                &fake.cwd,
+                &[],
+                &env,
+            );
+            assert!(new_tab.plan.args.is_empty());
+            assert!(new_tab.plan.env.is_empty());
+            assert!(new_tab.plan.settings_file.is_none());
             assert!(!dir.exists());
         }
         assert_eq!(env, before);
@@ -499,10 +523,25 @@ while :; do :; done
         assert!(!crate::ai_memory::tabs::enabled(Some("false")));
         let mut command = portable_pty::CommandBuilder::new("fake");
         command.env("AI_MEMORY_RUN_AUTOWIRE", "true");
+        command.env("AI_MEMORY_SCOPE_CWD", "/outro");
         crate::ai_memory::tabs::protect_pty_env(&mut command);
         assert_eq!(
             command.get_env("AI_MEMORY_RUN_AUTOWIRE"),
             Some(std::ffi::OsStr::new("false"))
+        );
+        assert!(command.get_env("AI_MEMORY_SCOPE_CWD").is_none());
+        let mut std_cmd = std::process::Command::new("fake");
+        std_cmd.env("AI_MEMORY_RUN_AUTOWIRE", "true");
+        std_cmd.env("AI_MEMORY_SCOPE_CWD", "/outro");
+        crate::ai_memory::tabs::protect_command_env(&mut std_cmd);
+        let std_envs: std::collections::HashMap<_, _> = std_cmd.get_envs().collect();
+        assert_eq!(
+            std_envs.get(std::ffi::OsStr::new("AI_MEMORY_RUN_AUTOWIRE")),
+            Some(&Some(std::ffi::OsStr::new("false")))
+        );
+        assert_eq!(
+            std_envs.get(std::ffi::OsStr::new("AI_MEMORY_SCOPE_CWD")),
+            Some(&None)
         );
         let old = Fake::new("ai-memory 3.2.9", "exit 99");
         assert!(!crate::ai_memory::tabs::supported_program(
@@ -572,16 +611,17 @@ while :; do :; done
     #[test]
     fn hooks_do_usuario_so_em_parte_ganham_so_os_eventos_que_faltam() {
         let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+        let ags = fake.root.join("ags");
         let settings = fake.root.join("settings.json");
         fs::write(&settings, r#"{"hooks":{"Stop":[{"hooks":[{"command":"ai-memory hook --event stop --agent claude-code"}]}]}}"#).unwrap();
         assert!(!crate::ai_memory::tabs::configured_hooks(std::slice::from_ref(&settings)));
         let plan = crate::ai_memory::tabs::prepare(
+            &ags,
             &fake.program,
             &fake.root.join("mcp"),
             "abc",
-            "claude",
+            (&fake.cwd, "w", "p"),
             &[],
-            &Default::default(),
             std::slice::from_ref(&settings),
         )
         .unwrap();
@@ -596,15 +636,16 @@ while :; do :; done
     #[test]
     fn config_do_usuario_invalida_continua_sem_hooks_da_aba() {
         let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+        let ags = fake.root.join("ags");
         let settings = fake.root.join("settings.json");
         fs::write(&settings, "invalid").unwrap();
         let plan = crate::ai_memory::tabs::prepare(
+            &ags,
             &fake.program,
             &fake.root.join("mcp"),
             "abc",
-            "claude",
+            (&fake.cwd, "w", "p"),
             &[],
-            &Default::default(),
             &[settings],
         )
         .unwrap();
@@ -637,14 +678,15 @@ while :; do :; done
     #[test]
     fn continuidade_preserva_args_nativos_e_injeta_hooks_uma_vez() {
         let fake = Fake::new("unused", "exit 99");
+        let ags = fake.root.join("ags");
         let native = vec!["claude".into(), "--model".into(), "modelo-do-perfil".into()];
         let plan = crate::ai_memory::tabs::prepare(
+            &ags,
             &fake.program,
             &fake.root,
             "continuity",
-            "claude",
+            (&fake.cwd, "w", "p"),
             &native,
-            &std::collections::HashMap::new(),
             &[],
         )
         .unwrap();
@@ -698,6 +740,154 @@ while :; do :; done
         ));
         fs::write(&settings, r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"ai-memory hook --event session-start"}]}]}}"#).unwrap();
         assert!(crate::ai_memory::tabs::configured_hooks(&[settings]));
+    }
+
+    #[test]
+    fn claude_sem_escopo_ou_com_projeto_reservado_nao_recebe_mcp_direto_nem_hooks() {
+        let fake = Fake::new("ai-memory 3.3.0", "cat \"$(dirname \"$0\")/result.json\"");
+        let dir = fake.root.join("mcp");
+        let home = fake.root.join("home");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        let config_path = dir.join("tab-abc.json");
+        fs::write(&config_path, r#"{"mcpServers":{"ags":{"command":"ags"}}}"#).unwrap();
+        let argv = vec!["claude".into(), "--mcp-config".into(), config_path.to_string_lossy().into_owned()];
+
+        // 1) Sem marcador e sem projeto único em list-projects.
+        fs::write(fake.root.join("result.json"), "[]").unwrap();
+        let empty = crate::ai_memory::tabs::prepare_new_tab_with(
+            Some(fake.program.clone()),
+            "abc",
+            "claude",
+            &dir,
+            &home,
+            &fake.cwd,
+            &argv,
+            &Default::default(),
+        );
+        assert!(empty.plan.args.is_empty(), "{:?}", empty.plan.args);
+        assert!(empty.plan.settings_file.is_none());
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+        assert!(saved["mcpServers"].get("ai-memory").is_none(), "{saved}");
+        assert!(saved["mcpServers"].get("ags").is_some());
+
+        // 2) Marcador apontando para projeto reservado (_global), mesmo com match em list-projects.
+        fs::write(
+            fake.root.join("result.json"),
+            r#"[{"workspace_name":"default","project_name":"pasta da aba","page_count":0}]"#,
+        )
+        .unwrap();
+        fs::write(fake.cwd.join(".ai-memory.toml"), "workspace = \"default\"\nproject = \"_global\"\n").unwrap();
+        let ags = fake.root.join("ags");
+        let reserved = crate::ai_memory::tabs::prepare_new_tab_with_ags(
+            Some(fake.program.clone()),
+            Some(ags.clone()),
+            "abc",
+            "claude",
+            &dir,
+            &home,
+            &fake.cwd,
+            &argv,
+            &Default::default(),
+        );
+        assert!(reserved.plan.args.is_empty(), "{:?}", reserved.plan.args);
+        assert!(reserved.plan.settings_file.is_none());
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+        assert!(saved["mcpServers"].get("ai-memory").is_none(), "{saved}");
+
+        // 3) Com escopo válido, sem binário `ags` não cai no `ai-memory mcp-bridge` direto.
+        fs::write(fake.cwd.join(".ai-memory.toml"), "workspace = \"team\"\nproject = \"repo\"\n").unwrap();
+        let without_ags = crate::ai_memory::tabs::prepare_new_tab_with_ags(
+            Some(fake.program.clone()),
+            None,
+            "abc",
+            "claude",
+            &dir,
+            &home,
+            &fake.cwd,
+            &argv,
+            &Default::default(),
+        );
+        assert!(without_ags.plan.args.is_empty(), "{:?}", without_ags.plan.args);
+        assert!(without_ags.plan.settings_file.is_none());
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+        assert!(saved["mcpServers"].get("ai-memory").is_none(), "{saved}");
+    }
+
+    #[test]
+    fn claude_com_escopo_usa_proxy_ags_e_mesmo_projeto_do_codex_e_opencode() {
+        let fake = Fake::new("ai-memory 3.3.0", "cat \"$(dirname \"$0\")/result.json\"");
+        let dir = fake.root.join("mcp");
+        let home = fake.root.join("home");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        let ags = fake.root.join("ags");
+        fs::write(&ags, "").unwrap();
+        let config_path = dir.join("tab-abc.json");
+        fs::write(&config_path, r#"{"mcpServers":{"ags":{"command":"ags"}}}"#).unwrap();
+        let argv = vec!["claude".into(), "--mcp-config".into(), config_path.to_string_lossy().into_owned()];
+
+        // 1) Marcador explícito.
+        fs::write(fake.cwd.join(".ai-memory.toml"), "workspace = \"team\"\nproject = \"meu-proj\"\n").unwrap();
+        let by_marker = crate::ai_memory::tabs::prepare_new_tab_with_ags(
+            Some(fake.program.clone()),
+            Some(ags.clone()),
+            "abc",
+            "claude",
+            &dir,
+            &home,
+            &fake.cwd,
+            &argv,
+            &Default::default(),
+        );
+        assert!(by_marker.plan.settings_file.is_some());
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+        assert_eq!(saved["mcpServers"]["ai-memory"]["command"], ags.to_string_lossy().as_ref());
+        assert_eq!(
+            saved["mcpServers"]["ai-memory"]["args"],
+            serde_json::json!([
+                "ai-memory-bridge",
+                "--cwd",
+                fake.cwd.to_string_lossy(),
+                "--workspace",
+                "team",
+                "--project",
+                "meu-proj"
+            ])
+        );
+
+        // 2) Fallback por projeto único de `list-projects --json`.
+        fs::remove_file(fake.cwd.join(".ai-memory.toml")).unwrap();
+        fs::write(
+            fake.root.join("result.json"),
+            r#"[{"workspace_name":"ws-auto","project_name":"pasta da aba","page_count":3}]"#,
+        )
+        .unwrap();
+        let by_unique = crate::ai_memory::tabs::prepare_new_tab_with_ags(
+            Some(fake.program.clone()),
+            Some(ags.clone()),
+            "abc",
+            "claude",
+            &dir,
+            &home,
+            &fake.cwd,
+            &argv,
+            &Default::default(),
+        );
+        assert!(by_unique.plan.settings_file.is_some());
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+        assert_eq!(
+            saved["mcpServers"]["ai-memory"]["args"],
+            serde_json::json!([
+                "ai-memory-bridge",
+                "--cwd",
+                fake.cwd.to_string_lossy(),
+                "--workspace",
+                "ws-auto",
+                "--project",
+                "pasta da aba"
+            ])
+        );
     }
 
     #[test]

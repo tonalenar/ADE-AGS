@@ -96,3 +96,16 @@ fn marcador_invalido_na_fronteira_nao_permite_ler_o_pai() {
     std::fs::create_dir(f.0.join("other-home")).unwrap();
     assert!(scope(&f.0.join("checkout/sub"), Some(&f.0.join("other-home"))).is_none());
 }
+
+#[test]
+fn marcador_com_projeto_reservado_retorna_bloqueio_explicito() {
+    let f = Fixture::new();
+    for reserved in ["_global", " _GLOBAL ", "_profile", "_profile.work"] {
+        f.marker("checkout", &format!("workspace = \"default\"\nproject = \"{reserved}\"\n"));
+        assert_eq!(
+            resolve(&f.0.join("checkout/sub"), Some(&f.0)),
+            Scope::Reserved,
+            "projeto reservado {reserved} precisa bloquear fallback"
+        );
+    }
+}

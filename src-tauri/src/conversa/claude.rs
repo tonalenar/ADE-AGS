@@ -456,7 +456,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     }
     // O ai-memory entra por processo, como nas abas: hooks e MCP só no nascimento (a troca de modelo ou de acesso, e a
     // retomada, abrem outro processo e passam por aqui de novo). Falhar aqui nunca impede a conversa de abrir.
-    let mut memory = memoria::for_thread(db, row, &program, &args, env.as_ref());
+    let mut memory = memoria::for_thread(app, db, row, &program, &args, env.as_ref());
     memoria::merge_session_settings(&mut memory, &session_settings)?;
     args.extend(memory.args.iter().cloned());
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -474,6 +474,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     cmd.envs(memory.env.iter().map(|(k, v)| (k, v)));
     // Quem a conversa é para o `ags` (`thread:<id>`), para ela delegar e responder num time (`chat_team`).
     cmd.envs(crate::chat_team::env::thread_env(&row.id));
+    crate::ai_memory::tabs::protect_command_env(&mut cmd);
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
     let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir o Claude: {e}"))?;
