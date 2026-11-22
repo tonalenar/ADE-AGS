@@ -467,25 +467,61 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
         })),
     );
 
-    // Una tarea con origen de pool conserva ese destino fijado. El opt-in permite cambiar
-    // cuenta/modelo dentro del mismo pool y TUI, una vez, tras acceso o límite.
+    // Uma tarefa com origem de pool segue o modo global unificado (`chat.pool.mode`) e o estado
+    // `paused` do próprio pool: `auto` troca dentro do pool, `ask` pausa e notifica, `off` ou
+    // pausado não troca sozinho.
     if let Some(origin) = super::pool_failover::task_pool(db, &task.id)
     {
         let pool = crate::accounts::pools::load(db)
             .into_iter()
             .find(|pool| pool.id == origin.id);
         if let Some(pool) = pool
-            && pool.failover
             && pool.agent_id == task.agent_id
             && origin.agent_id == task.agent_id
         {
-            super::pool_failover::cool_down_account(&key, now);
+            let mode = crate::accounts::pools::load_mode(db);
             let already_failed_over = super::pool_failover::task_already_failed_over(db, &task.id);
-            if super::pool_failover::failure_eligible(kind, pool.failover, already_failed_over) {
-                match failover_in_pool(app, db, task, &origin, &pool.members, &reason, kind, now) {
-                    Ok(()) => return,
-                    Err(error) => eprintln!("[runs] '{}' no pudo cambiar dentro del pool: {error}", task.title),
+            match super::pool_failover::task_action(mode, pool.paused, kind, already_failed_over) {
+                super::pool_failover::TaskPoolAction::AutoSwitch => {
+                    super::pool_failover::cool_down_account(&key, now);
+                    match failover_in_pool(app, db, task, &origin, &pool.members, &reason, kind, now) {
+                        Ok(()) => return,
+                        Err(error) => eprintln!("[runs] '{}' não pôde trocar dentro do pool: {error}", task.title),
+                    }
                 }
+                super::pool_failover::TaskPoolAction::PauseAndAsk => {
+                    super::pool_failover::cool_down_account(&key, now);
+                    let _ = super::pool_failover::record_pool_ask(
+                        db,
+                        &task.id,
+                        &pool.id,
+                        &pool.name,
+                        task.account_id.as_deref(),
+                        &reason,
+                        now,
+                    );
+                    if let Ok(conn) = db.lock() {
+                        let _ = store::tag_error(&conn, &task.id, "[pausada: confirme a troca de conta no pool]");
+                    }
+                    crate::bus::publish(
+                        Some(app),
+                        crate::bus::Publish::new("account.pool_ask")
+                            .task(&task.id)
+                            .run(&task.run_id)
+                            .data(serde_json::json!({
+                                "taskId": task.id,
+                                "taskTitle": task.title,
+                                "runId": task.run_id,
+                                "poolId": pool.id,
+                                "poolName": pool.name,
+                                "fromAccount": task.account_id,
+                                "reason": reason,
+                                "kind": kind.code(),
+                            })),
+                    );
+                    return;
+                }
+                super::pool_failover::TaskPoolAction::None => {}
             }
         }
     }
@@ -530,9 +566,11 @@ fn failover_in_pool(
         return Err("a conta original não pertence mais ao pool".into());
     }
     let spec = crate::accounts::pools::spec_for(db, &origin.id)?;
-    if !spec.failover || spec.agent_id != task.agent_id {
-        return Err("o pool não permite mais failover para esta TUI".into());
+    if spec.paused || spec.agent_id != task.agent_id {
+        return Err("o pool está pausado ou não permite mais troca para esta TUI".into());
     }
+    // No modo `auto` com pool não pausado, autorizamos a seleção de substituição no pool.
+    let spec = crate::accounts::pools::PoolSpec { failover: true, ..spec };
     let request = super::routing::RouteRequest {
         agent_id: Some(task.agent_id.clone()),
         // Try the current model first; confirmed model-access errors may choose another.

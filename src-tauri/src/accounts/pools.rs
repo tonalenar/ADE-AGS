@@ -23,10 +23,56 @@ use crate::database::DbConnection;
 
 const POOLS_KEY: &str = "accounts.pools";
 const CURSORS_KEY: &str = "accounts.pool_cursors";
+/// Modo global de troca quando a cota de uma conta acaba (vale para conversas e tarefas em pool).
+pub const MODE_KEY: &str = "chat.pool.mode";
 pub const MAX_POOLS: usize = 20;
 const MAX_NAME: usize = 30;
 /// El prefijo con que se pide un pool donde iría una cuenta.
 pub const PREFIX: &str = "pool:";
+
+/// Política global quando a cota de uma conta em um pool acaba (conversas e tarefas em segundo plano).
+/// Sem valor salvo, o padrão é `Ask` ("Perguntar").
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolMode {
+    Off,
+    #[default]
+    Ask,
+    Auto,
+}
+
+impl PoolMode {
+    /// Interpreta o valor guardado em `settings`.
+    /// - Ausente ou vazio: `Ask` ("Perguntar", novo padrão unificado).
+    /// - `"off"`, `"ask"`, `"auto"`: respeita o valor salvo.
+    /// - Valor desconhecido: falha fechado em `Off`.
+    pub fn parse_setting(raw: Option<&str>) -> Self {
+        match raw.map(str::trim) {
+            None | Some("") => PoolMode::Ask,
+            Some("off") => PoolMode::Off,
+            Some("ask") => PoolMode::Ask,
+            Some("auto") => PoolMode::Auto,
+            Some(_) => PoolMode::Off,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PoolMode::Off => "off",
+            PoolMode::Ask => "ask",
+            PoolMode::Auto => "auto",
+        }
+    }
+}
+
+pub fn load_mode(db: &DbConnection) -> PoolMode {
+    let raw = crate::database::get_setting(db, MODE_KEY).ok().flatten();
+    PoolMode::parse_setting(raw.as_deref())
+}
+
+pub fn save_mode(db: &DbConnection, mode: PoolMode) -> Result<(), String> {
+    crate::database::set_setting(db, MODE_KEY, mode.as_str())
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -67,10 +113,13 @@ pub struct Pool {
     pub members: Vec<Option<String>>,
     #[serde(default)]
     pub strategy: Strategy,
-    /// Al fallar por límite de uso, permite reintentar una vez dentro de este pool.
-    /// Los pools guardados antes de esta opción siguen desactivados.
+    /// Campo legado de opt-in por pool. Mantido para migração aditiva sem perda de dados:
+    /// pools salvos antes de `paused` com `failover: false` carregam com `paused: true`.
     #[serde(default)]
     pub failover: bool,
+    /// Pausa as trocas neste pool (substitui o antigo `failover` por pool). Default: `false`.
+    #[serde(default)]
+    pub paused: bool,
 }
 
 /// Identidad del pool que originó una tarea. Se guarda en `settings`, fuera de la tabla
@@ -94,6 +143,7 @@ pub struct PoolSpec {
     pub strategy: Strategy,
     pub start: usize,
     pub failover: bool,
+    pub paused: bool,
 }
 
 /// `pool:Trabajo` → `Trabajo`.
@@ -151,6 +201,41 @@ pub fn validate(
     Ok(name)
 }
 
+/// Valida a edição de um pool existente (preserva o `id`, permite manter o mesmo nome).
+pub fn validate_update(
+    existing: &[Pool],
+    id: &str,
+    name: &str,
+    agent_id: &str,
+    members: &[Option<String>],
+    accounts: &[(String, String)],
+) -> Result<String, String> {
+    let name = clean_name(name)?;
+    if existing.iter().any(|p| p.id != id && p.name.to_lowercase() == name.to_lowercase()) {
+        return Err(format!("Já existe um pool chamado '{name}'."));
+    }
+    if members.len() < 2 {
+        return Err("Um pool precisa de pelo menos 2 contas (para uma só, use a própria conta).".into());
+    }
+    for (i, m) in members.iter().enumerate() {
+        if members[..i].contains(m) {
+            return Err("Uma conta aparece duas vezes no pool.".into());
+        }
+        if let Some(aid_req) = m {
+            match accounts.iter().find(|(aid, _)| aid == aid_req) {
+                None => return Err(format!("A conta '{aid_req}' não existe.")),
+                Some((_, a)) if a != agent_id => {
+                    return Err(format!(
+                        "A conta '{aid_req}' é de '{a}', não de '{agent_id}': um pool é de uma TUI só."
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    Ok(name)
+}
+
 /// Un pool por nombre (sin mayúsculas) o por id.
 pub fn find<'a>(pools: &'a [Pool], wanted: &str) -> Result<&'a Pool, String> {
     let needle = wanted.trim().to_lowercase();
@@ -168,11 +253,31 @@ pub fn find<'a>(pools: &'a [Pool], wanted: &str) -> Result<&'a Pool, String> {
 
 // ── Guardado ────────────────────────────────────────────────────────
 
+/// Lê os pools do JSON salvo aplicando a migração aditiva:
+/// pools gravados antes do campo `paused` que tinham `failover: false` (ou ausente) continuam
+/// pausados (`paused: true`) para não iniciar troca automática inesperada em tarefas.
+pub fn parse_pools_migrated(raw: &str) -> Vec<Pool> {
+    let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(raw) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let has_paused = item.get("paused").is_some();
+        if let Ok(mut pool) = serde_json::from_value::<Pool>(item) {
+            if !has_paused && !pool.failover {
+                pool.paused = true;
+            }
+            out.push(pool);
+        }
+    }
+    out
+}
+
 pub fn load(db: &DbConnection) -> Vec<Pool> {
     crate::database::get_setting(db, POOLS_KEY)
         .ok()
         .flatten()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .map(|raw| parse_pools_migrated(&raw))
         .unwrap_or_default()
 }
 
@@ -181,12 +286,63 @@ pub fn save(db: &DbConnection, pools: &[Pool]) -> Result<(), String> {
     crate::database::set_setting(db, POOLS_KEY, &raw)
 }
 
+/// Atualiza nome, membros, ordem e estratégia de um pool, preservando `pool.id` e `agent_id`.
+pub fn update(
+    db: &DbConnection,
+    id: &str,
+    name: &str,
+    members: Vec<Option<String>>,
+    strategy: Strategy,
+    accounts: &[(String, String)],
+) -> Result<Pool, String> {
+    let mut all = load(db);
+    let idx = all.iter().position(|p| p.id == id).ok_or("O pool não existe mais.")?;
+    let agent_id = all[idx].agent_id.clone();
+    let clean = validate_update(&all, id, name, &agent_id, &members, accounts)?;
+    all[idx].name = clean;
+    all[idx].members = members;
+    all[idx].strategy = strategy;
+    let updated = all[idx].clone();
+    save(db, &all)?;
+    Ok(updated)
+}
+
+/// Pausa ou retoma as trocas neste pool (espelha `failover = !paused` por compatibilidade).
+pub fn set_paused(db: &DbConnection, id: &str, paused: bool) -> Result<Pool, String> {
+    let mut all = load(db);
+    let pool = all.iter_mut().find(|p| p.id == id).ok_or("O pool não existe mais.")?;
+    pool.paused = paused;
+    pool.failover = !paused;
+    let updated = pool.clone();
+    save(db, &all)?;
+    Ok(updated)
+}
+
 fn cursors(db: &DbConnection) -> std::collections::HashMap<String, usize> {
     crate::database::get_setting(db, CURSORS_KEY)
         .ok()
         .flatten()
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .unwrap_or_default()
+}
+
+/// Igual a `spec_for`, mas somente leitura: não avança o cursor de `round_robin`.
+/// Usado pela tela de Pools para mostrar "Agora escolheria X" usando `routing::pick_in_pool`.
+pub fn spec_preview(db: &DbConnection, wanted: &str) -> Result<PoolSpec, String> {
+    let pools = load(db);
+    let pool = find(&pools, wanted)?;
+    let turns = cursors(db);
+    let start = turns.get(&pool.id).copied().unwrap_or(0);
+    Ok(PoolSpec {
+        id: pool.id.clone(),
+        name: pool.name.clone(),
+        agent_id: pool.agent_id.clone(),
+        members: pool.members.clone(),
+        strategy: pool.strategy,
+        start,
+        failover: pool.failover,
+        paused: pool.paused,
+    })
 }
 
 /// El pool listo para elegir, y avanza su turno: cada pedido de `round_robin` arranca un
@@ -210,6 +366,7 @@ pub fn spec_for(db: &DbConnection, wanted: &str) -> Result<PoolSpec, String> {
         strategy: pool.strategy,
         start,
         failover: pool.failover,
+        paused: pool.paused,
     })
 }
 

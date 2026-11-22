@@ -292,6 +292,7 @@ pub(crate) const METHODS: &[(&str, Class)] = &[
     ("window.create", CALLER_OR_OUTSIDE),
     ("workspace.open", CALLER_OR_OUTSIDE),
     ("pool.create", CALLER_OR_OUTSIDE),
+    ("pool.update", CALLER_OR_OUTSIDE),
     // Frota: o `taskId` (ou a aba) declarado tem de ser o provado.
     ("run.approve", FLEET),
     ("run.roster", FLEET),

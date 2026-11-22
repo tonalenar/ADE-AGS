@@ -777,6 +777,8 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
         .filter(|name| {
             !name.starts_with("chat_")
                 && !name.starts_with("design_")
+                // Pools são configuração da pessoa: só sessões interativas editam, nunca tarefa da Frota.
+                && !name.starts_with("pool_")
                 && !name.starts_with("device_")
                 && *name != "sim_act"
                 && *name != "desk_act"
@@ -878,7 +880,8 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
             + 2
             + design
             + computer_use.len()
-            + devices.len(),
+            + devices.len()
+            + tab.iter().filter(|name| name.starts_with("pool_")).count(),
         offered.len()
     );
 }
@@ -4174,7 +4177,7 @@ mod autorizacao {
         );
     }
     const LIVRE: usize = 28;
-    const ESCOPO: usize = 193;
+    const ESCOPO: usize = 194;
     const PESSOA: usize = 4;
     const PAPEL: usize = 2;
 

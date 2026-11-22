@@ -19,6 +19,7 @@ describe("regiões geradas (scripts/check-catalogs.ts)", () => {
       'const ORCHESTRATION_TOOLS: &[OrchestrationTool] = &[\n    OrchestrationTool { name: "run_plan" },\n    OrchestrationTool { name: "memory_get" },\n];',
       'const PEER_TOOLS: &[(&str, &str)] = &[\n    ("peer_tell", "peer.tell"),\n];',
       'const CHAT_TOOLS: &[ChatTool] = &[\n    ChatTool { name: "chat_list", ipc: "chat.list" },\n];',
+      'const POOL_TOOLS: &[PoolTool] = &[\n    PoolTool { name: "pool_list", ipc: "pool.list", read_only: true },\n];',
       'const DESIGN_TOOLS: &[DesignTool] = &[\n];',
       'const RENDER_TOOLS: &[RenderTool] = &[\n    RenderTool { name: "render_publish", cli: "render.publish", read_only: false },\n];',
       'const COMPUTER_USE_TOOLS: &[ComputerUseTool] = &[\n    ComputerUseTool { name: "sim_act", dispatch: "sim.act" },\n];',
@@ -28,7 +29,7 @@ describe("regiões geradas (scripts/check-catalogs.ts)", () => {
     const families = mcpTools(mcp, git);
     expect(families.map((f) => [f.family, f.tools])).toEqual([
       ["Browser", ["browser_click"]], ["Fleet orchestration", ["run_plan"]], ["Fleet memory", ["memory_get"]],
-      ["Git account", ["git_push"]], ["Peers and team", ["peer_tell"]], ["Chat-mode conversations", ["chat_list"]],
+      ["Git account", ["git_push"]], ["Peers and team", ["peer_tell"]], ["Chat-mode conversations", ["chat_list"]], ["Account pools", ["pool_list"]],
       ["HTML pages", ["render_publish"]], ["Computer use", ["sim_act"]], ["Devices", ["device_list", "device_shot", "device_action"]],
       ["Questions to the person", ["ask_user"]], ["Permission", ["approve_tool_use"]],
     ]);

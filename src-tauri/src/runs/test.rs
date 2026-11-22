@@ -5071,6 +5071,7 @@ fn pool_spec(strategy: Strategy, members: &[Option<&str>], start: usize) -> Pool
         strategy,
         start,
         failover: false,
+        paused: false,
     }
 }
 

@@ -136,7 +136,7 @@ describe("AddAccountDialog: passo de login não derruba o terminal", () => {
     // O texto do passo de login lança no render em que a conta é criada.
     estado.quebrarTexto = true;
     act(() => {
-      botao("settings.accounts.add.next").click();
+      botao("settings.accounts.add.continue").click();
     });
     await descarregar();
 
@@ -153,7 +153,7 @@ describe("AddAccountDialog: passo de login não derruba o terminal", () => {
     // O rodapé do passo de login lança no render em que a conta é criada.
     estado.quebrarRodape = true;
     act(() => {
-      botao("settings.accounts.add.next").click();
+      botao("settings.accounts.add.continue").click();
     });
     await descarregar();
 
@@ -169,7 +169,7 @@ describe("AddAccountDialog: passo de login não derruba o terminal", () => {
     // O título do passo de login lança no render em que a conta é criada (o título vai ao cabeçalho do AppDialog).
     estado.quebrarTitulo = true;
     act(() => {
-      botao("settings.accounts.add.next").click();
+      botao("settings.accounts.add.continue").click();
     });
     await descarregar();
 

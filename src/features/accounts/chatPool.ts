@@ -3,17 +3,20 @@ import { invoke } from "@tauri-apps/api/core";
 import { getSetting, setSetting } from "@/shared/ipc/settings";
 
 /**
- * O pool de contas no chat: quando a conta de uma conversa esgota o limite, ela segue em outra conta do MESMO
- * pool. O interruptor é global, de decisão da pessoa, e o padrão é desligado (ver `conversa::pool`).
+ * Política global de troca de conta em pools (vale para conversas e tarefas em segundo plano).
+ * Sem valor salvo, o padrão é `"ask"` ("Perguntar"). Ver `accounts/pools.rs` e `conversa/pool.rs`.
  */
 export type ChatPoolMode = "off" | "ask" | "auto";
 
 export const CHAT_POOL_MODES: ChatPoolMode[] = ["off", "ask", "auto"];
 export const CHAT_POOL_MODE_KEY = "chat.pool.mode";
 
-/** Valor guardado → modo. Qualquer coisa desconhecida é «desligado». Pura. */
+/** Valor guardado → modo. Ausente/vazio = `"ask"` ("Perguntar"); desconhecido falha fechado em `"off"`. Pura. */
 export function parseChatPoolMode(raw: string | null | undefined): ChatPoolMode {
-  return raw === "ask" || raw === "auto" ? raw : "off";
+  if (raw === null || raw === undefined || raw.trim() === "") return "ask";
+  const value = raw.trim();
+  if (value === "off" || value === "ask" || value === "auto") return value;
+  return "off";
 }
 
 export const loadChatPoolMode = async (): Promise<ChatPoolMode> => parseChatPoolMode(await getSetting(CHAT_POOL_MODE_KEY).catch(() => null));

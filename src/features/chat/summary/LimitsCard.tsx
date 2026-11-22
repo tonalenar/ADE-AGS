@@ -14,6 +14,7 @@ import { useTabsStore } from "@/features/tabs/store";
 
 import type { ConversationCard } from "../chatModel";
 import { useChatLive } from "../liveStore";
+import { summarizeOtherAccounts } from "../pickerLimits";
 import { threadIdOf } from "../structured/model";
 import { useStructured } from "../structured/store";
 import { teamLedBy } from "../team/teamModel";
@@ -83,10 +84,9 @@ function useTurnEnds(refs: string[]): number {
 }
 
 /**
- * O cartão "Limites de uso" do Resumo: a cota da conta que a conversa usa (janela atual e semanal) e, num
- * time, as contas dos integrantes, recolhidas. Lê o `useUsageStore` (o mesmo do painel "Uso" do rodapé da
- * barra), e só atualiza as contas em uso ao abrir o Resumo e ao fim de cada turno, respeitando a validade
- * do store. As outras contas mostram o último snapshot local. Sem fonte ou com falha: "não medido", sem barra.
+ * O cartão "Limites de uso" do Resumo: a cota da conta que a conversa usa (janela atual e semanal) e
+ * "Outras contas" recolhido por padrão, sem badges nem chips. Fechado, mostra só a quantidade e um aviso
+ * discreto quando alguma conta passou de 80%; aberto, mostra uma lista compacta onde cada conta abre seus detalhes.
  */
 export function LimitsCard({ conversation }: { conversation: ConversationCard }) {
   const { t } = useTranslation();
@@ -103,20 +103,19 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
   const listedUnmeasured = useMemo(() => new Set(detected.filter((a) => a.available && LISTED_UNMEASURED.has(a.id)).map((a) => a.id)), [detected]);
   const [summaries, setSummaries] = useState<Record<string, AccountUsageSummary>>({});
   const [poolState, setPoolState] = useState<ChatPoolState | null>(null);
+  const [othersOpen, setOthersOpen] = useState(false);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const pools = usePools();
   useEffect(() => startTeams(), []);
 
   const refs = useMemo(() => [conversation.tabId], [conversation.tabId]);
   const turnEnds = useTurnEnds(refs);
-  // Mostra as contas conectadas, com as usadas por esta conversa primeiro.
   const entries = useMemo(
     () => connectedAccounts({ accounts, systemAccounts, used, measured: MEASURED_AGENTS, agyInstalled: agy.usage?.installed ?? false, listedUnmeasured }),
     [accounts, systemAccounts, used, agy.usage?.installed, listedUnmeasured],
   );
 
-  // Atualiza somente as contas desta conversa/time. As demais ficam visíveis com o último valor local conhecido.
   const keys = entries.map((e) => e.key).join("|");
-  // Só a identidade das contas em uso conta: trocar de aba ou de integrante sem trocar de conta não relê a cota.
   const usedKey = used.map((u) => u.key).join("|");
   const usesAgy = used.some((entry) => entry.agentId === "antigravity" && !entry.accountId);
   useEffect(() => {
@@ -135,7 +134,6 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
     return () => { alive = false; };
   }, [keys, turnEnds, usedKey]); // eslint-disable-line react-hooks/exhaustive-deps -- `entries` muda com `keys`; `loaded` só vale na primeira vez
 
-  // O pool da conversa: relido junto com a cota (a troca acontece no fim de um turno).
   const threadId = threadIdOf(conversation.tabId);
   useEffect(() => {
     if (!threadId) return;
@@ -143,6 +141,7 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
     chatPoolState(threadId).then((s) => alive && setPoolState(s), () => undefined);
     return () => { alive = false; };
   }, [threadId, turnEnds]);
+
   const poolNote = (u: { agentId: string; accountId?: string | null }): string | null => {
     if (!threadId) return null;
     if (poolState?.poolName) {
@@ -157,7 +156,6 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
   const now = Math.floor(Date.now() / 1000);
   const readingOf = (entry: AccountEntry): AccountReading => {
     if (!MEASURED_AGENTS.has(entry.agentId)) return { state: "unmeasured", reason: LISTED_UNMEASURED.has(entry.agentId) ? "noQuotaSource" : "noSource" };
-    // O Antigravity sem perfil é o login local do `agy`: a mesma leitura do canvas.
     if (entry.agentId === "antigravity" && !entry.accountId) return readAgy(agy, true, now);
     const account = entry.account;
     if (!account) return { state: "unmeasured", reason: !loaded ? "loading" : entry.accountId ? "unresolved" : "noSource" };
@@ -169,6 +167,7 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
   const [main, ...rest] = entries;
   const mainReading = main ? readingOf(main) : null;
   const headline = mainReading ? headlineOf(mainReading) : null;
+  const others = summarizeOtherAccounts(rest, readingOf);
 
   return (
     <Section id="limits" title={t("chat.summary.limits.title")} flat
@@ -179,12 +178,76 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
       {main && mainReading && (
         <AccountBlock entry={main} reading={mainReading} budget={budgetOf(summaries[main.key])} now={now} poolNote={poolNote(main)} />
       )}
-      {rest.length > 0 && (
-        <div className="mt-2 pt-3 border-t border-gray-200 dark:border-white/[0.08] flex flex-col gap-4">
-          <div className="px-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-white/35">{t("chat.summary.limits.others", { count: rest.length })}</div>
-          {rest.map((entry) => (
-            <AccountBlock key={entry.key} entry={entry} reading={readingOf(entry)} budget={budgetOf(summaries[entry.key])} now={now} />
-          ))}
+      {others.count > 0 && (
+        <div className="mt-2 pt-2.5 border-t border-gray-200 dark:border-white/[0.08] flex flex-col gap-2">
+          <button
+            type="button"
+            aria-expanded={othersOpen}
+            onClick={() => setOthersOpen((v) => !v)}
+            className="flex items-center gap-1.5 px-0.5 py-0.5 text-left text-[12px] text-gray-500 dark:text-white/55 hover:text-gray-800 dark:hover:text-white transition-colors"
+          >
+            <span aria-hidden="true" className="text-[10px] w-3 text-center">{othersOpen ? "▾" : "▸"}</span>
+            <span className="flex-1 font-medium">{t("chat.summary.limits.others", { count: others.count })}</span>
+          </button>
+
+          {!othersOpen && others.highUsageCount > 0 && (
+            <p className={`m-0 px-0.5 text-[11.5px] ${others.warningLevel === "full" ? TEXT.full : TEXT.warn}`}>
+              {t("chat.summary.limits.othersHighUsage", { count: others.highUsageCount })}
+            </p>
+          )}
+
+          {othersOpen && (
+            <div className="flex flex-col gap-1.5">
+              {others.items.map((item) => {
+                const open = expandedKey === item.entry.key;
+                const displayName = `${agentName(item.entry.agentId)} · ${
+                  item.reading.state === "unmeasured" && item.reading.reason === "unresolved"
+                    ? t("chat.summary.limits.unresolvedAccount")
+                    : accountName(item.entry.account, t)
+                }`;
+                return (
+                  <div key={item.entry.key} className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      onClick={() => setExpandedKey(open ? null : item.entry.key)}
+                      className="flex items-center gap-2 px-1 py-1 rounded-md text-left hover:bg-gray-100/80 dark:hover:bg-white/[0.04] transition-colors"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-gray-700 dark:text-white/75" title={displayName}>
+                        {displayName}
+                      </span>
+                      <span
+                        role="progressbar"
+                        aria-label={displayName}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={item.percent ?? 0}
+                        className="relative w-14 h-1.5 shrink-0 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden"
+                      >
+                        {item.percent !== null && (
+                          <span className={`absolute inset-y-0 left-0 rounded-full ${FILL[item.level]}`} style={{ width: `${item.percent}%` }} />
+                        )}
+                      </span>
+                      <span className={`w-9 shrink-0 text-right text-[11.5px] tabular-nums ${TEXT[item.level]}`}>
+                        {item.percent === null ? "—" : `${item.percent}%`}
+                      </span>
+                    </button>
+                    {open && (
+                      <div className="pl-2.5 ml-1 border-l border-gray-200 dark:border-white/[0.08] pb-1">
+                        <AccountBlock
+                          entry={item.entry}
+                          reading={item.reading}
+                          budget={budgetOf(summaries[item.entry.key])}
+                          now={now}
+                          hideHeader
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </Section>
@@ -196,15 +259,24 @@ function accountName(account: AccountLike | null, t: (k: string) => string): str
 }
 
 /** Uma conta: «Agente · conta» (e quem da conversa a usa), e uma barra por janela, ou «não medido» com o motivo. */
-function AccountBlock({ entry, reading, budget, now, poolNote = null }: { entry: AccountEntry; reading: AccountReading; budget: Budget | null; now: number; poolNote?: string | null }) {
+function AccountBlock({ entry, reading, budget, now, poolNote = null, hideHeader = false }: {
+  entry: AccountEntry;
+  reading: AccountReading;
+  budget: Budget | null;
+  now: number;
+  poolNote?: string | null;
+  hideHeader?: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2">
-      <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45 truncate" title={entry.who.join(", ")}>
-        <span className="font-medium text-gray-800 dark:text-white/85">{agentName(entry.agentId)}</span>
-        {" · "}{reading.state === "unmeasured" && reading.reason === "unresolved" ? t("chat.summary.limits.unresolvedAccount") : accountName(entry.account, t)}
-        {entry.who.length > 0 && <span className="text-gray-400 dark:text-white/35">{" · "}{t("chat.summary.limits.usedBy", { who: entry.who.join(", ") })}</span>}
-      </div>
+      {!hideHeader && (
+        <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45 truncate" title={entry.who.join(", ")}>
+          <span className="font-medium text-gray-800 dark:text-white/85">{agentName(entry.agentId)}</span>
+          {" · "}{reading.state === "unmeasured" && reading.reason === "unresolved" ? t("chat.summary.limits.unresolvedAccount") : accountName(entry.account, t)}
+          {entry.who.length > 0 && <span className="text-gray-400 dark:text-white/35">{" · "}{t("chat.summary.limits.usedBy", { who: entry.who.join(", ") })}</span>}
+        </div>
+      )}
       {poolNote && <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45">{poolNote}</div>}
       {reading.state === "measured" ? (
         <>
@@ -233,7 +305,6 @@ function Unmeasured({ reason }: { reason: string }) {
 function WindowBar({ window: w, now, rejected }: { window: LimitWindow; now: number; rejected: boolean }) {
   const { t, i18n } = useTranslation();
   const kindLabel = w.kind === "session" ? t("chat.accounts.window") : t("chat.accounts.week");
-  // Um grupo de modelos (Antigravity) leva o nome na frente da janela; a de um modelo é só o nome.
   const label = w.kind === "model" ? w.label ?? "" : w.label ? `${w.label} · ${kindLabel}` : kindLabel;
   const level = rejected && w.kind === "session" ? "full" : limitLevel(w.percent);
   const when = renewalText(w, now, i18n.language, t);

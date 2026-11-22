@@ -1,4 +1,4 @@
-//! Pools de cuentas: `ags pools | pool create|delete`. Ver `crate::accounts::pools`.
+//! Pools de cuentas: `ags pools | pool create|update|delete`. Ver `crate::accounts::pools`.
 //!
 //! Un pool agrupa cuentas de una misma TUI y reparte entre ellas por una estrategia; se pide
 //! con `pool:<nombre>` donde iría una cuenta (`ags tab create --agent claude-code --account
@@ -6,6 +6,7 @@
 //!
 //! No guarda ningún secreto: solo nombra cuentas que ya existen.
 
+use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -60,7 +61,15 @@ fn describe(pool: &Pool, accounts: &[(String, String, String)]) -> Value {
             Some(id) => accounts.iter().find(|(aid, _, _)| aid == id).map(|(_, _, n)| n.clone()).unwrap_or_else(|| format!("{id} (apagada)")),
         })
         .collect();
-    json!({ "id": pool.id, "name": pool.name, "agent": pool.agent_id, "strategy": pool.strategy.as_str(), "accounts": names, "failover": pool.failover })
+    json!({
+        "id": pool.id,
+        "name": pool.name,
+        "agent": pool.agent_id,
+        "strategy": pool.strategy.as_str(),
+        "accounts": names,
+        "failover": pool.failover,
+        "paused": pool.paused,
+    })
 }
 
 pub(super) fn pool_list(app: &AppHandle, _args: &Value) -> Result<Value, String> {
@@ -76,16 +85,55 @@ pub(super) fn pool_create(app: &AppHandle, args: &Value) -> Result<Value, String
     let accounts = created_accounts(&db)?;
     let members = members_from_names(&accounts, &agent, &arg_str(args, "accounts")?)?;
     let strategy = arg_str_opt(args, "strategy").map(|s| Strategy::parse(&s)).transpose()?.unwrap_or_default();
-    let failover = args.get("failover").and_then(Value::as_bool).unwrap_or(false);
+    let paused = args.get("paused").and_then(Value::as_bool).unwrap_or(false);
+    let failover = args.get("failover").and_then(Value::as_bool).unwrap_or(!paused);
 
     let mut all = pools::load(&db);
     let pairs: Vec<(String, String)> = accounts.iter().map(|(id, a, _)| (id.clone(), a.clone())).collect();
     let name = pools::validate(&all, &name, &agent, &members, &pairs)?;
-    let pool = Pool { id: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(), name, agent_id: agent, members, strategy, failover };
+    let pool = Pool {
+        id: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(),
+        name,
+        agent_id: agent,
+        members,
+        strategy,
+        failover,
+        paused,
+    };
     all.push(pool.clone());
     pools::save(&db, &all)?;
     let _ = app.emit(CHANGED_EVENT, &pool.id);
     Ok(json!({ "created": describe(&pool, &accounts) }))
+}
+
+/// Atualiza nome, membros, ordem, estratégia ou pausa de um pool, preservando `pool.id`.
+pub(super) fn pool_update_ipc(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let db = db(app)?;
+    let wanted = arg_str_opt(args, "id").or_else(|| arg_str_opt(args, "name"))
+        .ok_or("Informe o nome ou id do pool a editar.")?;
+    let existing = pools::load(&db);
+    let current = pools::find(&existing, &wanted)?.clone();
+    let accounts = created_accounts(&db)?;
+    let pairs: Vec<(String, String)> = accounts.iter().map(|(id, a, _)| (id.clone(), a.clone())).collect();
+
+    let next_name = arg_str_opt(args, "newName")
+        .or_else(|| arg_str_opt(args, "new_name"))
+        .or_else(|| if arg_str_opt(args, "id").is_some() { arg_str_opt(args, "name") } else { None })
+        .unwrap_or_else(|| current.name.clone());
+    let next_members = match arg_str_opt(args, "accounts") {
+        Some(raw) => members_from_names(&accounts, &current.agent_id, &raw)?,
+        None => current.members.clone(),
+    };
+    let next_strategy = match arg_str_opt(args, "strategy") {
+        Some(raw) => Strategy::parse(&raw)?,
+        None => current.strategy,
+    };
+    let mut updated = pools::update(&db, &current.id, &next_name, next_members, next_strategy, &pairs)?;
+    if let Some(paused) = args.get("paused").and_then(|v| v.as_bool().or_else(|| v.as_str().and_then(|s| s.parse::<bool>().ok()))) {
+        updated = pools::set_paused(&db, &updated.id, paused)?;
+    }
+    let _ = app.emit(CHANGED_EVENT, &updated.id);
+    Ok(json!({ "updated": describe(&updated, &accounts) }))
 }
 
 pub(super) fn pool_delete(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -107,23 +155,93 @@ pub fn pool_list_all(app: AppHandle) -> Result<Vec<Pool>, String> {
 }
 
 #[tauri::command]
-pub fn pool_save_new(app: AppHandle, name: String, agent_id: String, members: Vec<Option<String>>, strategy: String, failover: Option<bool>) -> Result<Pool, String> {
+pub fn pool_save_new(
+    app: AppHandle,
+    name: String,
+    agent_id: String,
+    members: Vec<Option<String>>,
+    strategy: String,
+    failover: Option<bool>,
+    paused: Option<bool>,
+) -> Result<Pool, String> {
     let db = db(&app)?;
     let accounts = created_accounts(&db)?;
     let pairs: Vec<(String, String)> = accounts.iter().map(|(id, a, _)| (id.clone(), a.clone())).collect();
     let mut all = pools::load(&db);
     let name = pools::validate(&all, &name, &agent_id, &members, &pairs)?;
-    let pool = Pool { id: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(), name, agent_id, members, strategy: Strategy::parse(&strategy)?, failover: failover.unwrap_or(false) };
+    let paused = paused.unwrap_or(false);
+    let failover = failover.unwrap_or(!paused);
+    let pool = Pool {
+        id: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(),
+        name,
+        agent_id,
+        members,
+        strategy: Strategy::parse(&strategy)?,
+        failover,
+        paused,
+    };
     all.push(pool.clone());
     pools::save(&db, &all)?;
     let _ = app.emit(CHANGED_EVENT, &pool.id);
     Ok(pool)
 }
 
+/// Atualiza nome, membros, ordem e estratégia de um pool existente, preservando o `pool.id`.
+#[tauri::command]
+pub fn pool_update(
+    app: AppHandle,
+    id: String,
+    name: String,
+    members: Vec<Option<String>>,
+    strategy: String,
+) -> Result<Pool, String> {
+    let db = db(&app)?;
+    let accounts = created_accounts(&db)?;
+    let pairs: Vec<(String, String)> = accounts.iter().map(|(id, a, _)| (id.clone(), a.clone())).collect();
+    let updated = pools::update(&db, &id, &name, members, Strategy::parse(&strategy)?, &pairs)?;
+    let _ = app.emit(CHANGED_EVENT, &updated.id);
+    Ok(updated)
+}
+
 /// La cuenta que elige ese pool ahora, para abrir una tab desde la pantalla (`None` = la del sistema).
 #[tauri::command(async)]
 pub fn pool_pick(app: AppHandle, agent_id: String, pool: String) -> Result<Option<String>, String> {
     super::agents::resolve_pool_account(&app, &agent_id, &pool)
+}
+
+/// Prévia somente leitura de qual conta cada pool escolheria agora, reaproveitando `routing::pick_in_pool`
+/// sem avançar cursor nem duplicar a regra de escolha no frontend.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PoolPickPreview {
+    pub pool_id: String,
+    /// `Some(None)` = conta principal/do sistema; `Some(Some(id))` = conta extra; `None` = nenhuma disponível.
+    pub account_id: Option<Option<String>>,
+    pub available: bool,
+    pub swaps_today: usize,
+}
+
+#[tauri::command(async)]
+pub fn pool_preview_picks(app: AppHandle) -> Result<Vec<PoolPickPreview>, String> {
+    let db = db(&app)?;
+    let all = pools::load(&db);
+    let roster = crate::runs::roster::snapshot(&db, false)?;
+    let now = crate::util::now_ts();
+    let mut out = Vec::with_capacity(all.len());
+    for pool in all {
+        let swaps_today = crate::runs::pool_failover::swaps_in_last_day(&db, &pool.id, now);
+        let picked = pools::spec_preview(&db, &pool.id).ok().and_then(|spec| {
+            let agent = roster.agents.iter().find(|a| a.agent_id == pool.agent_id)?;
+            crate::runs::routing::pick_in_pool(agent, &spec, now).ok().map(|(id, _)| id)
+        });
+        out.push(PoolPickPreview {
+            pool_id: pool.id,
+            available: picked.is_some(),
+            account_id: picked,
+            swaps_today,
+        });
+    }
+    Ok(out)
 }
 
 #[tauri::command]
@@ -140,11 +258,15 @@ pub fn pool_remove(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn pool_set_failover(app: AppHandle, id: String, enabled: bool) -> Result<Pool, String> {
     let db = db(&app)?;
-    let mut all = pools::load(&db);
-    let pool = all.iter_mut().find(|pool| pool.id == id).ok_or("O pool não existe mais.")?;
-    pool.failover = enabled;
-    let updated = pool.clone();
-    pools::save(&db, &all)?;
+    let updated = pools::set_paused(&db, &id, !enabled)?;
+    let _ = app.emit(CHANGED_EVENT, &id);
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn pool_set_paused(app: AppHandle, id: String, paused: bool) -> Result<Pool, String> {
+    let db = db(&app)?;
+    let updated = pools::set_paused(&db, &id, paused)?;
     let _ = app.emit(CHANGED_EVENT, &id);
     Ok(updated)
 }
@@ -176,9 +298,10 @@ mod test {
 
     #[test]
     fn la_descripcion_pone_nombres_y_marca_las_apagadas() {
-        let pool = Pool { id: "p".into(), name: "T".into(), agent_id: "claude-code".into(), members: vec![None, Some("id-a".into()), Some("zz".into())], strategy: Strategy::Sticky, failover: false };
+        let pool = Pool { id: "p".into(), name: "T".into(), agent_id: "claude-code".into(), members: vec![None, Some("id-a".into()), Some("zz".into())], strategy: Strategy::Sticky, failover: false, paused: false };
         let d = describe(&pool, &accounts());
         assert_eq!(d["accounts"], json!(["principal", "Trabajo", "zz (apagada)"]));
         assert_eq!(d["strategy"], "sticky");
+        assert_eq!(d["paused"], false);
     }
 }

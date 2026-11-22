@@ -145,7 +145,7 @@ fn a_conversa_so_liga_a_um_pool_quando_a_pessoa_escolhe() {
 }
 
 fn pool(id: &str, agent: &str, members: &[Option<&str>]) -> crate::accounts::pools::Pool {
-    crate::accounts::pools::Pool { id: id.into(), name: format!("Pool {id}"), agent_id: agent.into(), members: members.iter().map(|m| m.map(String::from)).collect(), strategy: Default::default(), failover: false }
+    crate::accounts::pools::Pool { id: id.into(), name: format!("Pool {id}"), agent_id: agent.into(), members: members.iter().map(|m| m.map(String::from)).collect(), strategy: Default::default(), failover: false, paused: false }
 }
 
 #[test]

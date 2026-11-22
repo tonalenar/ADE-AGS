@@ -158,6 +158,7 @@ CORREÇÕES — teto de rodadas da mesma entrega (canvas e frota)
 POOLS DE CONTAS — repartir entre várias contas de uma TUI com uma estratégia
   pools                                       Os pools criados, com suas contas e sua estratégia
   pool create <nome> --agent <id> --accounts principal,trabalho [--strategy least-used|round-robin|sticky]
+  pool update <nome> [--new-name <nome>] [--accounts principal,trabalho] [--strategy least-used|round-robin|sticky] [--paused true|false]
   pool delete <nome>
   Pedem-se onde iria uma conta: tab create --agent claude-code --account pool:Trabalho, ou o
   \"account\" de uma tarefa de um plano / de um membro de um Squad (pool:Trabalho).
@@ -473,6 +474,7 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
     team_candidates, team_create, team_link, team_unlink, team_role
   Conversas do modo chat: chat_list, chat_providers, harness_graph, chat_compact, chat_goal,
     chat_new, delegate_agent, chat_send, chat_wait, chat_show, chat_stop, chat_pending
+  Pools de contas: pool_update
   Pranchetas: design_list, design_get, design_view, design_create, design_open, design_page_add,
     design_page_rename, design_page_delete, design_artboard_add, design_artboard_update,
     design_artboard_duplicate, design_artboard_delete, design_comment_add, design_comment_resolve,
@@ -1393,7 +1395,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "portal.press" => &["name", "key"],
         "portal.select" => &["name", "target", "value"],
         // `ags device tap Pixel --text Entrar`: el dispositivo primero, y lo que cada acción pide.
-        "pool.create" | "pool.delete" => &["name"],
+        "pool.create" | "pool.update" | "pool.delete" => &["name"],
         "device.create" => &["name"],
         "device.start" | "device.shot" | "device.tree" => &["name"],
         "device.apps" => &["name"],

@@ -16,8 +16,19 @@ export interface Pool {
   agentId: string;
   members: (string | null)[];
   strategy: PoolStrategy;
-  /** Failover opt-in (solo tareas headless, con límites fijos; ver `accounts.pools.failover.hint`). Default: false. */
+  /** Campo legado de failover por pool; substituído por `paused` + modo global. */
   failover: boolean;
+  /** Pausa as trocas neste pool. Default: false. */
+  paused?: boolean;
+}
+
+/** Prévia somente leitura de qual conta o pool escolheria agora (`routing::pick_in_pool`). */
+export interface PoolPickPreview {
+  poolId: string;
+  /** `null` = conta principal/do sistema; `string` = id da conta extra; `undefined` quando `available === false`. */
+  accountId: string | null;
+  available: boolean;
+  swapsToday: number;
 }
 
 // O valor serializado de um pool vive em `poolRef.ts` (sem Tauri); reexportado aqui por quem já importa daqui.
@@ -52,13 +63,32 @@ export function usePools(agentId?: string | null): Pool[] {
   return agentId ? pools.filter((p) => p.agentId === agentId) : pools;
 }
 
-export const poolSaveNew = (name: string, agentId: string, members: (string | null)[], strategy: PoolStrategy, failover: boolean) =>
-  invoke<Pool>("pool_save_new", { name, agentId, members, strategy, failover });
+export const poolSaveNew = (
+  name: string,
+  agentId: string,
+  members: (string | null)[],
+  strategy: PoolStrategy,
+  failover = true,
+) => invoke<Pool>("pool_save_new", { name, agentId, members, strategy, failover });
+
+/** Atualiza nome, membros, ordem e estratégia de um pool existente preservando o `id`. */
+export const poolUpdate = (
+  id: string,
+  name: string,
+  members: (string | null)[],
+  strategy: PoolStrategy,
+) => invoke<Pool>("pool_update", { id, name, members, strategy });
 
 export const poolRemove = (id: string) => invoke<void>("pool_remove", { id });
 
 /** Liga/desliga failover num pool já existente, sem recriá-lo. */
 export const poolSetFailover = (id: string, enabled: boolean) => invoke<Pool>("pool_set_failover", { id, enabled });
+
+/** Pausa ou retoma as trocas neste pool. */
+export const poolSetPaused = (id: string, paused: boolean) => invoke<Pool>("pool_set_paused", { id, paused });
+
+/** Prévia de qual conta cada pool escolheria agora (reusa `routing::pick_in_pool` sem avançar cursor). */
+export const poolPreviewPicks = () => invoke<PoolPickPreview[]>("pool_preview_picks");
 
 /** La cuenta que elige ese pool ahora (`null` = la del sistema). */
 export const poolPick = (agentId: string, pool: string) => invoke<string | null>("pool_pick", { agentId, pool });

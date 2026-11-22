@@ -62,7 +62,7 @@ describe("ajustes da busca", () => {
 
   it("a aba de um ajuste existe na página dele", () => {
     const tabsPerPage: Record<string, string[]> = {
-      accounts: ["provedores", "contas", "tuis", "acp"],
+      accounts: ["agentes", "contas", "pools", "personalizados"],
       orchestrator: ["orquestrador", "roteamento", "prelaunch"],
     };
     for (const item of SETTINGS_SEARCH_ITEMS) {
