@@ -1,10 +1,24 @@
+import { artboardBootScript, emptySnapshot, type StorageSnapshot } from "./artboardBoot";
+
 /**
  * O HTML de uma prancheta é NÃO CONFIÁVEL (vem de um agente ou do usuário). Ele só roda num
  * iframe com `sandbox="allow-scripts"` (sem allow-same-origin: origem opaca, sem cookies,
- * sem acesso ao app) e com uma CSP que corta a rede.
+ * sem acesso ao app) e com uma CSP que corta a rede, salvo as bibliotecas e fontes de sempre
+ * dos Artifacts. A CSP sai daqui inteira: o srcdoc a embute e o servidor de prancheta a manda no header.
  */
 export const DESIGN_SANDBOX = "allow-scripts";
-export const DESIGN_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'unsafe-inline'; form-action 'none'; base-uri 'none'";
+/** Bibliotecas que a prancheta pode carregar (scripts). Nenhuma outra origem entra. */
+export const DESIGN_SCRIPT_SOURCES = ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net/npm/", "https://unpkg.com", "https://cdn.tailwindcss.com", "https://code.jquery.com"] as const;
+export const DESIGN_CSP = [
+  "default-src 'none'",
+  `script-src 'unsafe-inline' ${DESIGN_SCRIPT_SOURCES.join(" ")}`,
+  "style-src 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src https://fonts.gstatic.com",
+  "img-src data: blob:",
+  "connect-src 'none'",
+  "form-action 'none'",
+  "base-uri 'none'",
+].join("; ");
 /** Mensagem que o iframe manda ao app quando se escolhe um elemento. */
 export const PICK_MESSAGE = "ags-design-pick";
 /** Liga ou desliga o modo Escolher num documento já carregado, sem recarregar o srcdoc. */
@@ -107,15 +121,23 @@ export interface SrcdocOptions {
   chooser?: boolean;
   /** Um script próprio no fim do body (o da tela de Design, ver `features/design/frameBridge.ts`). */
   script?: string;
+  /** O que a prancheta já guardou no localStorage/sessionStorage (carregado do backend antes). */
+  storage?: StorageSnapshot;
+  /** O tema do app no momento da montagem; depois ele chega por mensagem, sem recarregar. */
+  dark?: boolean;
 }
 
-/** Monta o `srcdoc` do iframe: CSP primeiro, depois o HTML do agente, e o seletor se for modo EDIT. */
+/**
+ * Monta o `srcdoc` do iframe: CSP primeiro, o boot (storage, tema, erros) no head antes de qualquer script
+ * do agente, depois o HTML do agente, e o seletor se for modo EDIT.
+ */
 export function buildSrcdoc(html: string, opts: SrcdocOptions = {}): string {
   const meta = `<meta http-equiv="Content-Security-Policy" content="${DESIGN_CSP}">`;
+  const boot = `<script>${artboardBootScript({ storage: opts.storage ?? emptySnapshot(), dark: opts.dark === true })}</script>`;
   const extra = opts.picker ? `<script>${PICKER_SCRIPT}</script>` : opts.script ? `<script>${opts.script}</script>` : "";
   // No canvas o modo Escolher liga por postMessage (sem recarregar); script próprio (Design Studio) entra sozinho.
   const chooser = opts.script ? "" : `<script>${CHOOSER_SCRIPT}</script>`;
-  return `<!doctype html><html><head><meta charset="utf-8">${meta}<style>html,body{margin:0}${SCROLLBAR_CSS}</style></head><body>${stripUnsafeHead(html)}${extra}${chooser}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8">${meta}<style>html,body{margin:0}${SCROLLBAR_CSS}</style>${boot}</head><body>${stripUnsafeHead(html)}${extra}${chooser}</body></html>`;
 }
 
 export interface PickMessage { selector: string; text: string }

@@ -19,7 +19,7 @@ describe("srcdoc", () => {
   it("a CSP corta a rede", () => {
     expect(DESIGN_CSP).toContain("default-src 'none'");
     expect(DESIGN_CSP).toContain("img-src data:");
-    expect(DESIGN_CSP).not.toMatch(/https?:|connect-src/);
+    expect(DESIGN_CSP).toContain("connect-src 'none'");
   });
   it("a CSP bloqueia formulários e base", () => {
     expect(DESIGN_CSP).toContain("form-action 'none'");
