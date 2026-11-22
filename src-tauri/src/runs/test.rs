@@ -6372,3 +6372,17 @@ fn so_o_comando_da_tela_chama_a_decisao() {
     let chamadas: Vec<&str> = mod_rs.lines().filter(|l| l.contains("decide_from_screen(") && !l.contains("fn decide_from_screen")).collect();
     assert_eq!(chamadas.len(), 1, "{chamadas:?}");
 }
+
+#[test]
+fn frota_e_oneshot_protegem_o_autowire_antes_de_iniciar_o_agente() {
+    for (name, src) in [
+        ("supervisor.rs", include_str!("supervisor.rs")),
+        ("oneshot.rs", include_str!("oneshot.rs")),
+        ("roster.rs", include_str!("roster.rs")),
+    ] {
+        assert!(
+            src.contains("protect_command_env("),
+            "{name} precisa chamar protect_command_env antes de iniciar o processo"
+        );
+    }
+}
