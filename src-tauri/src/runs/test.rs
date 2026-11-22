@@ -4787,6 +4787,9 @@ fn una_falla_se_clasifica_por_lo_que_dijo_la_cli() {
         "provider returned status code: 429",
         r#"{"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}"#,
         "You exceeded your current quota, please check your plan and billing details.",
+        "API error: RESOURCE_EXHAUSTED (429)",
+        "You have exhausted your capacity on this model. Try again later.",
+        "model capacity exhausted",
     ] {
         assert_eq!(classify(text), RateLimited, "{text}");
     }
@@ -5157,6 +5160,41 @@ fn un_pedido_con_pool_se_rutea_y_queda_fijado_a_la_cuenta_elegida() {
     let a = routing::route(&roster, &Tiers::default(), &pedido, AHORA).unwrap();
     assert_eq!(a.account_id.as_deref(), Some("extra"));
     assert!(!a.auto_account, "con un pool no se pasa a una cuenta de afuera");
+}
+
+#[test]
+fn agente_sem_suporte_a_contas_na_frota_recusa_pool_com_erro_claro() {
+    let mut roster = roster_de_prueba();
+    let agy = agente(&mut roster, "claude-code");
+    agy.agent_id = "antigravity".into();
+    agy.label = "Antigravity".into();
+    agy.capabilities.accounts = false;
+
+    let mut spec = pool_spec(Strategy::Sticky, &[None, Some("trabajo")], 0);
+    spec.agent_id = "antigravity".into();
+    let pedido = RouteRequest {
+        agent_id: Some("antigravity".into()),
+        model: None,
+        complexity: None,
+        account: AccountChoice::Pool(spec),
+    };
+    let err = routing::route(&roster, &Tiers::default(), &pedido, AHORA).unwrap_err();
+    assert!(err.contains("Antigravity") && err.contains("Trabajo"), "{err}");
+}
+
+#[test]
+fn erro_de_limite_de_conta_vem_em_portugues() {
+    let mut roster = claude_con_tres();
+    agente(&mut roster, "claude-code").accounts[1].limit = Some("atingiu o teto diário".into());
+    let pedido = RouteRequest {
+        agent_id: Some("claude-code".into()),
+        model: None,
+        complexity: None,
+        account: AccountChoice::Fixed(Some("trabajo".into())),
+    };
+    let err = routing::route(&roster, &Tiers::default(), &pedido, AHORA).unwrap_err();
+    assert!(err.starts_with("a conta trabajo"), "{err}");
+    assert!(!err.contains("la cuenta"), "{err}");
 }
 
 #[test]
