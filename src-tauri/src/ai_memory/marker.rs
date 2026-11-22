@@ -4,7 +4,7 @@ use std::{io::Read, path::Path};
 /// Resultado da resolução do marcador `.ai-memory.toml`: um par seguro, um projeto
 /// reservado explicitamente bloqueado, ou nenhum marcador utilizável.
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum Scope {
+pub(crate) enum Scope {
     Pair(String, String),
     Reserved,
     Missing,
@@ -20,7 +20,7 @@ pub(super) fn scope(cwd: &Path, home: Option<&Path>) -> Option<(String, String)>
     }
 }
 
-pub(super) fn resolve(cwd: &Path, home: Option<&Path>) -> Scope {
+pub(crate) fn resolve(cwd: &Path, home: Option<&Path>) -> Scope {
     let Ok(start) = std::fs::canonicalize(cwd) else {
         return Scope::Missing;
     };

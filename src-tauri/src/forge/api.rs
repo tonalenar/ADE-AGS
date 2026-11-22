@@ -441,6 +441,16 @@ impl Api {
         Ok(Api { kind, base: kind.api_base(host), token: token.to_string(), http })
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_base(kind: ForgeKind, base: String, token: &str) -> Result<Self, ForgeError> {
+        let http = reqwest::Client::builder()
+            .user_agent("ADE AGS")
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| ForgeError::Api(e.to_string()))?;
+        Ok(Api { kind, base, token: token.to_string(), http })
+    }
+
     async fn call(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value, ForgeError> {
         let url = format!("{}{}", self.base, path);
         let mut req = self.http.request(method, &url);
@@ -674,7 +684,9 @@ impl Api {
             ForgeKind::Gitlab => ForgeRepo {
                 full_name: s(v, "/path_with_namespace").unwrap_or_default(),
                 description: s(v, "/description").filter(|d| !d.is_empty()),
-                private: s(v, "/visibility").map(|vis| vis != "public").unwrap_or(false),
+                // "internal" é visível a toda a instância: só "private" conta como privado (memórias e
+                // configurações só vão para repositório privado de verdade).
+                private: s(v, "/visibility").is_some_and(|vis| vis == "private"),
                 fork: v.get("forked_from_project").is_some_and(|f| !f.is_null()),
                 archived: b(v, "/archived"),
                 clone_url: s(v, "/http_url_to_repo").unwrap_or_default(),
@@ -1690,5 +1702,22 @@ mod image_auth_tests {
         assert!(!image_sends_bearer("http", true));
         assert!(image_sends_bearer("https", true));
         assert!(!image_sends_bearer("https", false));
+    }
+}
+
+#[cfg(test)]
+mod visibility_tests {
+    use super::{Api, ForgeKind};
+    use serde_json::json;
+
+    /// "internal" no GitLab é visível a toda a instância: não serve para memória nem configuração.
+    #[test]
+    fn so_private_conta_como_privado_no_gitlab() {
+        let api = Api::with_base(ForgeKind::Gitlab, "http://127.0.0.1:9".into(), "t").unwrap();
+        for (vis, private) in [("private", true), ("internal", false), ("public", false)] {
+            let repo = api.repo_from(&json!({ "path_with_namespace": "eu/x", "visibility": vis }));
+            assert_eq!(repo.private, private, "visibility={vis}");
+        }
+        assert!(!api.repo_from(&json!({ "path_with_namespace": "eu/x" })).private);
     }
 }

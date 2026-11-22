@@ -4,7 +4,7 @@
 
 ## ai-memory: a memória de longo prazo (decisão de 30/10/2026)
 Decisão completa em [`docs/decisoes/AI_MEMORY.md`](../decisoes/AI_MEMORY.md).
-- A memória de longo prazo dos agentes é a do **ai-memory** (≥ 3.3.0). O que ele captura vale **sem aprovação item a item**.
+- **A memória de longo prazo é a do ai-memory** (≥ 3.3.0). O que ele captura vale **sem aprovação item a item**.
 - O ADE lê o ai-memory **só pelo binário**, por subprocesso com `--json` e timeout (`util::spawn`). **Nunca lê o token** nem os arquivos dele.
 - O projeto no ai-memory é fixado pelo `.ai-memory.toml` da raiz (`default/ADE-AGS`), para todo worktree cair no mesmo projeto. Sem ele, um worktree com remoto não reconhecido vira um projeto com o nome da pasta.
 - Toda aba (PTY), conversa por protocolo (`conversa/*`) e execução da Frota (`runs/supervisor.rs`, `oneshot.rs`, `roster.rs`) rodam com `AI_MEMORY_RUN_AUTOWIRE=false` e sem `AI_MEMORY_SCOPE_CWD` (`protect_pty_env` / `protect_command_env`); o `run` leva `--no-autowire`. Hooks e MCP entram **por aba/conversa**, nunca nas configs globais dos agentes sem OK.
@@ -12,6 +12,14 @@ Decisão completa em [`docs/decisoes/AI_MEMORY.md`](../decisoes/AI_MEMORY.md).
 - O apagamento automático fica desligado (`forget_sweep_interval_secs = 0`): **ao vencer o decaimento, o ADE só avisa**.
 - Embeddings (~87 MB) e reranker pelo Jev só com OK do usuário.
 - O SQLite abaixo (`memory_entries`…) passa a ser **só leitura**, fonte da migração única para o wiki do ai-memory. Nada é apagado.
+
+## Backup privado para GitHub (`memory_sync/`)
+- **Opcional e desligado por padrão** em **Configurações → Memória** (`src/features/memorySync/MemorySyncCard.tsx`), com agendamento automático opcional a cada N horas (`MemorySyncRunner.tsx`) e botão **Enviar agora**.
+- **Privado obrigatório**: antes de cada envio (e no setup), confirma pela API do forge que o repositório é privado; se for público ou não der para confirmar, bloqueia o envio e exibe o erro. Contas genéricas (`ForgeKind::Other`, sem API) são recusadas.
+- **Filtro de segredos**: aplica `looks_like_user_secret` antes de gravar no espelho; páginas/revisões suspeitas ficam de fora e aparecem listadas na UI para revisão manual.
+- **Espelho isolado**: grava e commita em `<app_data_dir>/memory-sync/repo`. **Nunca** altera nem adiciona remote no repositório local de projeção (`~/.ags/memory/ws-<hash>/`).
+- **Token**: sai do keyring do SO e vai ao `git` somente por `GIT_ASKPASS` efêmero em loopback (`memory_sync/credentials.rs`), validando host e nonce; nunca entra em `argv`, ambiente persistente, URL, arquivo ou log.
+- **Fontes e direção**: exporta páginas do `ai-memory` (via `ai_memory/client.rs`, `--json`, escopo do projeto — nunca `_global`/`_profile`) mais o histórico aprovado do SQLite legado em modo somente leitura. É envio de **mão única** (ADE → remoto); importação de volta fica como trabalho futuro. Desligar interrompe envios e não apaga nada local nem remoto.
 
 As seções seguintes descrevem a memória própria do ADE, que fica só leitura.
 
