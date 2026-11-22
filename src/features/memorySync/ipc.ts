@@ -1,0 +1,18 @@
+/** Comandos Tauri de sincronização de memória (`src-tauri/src/memory_sync/commands.rs`). */
+import { invoke } from "@tauri-apps/api/core";
+
+import type { MemorySyncResult, MemorySyncStatus } from "./types";
+
+export const memorySyncStatus = () => invoke<MemorySyncStatus>("memory_sync_status");
+
+export const memorySyncSetup = (accountId: string, repoName: string) =>
+  invoke<MemorySyncStatus>("memory_sync_setup", { accountId, repoName });
+
+export const memorySyncSetEnabled = (enabled: boolean) =>
+  invoke<MemorySyncStatus>("memory_sync_set_enabled", { enabled });
+
+export const memorySyncSetAuto = (autoEnabled: boolean, intervalHours: number) =>
+  invoke<MemorySyncStatus>("memory_sync_set_auto", { autoEnabled, intervalHours });
+
+export const memorySyncNow = (workspaceId: string | null, cwd: string | null) =>
+  invoke<MemorySyncResult>("memory_sync_now", { workspaceId, cwd });

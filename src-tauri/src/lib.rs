@@ -35,6 +35,7 @@ pub mod ipc;
 mod surfaces;
 mod marketplace;
 mod memory;
+pub mod memory_sync;
 pub mod missions;
 mod notifier;
 mod orchestrator;

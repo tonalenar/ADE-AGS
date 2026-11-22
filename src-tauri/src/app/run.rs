@@ -599,6 +599,12 @@ pub fn run() {
             crate::sync::sync_now,
             crate::sync::sync_disconnect,
             crate::sync::sync_set_auto,
+            // Sincronização opcional de memórias para repositório privado
+            crate::memory_sync::memory_sync_status,
+            crate::memory_sync::memory_sync_setup,
+            crate::memory_sync::memory_sync_set_enabled,
+            crate::memory_sync::memory_sync_set_auto,
+            crate::memory_sync::memory_sync_now,
             // Actualizaciones desde las releases de GitHub
             crate::updates::update_check,
             crate::updates::update_install,

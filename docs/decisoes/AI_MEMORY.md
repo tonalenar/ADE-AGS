@@ -19,3 +19,10 @@ Decisão do usuário, em 30/10/2026: a memória de longo prazo dos agentes passa
 - O Codex 0.166.0 aceita hooks por `-c` pelo código-fonte, mas a prova em execução não saiu (a sonda sem credencial não chega ao hook). **Decisão: o Codex fica só com MCP** até haver prova.
 - O `--json` da CLI 3.3.0 foi capturado de um binário real numa caixa de areia; não há `sessions --json` nem `version --json`, e as sessões recentes só saem pelo MCP (`memory_briefing`).
 - `ai-memory run --no-autowire` funciona dentro de um PTY (provado com agente falso).
+
+## Backup opcional das memórias para GitHub privado (22/11/2026)
+- **Opt-in (desligado por padrão)**: a sincronização de memórias com repositório privado nasce desligada em Configurações → Memória e só envia após escolha explícita de conta git (com API) e repositório (ex.: `ade-memoria`, criado privado quando ausente).
+- **Privacidade verificada por API**: a cada envio e na configuração, a ADE consulta a API do forge (`find_repo`) e bloqueia o push se o repositório for público ou se não puder confirmar que é privado.
+- **Filtro de segredos e espelho separado**: páginas do `ai-memory` (escopo do projeto via `client.rs --json`, excluindo `_global`/`_profile`) e o histórico aprovado do SQLite legado (somente leitura) passam por `looks_like_user_secret` antes de ir para o espelho isolado em `<app_data_dir>/memory-sync/repo`. Páginas suspeitas são omitidas e listadas na UI; o repositório local de projeção (`~/.ags/memory/ws-<hash>/`) segue estritamente sem remote.
+- **Credencial efêmera**: o token do keyring chega ao `git` apenas via `GIT_ASKPASS` loopback efêmero autenticado por nonce e host esperado, sem gravar em `argv`, ambiente persistente, URL, disco ou log.
+- **Mão única e desligamento não destrutivo**: o envio é apenas ADE → remoto (importação reversa fica como trabalho futuro). Desligar interrompe envios manuais e automáticos sem apagar dados locais nem remotos.

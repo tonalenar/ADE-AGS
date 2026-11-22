@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.92.0
+version: 1.93.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -1684,6 +1684,13 @@ failure, a missing `ags` binary, or a reserved project (`_global`, `_profile`, `
 Divergent scopes, global/profile/multi-project requests, unknown tools and methods are rejected.
 Only `memory_query`, `memory_recent`, `memory_status`, `memory_read_page`, `memory_write_page` and
 `memory_patch_page` are exposed. Writes (`memory_write_page`, `memory_patch_page`) are scanned with the user-panel secret detector (`looks_like_user_secret`) and rejected without echoing the secret. All tab, chat-engine, and Fleet subprocesses run with `AI_MEMORY_RUN_AUTOWIRE=false` and `AI_MEMORY_SCOPE_CWD` stripped. This does not change settings or live tabs.
+
+## Optional private GitHub memory backup
+
+ADE AGS offers an optional, **off-by-default** one-way memory backup in **Settings → Memory** (`src-tauri/src/memory_sync/`):
+- **Private repo required:** uses a connected GitHub/GitLab/Gitea account with API support (`ade-memoria` by default, created private if absent) and re-verifies repository privacy via the forge API before every push; public or unverifiable targets are rejected.
+- **Secret filtering & isolated mirror:** exports project-scoped `ai-memory` pages (`--json`, excluding `_global`/`_profile`) and read-only legacy SQLite approved history, skipping any item flagged by `looks_like_user_secret` and listing skipped pages in the UI for review. Writes to a separate mirror under `<app_data_dir>/memory-sync/repo` — never adding a remote to `~/.ags/memory/<workspace>/`.
+- **Credential isolation & one-way:** delivers the keyring token to git only via an ephemeral loopback `GIT_ASKPASS` helper (never in argv, persistent env, URL, file, or log). Push-only (ADE → remote; reverse import is future work). Turning it off stops pushes without deleting local or remote data.
 
 ## Remote MCP over HTTP
 

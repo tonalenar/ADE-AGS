@@ -44,6 +44,7 @@ import { ConfirmationsSetting } from "@/features/settings/ConfirmationsSetting";
 import { SidebarSettings } from "@/features/settings/SidebarSettings";
 import { ScheduledTasksSection } from "@/features/settings/ScheduledTasksSection";
 import { AiMemoryTabsSetting } from "@/features/settings/AiMemoryTabsSetting";
+import { MemorySyncCard } from "@/features/memorySync/MemorySyncCard";
 import { SandboxSetting } from "@/features/settings/SandboxSetting";
 import { RenderingSetting } from "@/features/settings/RenderingSetting";
 import { FontPreferencesSetting } from "@/features/settings/FontPreferencesSetting";
@@ -347,6 +348,7 @@ function MemoryPage() {
       <SettingsGroup>
         <SettingsAnchor id="memory-tabs"><AiMemoryTabsSetting /></SettingsAnchor>
       </SettingsGroup>
+      <SettingsAnchor id="memory-sync"><MemorySyncCard activeCwd={activeCwd} workspaceId={workspaceId} /></SettingsAnchor>
       <AiMemoryPanel cwd={activeCwd} workspaceId={workspaceId} />
       {workspaceId
         ? <SharedMemoryPanel key={workspaceId} workspaceId={workspaceId} initialTab="workspace" />

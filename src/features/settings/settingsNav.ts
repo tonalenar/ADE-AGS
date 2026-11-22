@@ -185,6 +185,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "labs.graphify", page: "labs", anchor: "labs-graphify", titleKey: "settings.graphify" },
 
   { id: "memory.tabs", page: "memory", anchor: "memory-tabs", titleKey: "settings.aiMemoryTabs.label" },
+  { id: "memory.sync", page: "memory", anchor: "memory-sync", titleKey: "memorySync.title", keywordKeys: ["memorySync.description", "memorySync.auto"] },
 
   { id: "decisions", page: "decisions", anchor: "decisions-main", titleKey: "settings.decisions" },
   { id: "decisions.provider", page: "decisions", anchor: "decisions-main", titleKey: "settings.decisions.provider" },

@@ -34,6 +34,7 @@ import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
 import { AppExitListener } from "@/app/AppExitListener";
 import { useFileDropToTerminal } from "@/features/terminal/useFileDropToTerminal";
 import { SyncRunner } from "@/features/sync/SyncRunner";
+import { MemorySyncRunner } from "@/features/memorySync/MemorySyncRunner";
 import { UpdateNotifier } from "@/features/updates/UpdateNotifier";
 import { ApprovalToast } from "@/features/runs/ApprovalToast";
 import { CaptchaHandoffCard } from "@/features/browser/CaptchaHandoffCard";
@@ -292,6 +293,7 @@ export function AppShell() {
       {!isMaximized && <ResizeHandles />}
       <AppExitListener />
       <SyncRunner />
+      <MemorySyncRunner />
       <PoolFailoverNotice />
       <AgentUpdateWatcher />
       <BotToastHost />

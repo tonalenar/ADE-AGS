@@ -25,17 +25,18 @@ pub(super) fn is_missing_page(stderr: &str) -> bool {
     stderr.contains("404") && stderr.contains("not found")
 }
 
-pub(super) struct Client {
+pub(crate) struct Client {
     program: Option<PathBuf>,
     cwd: PathBuf,
     pub(super) timeout: Duration,
 }
 
 /// Lista fechada: nenhum argumento pode selecionar uma operação de escrita.
-pub(super) enum Read {
+pub(crate) enum Read {
     Status,
     Handoffs,
     Recent,
+    RecentLimit(u32),
     Search(String),
     SearchScoped {
         query: String,
@@ -52,6 +53,15 @@ impl Read {
             Self::Status => vec!["status", "--json"],
             Self::Handoffs => vec!["handoffs", "--json", "--limit", "50"],
             Self::Recent => vec!["recent", "--json", "--limit", "50"],
+            Self::RecentLimit(limit) => {
+                let capped = (*limit).clamp(1, 500);
+                return Ok(vec![
+                    "recent".into(),
+                    "--json".into(),
+                    "--limit".into(),
+                    capped.to_string(),
+                ]);
+            }
             Self::Projects => vec!["list-projects", "--json"],
             Self::Search(query) => {
                 if query.trim().is_empty() || query.len() > 4096 || query.contains('\0') {
@@ -162,7 +172,7 @@ impl Client {
         Self::at(path_env::find_program("ai-memory"), PathBuf::from(cwd))
     }
 
-    pub(super) fn at(program: Option<PathBuf>, cwd: PathBuf) -> Result<Self, String> {
+    pub(crate) fn at(program: Option<PathBuf>, cwd: PathBuf) -> Result<Self, String> {
         if !cwd.is_absolute() || !cwd.is_dir() {
             return Err("A pasta da aba deve ser um diretório absoluto existente.".into());
         }
@@ -315,7 +325,7 @@ impl Client {
 
     /// Lê uma página. `None` quando ela não existe (404). Qualquer outra falha é erro: uma queda do
     /// servidor nunca pode parecer página ausente, senão a cópia sobrescreveria algo.
-    pub(super) fn find_page(&self, path: &str) -> Result<Option<Page>, String> {
+    pub(crate) fn find_page(&self, path: &str) -> Result<Option<Page>, String> {
         let args = Read::Page(path.into()).args()?;
         let output = self.execute(&args).map_err(|_| {
             "Não foi possível consultar o ai-memory (limite de 10 segundos).".to_string()
