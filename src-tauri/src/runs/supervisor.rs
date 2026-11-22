@@ -328,6 +328,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     }
     // Con una cuenta de la app, una API key heredada no le gana a su login.
     crate::agents::apply_account_env(&mut command, &launch.env);
+    crate::ai_memory::tabs::protect_command_env(&mut command);
     let started_at = std::time::Instant::now();
     let (program_log, argv_log) = crate::util::spawn::argv_of(command.get_program(), &command.get_args().map(|arg| arg.to_owned()).collect::<Vec<_>>());
     // A flag entra no std::Command antes do from. O Job Object e o kill_on_drop ficam.
