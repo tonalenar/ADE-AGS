@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
+import { useDesignFrame } from "@/shared/ipc/designFrame";
+
 import type { Artboard, ArtboardStatus } from "./designApi";
 import { CHOOSER_MODE, DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
 
@@ -33,7 +35,8 @@ export function BoardCard({ board, active, comments, live = true, dragHandle = f
   const { t } = useTranslation();
   const [choosing, setChoosing] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
-  const srcDoc = useMemo(() => (live ? buildSrcdoc(board.html) : ""), [live, board.html]);
+  const documentHtml = useMemo(() => (live ? buildSrcdoc(board.html) : null), [live, board.html]);
+  const frameDoc = useDesignFrame(documentHtml, "design");
   const tellChooser = () => {
     frame.current?.contentWindow?.postMessage({ type: CHOOSER_MODE, on: choosing }, "*");
   };
@@ -50,7 +53,7 @@ export function BoardCard({ board, active, comments, live = true, dragHandle = f
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
   }, [choosing, onChoose]);
-  useEffect(() => { tellChooser(); }, [choosing, srcDoc]);
+  useEffect(() => { tellChooser(); }, [choosing, frameDoc.src, frameDoc.srcDoc]);
   const size = { width: board.width, height: board.height };
   return (
     <div style={{ width: board.width }}>
@@ -68,10 +71,14 @@ export function BoardCard({ board, active, comments, live = true, dragHandle = f
         <Button variant="custom" className={`nodrag ${designBtn}`} disabled={board.status === "rejected"} onClick={onReject}>{t("canvas.design.reject")}</Button>
       </div>
       {live ? (
-        // No canvas, o iframe só recebe o mouse ao escolher: senão engoliria o zoom e o arrastar.
-        <iframe ref={frame} title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc} referrerPolicy="no-referrer" onLoad={tellChooser}
-          className={`block bg-white rounded-sm shadow-md border-0 ${board.status === "rejected" ? "opacity-50" : ""} ${dragHandle && !choosing ? "pointer-events-none" : ""}`}
-          style={size} />
+        frameDoc.ready ? (
+          // No canvas, o iframe só recebe o mouse ao escolher: senão engoliria o zoom e o arrastar.
+          <iframe ref={frame} title={board.title} sandbox={DESIGN_SANDBOX} src={frameDoc.src} srcDoc={frameDoc.srcDoc} referrerPolicy="no-referrer" onLoad={tellChooser}
+            className={`block bg-white rounded-sm shadow-md border-0 ${board.status === "rejected" ? "opacity-50" : ""} ${dragHandle && !choosing ? "pointer-events-none" : ""}`}
+            style={size} />
+        ) : (
+          <div className="bg-white rounded-sm shadow-md" style={size} />
+        )
       ) : (
         <div className="bg-white/70 dark:bg-white/5 rounded-sm shadow-md flex items-center justify-center text-[12px] text-gray-400" style={size}>{board.title}</div>
       )}

@@ -104,12 +104,24 @@ pub fn run() {
     crate::notifier::initialize_identity();
     super::signals::cleanup_on_signals();
 
+    let design_frames = crate::design_frame::DesignFrameStore::new();
+    let design_frames_protocol = design_frames.clone();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(crate::updates::plugin())
         .manage(db_conn)
+        .manage(design_frames)
+        .register_asynchronous_uri_scheme_protocol(
+            crate::design_frame::SCHEME,
+            move |_ctx, request, responder| {
+                let response =
+                    crate::design_frame::handle_request(&design_frames_protocol, &request);
+                responder.respond(response);
+            },
+        )
         .invoke_handler(tauri::generate_handler![
             crate::ai_memory::ai_memory_probe,
             crate::ai_memory::ai_memory_migrate,
@@ -256,6 +268,7 @@ pub fn run() {
             crate::design::design_shape_delete,
             crate::design::design_view_set,
             crate::design::design_view_get,
+            crate::design_frame::design_frame_register,
             // Terminal embebida (PTY)
             crate::terminal::pty_create,
             crate::terminal::pty_attach,

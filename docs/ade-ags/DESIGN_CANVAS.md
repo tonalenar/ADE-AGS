@@ -97,7 +97,7 @@ A mesma tela (`DesignStudio`) abre na rota `/design/:id` e na aba Design do pain
 
 ## Segurança: o HTML nunca é confiável
 
-Cada prancheta renderiza em `iframe` com `sandbox="allow-scripts"` (sem `allow-same-origin`) e `srcdoc` com CSP `default-src 'none'`, estilos inline e imagens `data:`, `form-action 'none'` e `base-uri 'none'`. Sem rede e sem acesso ao app; o iframe só fala com o painel por `postMessage` (seleção de elemento). No backend o HTML tem limite de tamanho e nunca é executado. No prompt de construção o HTML é escapado e truncado.
+Cada prancheta renderiza em `iframe` com `sandbox="allow-scripts"` (sem `allow-same-origin`). No app Tauri, o HTML montado é registrado em memória no backend (`design_frame_register`, com hash SHA-256, TTL e limite de tamanho) e servido pelo URI scheme próprio `ags-design` (`ags-design://localhost/<id>` no macOS/Linux; `http://ags-design.localhost/<id>` no Windows) com CSP restritiva enviada por **header HTTP** (`default-src 'none'`, estilos e scripts inline, imagens `data:`, `form-action 'none'` e `base-uri 'none'`). A origem própria evita que o WKWebView/WebKitGTK herde `script-src 'self'` do documento principal (o que acontecia em `srcdoc` e bloqueava protótipos e o `FRAME_SCRIPT`), mantendo origem opaca, sem rede, sem acesso ao DOM e sem acesso ao IPC do Tauri; o iframe só fala com o painel por `postMessage` validado. No backend o HTML tem limite de tamanho e nunca é executado. No prompt de construção o HTML é escapado e truncado.
 
 ## Fora do escopo
 
