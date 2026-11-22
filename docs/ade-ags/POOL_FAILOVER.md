@@ -88,16 +88,17 @@ O failover acima é da frota headless. No modo chat, uma conversa por protocolo 
 
 | Regra | Como |
 |---|---|
-| Desligado por padrão | `settings` `chat.pool.mode` = `off` (padrão) \| `ask` \| `auto`. Só a pessoa muda (Contas → Pools). O agente, a CLI e mensagens de peers não ligam |
+| Modo global unificado | `settings` `chat.pool.mode` = `off` \| `ask` (padrão quando ausente) \| `auto`. Só a pessoa muda (Contas → Pools). O agente, a CLI e mensagens de peers não mudam |
 | Só com pool escolhido | a conversa criada com `pool:<nome>` fica ligada ao pool (`chat.pool.thread.<id>`). Sem pool, não troca. O backend resolve `pool:<nome>` em `api::create` (antes o valor ia cru para `account_id`) |
-| Conversa fora de pool | se o modo não é `off` e a conta que esgotou é membro de um pool do agente (com 2+ contas), a timeline mostra `poolOffer` («Usar o pool e continuar»). Só a pessoa aceitar liga a conversa ao pool e troca (handoff); nunca troca sozinha, nem em `auto`. `Failover` do pool é outra coisa (só frota headless, desligado por padrão) e não vale para o chat |
-| Gatilho | fim de turno com erro classificado `RateLimited` por `runs::failure::classify` (reuso: «hit your limit», «5-hour limit»…). Auth, modelo e outros erros nunca trocam |
-| Escolha da conta | `routing::pick_in_pool` sobre o roster: mesmo agente, logada, sem limite/orçamento estourado, fora do cooldown. A conta que esgotou entra no cooldown de 30 min e é marcada como esgotada até a renovação (`runs.quota.*`), então a frota também a evita |
-| Tetos | no máximo 3 trocas por hora por conversa; nunca encadeia (conta nova esgotando em até 5 min para e avisa) |
-| `ask` | aviso `poolAsk` na timeline com «Continuar na outra conta» / «Agora não» (pendência em `chat.pool.pending.<id>`) |
-| `auto` | troca e avisa (`poolSwitch`); sem conta livre, `poolBlocked` com o motivo |
-| Volta | quando a hora de renovação da conta original passa, a próxima mensagem da pessoa (conversa livre) volta a ela: `auto` volta e avisa; `ask` pergunta (`poolReturnAsk`). Nunca no meio de um turno |
+| Conversa fora de pool | se o modo não é `off` e a conta que esgotou pertence a um pool do agente com 2+ contas **ainda existentes**, a timeline mostra `poolOffer` («Usar o pool e continuar»). Só a pessoa aceitar liga a conversa ao pool e troca (handoff); nunca troca sozinha, nem em `auto` |
+| Gatilho | fim de turno com erro classificado `RateLimited` por `runs::failure::classify` (reuso: «hit your limit», «5-hour limit», `RESOURCE_EXHAUSTED`, «exhausted your capacity», «capacity exhausted»…). Auth, modelo e outros erros nunca trocam no chat (na Frota headless, `RateLimited`, `AuthExpired`, `ModelUnavailable` e `InsufficientBalance` são elegíveis) |
+| Escolha da conta | `routing::pick_in_pool` sobre o roster: mesmo agente, logada, sem limite/orçamento estourado, fora do cooldown. O cursor de `round_robin` só avança atomicamente quando a escolha sucede, sem módulo prematuro. A conta que esgotou entra no cooldown de 30 min e é marcada como esgotada até a renovação (`runs.quota.*`), então a frota também a evita |
+| Tetos | no máximo 3 trocas por hora por conversa; nunca encadeia no mesmo turno (`Switched.switchedTurnPending`, persistido aditivamente e limpo quando um turno termina sem limite ou quando a pessoa envia nova mensagem) |
+| `ask` | aviso `poolAsk` na timeline com «Continuar na outra conta» / «Agora não» (pendência em `chat.pool.pending.<id>` preservando `resetsAt` real). Botões aparecem só no aviso ativo e quando o código casa com `pending.kind` |
+| `auto` | troca e avisa (`poolSwitch`); sem conta livre, `poolBlocked` com o motivo. Avisos são gravados como JSON estruturado e traduzidos nos 3 catálogos (`pt-BR`, `en`, `es`), mantendo leitura de textos legados |
+| Volta | quando a hora de renovação da conta original passa, a próxima mensagem da pessoa (conversa livre) volta a ela: `auto` volta e envia o resumo junto; `ask` pergunta (`poolReturnAsk`) e, ao aceitar, volta a conta e guarda `handoff_key` para a próxima mensagem sem disparar turno só com contexto. Toda mudança de conta emite evento `"thread"` com `accountId` |
 | Renovação | `reset_at` lê «resets 1:10pm» no fuso do sistema; sem hora legível, vale 5 h |
+| Conta apagada | ao remover uma conta, o diálogo lista os pools afetados e `delete_agent_account` retira a referência deles (`accounts::pools::remove_account_from_pools`) |
 
 ### Continuidade: handoff por resumo
 
