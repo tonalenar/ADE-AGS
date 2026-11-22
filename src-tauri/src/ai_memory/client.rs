@@ -424,6 +424,33 @@ impl Client {
         if pinned {
             args.push("--pinned".into());
         }
+        // Escopo explícito: sem ele o ai-memory deduz o projeto pela pasta do processo e a
+        // página renovada poderia ir parar em outro projeto.
+        if plain(&current.workspace, 128) {
+            args.push(format!("--workspace={}", current.workspace));
+        }
+        if plain(&current.project, 128) {
+            args.push(format!("--project={}", current.project));
+        }
+        // Entradas de perfil guardam a quem se aplicam e o que já as garante; reescrever sem
+        // esses campos os apagaria.
+        if path.starts_with("profile/") {
+            let field = |a: &str, b: &str| current.frontmatter.get(a).or_else(|| current.frontmatter.get(b)).cloned();
+            match field("applies_to", "applies-to") {
+                Some(serde_json::Value::Array(items)) => {
+                    for item in items.iter().filter_map(|v| v.as_str()).filter(|t| plain(t, 64)) {
+                        args.push(format!("--applies-to={item}"));
+                    }
+                }
+                Some(serde_json::Value::String(item)) if plain(&item, 64) => args.push(format!("--applies-to={item}")),
+                _ => {}
+            }
+            if let Some(serde_json::Value::String(by)) = field("enforced_by", "enforced-by") {
+                if plain(&by, 128) {
+                    args.push(format!("--enforced-by={by}"));
+                }
+            }
+        }
         self.run_write_page(&args, current.body.into_bytes())?;
         self.json(Read::Page(path.into())).map(Untrusted::new)
     }

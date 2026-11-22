@@ -838,10 +838,34 @@ esac
         let argv_renew = fs::read_to_string(fake.root.join("argv")).unwrap();
         assert!(argv_renew.contains("write-page"));
         assert!(argv_renew.contains("--path=notes/regra.md"));
+        // Sem o escopo explícito o ai-memory deduz o projeto pela pasta do processo e a página
+        // renovada poderia mudar de projeto.
+        assert!(argv_renew.contains("--workspace=default"));
+        assert!(argv_renew.contains("--project=ADE-AGS"));
         assert!(!argv_renew.contains("--pinned"));
 
         let _pinned = fake.client().renew_page("notes/regra.md", true).unwrap();
         let argv_pin = fs::read_to_string(fake.root.join("argv")).unwrap();
         assert!(argv_pin.contains("--pinned"));
+
+        // Entrada de perfil: `applies-to` e `enforced-by` sobrevivem à renovação.
+        let profile_json = serde_json::json!({
+            "path": "profile/estilo.md",
+            "workspace": "default",
+            "project": "ADE-AGS",
+            "body": "Prefira funções pequenas.",
+            "frontmatter": {
+                "tier": "procedural",
+                "applies_to": ["rust", "typescript"],
+                "enforced_by": "pre-push hook"
+            }
+        });
+        fs::write(fake.root.join("page.json"), serde_json::to_vec(&profile_json).unwrap()).unwrap();
+        fake.client().renew_page("profile/estilo.md", false).unwrap();
+        let argv_profile = fs::read_to_string(fake.root.join("argv")).unwrap();
+        assert!(argv_profile.contains("--applies-to=rust"));
+        assert!(argv_profile.contains("--applies-to=typescript"));
+        assert!(argv_profile.contains("--enforced-by=pre-push hook"));
+        assert!(argv_profile.contains("--tier=procedural"));
     }
 }
