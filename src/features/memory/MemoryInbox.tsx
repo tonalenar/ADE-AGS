@@ -16,7 +16,7 @@ import * as memoryIpc from "./ipc";
 import { ReviewMarks } from "./ReviewMarks";
 import { usePendingMemoryStore } from "./pendingStore";
 import { isDeletion } from "./bulkReview";
-import { allHinted, fetchHints, hintTone, jevApprovedIds, type JevHint } from "./jevHints";
+import { allHinted, fetchHints, hintTone, isMemoryHintsEnabled, jevApprovedIds, type JevHint } from "./jevHints";
 import { evidenceParts, reviewFlag } from "./review";
 import type { MemoryPendingCounts, MemoryReviewItem } from "./types";
 
@@ -141,18 +141,43 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
   const all = useMemo(() => flatten(groups), [groups]);
   const chosen = useMemo(() => selectedItems(groups, selected), [groups, selected]);
 
-  // O que o Jev achou de cada proposta (só mostra; quem decide é a pessoa). A consulta ao provedor roda em
-  // segundo plano quando a revisão abre, então as dicas chegam depois: tenta de novo até todas terem uma.
+  // O que o Jev achou de cada proposta (só mostra; quem decide é a pessoa). Só consulta quando o ponto
+  // `memory_approval` está ligado e para assim que todas as propostas têm dica.
   const [hints, setHints] = useState<Record<string, JevHint>>({});
   useEffect(() => {
     if (all.length === 0) return;
     let alive = true;
-    const timers: number[] = [];
-    const pull = () => {
-      fetchHints(all).then((found) => { if (alive) setHints((cur) => ({ ...cur, ...found })); }).catch(() => {});
+    let timer: number | null = null;
+    const delays = [400, 1500, 4000, 9000];
+    let step = 0;
+    let latest: Record<string, JevHint> = {};
+    const schedule = () => {
+      if (!alive || step >= delays.length) return;
+      const ms = delays[step++];
+      timer = window.setTimeout(() => {
+        void pull();
+      }, ms);
     };
-    [400, 1500, 4000, 9000].forEach((ms) => timers.push(window.setTimeout(pull, ms)));
-    return () => { alive = false; timers.forEach((id) => window.clearTimeout(id)); };
+    const pull = async () => {
+      try {
+        const found = await fetchHints(all);
+        if (!alive) return;
+        latest = { ...latest, ...found };
+        setHints((cur) => ({ ...cur, ...found }));
+        if (!allHinted(all, latest)) {
+          schedule();
+        }
+      } catch {
+        // Falha silenciosa: a revisão continua sem dicas do Jev.
+      }
+    };
+    void isMemoryHintsEnabled().then((enabled) => {
+      if (alive && enabled) schedule();
+    });
+    return () => {
+      alive = false;
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [all]);
   const jevApproves = useMemo(() => jevApprovedIds(all, hints), [all, hints]);
   const hintsDone = useMemo(() => allHinted(all, hints), [all, hints]);
@@ -275,7 +300,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                         <input type="checkbox" className="size-3.5 accent-accent-500" checked={selected.has(id)} onChange={() => toggle(id)} aria-label={t("memoryInbox.selectItem", { key: item.key })} />
                         <span className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-gray-50" title={item.key}>{item.key}</span>
                         {hints[id] && (
-                          <span title={t("memoryInbox.jev.title", { provider: hints[id].provider, confidence: hints[id].confidence === null ? "—" : Math.round((hints[id].confidence ?? 0) * 100) + "%", secret: hints[id].secret ? t("memoryInbox.jev.secretYes") : t("memoryInbox.jev.secretNo") })}
+                          <span title={t("memoryInbox.jev.title", { provider: hints[id].provider, probability: hints[id].probability === null ? "—" : Math.round((hints[id].probability ?? 0) * 100) + "%", secret: hints[id].secret ? t("memoryInbox.jev.secretYes") : t("memoryInbox.jev.secretNo") })}
                             data-testid="jev-hint" data-tone={hintTone(hints[id])}
                             className={`inline-flex h-[18px] items-center rounded-full px-2 text-[10px] font-semibold ${hintTone(hints[id]) === "approve"
                               ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"

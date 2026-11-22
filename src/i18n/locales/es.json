@@ -3599,7 +3599,7 @@
   "memoryInbox.jev.secret": "¿secreto?",
   "memoryInbox.jev.secretYes": "posible secreto",
   "memoryInbox.jev.secretNo": "sin sospecha de secreto",
-  "memoryInbox.jev.title": "Opinión de {{provider}} (confianza {{confidence}}, {{secret}}). Solo una pista: decides tú.",
+  "memoryInbox.jev.title": "Opinión de {{provider}} (probabilidad {{probability}}, {{secret}}). Solo una pista: decides tú.",
   "memoryInbox.jev.select": "Seleccionar las que Jev aprobaría ({{count}})",
   "memoryInbox.jev.selectHint": "Marca solo las que Jev aprobaría sin sospecha de secreto y con la mayoría de la probabilidad en \"aprobar\". No se aprueba nada hasta que confirmes.",
   "memoryInbox.workspaceGroup": "Workspace / sin misión",
