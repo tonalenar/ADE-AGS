@@ -7,7 +7,6 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use base64::Engine;
-use ring::constant_time::verify_slices_are_equal;
 use ring::rand::{SecureRandom, SystemRandom};
 use tauri::Manager;
 
@@ -202,7 +201,7 @@ fn serve_askpass(
         let Some((req_nonce, req_query)) = trimmed.split_once(' ') else {
             continue;
         };
-        if verify_slices_are_equal(req_nonce.as_bytes(), expected_nonce.0.as_bytes()).is_err() {
+        if !constant_time_eq(req_nonce.as_bytes(), expected_nonce.0.as_bytes()) {
             continue;
         }
         let query = req_query.trim();
@@ -388,4 +387,27 @@ pub(crate) fn sanitize_error(text: &str, secrets: &[&str]) -> String {
         }
     }
     out
+}
+
+/// Comparação em tempo constante para o nonce (substitui `ring::constant_time::verify_slices_are_equal`, deprecado):
+/// o tempo não depende de onde os bytes diferem. Tamanhos diferentes falham na hora, como antes.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let diff = a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y));
+    std::hint::black_box(diff) == 0
+}
+
+#[cfg(test)]
+mod constant_time_tests {
+    use super::constant_time_eq;
+
+    #[test]
+    fn compara_igual_diferente_e_tamanho() {
+        assert!(constant_time_eq(b"abc123", b"abc123"));
+        assert!(!constant_time_eq(b"abc123", b"abc124"));
+        assert!(!constant_time_eq(b"abc", b"abc123"));
+        assert!(constant_time_eq(b"", b""));
+    }
 }
