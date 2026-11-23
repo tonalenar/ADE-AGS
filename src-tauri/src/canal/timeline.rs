@@ -156,7 +156,6 @@ impl UsageBreakdown {
 /// O maior HTML de um app MCP que a timeline guarda (em bytes, já decodificado). Acima disso o recurso
 /// fica de fora inteiro: um HTML cortado no meio não é um app.
 pub const APP_RESOURCE_MAX: usize = 512 * 1024;
-const APP_MIME: &str = "text/html;profile=mcp-app";
 /// Quantos nós, e a que profundidade, a busca pelo recurso no resultado da ferramenta olha.
 const APP_SEARCH_NODES: usize = 200;
 const APP_SEARCH_DEPTH: usize = 8;

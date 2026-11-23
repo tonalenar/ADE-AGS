@@ -31,6 +31,10 @@ pub fn initialize_identity() {
 }
 
 #[derive(Clone)]
+#[cfg_attr(
+    not(windows),
+    expect(dead_code, reason = "lido no callback de ativação do toast no Windows")
+)]
 pub struct Target {
     pub window: String,
     pub tab_id: String,

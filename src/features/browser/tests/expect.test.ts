@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { applyVerification, checkExpectation, genericProblem, norm, parseExpectations, verify, verifyReport } from "../expect";
 import { formatResult, parseSnapshot, type PilotResult } from "../jevPilot";
-import { loadRuntime } from "./runtimeHarness";
+import { type Harness, loadRuntime } from "./runtimeHarness";
 
 const snap = (url: string, lines: string[]) => ["page: \"Loja\" " + url, "viewport: 1000×600 · scroll 0/600", "", ...lines].join("\n");
 
@@ -139,9 +139,13 @@ describe("relatório reescrito", () => {
 });
 
 /** O snapshot COMPLETO que o runtime real devolve para uma página (o mesmo que a verifyAct lê). */
+let shared: Harness | null = null;
+
+/** O runtime carrega UMA vez por arquivo; cada página só troca o corpo. Recarregar o módulo a cada chamada (resetModules) estourava os 5 s do `it` sob carga. */
 async function realSnapshot(html: string): Promise<string> {
-  const h = await loadRuntime(html);
-  return String(await h.run({ op: "snapshot", all: true }));
+  shared ??= await loadRuntime("");
+  document.body.innerHTML = html;
+  return String(await shared.run({ op: "snapshot", all: true }));
 }
 
 describe("revisão da Fase 5: páginas reais do runtime", () => {

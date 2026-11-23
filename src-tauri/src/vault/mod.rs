@@ -446,6 +446,7 @@ pub fn origin_matches(entry_origin: &str, page_url: &str) -> bool {
 }
 
 /// Recupera a senha pelo id (uso interno do backend).
+#[cfg(test)]
 pub(crate) fn password_for_fill(id: &str) -> Result<VaultSecret, String> {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let entries = load_index()?;
@@ -511,6 +512,7 @@ pub fn revoke_agent(id: &str, agent: &str) -> Result<VaultEntry, String> {
 }
 
 /// Informa se `agent` já tem permissão permanente para este login.
+#[cfg(test)]
 pub fn is_allowed(id: &str, agent: &str) -> bool {
     let Ok(_guard) = STORE_LOCK.lock() else {
         return false;

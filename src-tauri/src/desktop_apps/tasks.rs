@@ -2,7 +2,9 @@
 use crate::database::DbConnection;
 use serde::Serialize;
 use serde_json::{Value, json};
+#[cfg(windows)]
 use std::sync::{Mutex, OnceLock};
+#[cfg(windows)]
 use std::time::Duration;
 use tauri::{Emitter, Manager};
 

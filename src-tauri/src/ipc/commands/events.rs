@@ -11,7 +11,7 @@
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::bus::{self, Filter};
 use crate::ipc::protocol::{arg_str_opt, arg_u64_opt};
@@ -65,7 +65,7 @@ pub(crate) fn idle_team(members: &[Member]) -> Option<String> {
 }
 
 fn db(app: &AppHandle) -> Option<crate::database::DbConnection> {
-    app.try_state::<crate::database::DbConnection>().map(|s| s.inner().clone())
+    crate::database::try_db(app)
 }
 
 /// O run do filtro: `--run`, ou o run ativo de `--mission`.
