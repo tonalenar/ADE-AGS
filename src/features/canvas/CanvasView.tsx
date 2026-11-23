@@ -262,29 +262,71 @@ function CanvasInner() {
   }, [key, setVp, rf]);
   const live = isLive(vp.zoom);
 
+  // Posição e tamanho locais durante arrasto/redimensionamento de nós: o store só recebe 1 gravação ao soltar.
+  const [nodeDrag, setNodeDrag] = useState<Record<string, Partial<Box>>>({});
+  const nodeDragRef = useRef<Record<string, Partial<Box>>>({});
+  const dragOverlayRafRef = useRef<number | null>(null);
+  const dragOverlayPendingRef = useRef({ live: false, desktop: false });
+
+  useEffect(() => {
+    nodeDragRef.current = {};
+    setNodeDrag((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+  }, [key]);
+
   // Dónde va cada terminal viva. Fuera del área no se dibuja: una terminal que nadie ve no
   // tiene por qué repintar.
   const publishLiveRects = useCallback((view: Viewport) => {
+    const dragged = nodeDragRef.current;
     canvasActions.setLiveRects(liveRectsOf(
       tabs.flatMap((tab) => {
-        const box = board.nodes[tab.id];
-        return box ? [{ id: tab.id, box }] : [];
+        const base = board.nodes[tab.id];
+        if (!base) return [];
+        const patch = dragged[tab.id];
+        return [{ id: tab.id, box: patch ? { ...base, ...patch } : base }];
       }),
       view,
       size,
     ));
   }, [board.nodes, tabs, size]);
   const publishDesktopRects = useCallback((view: Viewport) => {
-    useCanvasStore.setState({
-      desktopRects: desktopRectsOf(
-        Object.entries(board.portals).flatMap(([id, portal]) => (
-          portal.kind === "gemini" ? [{ id, box: portal.box }] : []
-        )),
-        view,
-        size,
-      ),
-    });
+    const dragged = nodeDragRef.current;
+    canvasActions.setDesktopRects(desktopRectsOf(
+      Object.entries(board.portals).flatMap(([id, portal]) => {
+        if (portal.kind !== "gemini") return [];
+        const patch = dragged[id];
+        return [{ id, box: patch ? { ...portal.box, ...patch } : portal.box }];
+      }),
+      view,
+      size,
+    ));
   }, [board.portals, size]);
+  const publishLiveRef = useRef(publishLiveRects);
+  publishLiveRef.current = publishLiveRects;
+  const publishDesktopRef = useRef(publishDesktopRects);
+  publishDesktopRef.current = publishDesktopRects;
+  const cancelDragOverlay = useCallback(() => {
+    if (dragOverlayRafRef.current !== null && typeof cancelAnimationFrame !== "undefined") {
+      cancelAnimationFrame(dragOverlayRafRef.current);
+    }
+    dragOverlayRafRef.current = null;
+    dragOverlayPendingRef.current.live = false;
+    dragOverlayPendingRef.current.desktop = false;
+  }, []);
+  const scheduleDragOverlay = useCallback((liveChanged: boolean, desktopChanged: boolean) => {
+    if (!liveChanged && !desktopChanged) return;
+    if (liveChanged) dragOverlayPendingRef.current.live = true;
+    if (desktopChanged) dragOverlayPendingRef.current.desktop = true;
+    if (dragOverlayRafRef.current !== null || typeof requestAnimationFrame === "undefined") return;
+    dragOverlayRafRef.current = requestAnimationFrame(() => {
+      dragOverlayRafRef.current = null;
+      const { live: flushLive, desktop: flushDesktop } = dragOverlayPendingRef.current;
+      dragOverlayPendingRef.current.live = false;
+      dragOverlayPendingRef.current.desktop = false;
+      if (flushLive) publishLiveRef.current(vpRef.current);
+      if (flushDesktop) publishDesktopRef.current(vpRef.current);
+    });
+  }, []);
+  useEffect(() => cancelDragOverlay, [cancelDragOverlay]);
   const onViewportChange = useCallback((next: Viewport) => {
     const view = safeViewport(next, vpRef.current);
     vpRef.current = view;
@@ -296,7 +338,7 @@ function CanvasInner() {
     if (!canvasActive) return;
     publishDesktopRects(vpRef.current);
   }, [canvasActive, publishDesktopRects]);
-  useEffect(() => () => { useCanvasStore.setState({ desktopRects: {} }); }, []);
+  useEffect(() => () => canvasActions.setDesktopRects({}), []);
   useEffect(() => {
     if (!canvasActive) return;
     publishLiveRects(vpRef.current);
@@ -438,8 +480,10 @@ function CanvasInner() {
   const reconnected = useRef(false);
 
   const rawAgentNodes: AgentFlowNode[] = useMemo(() => tabs.flatMap((tab) => {
-    const box = board.nodes[tab.id];
-    if (!box) return [];
+    const base = board.nodes[tab.id];
+    if (!base) return [];
+    const drag = nodeDrag[tab.id];
+    const box = drag ? { ...base, ...drag } : base;
     return [{
       id: tab.id,
       type: "agent" as const,
@@ -471,78 +515,101 @@ function CanvasInner() {
       },
     }];
     // `focusNode` cambia con cada render y no aporta nada nuevo al nodo.
-  }), [tabs, board, activeTabId, selected, live]);
+  }), [tabs, board, activeTabId, selected, live, nodeDrag]);
 
   // Las notas tapadas por otra de su pila no se dibujan: se ve la del frente.
-  const rawNoteNodes: NoteFlowNode[] = useMemo(() => Object.entries(board.notes).filter(([id]) => !isHiddenNote(board, id)).map(([id, note]) => ({
-    id,
-    type: "note" as const,
-    position: { x: note.box.x, y: note.box.y },
-    width: note.box.w,
-    height: note.box.h,
-    selected: id === selectedNote,
-    deletable: false,
-    data: {
+  const rawNoteNodes: NoteFlowNode[] = useMemo(() => Object.entries(board.notes).filter(([id]) => !isHiddenNote(board, id)).map(([id, rawNote]) => {
+    const drag = nodeDrag[id];
+    const note = drag ? { ...rawNote, box: { ...rawNote.box, ...drag } } : rawNote;
+    return {
       id,
-      note,
-      // Las conexiones de toda la pila se cuentan en la del frente.
-      links: stackMembers(board, note.stack).concat(note.stack ? [] : [id]).reduce((n, m) => n + neighbors(board, m).length, 0),
-      stack: stackMembers(board, note.stack).map((m) => ({ id: m, name: board.notes[m].name })),
-      others: Object.entries(board.notes).filter(([oid]) => oid !== id && !isHiddenNote(board, oid)).map(([oid, o]) => ({ id: oid, name: o.name })),
-    },
-  })), [board, selectedNote]);
+      type: "note" as const,
+      position: { x: note.box.x, y: note.box.y },
+      width: note.box.w,
+      height: note.box.h,
+      selected: id === selectedNote,
+      deletable: false,
+      data: {
+        id,
+        note,
+        // Las conexiones de toda la pila se cuentan en la del frente.
+        links: stackMembers(board, note.stack).concat(note.stack ? [] : [id]).reduce((n, m) => n + neighbors(board, m).length, 0),
+        stack: stackMembers(board, note.stack).map((m) => ({ id: m, name: board.notes[m].name })),
+        others: Object.entries(board.notes).filter(([oid]) => oid !== id && !isHiddenNote(board, oid)).map(([oid, o]) => ({ id: oid, name: o.name })),
+      },
+    };
+  }), [board, selectedNote, nodeDrag]);
 
   const portalCwd = tabs[0]?.cwd || key?.split("|").slice(1).join("|").split(/#(?:m|c|cmp|s):/)[0] || "";
-  const rawPortalNodes: PortalFlowNode[] = useMemo(() => Object.entries(board.portals).map(([id, portal]) => ({
-    id,
-    type: "portal" as const,
-    position: { x: portal.box.x, y: portal.box.y },
-    width: portal.box.w,
-    height: portal.box.h,
-    selected: id === selectedNote,
-    dragHandle: ".ade-node-drag",
-    deletable: false,
-    data: { id, cwd: portal.kind === "gemini" ? key?.split("|").slice(1).join("|").split(/#(?:m|c|cmp|s):/)[0] ?? portalCwd : portalCwd, portal, links: neighbors(board, id).length },
-  })), [board, selectedNote, portalCwd]);
+  const rawPortalNodes: PortalFlowNode[] = useMemo(() => Object.entries(board.portals).map(([id, rawPortal]) => {
+    const drag = nodeDrag[id];
+    const portal = drag ? { ...rawPortal, box: { ...rawPortal.box, ...drag } } : rawPortal;
+    return {
+      id,
+      type: "portal" as const,
+      position: { x: portal.box.x, y: portal.box.y },
+      width: portal.box.w,
+      height: portal.box.h,
+      selected: id === selectedNote,
+      dragHandle: ".ade-node-drag",
+      deletable: false,
+      data: { id, cwd: portal.kind === "gemini" ? key?.split("|").slice(1).join("|").split(/#(?:m|c|cmp|s):/)[0] ?? portalCwd : portalCwd, portal, links: neighbors(board, id).length },
+    };
+  }), [board, selectedNote, portalCwd, nodeDrag]);
 
-  const rawTextNodes: TextFlowNode[] = useMemo(() => Object.entries(board.texts).map(([id, text]) => ({
-    id,
-    type: "text" as const,
-    position: { x: text.box.x, y: text.box.y },
-    width: text.box.w,
-    height: text.box.h,
-    selected: id === selectedNote,
-    dragHandle: ".ade-node-drag",
-    deletable: false,
-    data: { id, text },
-  })), [board.texts, selectedNote]);
+  const rawTextNodes: TextFlowNode[] = useMemo(() => Object.entries(board.texts).map(([id, rawText]) => {
+    const drag = nodeDrag[id];
+    const text = drag ? { ...rawText, box: { ...rawText.box, ...drag } } : rawText;
+    return {
+      id,
+      type: "text" as const,
+      position: { x: text.box.x, y: text.box.y },
+      width: text.box.w,
+      height: text.box.h,
+      selected: id === selectedNote,
+      dragHandle: ".ade-node-drag",
+      deletable: false,
+      data: { id, text },
+    };
+  }), [board.texts, selectedNote, nodeDrag]);
 
-  const rawImageNodes: ImageFlowNode[] = useMemo(() => Object.entries(board.images).map(([id, image]) => ({
-    id,
-    type: "image" as const,
-    position: { x: image.box.x, y: image.box.y },
-    width: image.box.w,
-    height: image.box.h,
-    selected: id === selectedNote,
-    deletable: false,
-    data: { id, image },
-  })), [board.images, selectedNote]);
+  const rawImageNodes: ImageFlowNode[] = useMemo(() => Object.entries(board.images).map(([id, rawImage]) => {
+    const drag = nodeDrag[id];
+    const image = drag ? { ...rawImage, box: { ...rawImage.box, ...drag } } : rawImage;
+    return {
+      id,
+      type: "image" as const,
+      position: { x: image.box.x, y: image.box.y },
+      width: image.box.w,
+      height: image.box.h,
+      selected: id === selectedNote,
+      deletable: false,
+      data: { id, image },
+    };
+  }), [board.images, selectedNote, nodeDrag]);
 
-  const rawFolderNodes: FolderFlowNode[] = useMemo(() => Object.entries(board.folders).map(([id, folder]) => ({
-    id,
-    type: "folder" as const,
-    position: { x: folder.box.x, y: folder.box.y },
-    width: folder.box.w,
-    height: folder.box.h,
-    selected: id === selectedNote,
-    dragHandle: ".ade-node-drag",
-    deletable: false,
-    data: { id, cwd: portalCwd, folder },
-  })), [board.folders, selectedNote, portalCwd]);
+  const rawFolderNodes: FolderFlowNode[] = useMemo(() => Object.entries(board.folders).map(([id, rawFolder]) => {
+    const drag = nodeDrag[id];
+    const folder = drag ? { ...rawFolder, box: { ...rawFolder.box, ...drag } } : rawFolder;
+    return {
+      id,
+      type: "folder" as const,
+      position: { x: folder.box.x, y: folder.box.y },
+      width: folder.box.w,
+      height: folder.box.h,
+      selected: id === selectedNote,
+      dragHandle: ".ade-node-drag",
+      deletable: false,
+      data: { id, cwd: portalCwd, folder },
+    };
+  }), [board.folders, selectedNote, portalCwd, nodeDrag]);
 
-  const rawThreadNodes: ThreadFlowNode[] = useMemo(() => Object.entries(board.threads).flatMap(([ref, box]) => {
+  const rawThreadNodes: ThreadFlowNode[] = useMemo(() => Object.entries(board.threads).flatMap(([ref, rawBox]) => {
     const threadId = threadIdOf(ref);
-    return threadId ? [{
+    if (!threadId) return [];
+    const drag = nodeDrag[ref];
+    const box = drag ? { ...rawBox, ...drag } : rawBox;
+    return [{
       id: ref, type: "thread" as const, position: { x: box.x, y: box.y }, width: box.w, height: box.h,
       selected: ref === selected, dragHandle: ".ade-node-drag", deletable: false,
       data: {
@@ -559,8 +626,8 @@ function CanvasInner() {
           });
         },
       },
-    }] : [];
-  }), [board, selected, key]);
+    }];
+  }), [board, selected, key, nodeDrag]);
   const [remoteClients, setRemoteClients] = useState<RemoteClient[]>([]);
   const boardLoaded = useCanvasStore((s) => s.loaded);
   useEffect(() => {
@@ -609,9 +676,12 @@ function CanvasInner() {
 
   const rawRemoteNodes: RemoteFlowNode[] = useMemo(() => {
     const byId = new Map(remoteClients.map((c) => [c.id, c]));
-    return Object.entries(board.remotes ?? {}).flatMap(([ref, box]) => {
+    return Object.entries(board.remotes ?? {}).flatMap(([ref, rawBox]) => {
       const clientId = remoteClientIdOf(ref);
-      return clientId ? [{
+      if (!clientId) return [];
+      const drag = nodeDrag[ref];
+      const box = drag ? { ...rawBox, ...drag } : rawBox;
+      return [{
         id: ref,
         type: "remote" as const,
         position: { x: box.x, y: box.y },
@@ -636,9 +706,9 @@ function CanvasInner() {
             });
           },
         },
-      }] : [];
+      }];
     });
-  }, [board, remoteClients, selectedNote, key]);
+  }, [board, remoteClients, selectedNote, key, nodeDrag]);
 
   const threadNodes = useStable(rawThreadNodes, threadSig);
   const remoteNodes = useStable(rawRemoteNodes, remoteSig);
@@ -760,31 +830,78 @@ function CanvasInner() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [design.details, design.reload, ownerTabs, missionIndex, t, key]);
-  /** Al soltar una prancheta: graba x/y (relativos a su página) y las hermanas que estaban apiladas. */
-  const onDesignDragStop = (_: unknown, node: Node) => {
-    if (!node.id.startsWith(BOARD_NODE_PREFIX)) return;
-    const id = node.id.slice(BOARD_NODE_PREFIX.length);
-    const group = groups.find((g) => g.boards.some((b) => b.board.id === id));
-    if (!group) return;
-    const saves = positionsToSave(group, id, node.position.x, node.position.y);
-    Promise.all(saves.map((p) => designApi.updateArtboard(p.id, { x: p.x, y: p.y })))
-      .then(() => design.reload())
-      .catch((e) => AlertaToast(t("canvas.design.title"), String(e), "error", 6000))
-      .finally(() => setDragPos({}));
+  /** Grava as posições/dimensões acumuladas no fim do arrasto ou redimensionamento em 1 única escrita. */
+  const commitNodePatches = (patches: Record<string, Partial<Box>>) => {
+    if (!key) return;
+    const ids = Object.keys(patches);
+    if (ids.length === 0) return;
+    cancelDragOverlay();
+    let cleared = false;
+    const nextDrag = { ...nodeDragRef.current };
+    for (const id of ids) {
+      if (id in nextDrag) {
+        delete nextDrag[id];
+        cleared = true;
+      }
+    }
+    if (cleared) {
+      nodeDragRef.current = nextDrag;
+      setNodeDrag(nextDrag);
+    }
+    if (ids.length === 1) {
+      const id = ids[0]!;
+      canvasActions.moveNode(key, id, patches[id]!);
+    } else {
+      canvasActions.moveNodes(key, patches);
+    }
+  };
+
+  /** Al soltar una prancheta o nodo del canvas: graba a posição final uma única vez. */
+  const onCanvasNodeDragStop = (_: unknown, node: Node, draggedNodes?: Node[]) => {
+    if (node.id.startsWith(BOARD_NODE_PREFIX)) {
+      const id = node.id.slice(BOARD_NODE_PREFIX.length);
+      const group = groups.find((g) => g.boards.some((b) => b.board.id === id));
+      if (!group) return;
+      const saves = positionsToSave(group, id, node.position.x, node.position.y);
+      Promise.all(saves.map((p) => designApi.updateArtboard(p.id, { x: p.x, y: p.y })))
+        .then(() => design.reload())
+        .catch((e) => AlertaToast(t("canvas.design.title"), String(e), "error", 6000))
+        .finally(() => setDragPos({}));
+      return;
+    }
+    const list = draggedNodes && draggedNodes.length > 0 ? draggedNodes : [node];
+    const patches: Record<string, Partial<Box>> = {};
+    for (const item of list) {
+      if (isEphemeralSubagentNodeId(item.id) || isDesignNodeId(item.id)) continue;
+      const prev = nodeDragRef.current[item.id];
+      const nextPatch: Partial<Box> = {
+        ...(prev ?? {}),
+        x: Math.round(item.position.x),
+        y: Math.round(item.position.y),
+      };
+      patches[item.id] = nextPatch;
+    }
+    commitNodePatches(patches);
   };
 
   // Una conexión con un agente de otro piso no tiene punta en este canvas: no se dibuja.
   // La punta en una nota tapada se dibuja en la del frente de su pila.
   const edges: Edge[] = useMemo(() => {
     const seen = new Set<string>();
+    const boxWithDrag = (id: string): Box | undefined => {
+      const base = boxOf(board, id);
+      if (!base) return undefined;
+      const patch = nodeDrag[id];
+      return patch ? { ...base, ...patch } : base;
+    };
     const persisted = board.edges.filter((e) => boxOf(board, e.a) && boxOf(board, e.b)).flatMap((e) => {
       const source = shownNote(board, e.a);
       const target = shownNote(board, e.b);
       const pair = [source, target].sort().join("|");
       if (source === target || seen.has(pair)) return [];
       seen.add(pair);
-      const a = boxOf(board, source);
-      const b = boxOf(board, target);
+      const a = boxWithDrag(source);
+      const b = boxWithDrag(target);
       // Sale por el lado que mira al otro nodo: la curva no cruza su propio nodo.
       const [sourceHandle, targetHandle] = a && b ? facingSides(a, b) : ["r", "l"];
       return [{ id: e.id, source, target, sourceHandle, targetHandle, type: "link", selected: e.id === selectedEdge,
@@ -804,10 +921,38 @@ function CanvasInner() {
       data: { color: cordColor(e.id), ephemeral: true },
     }));
     return [...persisted, ...ephemeral];
-  }, [board, selectedEdge, hoveredEdge, ephemeralSubagents.edges]);
+  }, [board, selectedEdge, hoveredEdge, ephemeralSubagents.edges, nodeDrag]);
 
   const onNodesChange = (changes: NodeChange<FlowNode>[]) => {
     if (!key) return;
+    const resizingIds = new Set<string>();
+    for (const c of changes) {
+      if (c.type === "dimensions" && c.resizing === true) resizingIds.add(c.id);
+    }
+
+    let dragChanged = false;
+    let liveOverlayChanged = false;
+    let desktopOverlayChanged = false;
+    const nextDrag = { ...nodeDragRef.current };
+    const commitPatches: Record<string, Partial<Box>> = {};
+
+    const stageLocal = (id: string, patch: Partial<Box>) => {
+      const prev = nextDrag[id];
+      if (
+        prev
+        && (patch.x === undefined || prev.x === patch.x)
+        && (patch.y === undefined || prev.y === patch.y)
+        && (patch.w === undefined || prev.w === patch.w)
+        && (patch.h === undefined || prev.h === patch.h)
+      ) {
+        return;
+      }
+      nextDrag[id] = prev ? { ...prev, ...patch } : patch;
+      dragChanged = true;
+      if (size.width > 0 && live && id in board.nodes) liveOverlayChanged = true;
+      if (size.width > 0 && board.portals[id]?.kind === "gemini") desktopOverlayChanged = true;
+    };
+
     for (const c of changes) {
       if ("id" in c && isEphemeralSubagentNodeId(c.id)) continue;
       if ("id" in c && isDesignNodeId(c.id)) {
@@ -817,15 +962,44 @@ function CanvasInner() {
         }
         continue;
       }
-      if (c.type === "position" && c.position) {
-        canvasActions.moveNode(key, c.id, { x: Math.round(c.position.x), y: Math.round(c.position.y) });
-      } else if (c.type === "dimensions" && c.resizing && c.dimensions) {
-        canvasActions.moveNode(key, c.id, { w: Math.round(c.dimensions.width), h: Math.round(c.dimensions.height) });
+      if (c.type === "position") {
+        if (c.dragging === true && c.position) {
+          stageLocal(c.id, { x: Math.round(c.position.x), y: Math.round(c.position.y) });
+        } else if (c.dragging === false) {
+          const staged = nextDrag[c.id];
+          const finalPos = c.position ? { x: Math.round(c.position.x), y: Math.round(c.position.y) } : undefined;
+          if (staged || finalPos) {
+            commitPatches[c.id] = { ...(commitPatches[c.id] ?? {}), ...(staged ?? {}), ...(finalPos ?? {}) };
+          }
+        } else if (c.position) {
+          const pos = { x: Math.round(c.position.x), y: Math.round(c.position.y) };
+          if (resizingIds.has(c.id) || c.id in nextDrag) stageLocal(c.id, pos);
+          else commitPatches[c.id] = { ...(commitPatches[c.id] ?? {}), ...pos };
+        }
+      } else if (c.type === "dimensions") {
+        if (c.resizing === true && c.dimensions) {
+          stageLocal(c.id, { w: Math.round(c.dimensions.width), h: Math.round(c.dimensions.height) });
+        } else if (c.resizing === false) {
+          const staged = nextDrag[c.id];
+          const finalDims = c.dimensions ? { w: Math.round(c.dimensions.width), h: Math.round(c.dimensions.height) } : undefined;
+          if (staged || finalDims) {
+            commitPatches[c.id] = { ...(commitPatches[c.id] ?? {}), ...(staged ?? {}), ...(finalDims ?? {}) };
+          }
+        }
       } else if (c.type === "select") {
         if (threadIdOf(c.id)) { if (c.selected && c.id !== selected) selectConversation(c.id); }
         else if (isFreeNodeId(c.id) || isRemoteRef(c.id)) setSelectedNote(c.selected ? c.id : (prev) => (prev === c.id ? null : prev));
         else if (c.selected) activateTab(c.id);
       }
+    }
+
+    if (dragChanged) {
+      nodeDragRef.current = nextDrag;
+      setNodeDrag(nextDrag);
+      scheduleDragOverlay(liveOverlayChanged, desktopOverlayChanged);
+    }
+    if (Object.keys(commitPatches).length > 0) {
+      commitNodePatches(commitPatches);
     }
   };
 
@@ -1037,7 +1211,10 @@ function CanvasInner() {
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
         onNodesChange={onNodesChange}
-        onNodeDragStop={onDesignDragStop}
+        onNodeDragStop={onCanvasNodeDragStop}
+        onSelectionDragStop={(ev, dragged) => {
+          if (dragged.length > 0) onCanvasNodeDragStop(ev, dragged[0]!, dragged);
+        }}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         connectionMode={ConnectionMode.Loose}

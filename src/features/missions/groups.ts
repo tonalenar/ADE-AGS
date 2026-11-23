@@ -1,7 +1,6 @@
-import { useMemo } from "react";
-
-import { boardKeyOfTab, missionOfKey, useCanvasStore } from "@/features/canvas/store";
+import { boardKey, boardKeyOfTab, missionOfKey, useCanvasStore } from "@/features/canvas/store";
 import type { Board } from "@/features/canvas/board";
+import { useTeamIndex } from "@/features/chat/team/teamIndex";
 import { useTabsStore } from "@/features/tabs/store";
 import type { Tab } from "@/features/tabs/types";
 
@@ -36,11 +35,59 @@ export function entryTab(orchestrators: string[], missionTabs: string[]): string
   return orchestrators.find((id) => missionTabs.includes(id)) ?? missionTabs[0] ?? null;
 }
 
+const EMPTY_MISSION_INDEX: Record<string, string> = Object.freeze({});
+let cachedBoards: Record<string, Board> | null = null;
+let cachedTabs: readonly Pick<Tab, "id" | "cwd">[] | null = null;
+let cachedTeams: unknown = null;
+let cachedTeamsLoaded: boolean | null = null;
+let cachedWindowPrefix: string | null = null;
+let cachedIndex: Record<string, string> = EMPTY_MISSION_INDEX;
+
+function sameStringRecord(a: Record<string, string>, b: Record<string, string>): boolean {
+  if (a === b) return true;
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+function cachedMissionIndex(
+  boards: Record<string, Board>,
+  tabs: Pick<Tab, "id" | "cwd">[],
+  teams: unknown,
+  teamsLoaded: boolean,
+  windowPrefix: string,
+): Record<string, string> {
+  if (
+    boards === cachedBoards
+    && tabs === cachedTabs
+    && teams === cachedTeams
+    && teamsLoaded === cachedTeamsLoaded
+    && windowPrefix === cachedWindowPrefix
+  ) {
+    return cachedIndex;
+  }
+  const next = missionIndex(boards, tabs);
+  const stable = sameStringRecord(cachedIndex, next) ? cachedIndex : next;
+  cachedBoards = boards;
+  cachedTabs = tabs;
+  cachedTeams = teams;
+  cachedTeamsLoaded = teamsLoaded;
+  cachedWindowPrefix = windowPrefix;
+  cachedIndex = stable;
+  return stable;
+}
+
 /** tabId → misionId, al día; solo cambia cuando cambia la pertenencia (no con cada arrastre de un nodo). */
 export function useMissionIndex(): Record<string, string> {
   const tabs = useTabsStore((s) => s.tabs);
-  const serialized = useCanvasStore((s) => JSON.stringify(missionIndex(s.boards, tabs)));
-  return useMemo(() => JSON.parse(serialized) as Record<string, string>, [serialized]);
+  const teams = useTeamIndex((s) => s.teams);
+  const teamsLoaded = useTeamIndex((s) => s.loaded);
+  const windowPrefix = boardKey("");
+  return useCanvasStore((s) => cachedMissionIndex(s.boards, tabs, teams, teamsLoaded, windowPrefix));
 }
 
 /** La misión de la pestaña activa, o `null` si es una suelta. Es el "grupo" que se está mirando. */

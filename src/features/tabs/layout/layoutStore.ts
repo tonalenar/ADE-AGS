@@ -459,11 +459,18 @@ export function placementsFrom(input: PlacementInput): Placements {
   return { visible, focusedItem: focusedActive(layout) };
 }
 
+const EMPTY_RECTS: Record<string, Rect> = {};
+
+export interface UsePlacementsOptions {
+  /** `false` para consumidores que só posicionam views (file/diff/browser/desktop) e não dependem de `liveRects` no pan do canvas. */
+  trackCanvasAgents?: boolean;
+}
+
 /** Dónde se dibuja cada tab visible y cuál tiene el foco. Sin árbol (las tabs todavía no
  *  cargaron) se comporta como antes de que existieran los grupos. */
-export function usePlacements(): Placements {
+export function usePlacements(options?: UsePlacementsOptions): Placements {
+  const trackCanvasAgents = options?.trackCanvasAgents ?? true;
   const layout = useWorkspaceLayout();
-  const slots = useLayoutStore((s) => s.slots);
   const activeTabId = useTabsStore((s) => (s.tabs.some((t) => t.id === s.activeTabId) ? s.activeTabId : null));
   const activeCwd = useTabsStore((s) => {
     const active = s.tabs.find((t) => t.id === s.activeTabId);
@@ -474,17 +481,29 @@ export function usePlacements(): Placements {
     return view && comparablePath(view.cwd) === activeCwd ? view.id : null;
   });
   const mode = useWorkMode();
-  const liveRects = useCanvasStore((s) => s.liveRects);
   const grid = useMissionGrid();
   const chatOn = useUiStore(chatShellOn);
-  const chatSlot = useChatStore((s) => s.slot);
+  const needsLiveRects = !chatOn && mode === "canvas" && activeViewId === null && trackCanvasAgents;
+  const liveRects = useCanvasStore((s) => (needsLiveRects ? s.liveRects : EMPTY_RECTS));
+  const needsSlots = !chatOn && mode !== "canvas";
+  const slots = useLayoutStore((s) => (needsSlots ? s.slots : EMPTY_RECTS));
+  const chatSlot = useChatStore((s) => (chatOn ? s.slot : null));
   // Três seletores simples + useMemo: um seletor que monta o objeto a cada chamada nunca estabiliza (laço "getSnapshot").
-  const rawBrowser = useChatStore((s) => s.browser);
-  const browserFloating = useChatStore((s) => s.browserFloating);
-  const browserFloatRect = useChatStore((s) => s.browserFloatRect);
+  const rawBrowser = useChatStore((s) => (chatOn ? s.browser : null));
+  const browserFloating = useChatStore((s) => (chatOn ? s.browserFloating : false));
+  const browserFloatRect = useChatStore((s) => (chatOn ? s.browserFloatRect : null));
   const chatBrowser = useMemo(() => browserForChatPlacement(rawBrowser, browserFloating, browserFloatRect), [rawBrowser, browserFloating, browserFloatRect]);
-  const chatShell = useChatStore((s) => s.shell);
-  return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects, grid, chat: chatOn ? { slot: chatSlot, browser: chatBrowser, shell: chatShell } : null });
+  const chatShell = useChatStore((s) => (chatOn ? s.shell : null));
+  const chat = useMemo(
+    () => (chatOn ? { slot: chatSlot, browser: chatBrowser, shell: chatShell } : null),
+    [chatOn, chatSlot, chatBrowser, chatShell],
+  );
+  const effectiveLayout = !chatOn && mode !== "canvas" && grid === null ? layout : null;
+  const effectiveActiveTabId = !trackCanvasAgents && !chatOn && mode === "canvas" && activeViewId === null ? null : activeTabId;
+  return useMemo(
+    () => placementsFrom({ layout: effectiveLayout, slots, activeTabId: effectiveActiveTabId, activeViewId, mode, liveRects, grid, chat }),
+    [effectiveLayout, slots, effectiveActiveTabId, activeViewId, mode, liveRects, grid, chat],
+  );
 }
 
 /** Lo que está en pantalla ahora, leído de los stores (sin suscribir un componente). */
