@@ -209,6 +209,22 @@ pub fn pool_pick(app: AppHandle, agent_id: String, pool: String) -> Result<Optio
     super::agents::resolve_pool_account(&app, &agent_id, &pool)
 }
 
+/// `pool:<nome>` que um integrante/subagente novo usa quando ninguém escolheu conta (o pool ativo do agente, por nome
+/// e id), ou `None` se o agente não tem pool ativo com 2+ contas.
+#[tauri::command(async)]
+pub fn pool_default_ref(app: AppHandle, agent_id: String) -> Result<Option<String>, String> {
+    let db = db(&app)?;
+    let Some(pool_ref) = crate::conversa::pool::default_pool_ref(&db, &agent_id) else { return Ok(None) };
+    // Só devolve o pool se ele escolheria uma conta agora (sem avançar o cursor): o integrante não nasce com erro.
+    let roster = crate::runs::roster::snapshot(&db, false)?;
+    let pickable = pools::pool_ref(&pool_ref).and_then(|name| pools::spec_preview(&db, name).ok()).is_some_and(|spec| {
+        roster.agents.iter().find(|a| a.agent_id == agent_id).is_some_and(|agent| {
+            crate::runs::routing::pick_in_pool(agent, &spec, crate::util::now_ts()).is_ok()
+        })
+    });
+    Ok(pickable.then_some(pool_ref))
+}
+
 /// Prévia somente leitura de qual conta cada pool escolheria agora, reaproveitando `routing::pick_in_pool`
 /// sem avançar cursor nem duplicar a regra de escolha no frontend.
 #[derive(Debug, Clone, Serialize)]

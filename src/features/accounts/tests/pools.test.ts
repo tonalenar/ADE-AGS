@@ -11,6 +11,7 @@ import {
   isPoolValue,
   poolNameOf,
   poolPreviewPicks,
+  poolDefaultRef,
   poolSaveNew,
   poolSetFailover,
   poolSetPaused,
@@ -177,6 +178,10 @@ describe("pools de cuentas (lado de la pantalla)", () => {
     const previews = await poolPreviewPicks();
     expect(mock.invoke).toHaveBeenCalledWith("pool_preview_picks");
     expect(previews[0]?.accountId).toBe("acc-1");
+
+    mock.invoke.mockResolvedValueOnce("pool:Gemini");
+    expect(await poolDefaultRef("antigravity")).toBe("pool:Gemini");
+    expect(mock.invoke).toHaveBeenCalledWith("pool_default_ref", { agentId: "antigravity" });
   });
 
   it("identifica pools vazios, órfãos, separa pools que ficam vazios ao apagar conta e traduz erro estruturado", async () => {

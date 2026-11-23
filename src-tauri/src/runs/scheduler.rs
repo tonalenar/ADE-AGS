@@ -470,7 +470,7 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
     // Uma tarefa com origem de pool segue o modo global unificado (`chat.pool.mode`) e o estado
     // `paused` do próprio pool: `auto` troca dentro do pool, `ask` pausa e notifica, `off` ou
     // pausado não troca sozinho.
-    if let Some(origin) = super::pool_failover::task_pool(db, &task.id)
+    if let Some(origin) = super::pool_failover::origin_for_task(db, &task.id, &task.agent_id, &task.account_id)
     {
         let pool = crate::accounts::pools::load(db)
             .into_iter()
