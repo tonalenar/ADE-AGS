@@ -3,7 +3,7 @@
 //! nem abre o bloco (crase, `<` e `>` viram escapes, como na Frota MCP).
 
 use rusqlite::Connection;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::missions::{memory_history_on, memory_search_in, memory_search_on, memory_usage_on, swarm_read_on};
 use crate::memory::{self, ProposalActor, ProposalInput};
@@ -71,7 +71,33 @@ fn a_busca_devolve_os_resultados_so_dentro_do_envelope() {
     let d = dados(envelope(&saida, CABECALHO_MEMORIA));
     assert_eq!(d["query"], "pagamento");
     assert_eq!(d["results"][0]["key"], "pagamento");
+    assert_eq!(d["results"][0]["source"], "legacy");
     assert!(d["results"][0]["snippet"].as_str().unwrap().contains("Pix"), "{d}");
+}
+
+#[test]
+fn busca_historica_no_passado_informa_que_at_nao_consulta_ai_memory() {
+    let saida = super::missions::memory_search_response("pagamento", Some(10), Vec::new(), vec![json!({
+        "entryId": "legacy-1", "key": "pagamento", "snippet": "antigo", "source": "legacy"
+    })]);
+    let d = dados(envelope(&saida, CABECALHO_MEMORIA));
+    assert_eq!(d["at"], 10);
+    assert_eq!(d["results"][0]["source"], "legacy");
+    assert!(d["note"].as_str().unwrap().contains("apenas o histórico SQLite legado"));
+}
+
+#[test]
+fn resultados_ai_memory_precedem_e_identificam_o_historico_legacy() {
+    let saida = super::missions::memory_search_response("pagamento", None, vec![json!({
+        "path": "ade-ags/pagamento.md", "source": "ai-memory", "snippet": "atual"
+    })], vec![json!({
+        "entryId": "legacy-1", "key": "pagamento", "snippet": "antigo", "source": "legacy"
+    })]);
+    let d = dados(envelope(&saida, CABECALHO_MEMORIA));
+    assert_eq!(d["results"][0]["path"], "ade-ags/pagamento.md");
+    assert_eq!(d["results"][0]["source"], "ai-memory");
+    assert_eq!(d["results"][1]["entryId"], "legacy-1");
+    assert_eq!(d["results"][1]["source"], "legacy");
 }
 
 #[test]

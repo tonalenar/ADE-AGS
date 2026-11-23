@@ -35,30 +35,58 @@ pub(crate) fn project_context(cwd: &str, query: &str) -> Result<String, String> 
     client.project_context(query, &workspace, &project)
 }
 
-/// Grava memória de agente no projeto ai-memory resolvido para a pasta, sem fila item a item.
-pub(crate) fn write_agent_memory(
+/// Grava memória no projeto resolvido, isolando o diretório quando pertence a uma missão.
+pub(crate) fn write_agent_memory_for_scope(
     cwd: &str,
+    mission_id: Option<&str>,
     key: &str,
     kind: &str,
     body: &str,
     tags: &[String],
     reason: Option<&str>,
 ) -> Result<(), String> {
-    let prepared = prepare_agent_write(key, kind, body, tags, reason)?;
+    let prepared = prepare_agent_write(key, mission_id, kind, body, tags, reason)?;
     let (client, workspace, project) = scoped_client(cwd)?;
     write_prepared_agent_memory(&client, &workspace, &project, prepared)
 }
 
-struct PreparedAgentWrite {
-    path: String,
+/// Busca páginas no projeto resolvido pela pasta da aba. Nunca aceita projeto vindo do chamador.
+pub(crate) fn search_project_pages(cwd: &str, query: &str) -> Result<Vec<SearchHit>, String> {
+    let (client, workspace, project) = scoped_client(cwd)?;
+    let hits = client.read::<Vec<SearchHit>>(Read::SearchScoped {
+        query: query.to_owned(),
+        workspace: workspace.clone(),
+        project: project.clone(),
+    })?;
+    Ok(hits.data.into_iter().filter(|hit| {
+        hit.workspace.as_deref().is_none_or(|value| value == workspace)
+            && hit.project.as_deref().is_none_or(|value| value == project)
+    }).collect())
+}
+
+/// Lê apenas uma página pertencente ao projeto resolvido pela pasta da aba.
+pub(crate) fn read_project_page(cwd: &str, path: &str) -> Result<Option<Page>, String> {
+    let (client, workspace, project) = scoped_client(cwd)?;
+    let Some(page) = client.find_page_scoped(path, &workspace, &project)? else {
+        return Ok(None);
+    };
+    if page.workspace != workspace || page.project != project || page.path != path {
+        return Err("A página retornada não pertence ao projeto resolvido.".into());
+    }
+    Ok(Some(page))
+}
+
+pub(super) struct PreparedAgentWrite {
+    pub(super) path: String,
     title: String,
     kind: &'static str,
     tags: Vec<String>,
     body: Vec<u8>,
 }
 
-fn prepare_agent_write(
+pub(super) fn prepare_agent_write(
     key: &str,
+    mission_id: Option<&str>,
     kind: &str,
     body: &str,
     tags: &[String],
@@ -88,7 +116,22 @@ fn prepare_agent_write(
     }).collect::<String>().split('-').filter(|part| !part.is_empty()).collect::<Vec<_>>().join("-");
     let digest = Sha256::digest(key.as_bytes());
     let suffix = digest[..8].iter().map(|byte| format!("{byte:02x}")).collect::<String>();
-    let path = format!("ade-ags/{}-{suffix}.md", if slug.is_empty() { "memory" } else { &slug });
+    let page = format!("{}-{suffix}.md", if slug.is_empty() { "memory" } else { &slug });
+    let path = if let Some(mission_id) = mission_id {
+        if mission_id.is_empty() || mission_id.len() > 128 || mission_id.chars().any(char::is_control) {
+            return Err("O id da missão é inválido para separar a memória.".into());
+        }
+        let mission_slug = mission_id.to_ascii_lowercase().chars().map(|ch| {
+            if ch.is_ascii_alphanumeric() { ch } else { '-' }
+        }).collect::<String>().split('-').filter(|part| !part.is_empty()).collect::<Vec<_>>().join("-");
+        let mission_digest = Sha256::digest(mission_id.as_bytes());
+        let mission_suffix = mission_digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        let directory = if mission_slug.is_empty() { mission_suffix } else { format!("{}-{mission_suffix}", mission_slug) };
+        format!("ade-ags/mission-{directory}/{page}")
+    } else {
+        // Mantém o caminho antigo das memórias de workspace.
+        format!("ade-ags/{page}")
+    };
     let tags: Vec<String> = tags.iter().filter(|tag| {
         !tag.is_empty() && tag.len() <= 96 && !tag.chars().any(char::is_control) && !tag.chars().any(char::is_whitespace)
     }).cloned().collect();
@@ -124,7 +167,7 @@ pub(super) fn write_agent_memory_with_scope(
     tags: &[String],
     reason: Option<&str>,
 ) -> Result<(), String> {
-    let prepared = prepare_agent_write(key, kind, body, tags, reason)?;
+    let prepared = prepare_agent_write(key, None, kind, body, tags, reason)?;
     write_prepared_agent_memory(client, workspace, project, prepared)
 }
 

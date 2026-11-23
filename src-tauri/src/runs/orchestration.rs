@@ -293,17 +293,19 @@ pub fn handle(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
                     return Err("ai-memory está desativado; a memória SQLite antiga é somente leitura".into());
                 }
                 let repo_key = crate::memory::repo_scope::task_repo_key_unlocked(&db, task_id)?;
-                let (cwd, write) = {
+                let (cwd, mission_id, write) = {
                     let conn = db.lock().map_err(|e| e.to_string())?;
                     let task = store::task_by_id(&conn, task_id)?.ok_or("caller Task is unavailable")?;
                     let run = store::run_by_id(&conn, &task.run_id)?.ok_or("caller Run is unavailable")?;
                     let write = crate::memory::task_memory_write_with_repo(
                         &conn, task_id, command, args(payload).clone(), repo_key.as_deref(),
                     )?;
-                    (run.cwd, write)
+                    (run.cwd, run.mission_id, write)
                 };
-                crate::ai_memory::write_agent_memory(
-                    &cwd, &write.key, &write.kind, &write.body, &write.tags, write.reason.as_deref(),
+                crate::ai_memory::write_agent_memory_for_scope(
+                    &cwd,
+                    (write.scope == "mission").then_some(mission_id.as_deref()).flatten(),
+                    &write.key, &write.kind, &write.body, &write.tags, write.reason.as_deref(),
                 )?;
                 return Ok(text(serde_json::json!({
                     "status": "saved",
