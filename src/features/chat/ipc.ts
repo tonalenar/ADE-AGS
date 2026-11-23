@@ -25,8 +25,17 @@ export interface WorkingDiff {
   truncated: boolean;
 }
 
+export interface WorkingDiffStat {
+  root: string;
+  added: number;
+  removed: number;
+}
+
 /** O `git diff HEAD` da pasta (`scm/commands.rs`, `scm_working_diff`). `null` = fora de um repo. */
 export const scmWorkingDiff = (cwd: string) => invoke<WorkingDiff | null>("scm_working_diff", { cwd });
+
+/** Totais `+`/`−` não commitados via `git diff HEAD --numstat` (`scm/commands.rs`, `scm_working_diff_stat`). `null` = fora de um repo. */
+export const scmWorkingDiffStat = (cwd: string) => invoke<WorkingDiffStat | null>("scm_working_diff_stat", { cwd });
 
 /** Um worktree novo para uma conversa (`conversa.rs`): onde o agente roda e a branch criada. */
 export const chatNewWorktree = (cwd: string, title: string, agentId: string, submodules: ChatWorktreeSubmodules) =>
