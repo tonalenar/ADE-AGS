@@ -288,6 +288,29 @@ pub fn handle(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
                 .get("taskId")
                 .and_then(Value::as_str)
                 .ok_or("As ferramentas MCP de Memória Compartilhada exigem uma tarefa Lead ou Worker da frota. Num terminal use ags memory search, ags memory index ou ags memory open <chave>")?;
+            if matches!(command, "memory.propose" | "memory.update" | "memory.delete" | "memory.promoteFact") {
+                if !crate::ai_memory::memory_enabled(&db) {
+                    return Err("ai-memory está desativado; a memória SQLite antiga é somente leitura".into());
+                }
+                let repo_key = crate::memory::repo_scope::task_repo_key_unlocked(&db, task_id)?;
+                let (cwd, write) = {
+                    let conn = db.lock().map_err(|e| e.to_string())?;
+                    let task = store::task_by_id(&conn, task_id)?.ok_or("caller Task is unavailable")?;
+                    let run = store::run_by_id(&conn, &task.run_id)?.ok_or("caller Run is unavailable")?;
+                    let write = crate::memory::task_memory_write_with_repo(
+                        &conn, task_id, command, args(payload).clone(), repo_key.as_deref(),
+                    )?;
+                    (run.cwd, write)
+                };
+                crate::ai_memory::write_agent_memory(
+                    &cwd, &write.key, &write.kind, &write.body, &write.tags, write.reason.as_deref(),
+                )?;
+                return Ok(text(serde_json::json!({
+                    "status": "saved",
+                    "destination": "ai-memory",
+                    "message": "Memória gravada no ai-memory do projeto, sem aprovação item a item.",
+                }).to_string()));
+            }
             let history_scope = if command == "memory.workspaceHistory" {
                 Some(crate::memory::repo_scope::task_history_scope_unlocked(&db, task_id)?)
             } else {

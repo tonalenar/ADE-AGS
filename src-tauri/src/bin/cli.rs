@@ -342,7 +342,7 @@ MISSÕES (também sem interface: `ade-ags --headless`)
                                               Revisões aprovadas e seus intervalos de validade
   memory suggest [--mission <id>] --key <nome> --body \"...\" [--scope workspace|mission]
                  [--kind decision|constraint|finding|file|note] [--priority 0-3]
-                                              SUGERE uma memória (fica pendente; o usuário aprova); fora de missão, só --scope workspace
+                                              Grava no ai-memory do projeto, sem aprovação item a item; prioridade é compatível, mas não altera o ranking
   mission accept <id> <tarefa>                Junta na integração da missão
   mission apply <id>                          Leva o aceito para o projeto
   mission redeliver <id> [--pr <N>] [--test passed|failed|not_run]

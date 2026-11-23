@@ -14,6 +14,12 @@ Decisão do usuário, em 30/10/2026: a memória de longo prazo dos agentes passa
 - **Nada some sozinho.** O apagamento automático do ai-memory fica desligado (`[maintenance] forget_sweep_interval_secs = 0`). Quando uma página cumpre o prazo do decaimento, o ADE só avisa.
 - O modelo de embeddings (~87 MB) fica desligado (`embedding_provider = "none"`) até o usuário liberar o download. O reranker pelo Jev não entra sem OK e teto de custo.
 
+## Adoção pelas missões e pela Frota (22/11/2026)
+- Briefings de missão e snapshots da Frota consultam `search --json` com o par workspace/projeto resolvido para o cwd. O ADE injeta até 10 páginas e 6 KiB em `UNTRUSTED DATA`; se o binário/servidor faltar ou a integração estiver desligada, usa o snapshot SQLite histórico, em leitura.
+- `ags memory suggest`, `swarm promote` e as gravações MCP da Frota mantêm os nomes existentes, mas gravam páginas no projeto do ai-memory. A chave gera o caminho estável da página; atualização e promoção não criam proposta no SQLite. A ADE aplica o mesmo filtro de segredos e não pede aprovação item a item.
+- A escrita exige escopo único e não reservado. Se o ai-memory estiver desligado ou indisponível, a escrita falha; ela nunca volta para o SQLite.
+- O Inbox continua exibindo e permitindo revisar registros antigos do SQLite. Novas gravações no ai-memory não entram nessa fila. Nenhuma linha histórica é apagada; `ai_memory/migracao.rs` continua fazendo cópia não destrutiva e purge/compact permanecem controles do usuário.
+
 ## O que a Fase 0 provou (30/10/2026)
 - `claude --settings <arquivo>` **soma** os hooks aos do usuário e do projeto, não substitui (provado no `claude -p`; modo interativo não testado). O risco é hook duplicado, não hook perdido.
 - O Codex 0.166.0 aceita hooks por `-c` pelo código-fonte, mas a prova em execução não saiu (a sonda sem credencial não chega ao hook). **Decisão: o Codex fica só com MCP** até haver prova.

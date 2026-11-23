@@ -18,7 +18,7 @@ describe("injectTabMemory", () => {
     expect(await injectTabMemory({ id: "t", agentId: "codex", memoryBlock: true }, "ws")).toBe(true);
     expect(mocks.invoke).toHaveBeenCalledWith("memory_index", { workspaceId: "ws" });
     // O índice sai com a conferência de quem escreve sem digitar (PR08): a política é o terceiro argumento.
-    expect(mocks.sendWhenReady).toHaveBeenCalledWith("t", "DADOS | [\"a\"] | FIM", expect.objectContaining({ policy: expect.any(Object) }));
+    expect(mocks.sendWhenReady).toHaveBeenCalledWith("t", "HISTÓRICO LEGADO DO ADE — somente leitura. Memórias novas ficam no ai-memory do projeto. | DADOS | [\"a\"] | FIM", expect.objectContaining({ policy: expect.any(Object) }));
   });
   it("shell: nunca consulta nem envia, mesmo com a flag ligada (P1)", async () => {
     mocks.invoke.mockResolvedValue("DADOS");
@@ -34,7 +34,7 @@ describe("injectTabMemory", () => {
   });
   it("tabMemoryMessage devolve o texto sem enviar (para juntar com o prompt)", async () => {
     mocks.invoke.mockResolvedValue("DADOS");
-    expect(await tabMemoryMessage({ id: "t", agentId: "codex", memoryBlock: true }, "ws")).toBe("DADOS");
+    expect(await tabMemoryMessage({ id: "t", agentId: "codex", memoryBlock: true }, "ws")).toBe("HISTÓRICO LEGADO DO ADE — somente leitura. Memórias novas ficam no ai-memory do projeto. | DADOS");
     expect(mocks.sendWhenReady).not.toHaveBeenCalled();
   });
   it("startupText junta memória e prompt em um só envio, prompt por último (P2)", () => {
@@ -53,9 +53,11 @@ describe("injectTabMemory", () => {
 });
 
 describe("MEMORY_SUGGEST_HINT", () => {
-  it("ensina a sugerir memória do projeto sem missão, sempre pendente do usuário", () => {
+  it("ensina a gravar memória do projeto sem missão no ai-memory", () => {
     expect(MEMORY_SUGGEST_HINT).toContain("ags memory suggest --scope workspace");
     expect(MEMORY_SUGGEST_HINT).not.toContain("--mission");
-    expect(MEMORY_SUGGEST_HINT).toContain("pendente até o usuário aprovar");
+    expect(MEMORY_SUGGEST_HINT).toContain("ai-memory");
+    expect(MEMORY_SUGGEST_HINT).toContain("sem aprovação item a item");
+    expect(MEMORY_SUGGEST_HINT).not.toContain("pendente até o usuário aprovar");
   });
 });

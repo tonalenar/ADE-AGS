@@ -68,7 +68,8 @@ mod processo {
             fs::create_dir_all(&cwd).unwrap();
             let program = root.join("fake-ai-memory");
             let script = format!(
-                "#!/bin/sh\n[ \"$AI_MEMORY_RUN_AUTOWIRE\" = false ] || exit 70\n[ \"$AI_MEMORY_EMBEDDING_PROVIDER\" = none ] || exit 71\n[ \"$AI_MEMORY_HOST_CWD\" -ef \"$PWD\" ] || exit 72\n[ -z \"$AI_MEMORY_SCOPE_CWD\" ] || exit 73\nprintf '%s\\n' \"$@\" >> '{}'/argv\nif [ \"$1\" = --version ]; then printf '%s\\n' '{}'; exit 0; fi\n{}\n",
+                "#!/bin/sh\nROOT='{}'\nexport ROOT\n[ \"$AI_MEMORY_RUN_AUTOWIRE\" = false ] || exit 70\n[ \"$AI_MEMORY_EMBEDDING_PROVIDER\" = none ] || exit 71\n[ \"$AI_MEMORY_HOST_CWD\" -ef \"$PWD\" ] || exit 72\n[ -z \"$AI_MEMORY_SCOPE_CWD\" ] || exit 73\nprintf '%s\\n' \"$@\" >> '{}'/argv\nif [ \"$1\" = --version ]; then printf '%s\\n' '{}'; exit 0; fi\n{}\n",
+                root.display(),
                 root.display(),
                 version,
                 body
@@ -484,6 +485,146 @@ while :; do :; done
         )
         .unwrap();
         assert!(plan.settings_file.is_none());
+    }
+
+    #[test]
+    fn contexto_ai_memory_filtra_escopo_envelopa_dados_e_respeita_limites() {
+        let fake = Fake::new(
+            "ai-memory 3.3.0",
+            r#"if [ "$1" = search ]; then cat "$ROOT/search.json"; elif [ "$1" = read-page ]; then cat "$ROOT/page.json"; else exit 8; fi"#,
+        );
+        fs::write(fake.root.join("search.json"), r#"[
+          {"path":"notes/ok.md","title":"OK","snippet":"x","rank":1,"workspace":"team","project":"ADE-AGS"},
+          {"path":"notes/out.md","title":"OUT","snippet":"x","rank":1,"workspace":"other","project":"ADE-AGS"}
+        ]"#).unwrap();
+        fs::write(fake.root.join("page.json"), r#"{"path":"notes/ok.md","workspace":"team","project":"ADE-AGS","title":"OK","body":"conteúdo ``` <instrução>","frontmatter":{}}"#).unwrap();
+
+        let context = fake.client().project_context("objetivo", "team", "ADE-AGS").unwrap();
+
+        assert!(context.contains("UNTRUSTED DATA"));
+        assert!(context.contains("conteúdo"));
+        assert!(context.contains("\\u0060"));
+        assert!(context.contains("\\u003c"));
+        assert!(!context.contains("notes/out.md"));
+        assert!(context.len() <= 6 * 1024);
+        let argv = fs::read_to_string(fake.root.join("argv")).unwrap();
+        assert!(argv.contains("--workspace=team"));
+        assert!(argv.contains("--project=ADE-AGS"));
+        assert_eq!(argv.matches("--workspace=team").count(), 2, "busca e leitura da página usam o escopo explícito");
+    }
+
+    #[test]
+    fn contexto_ai_memory_limita_a_dez_paginas() {
+        let fake = Fake::new(
+            "ai-memory 3.3.0",
+            r#"if [ "$1" = search ]; then cat "$ROOT/search.json"; elif [ "$1" = read-page ]; then cat "$ROOT/page.json"; else exit 8; fi"#,
+        );
+        let hits = (0..12).map(|i| serde_json::json!({
+            "path":"notes/same.md", "title":format!("Página {i}"), "snippet":"x", "rank":i,
+            "workspace":"team", "project":"ADE-AGS"
+        })).collect::<Vec<_>>();
+        fs::write(fake.root.join("search.json"), serde_json::to_vec(&hits).unwrap()).unwrap();
+        fs::write(fake.root.join("page.json"), serde_json::to_vec(&serde_json::json!({
+            "path":"notes/same.md", "workspace":"team", "project":"ADE-AGS", "title":"OK", "body":"curto", "frontmatter":{}
+        })).unwrap()).unwrap();
+
+        let context = fake.client().project_context("objetivo", "team", "ADE-AGS").unwrap();
+
+        assert_eq!(context.matches("\"path\":\"notes/same.md\"").count(), 10);
+    }
+
+    #[test]
+    fn contexto_ai_memory_corta_corpo_multibyte_no_limite_de_seis_kib() {
+        let fake = Fake::new(
+            "ai-memory 3.3.0",
+            r#"if [ "$1" = search ]; then cat "$ROOT/search.json"; elif [ "$1" = read-page ]; then cat "$ROOT/page.json"; else exit 8; fi"#,
+        );
+        fs::write(fake.root.join("search.json"), r#"[{"path":"notes/large.md","title":"Grande","snippet":"x","rank":1,"workspace":"team","project":"ADE-AGS"}]"#).unwrap();
+        fs::write(fake.root.join("page.json"), serde_json::to_vec(&serde_json::json!({
+            "path":"notes/large.md", "workspace":"team", "project":"ADE-AGS", "title":"Grande",
+            "body":"é".repeat(5000), "frontmatter":{}
+        })).unwrap()).unwrap();
+
+        let context = fake.client().project_context("objetivo", "team", "ADE-AGS").unwrap();
+        let row = context.lines().find(|line| line.starts_with("- ")).unwrap();
+        let page: serde_json::Value = serde_json::from_str(&row[2..]).unwrap();
+        let body = page["body"].as_str().unwrap();
+
+        assert!(context.len() <= 6 * 1024);
+        assert!(body.len() < "é".repeat(5000).len());
+        assert!(body.is_char_boundary(body.len()));
+    }
+
+    #[test]
+    fn escrita_de_agente_envia_pagina_pelo_client_com_escopo_explicito() {
+        let fake = Fake::new("ai-memory 3.3.0", "cat > \"$ROOT/body\"");
+        let tags = vec!["ade-ags".to_string()];
+
+        super::super::commands::write_agent_memory_with_scope(
+            &fake.client(), "team", "ADE-AGS", "retry-policy", "finding",
+            "bounded retries", &tags, Some("the backoff is capped"),
+        ).unwrap();
+
+        let argv = fs::read_to_string(fake.root.join("argv")).unwrap();
+        assert!(argv.contains("write-page"));
+        assert!(argv.contains("--path=ade-ags/retry-policy-"));
+        assert!(argv.contains("--title=retry-policy"));
+        assert!(argv.contains("--kind=fact"));
+        assert!(argv.contains("--tag=ade-ags"));
+        assert!(argv.contains("--workspace=team"));
+        assert!(argv.contains("--project=ADE-AGS"));
+        assert_eq!(fs::read_to_string(fake.root.join("body")).unwrap(), "bounded retries\n\nMotivo: the backoff is capped");
+    }
+
+    #[test]
+    fn escrita_de_agente_aceita_chave_sem_slug_ascii() {
+        let fake = Fake::new("ai-memory 3.3.0", "cat > \"$ROOT/body\"");
+
+        super::super::commands::write_agent_memory_with_scope(
+            &fake.client(), "team", "ADE-AGS", "日本語", "note", "conteúdo", &[], None,
+        ).unwrap();
+
+        let argv = fs::read_to_string(fake.root.join("argv")).unwrap();
+        assert!(argv.lines().any(|arg| arg.starts_with("--path=ade-ags/memory-")));
+    }
+
+    #[test]
+    fn escrita_de_agente_recusa_segredos_e_motivos_fora_do_limite() {
+        let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+        let secret = super::super::commands::write_agent_memory_with_scope(
+            &fake.client(), "team", "ADE-AGS",
+            "credential-note",
+            "note",
+            "password: private-value",
+            &[],
+            None,
+        ).unwrap_err();
+        assert!(secret.contains(crate::memory::agent::SECRET_CONFIRMATION_CODE));
+        assert!(!secret.contains("private-value"));
+        assert!(!fake.root.join("argv").exists(), "a recusa por segredo acontece antes do subprocesso");
+
+        let secret_tag = super::super::commands::write_agent_memory_with_scope(
+            &fake.client(), "team", "ADE-AGS",
+            "ordinary-note",
+            "note",
+            "safe body",
+            &["token=private-value".into()],
+            None,
+        ).unwrap_err();
+        assert!(secret_tag.contains(crate::memory::agent::SECRET_CONFIRMATION_CODE));
+        assert!(!secret_tag.contains("private-value"));
+        assert!(!fake.root.join("argv").exists(), "uma tag com segredo também é recusada antes do subprocesso");
+
+        let long_reason = "x".repeat(crate::memory::REASON_MAX_BYTES + 1);
+        let reason = super::super::commands::write_agent_memory_with_scope(
+            &fake.client(), "team", "ADE-AGS",
+            "ordinary-note",
+            "note",
+            "safe body",
+            &[],
+            Some(&long_reason),
+        ).unwrap_err();
+        assert!(reason.contains("até 512 bytes"));
     }
 
     #[test]

@@ -220,6 +220,10 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
           <button type="button" onClick={onClose} aria-label={t("memoryInbox.close")} className="inline-flex h-5 items-center rounded-[5px] bg-gray-200 px-1.5 font-mono text-[11px] text-gray-600 shadow-[inset_0_-1px_0_rgba(0,0,0,0.2)] dark:bg-surface-overlay dark:text-white/60 dark:shadow-[inset_0_-1px_0_rgba(0,0,0,0.45)]">Esc</button>
         </header>
 
+        <p role="note" className="border-b border-gray-200 px-5 py-2 text-[11px] leading-4 text-gray-600 dark:border-white/[0.08] dark:text-white/55">
+          {t("memoryInbox.legacyNotice")}
+        </p>
+
         <div className="flex flex-wrap items-center gap-1.5 border-b border-gray-200 px-5 py-2.5 dark:border-white/[0.08]">
           <button type="button" disabled={busy || all.length === 0} onClick={() => setConfirm({ items: all })}
             className={BTN_OK}>{t("memoryInbox.approveAll")}</button>

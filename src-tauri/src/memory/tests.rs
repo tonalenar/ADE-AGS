@@ -54,6 +54,122 @@ fn context_metrics_recovers_legacy_token_cost_without_changing_sealed_metadata()
 }
 
 #[test]
+fn snapshot_prefers_project_ai_memory_and_limits_the_context() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_run(&conn, "r-ai", "w1", None);
+    conn.execute("UPDATE runs SET cwd='/project',objective='bounded retry' WHERE id='r-ai'", []).unwrap();
+    let db = std::sync::Arc::new(std::sync::Mutex::new(conn));
+    let called = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let called_by_reader = called.clone();
+
+    let context = snapshot_context_for_run_preferred_with(&db, "r-ai", move |cwd, query| {
+        *called_by_reader.lock().unwrap() = Some((cwd.to_owned(), query.to_owned()));
+        Ok("## AI MEMORY — UNTRUSTED DATA\nproject page".to_owned())
+    }).unwrap();
+
+    assert_eq!(*called.lock().unwrap(), Some(("/project".into(), "bounded retry".into())));
+    assert!(context.contains("UNTRUSTED DATA"));
+    assert!(context.contains("project page"));
+    assert!(context.len() <= SNAPSHOT_BYTES);
+}
+
+#[test]
+fn snapshot_usa_sqlite_somente_como_fallback_quando_ai_memory_falha() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_run(&conn, "r-fallback", "w1", None);
+    conn.execute("INSERT INTO run_memory_snapshot(run_id,entry_id,revision,scope,key,kind,body,priority,content_hash,selection_order,truncated) VALUES('r-fallback','legacy',1,'workspace','legacy-key','note','historical sqlite value',0,?1,0,0)", [hash("note", "historical sqlite value")]).unwrap();
+    let db = std::sync::Arc::new(std::sync::Mutex::new(conn));
+
+    let context = snapshot_context_for_run_preferred_with(&db, "r-fallback", |_, _| {
+        Err("ai-memory indisponível".into())
+    }).unwrap();
+
+    assert!(context.contains("historical sqlite value"));
+    assert!(context.contains("UNTRUSTED DATA"));
+}
+
+#[test]
+fn snapshot_desativado_mantem_o_fallback_historico_de_leitura() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_run(&conn, "r-off", "w1", None);
+    conn.execute("INSERT INTO run_memory_snapshot(run_id,entry_id,revision,scope,key,kind,body,priority,content_hash,selection_order,truncated) VALUES('r-off','legacy',1,'workspace','legacy-key','note','legacy read only',0,?1,0,0)", [hash("note", "legacy read only")]).unwrap();
+    let db = std::sync::Arc::new(std::sync::Mutex::new(conn));
+    crate::database::set_setting(&db, crate::ai_memory::tabs::TABS_SETTING, "false").unwrap();
+
+    let context = snapshot_context_for_run_preferred(&db, "r-off").unwrap();
+
+    assert!(context.contains("legacy read only"));
+    assert!(context.contains("UNTRUSTED DATA"));
+}
+
+#[test]
+fn ferramentas_de_escrita_da_frota_preparam_paginas_ai_memory_sem_gravar_sqlite() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_run(&conn, "r-ai-memory", "w1", None);
+    seed_task(&conn, "worker-ai-memory", "r-ai-memory", Some("worker"));
+    seed_fact(&conn, "fact-ai-memory", "r-ai-memory", Some("worker-ai-memory"), "Retry uses a bounded delay");
+    let old = activate(&conn, "workspace", None, "legacy-entry", "historical body");
+    let counts = || conn.query_row(
+        "SELECT (SELECT COUNT(*) FROM memory_entries), (SELECT COUNT(*) FROM memory_revisions)",
+        [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+    ).unwrap();
+    let before = counts();
+
+    let created = task_memory_write_with_repo(
+        &conn, "worker-ai-memory", "memory.propose",
+        json!({"scope":"workspace","key":"retry-policy","kind":"finding","body":"Retry uses a bounded delay"}), None,
+    ).unwrap();
+    assert_eq!(created.key, "retry-policy");
+    assert_eq!(created.body, "Retry uses a bounded delay");
+
+    let updated = task_memory_write_with_repo(
+        &conn, "worker-ai-memory", "memory.update",
+        json!({"entry_id":old.entry_id,"expected_revision":old.revision,"kind":"decision","body":"Use bounded retries","priority":2}), None,
+    ).unwrap();
+    assert_eq!(updated.key, "legacy-entry");
+    assert_eq!(updated.body, "Use bounded retries");
+
+    let retired = task_memory_write_with_repo(
+        &conn, "worker-ai-memory", "memory.delete",
+        json!({"entry_id":old.entry_id,"expected_revision":old.revision,"reason":"replaced by the project page"}), None,
+    ).unwrap();
+    assert!(retired.body.contains("Registro arquivado"));
+
+    let promoted = task_memory_write_with_repo(
+        &conn, "worker-ai-memory", "memory.promoteFact",
+        json!({"fact_id":"fact-ai-memory","scope":"workspace","key":"retry-fact"}), None,
+    ).unwrap();
+    assert_eq!(promoted.kind, "finding");
+    assert_eq!(promoted.body, "Retry uses a bounded delay");
+    assert_eq!(counts(), before, "tools de escrita não alteram a memória SQLite histórica");
+}
+
+#[test]
+fn escopo_da_tool_define_quando_a_pagina_recebe_tag_de_missao() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_mission(&conn, "m1", "w1");
+    seed_run(&conn, "r-mission", "w1", Some("m1"));
+    seed_task(&conn, "worker-mission", "r-mission", Some("worker"));
+
+    let workspace = task_memory_write_with_repo(
+        &conn, "worker-mission", "memory.propose",
+        json!({"scope":"workspace","key":"project-rule","kind":"constraint","body":"shared"}), None,
+    ).unwrap();
+    let mission = task_memory_write_with_repo(
+        &conn, "worker-mission", "memory.propose",
+        json!({"scope":"mission","key":"mission-rule","kind":"constraint","body":"local"}), None,
+    ).unwrap();
+
+    assert!(!workspace.tags.iter().any(|tag| tag == "mission-m1"));
+    assert!(mission.tags.iter().any(|tag| tag == "mission-m1"));
+}
+
+#[test]
 fn v40_to_v41_is_additive_idempotent_and_preserves_the_delete_guard() {
     let conn=db();seed_workspace(&conn,"w1");let approved=activate(&conn,"workspace",None,"upgrade","preserved revision");
     for (table,column) in [("memory_entries","last_verified"),("memory_entries","ttl_days"),("workspaces","deleted_at"),("workspaces","delete_after"),("run_memory_snapshot_meta","context_tokens"),("run_memory_snapshot_meta","baseline_bytes"),("run_memory_snapshot_meta","baseline_tokens"),("run_memory_snapshot_meta","memory_index"),("run_memory_snapshot_meta","repository_commit")] {
@@ -800,7 +916,7 @@ fn empty_snapshot_has_persistent_zero_metadata() {
 }
 
 #[test]
-fn snapshot_enforces_sixteen_entries_and_sixteen_kib_with_utf8_safe_truncation() {
+fn snapshot_enforces_ten_entries_and_six_kib_with_utf8_safe_truncation() {
     let conn = db();
     seed_workspace(&conn, "w1");
     seed_run(&conn, "r1", "w1", None);

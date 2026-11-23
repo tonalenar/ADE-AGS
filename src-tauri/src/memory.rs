@@ -1,5 +1,5 @@
-//! Persistent, user-approved memory scoped to a workspace or one Mission.
-//! Run Facts remain a separate, per-execution collaboration channel.
+//! Histórico legado de memória do ADE, mantido para migração, leitura e manutenção do usuário.
+//! A memória durável atual fica no ai-memory; Run Facts seguem como canal de colaboração por execução.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -25,9 +25,9 @@ pub const WORKSPACE_ACTIVE_MAX: i64 = 256;
 pub const OWNER_QUOTA_BYTES: i64 = 8 * 1024 * 1024;
 pub const LIST_LIMIT: usize = 32;
 pub const LIST_BYTES: usize = 32 * 1024;
-pub const SNAPSHOT_LIMIT: usize = 16;
-pub const SNAPSHOT_BYTES: usize = 16 * 1024;
-pub const RELEVANT_LIMIT: usize = 5;
+pub const SNAPSHOT_LIMIT: usize = 10;
+pub const SNAPSHOT_BYTES: usize = 6 * 1024;
+pub const RELEVANT_LIMIT: usize = 10;
 
 const KINDS: &[&str] = &["decision", "finding", "file", "constraint", "note"];
 
@@ -76,7 +76,7 @@ pub fn normalize_body(body: &str) -> Result<String, String> {
     Ok(body)
 }
 
-fn normalize_reason(reason: Option<&str>) -> Result<Option<String>, String> {
+pub(crate) fn normalize_reason(reason: Option<&str>) -> Result<Option<String>, String> {
     let Some(reason) = reason else {
         return Ok(None);
     };
@@ -1065,6 +1065,68 @@ pub fn snapshot_context_for_run(conn: &Connection, run_id: &str) -> Result<Strin
     Ok(snapshot_block(&snapshot_for_run(conn, run_id)?))
 }
 
+/// Prefere o ai-memory; o snapshot SQLite continua disponível como fallback somente de leitura.
+pub fn snapshot_context_for_run_preferred(
+    db: &DbConnection,
+    run_id: &str,
+) -> Result<String, String> {
+    if crate::ai_memory::memory_enabled(db) {
+        snapshot_context_for_run_preferred_with(db, run_id, crate::ai_memory::project_context)
+    } else {
+        snapshot_context_for_run_preferred_with(db, run_id, |_, _| Err("ai-memory está desativado".into()))
+    }
+}
+
+fn snapshot_context_for_run_preferred_with(
+    db: &DbConnection,
+    run_id: &str,
+    read_ai_memory: impl FnOnce(&str, &str) -> Result<String, String>,
+) -> Result<String, String> {
+    let (cwd, objective) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
+            "SELECT cwd, objective FROM runs WHERE id=?1",
+            [run_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        ).map_err(|_| "Run memory snapshot unavailable".to_string())?
+    };
+    if let Ok(context) = read_ai_memory(&cwd, &objective) {
+        return Ok(context);
+    }
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let mut snapshot = snapshot_for_run(&conn, run_id)?;
+    let original_count = snapshot.items.len();
+    snapshot.items.truncate(SNAPSHOT_LIMIT);
+    snapshot.meta.omitted_entries += (original_count - snapshot.items.len()) as i64;
+    loop {
+        let rendered = snapshot_block(&snapshot);
+        if rendered.len() <= SNAPSHOT_BYTES {
+            return Ok(rendered);
+        }
+        let Some(last) = snapshot.items.last().cloned() else {
+            snapshot.meta.memory_index.clear();
+            return Ok(snapshot_block(&snapshot));
+        };
+        let body = last.body;
+        let mut low = 0usize;
+        let mut high = body.len();
+        while low < high {
+            let mid = low + (high - low).div_ceil(2);
+            snapshot.items.last_mut().expect("last item exists").body = truncate_utf8(&body, mid);
+            snapshot.items.last_mut().expect("last item exists").truncated = true;
+            if snapshot_block(&snapshot).len() <= SNAPSHOT_BYTES { low = mid; } else { high = mid - 1; }
+        }
+        snapshot.items.last_mut().expect("last item exists").body = truncate_utf8(&body, low);
+        snapshot.items.last_mut().expect("last item exists").truncated = true;
+        if snapshot_block(&snapshot).len() <= SNAPSHOT_BYTES && low > 0 {
+            snapshot.meta.truncated_entries += 1;
+            return Ok(snapshot_block(&snapshot));
+        }
+        snapshot.items.pop();
+        snapshot.meta.omitted_entries += 1;
+    }
+}
+
 pub fn context_metrics(conn: &Connection, run_id: Option<&str>, mission_id: Option<&str>) -> Result<serde_json::Value, String> {
     if run_id.is_some() == mission_id.is_some() { return Err("provide exactly one Run or Mission".into()); }
     let mut stmt = conn.prepare("SELECT s.run_id,s.baseline_bytes,s.context_bytes,s.baseline_tokens,s.context_tokens,s.repository_commit,(SELECT COUNT(*) FROM run_memory_snapshot i WHERE i.run_id=s.run_id) FROM run_memory_snapshot_meta s JOIN runs r ON r.id=s.run_id WHERE (?1 IS NOT NULL AND r.id=?1) OR (?2 IS NOT NULL AND r.mission_id=?2) ORDER BY r.created_at,r.id").map_err(|e|e.to_string())?;
@@ -1252,6 +1314,134 @@ struct TaskFactPromotion {
     #[serde(default)]
     priority: i64,
     reason: Option<String>,
+}
+
+/// Conteúdo validado de uma tool legada, pronto para gravar no ai-memory.
+pub struct AiMemoryAgentWrite {
+    pub key: String,
+    pub kind: String,
+    pub body: String,
+    pub reason: Option<String>,
+    pub tags: Vec<String>,
+}
+
+/// Interpreta as tools antigas sem escrever nas tabelas legadas.
+pub fn task_memory_write_with_repo(
+    conn: &Connection,
+    task_id: &str,
+    command: &str,
+    args: serde_json::Value,
+    repo_key: Option<&str>,
+) -> Result<AiMemoryAgentWrite, String> {
+    let (workspace_id, mission_id, actor, run_id) = task_memory_owner(conn, task_id)?;
+    if actor == "dreamer" && command == "memory.promoteFact" {
+        return Err("Dreamer cannot promote Run Facts directly".into());
+    }
+    let (key, kind, body, reason, scope) = match command {
+        "memory.propose" => {
+            let input: TaskCreateProposal = serde_json::from_value(args)
+                .map_err(|_| "invalid memory.propose arguments".to_string())?;
+            validate_agent_priority(input.priority)?;
+            if !matches!(input.scope.as_str(), "workspace" | "mission") {
+                return Err("scope must be workspace or mission".into());
+            }
+            if input.scope == "mission" && mission_id.is_none() {
+                return Err("this Run is not attached to a Mission".into());
+            }
+            (input.key, input.kind, input.body, input.reason, input.scope)
+        }
+        "memory.update" => {
+            let input: TaskUpdateProposal = serde_json::from_value(args)
+                .map_err(|_| "invalid memory.update arguments".to_string())?;
+            validate_agent_priority(input.priority)?;
+            let (owner, entry_mission, _actor, _entry_run, scope) =
+                task_authorized_entry(conn, task_id, &input.entry_id, repo_key)?;
+            let detail = detail_with_repo(
+                conn, &input.entry_id, &owner,
+                if scope == "mission" { entry_mission.as_deref() } else { None },
+                &scope, repo_key.map(str::to_owned), true,
+            )?;
+            if detail.entry.current_revision != Some(input.expected_revision) {
+                return Err("memory revision is no longer current".into());
+            }
+            (detail.entry.key, input.kind, input.body, input.reason, scope)
+        }
+        "memory.delete" => {
+            let input: TaskDeleteProposal = serde_json::from_value(args)
+                .map_err(|_| "invalid memory.delete arguments".to_string())?;
+            let (owner, entry_mission, _actor, _entry_run, scope) =
+                task_authorized_entry(conn, task_id, &input.entry_id, repo_key)?;
+            let detail = detail_with_repo(
+                conn, &input.entry_id, &owner,
+                if scope == "mission" { entry_mission.as_deref() } else { None },
+                &scope, repo_key.map(str::to_owned), true,
+            )?;
+            if detail.entry.current_revision != Some(input.expected_revision) {
+                return Err("memory revision is no longer current".into());
+            }
+            let tombstone = format!("Registro arquivado da memória do agente. {}", input.reason.as_deref().unwrap_or(""));
+            (detail.entry.key, detail.entry.kind, tombstone, input.reason, scope)
+        }
+        "memory.promoteFact" => {
+            let input: TaskFactPromotion = serde_json::from_value(args)
+                .map_err(|_| "invalid memory.promoteFact arguments".to_string())?;
+            validate_agent_priority(input.priority)?;
+            if !matches!(input.scope.as_str(), "workspace" | "mission") {
+                return Err("scope must be workspace or mission".into());
+            }
+            if input.scope == "mission" && mission_id.is_none() {
+                return Err("this Run is not attached to a Mission".into());
+            }
+            let (fact_run, kind, body): (String, String, String) = conn.query_row(
+                "SELECT run_id,kind,body FROM run_facts WHERE id=?1",
+                [&input.fact_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).map_err(|_| "Run Fact is unavailable")?;
+            if fact_run != run_id {
+                return Err("Run Fact must belong to the caller's Run".into());
+            }
+            (input.key, kind, body, input.reason, input.scope)
+        }
+        _ => return Err("unknown Shared Memory write tool".into()),
+    };
+    let key = normalize_key(&key)
+        .map_err(|_| "A chave da memória deve ter de 1 a 128 bytes UTF-8 e não conter controles.".to_string())?;
+    if !KINDS.contains(&kind.as_str()) {
+        return Err("Tipo de memória inválido.".into());
+    }
+    let body = normalize_body(&body)
+        .map_err(|_| "O corpo da memória deve ter de 1 a 4096 bytes UTF-8.".to_string())?;
+    let reason = normalize_reason(reason.as_deref())
+        .map_err(|_| "O motivo da memória deve ter até 512 bytes UTF-8.".to_string())?;
+    if actor == "dreamer" {
+        dream::check_input(&key)?;
+        dream::validate_proposal(
+            conn,
+            &workspace_id,
+            &ProposalActor {
+                kind: "dreamer",
+                run_id: Some(&run_id),
+                task_id: Some(task_id),
+                fact_id: None,
+            },
+            reason.as_deref(),
+            &body,
+        )?;
+    }
+    let mut tags = vec!["ade-ags".to_string()];
+    if scope == "mission" {
+        let mission = mission_id.ok_or("this Run is not attached to a Mission")?;
+        tags.push(format!("mission-{}", mission.chars().take(32).collect::<String>()));
+    }
+    Ok(AiMemoryAgentWrite { key, kind, body, reason, tags })
+}
+
+fn validate_agent_priority(priority: i64) -> Result<(), String> {
+    if (PRIORITY_MIN..=PRIORITY_MAX).contains(&priority) {
+        Ok(())
+    } else {
+        Err(format!("A prioridade de compatibilidade deve ficar entre {PRIORITY_MIN} e {PRIORITY_MAX}."))
+    }
 }
 
 fn task_memory_owner(

@@ -3,8 +3,9 @@ import { useTranslation } from "react-i18next";
 
 /**
  * Interruptor "incluir memória somente-leitura no início da sessão" da tab interativa. Desligado
- * por padrão. Ligado só manda o índice da memória aprovada como DADOS, uma vez, ao abrir a sessão:
- * nada é escrito em CLAUDE.md nem em AGENTS.md. É um botão nativo (Espaço/Enter alternam, o foco
+ * por padrão. Ligado só manda o índice histórico do SQLite como DADOS, uma vez, ao abrir a sessão;
+ * memórias novas ficam no ai-memory do projeto. Nada é escrito em CLAUDE.md nem em AGENTS.md.
+ * É um botão nativo (Espaço/Enter alternam, o foco
  * é visível) e a transição respeita reduced-motion.
  */
 export function MemoryBlockSwitch({ checked, onChange, disabled = false }: { checked: boolean; onChange: (next: boolean) => void; disabled?: boolean }) {
