@@ -570,6 +570,48 @@ fn filho_nascido_na_graca_e_encontrado_na_revarredura() {
     use std::sync::{mpsc, Mutex};
     use std::time::{Duration, Instant};
 
+    /// Espera o kernel concluir a saída do processo já sinalizado, sem polling nem `sleep`.
+    /// Fecha a janela entre o envio assíncrono de `SIGKILL` (ou fechamento dos fds no `exit_files`)
+    /// e a atualização do estado do processo para zumbi/ausente (`/proc` no Linux, `proc_pidinfo` no macOS).
+    fn wait_kernel_exit(identity: &ProcessIdentity, timeout: Duration) {
+        #[cfg(target_os = "linux")]
+        if let Some(pidfd) = &identity.pidfd {
+            use std::os::fd::AsRawFd;
+            let mut pfd = libc::pollfd {
+                fd: pidfd.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as libc::c_int;
+            unsafe {
+                libc::poll(&mut pfd, 1, timeout_ms);
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let kq = unsafe { libc::kqueue() };
+            if kq >= 0 {
+                let change = libc::kevent {
+                    ident: identity.pid as usize,
+                    filter: libc::EVFILT_PROC,
+                    flags: libc::EV_ADD | libc::EV_ONESHOT,
+                    fflags: libc::NOTE_EXIT,
+                    data: 0,
+                    udata: std::ptr::null_mut(),
+                };
+                let mut event: libc::kevent = unsafe { std::mem::zeroed() };
+                let ts = libc::timespec {
+                    tv_sec: timeout.as_secs() as libc::time_t,
+                    tv_nsec: timeout.subsec_nanos() as libc::c_long,
+                };
+                unsafe {
+                    libc::kevent(kq, &change, 1, &mut event, 1, &ts);
+                    libc::close(kq);
+                }
+            }
+        }
+    }
+
     struct EventClock {
         now: Mutex<Instant>,
         spawned: Mutex<mpsc::Receiver<u32>>,
@@ -592,15 +634,17 @@ fn filho_nascido_na_graca_e_encontrado_na_revarredura() {
     }
 
     let mut group = ProcessGroup::new(91_024);
+    // O filho `sleep 30` herda o fd de stdout do `root` e só o fecha ao encerrar.
     let mut root = Command::new("sh")
-        .args(["-c", "trap '' HUP; trap 'sleep 30 & echo $!; trap \"\" TERM' TERM; echo pronto; while :; do :; done"])
+        .args(["-c", "trap '' HUP; trap 'sleep 30 >&1 & echo $!; trap \"\" TERM' TERM; echo pronto; while :; do :; done"])
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    group.adopt(&root);
+    let root_pid = root.id();
     let reader = root.stdout.take().unwrap();
     let (ready_tx, ready_rx) = mpsc::channel();
     let (tx, rx) = mpsc::channel();
+    let (eof_tx, eof_rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut reader = std::io::BufReader::new(reader);
         let mut line = String::new();
@@ -613,8 +657,21 @@ fn filho_nascido_na_graca_e_encontrado_na_revarredura() {
         {
             let _ = tx.send(pid);
         }
+        // Continua lendo até EOF: o pipe só fecha quando `root` e `sleep 30` encerram.
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        let _ = eof_tx.send(());
     });
     assert_eq!(ready_rx.recv_timeout(Duration::from_secs(2)).unwrap(), "pronto");
+    group.adopt(&root);
+    let (root_exit_tx, root_exit_rx) = mpsc::channel();
+    std::thread::spawn(move || { let _ = root_exit_tx.send(root.wait()); });
+
     let clock = EventClock {
         now: Mutex::new(Instant::now()),
         spawned: Mutex::new(rx),
@@ -624,15 +681,24 @@ fn filho_nascido_na_graca_e_encontrado_na_revarredura() {
 
     let seen = clock.seen.lock().unwrap();
     let identity = seen.as_ref().expect("identidade do filho");
+    // O `EventClock` avança `POST_KILL_REAP` sem esperar tempo real; aguardamos o sinal
+    // explícito do kernel (EOF do pipe herdado pelo filho + evento de saída) antes de ler o estado.
+    let pipe_closed = eof_rx.recv_timeout(Duration::from_secs(2)).is_ok();
+    if pipe_closed {
+        wait_kernel_exit(identity, Duration::from_secs(2));
+    }
     let alive = is_alive(identity);
     if alive {
         signal_victims(std::slice::from_ref(identity), libc::SIGKILL);
     }
-    if root.try_wait().unwrap().is_none() {
-        let _ = root.kill();
-        let _ = root.wait();
+    if root_exit_rx.recv_timeout(Duration::from_secs(2)).is_err() {
+        unsafe { libc::kill(root_pid as i32, libc::SIGKILL); }
     }
-    assert!(!alive, "o filho {} nascido durante a graça sobreviveu à revarredura", identity.pid);
+    assert!(
+        pipe_closed && !alive,
+        "o filho {} nascido durante a graça sobreviveu à revarredura",
+        identity.pid
+    );
 }
 
 // ── Fin a fin: matar la tab se lleva su descendencia ────────────
