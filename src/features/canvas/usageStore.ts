@@ -1,12 +1,14 @@
 import { create } from "zustand";
 
 import { antigravityCliUsage, codexAccountUsage, discoverAntigravityAccount, type AgyGroup, type AgyUsage } from "@/features/accounts/ipc";
+import { mergeClaudeUsage } from "@/features/accounts/problem";
 import type { AgentAccount, CodexUsage } from "@/features/accounts/types";
 import { modelMeters, type ModelMeter } from "./antigravityQuota";
 import { agentAccountUsage, claudeLiveUsage, isUsageFresh, planLabel, type LiveUsage } from "@/features/accounts/usage";
 
 /** Cada cuánto se renuevan las cuotas mientras el canvas está abierto. */
-const EVERY = 5 * 60 * 1000;
+const EVERY = 10 * 60 * 1000;
+const VISIBILITY_COOLDOWN_MS = 5 * 60 * 1000;
 const isSystem = (a: AgentAccount) => a.id.startsWith("system:");
 /** Contas Antigravity por perfil CLI (`HOME` isolado no macOS) leem a cota pelo `agy /usage`, não por OAuth da ADE. */
 const isAntigravityCliProfile = (a: AgentAccount) => a.id === "system:antigravity" || a.envVar === "HOME";
@@ -83,14 +85,22 @@ export const useUsageStore = create<UsageState>((set, get) => ({
 
   async refresh(account, force) {
     const id = account.id;
+    if (account.agentId === "claude-code" && account.kind === "api_key") {
+      return;
+    }
     set(patch("busy", id, true));
     try {
       if (account.agentId === "claude-code") {
-        let live = await claudeLiveUsage(id, force);
+        const first = await claudeLiveUsage(id, force, force);
+        let live = mergeClaudeUsage(get().claude[id], first);
         set(patch("claude", id, live));
-        // Lo guardado puede estar vencido: se muestra al instante y se pregunta de verdad detrás.
-        if (!force && live.available && live.cached && !isUsageFresh(live.fetchedAt, Math.floor(Date.now() / 1000))) {
-          live = await claudeLiveUsage(id, true);
+        const now = Math.floor(Date.now() / 1000);
+        const blockedByBackoff = live.retryAt != null && live.retryAt > now;
+        // Lo guardado puede estar vencido: se muestra al instante y se pregunta de verdad detrás,
+        // respeitando o backoff automático quando houver rate limit/erro recente.
+        if (!force && live.available && live.cached && !isUsageFresh(live.fetchedAt, now) && !blockedByBackoff) {
+          const fresh = await claudeLiveUsage(id, true, false);
+          live = mergeClaudeUsage(live, fresh);
           set(patch("claude", id, live));
         }
         if (get().plan[id] === undefined) {
@@ -169,15 +179,16 @@ export const useUsageStore = create<UsageState>((set, get) => ({
     } catch (e) {
       if (account.agentId === "claude-code") {
         const prev = get().claude[id];
-        set(patch("claude", id, {
-          available: prev?.available ?? false,
-          session: prev?.session ?? null,
-          week: prev?.week ?? null,
-          weekModels: prev?.weekModels ?? [],
-          fetchedAt: prev?.fetchedAt ?? 0,
-          cached: prev?.cached ?? false,
+        set(patch("claude", id, mergeClaudeUsage(prev, {
+          available: false,
+          session: null,
+          week: null,
+          weekModels: [],
+          fetchedAt: 0,
+          cached: false,
           problem: String(e),
-        }));
+          retryAt: null,
+        })));
       }
     } finally {
       set(patch("busy", id, false));
@@ -230,9 +241,11 @@ export function startUsagePolling(accounts: AgentAccount[], active = true): () =
   stopUsagePolling();
   running = sig;
   let sweeping = false;
+  let lastSweepAt = 0;
   const sweep = async () => {
     if (document.visibilityState === "hidden" || sweeping) return;
     sweeping = true;
+    lastSweepAt = Date.now();
     try {
       const { refresh, refreshAgy } = useUsageStore.getState();
       await Promise.all([
@@ -247,7 +260,9 @@ export function startUsagePolling(accounts: AgentAccount[], active = true): () =
     }
   };
   onVisible = () => {
-    if (document.visibilityState === "visible") void sweep();
+    if (document.visibilityState === "visible" && Date.now() - lastSweepAt >= VISIBILITY_COOLDOWN_MS) {
+      void sweep();
+    }
   };
   document.addEventListener("visibilitychange", onVisible);
   void sweep();

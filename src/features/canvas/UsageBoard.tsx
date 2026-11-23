@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
-import { accountProblemKey } from "@/features/accounts/problem";
+import { accountProblemText } from "@/features/accounts/problem";
 import type { AgentAccount, QuotaWindow } from "@/features/accounts/types";
 
 import { RING_COLORS, Ring } from "./Ring";
@@ -132,7 +132,8 @@ function ClaudeSection({ account }: { account: AgentAccount }) {
 
   const now = Math.floor(Date.now() / 1000);
   const color = RING_COLORS.claude;
-  const problemKey = live && !live.available ? accountProblemKey(live.problem) : null;
+  const retryIn = live?.retryAt && live.retryAt > now ? live.retryAt - now : null;
+  const problemText = live?.problem ? accountProblemText(live.problem, t, retryIn) : null;
 
   return (
     <section className="px-4 py-4 space-y-3.5">
@@ -152,10 +153,15 @@ function ClaudeSection({ account }: { account: AgentAccount }) {
               {t("canvas.usage.updated", { ago: ago(now - live.fetchedAt, t) })}{live.cached ? ` · ${t("canvas.usage.cached")}` : ""}
             </div>
           )}
+          {problemText && (
+            <Notice tone="warn" action={<RefreshButton busy={busy} onClick={() => ask(true)} label={t("canvas.usage.retry")} />}>
+              {problemText}
+            </Notice>
+          )}
         </>
       ) : (
         <Notice tone="warn" action={<RefreshButton busy={busy} onClick={() => ask(true)} label={t("canvas.usage.retry")} />}>
-          {problemKey ? t(problemKey) : t("canvas.usage.failed")}
+          {problemText ?? t("canvas.usage.failed")}
         </Notice>
       )}
     </section>
