@@ -169,6 +169,10 @@ export const realBrowserPost = (id: string, message: unknown) => invoke<void>("r
 export const realBrowserScreenshot = (id: string) =>
   invoke<{ data: string; width: number; height: number }>("real_browser_screenshot", { id });
 
+/** A foto da página direto num arquivo de captura (o PNG do Chrome, sem recodificar): devolve o caminho. */
+export const realBrowserShotSave = (id: string, tag?: string) =>
+  invoke<string>("real_browser_screenshot_save", { id, tag: tag ?? null });
+
 /** A foto da página num canvas, com o tamanho da página em px CSS. */
 export async function realBrowserShot(id: string): Promise<{ canvas: HTMLCanvasElement; width: number; height: number }> {
   const shot = await realBrowserScreenshot(id);

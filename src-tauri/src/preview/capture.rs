@@ -68,6 +68,15 @@ pub async fn preview_save_capture(request: Request<'_>) -> Result<String, String
         // bytes llegan como una lista de números.
         InvokeBody::Json(value) => serde_json::from_value(value.clone()).map_err(|_| "la captura tiene que llegar como bytes".to_string())?,
     };
+    guardar_png(png, tag).await
+}
+
+/// Guarda un PNG ya pronto (el del CDP, sin pasar por el webview) como una captura más. La `tag` se sanea aquí.
+pub(crate) async fn guardar_png_con_tag(png: Vec<u8>, tag: Option<&str>) -> Result<String, String> {
+    guardar_png(png, tag.map(slug)).await
+}
+
+async fn guardar_png(png: Vec<u8>, tag: Option<String>) -> Result<String, String> {
     // Escribir el PNG en disco va fuera del hilo principal.
     let path = tauri::async_runtime::spawn_blocking(move || save_capture(&capture_dir(), &png, tag.as_deref(), SystemTime::now()))
         .await

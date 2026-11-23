@@ -2,12 +2,14 @@
 
 pub mod datadir;
 pub mod external_path;
+pub mod git;
 pub mod launch;
 pub mod legacy;
 pub mod loopback_trust;
 pub mod path_env;
 mod proc;
 pub mod spawn;
+mod text;
 mod time;
 pub mod untrusted;
 pub mod user_json;
@@ -21,4 +23,5 @@ pub use external_path::external_path;
 pub use launch::external_command;
 pub use path_env::{find_program, program};
 pub use proc::output_with_timeout;
+pub use text::clip;
 pub use time::{now_ts, now_ts_ms};

@@ -26,7 +26,7 @@ const SHOW_DEFAULT: u64 = 20;
 const TITLE_MAX: usize = 60;
 
 fn db(app: &AppHandle) -> Result<DbConnection, String> {
-    Ok(super::shared::db(app)?.inner().clone())
+    crate::database::db_of(app)
 }
 
 fn thread_arg(args: &Value) -> Result<String, String> {

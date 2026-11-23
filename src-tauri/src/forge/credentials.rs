@@ -112,16 +112,9 @@ pub struct RepoTarget {
 }
 
 fn git(dir: &str, args: &[&str]) -> Option<String> {
-    let mut cmd = crate::util::spawn::hidden_command("git");
-    cmd.arg("-C")
-        .arg(dir)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0");
-    let out =
-        crate::util::output_with_timeout(&mut cmd, std::time::Duration::from_secs(10)).ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    crate::util::git::run(std::path::Path::new(dir), args, std::time::Duration::from_secs(10))
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 pub(super) fn repo_root(cwd: &str) -> Option<String> {

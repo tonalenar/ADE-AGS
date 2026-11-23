@@ -23,13 +23,126 @@ use std::collections::HashMap;
 use serde_json::{json, Map, Value};
 
 use crate::canal::event::clip;
-use crate::canal::timeline::{Item, ItemKind, ToolStatus};
+use crate::canal::timeline::{claude_tool, Item, ItemKind, ToolStatus};
 
-use super::agy_map::tool_item;
-pub use super::agy_map::Out;
 use super::claude_map::TurnResult;
 use super::codex_map::DeltaKind;
 use super::store::ThreadRow;
+
+/// O que uma linha da saída significa para a conversa.
+#[derive(Debug, PartialEq)]
+pub enum Out {
+    /// Um item novo ou atualizado da timeline (numa caixa: o item é bem maior que as outras variantes).
+    Item(Box<Item>),
+    /// Um pedaço da fala (ou do raciocínio) chegando; `item_id` é o do item que vai fechar o texto.
+    Delta {
+        item_id: String,
+        delta: String,
+        kind: DeltaKind,
+    },
+    /// O id da sessão (para continuar com `--resume`).
+    Session(String),
+    /// O turno acabou.
+    Done(TurnResult),
+}
+
+/// O valor de um parâmetro pelo nome, sem ligar para caixa e `_` (`CommandLine`, `command_line`).
+fn param<'a>(params: &'a Value, keys: &[&str]) -> Option<&'a Value> {
+    let norm = |s: &str| {
+        s.chars()
+            .filter(|c| *c != '_' && *c != '-')
+            .collect::<String>()
+            .to_ascii_lowercase()
+    };
+    let map = params.as_object()?;
+    keys.iter().find_map(|want| {
+        map.iter()
+            .find(|(k, v)| norm(k) == *want && !v.is_null())
+            .map(|(_, v)| v)
+    })
+}
+
+fn param_str<'a>(params: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    param(params, keys).and_then(Value::as_str)
+}
+
+/// Converte uma ferramenta no formato da timeline do transcript via `claude_tool`.
+/// Os nomes desconhecidos ficam como ferramenta genérica com o próprio nome. Pura.
+pub fn tool_item(id: &str, name: &str, params: &Value, at: Option<i64>) -> Item {
+    let key: String = name
+        .chars()
+        .filter(|c| *c != '_' && *c != '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let path = param_str(
+        params,
+        &[
+            "absolutepath",
+            "targetfile",
+            "filepath",
+            "path",
+            "file",
+            "directorypath",
+            "searchpath",
+        ],
+    );
+    let has = |needles: &[&str]| needles.iter().any(|n| key.contains(n));
+    if has(&["url", "websearch", "searchweb", "webfetch", "browser"]) && !has(&["subagent"]) {
+        let url = param_str(params, &["url", "query"]).unwrap_or(name);
+        return claude_tool(id, "WebFetch", &json!({ "url": url }), at);
+    }
+    if has(&["subagent", "invokeagent", "delegate"]) {
+        let what =
+            param_str(params, &["prompt", "task", "description", "taskname"]).unwrap_or(name);
+        return claude_tool(id, "Task", &json!({ "description": what }), at);
+    }
+    if has(&["mcp"]) {
+        let server = param_str(params, &["servername", "server"]);
+        let tool = param_str(params, &["toolname", "tool"]);
+        let label = match (server, tool) {
+            (Some(s), Some(t)) => format!("{s}: {t}"),
+            (None, Some(t)) => t.to_string(),
+            _ => name.to_string(),
+        };
+        return claude_tool(id, &label, params, at);
+    }
+    if has(&["runcommand", "command", "bash", "shell", "terminal"]) {
+        let command = param_str(params, &["commandline", "command", "cmd"]).unwrap_or(name);
+        return claude_tool(id, "Bash", &json!({ "command": command }), at);
+    }
+    if has(&["writetofile", "createfile", "writefile"]) {
+        let content = param_str(params, &["codecontent", "content", "filecontent"]).unwrap_or("");
+        return claude_tool(
+            id,
+            "Write",
+            &json!({ "file_path": path, "content": content }),
+            at,
+        );
+    }
+    if has(&["edit", "replace", "patch"]) {
+        let new = param_str(
+            params,
+            &["replacementcontent", "newstring", "newcontent", "codeedit"],
+        )
+        .unwrap_or("");
+        let old = param_str(params, &["targetcontent", "oldstring", "oldcontent"]).unwrap_or("");
+        return claude_tool(
+            id,
+            "Edit",
+            &json!({ "file_path": path, "old_string": old, "new_string": new }),
+            at,
+        );
+    }
+    if has(&["grep", "findbyname", "search", "find"]) {
+        let pattern =
+            param_str(params, &["query", "pattern", "searchpattern", "regex"]).unwrap_or(name);
+        return claude_tool(id, "Grep", &json!({ "pattern": pattern, "path": path }), at);
+    }
+    if has(&["viewfile", "readfile", "view", "read", "listdir", "outline"]) {
+        return claude_tool(id, "Read", &json!({ "file_path": path }), at);
+    }
+    claude_tool(id, name, params, at)
+}
 
 const TEXT_MAX: usize = 20_000;
 const OUTPUT_MAX: usize = 4_000;

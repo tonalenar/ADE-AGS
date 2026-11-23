@@ -277,6 +277,7 @@ pub fn snapshot(conn: &Connection) -> Result<ShadowSnapshot, String> {
     Ok(ShadowSnapshot { rows, human: human_decisions(conn)? })
 }
 
+#[cfg(test)]
 pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
     report_from_snapshot(snapshot(conn)?)
 }
@@ -549,6 +550,7 @@ fn comparisons(rows: &[Row]) -> Vec<Comparison> {
     out
 }
 
+#[cfg(test)]
 pub fn export_csv(conn: &Connection) -> Result<String, String> {
     let report = report(conn)?;
     export_csv_from_report(&report)

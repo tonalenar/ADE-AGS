@@ -598,7 +598,7 @@ pub fn chat_team_watch_stall(app: AppHandle, db: State<'_, DbConnection>, team_i
 }
 
 /// O estado real (trabalhando, esperando entrada, encerrou sem entregar, erro, ocioso) de cada integrante e filho ativo.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_states(db: State<'_, DbConnection>) -> Result<Vec<super::watch_db::MemberState>, String> {
     super::watch_db::states(&*lock(&db)?, crate::util::now_ts_ms())
 }

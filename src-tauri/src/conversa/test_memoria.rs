@@ -327,7 +327,6 @@ fn todos_os_motores_de_conversa_protegem_o_autowire() {
     for (name, src) in [
         ("codex.rs", include_str!("codex.rs")),
         ("opencode.rs", include_str!("opencode.rs")),
-        ("agy.rs", include_str!("agy.rs")),
         ("cursor.rs", include_str!("cursor.rs")),
         ("claude.rs", include_str!("claude.rs")),
     ] {
