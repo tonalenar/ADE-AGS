@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { PermissionCard } from "@/features/runs/PermissionCard";
@@ -10,6 +9,7 @@ import { ChatMarkdown } from "./LazyChatMarkdown";
 import { dateLocale } from "@/i18n/dateLocale";
 import { buildFeed, feedFilterOptions, filterFeed, formatMessageText, parseVigiaText, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, type FeedFilter, type FeedItem, type TeamMessage, type TerminalPromptItem, type UserNote } from "./teamFeedModel";
 import { answerTerminalPrompt } from "./useTerminalPrompts";
+import { missionMessages } from "./ipc";
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 
@@ -31,7 +31,7 @@ export function useTeamMessages(missionId: string | null, enabled = true): TeamM
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       if (inflight) { again = true; return; }
       inflight = true;
-      invoke<TeamMessage[]>("mission_messages", { missionId, afterId: last.current })
+      missionMessages(missionId, last.current)
         .then((fresh) => {
           if (!alive || fresh.length === 0) return;
           last.current = Math.max(last.current, ...fresh.map((m) => m.id));

@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 
 import App from "@/app/App";
 import { PanelBoundary } from "@/app/PanelBoundary";
 import { revealApp } from "@/app/splash";
+import { dbBootStatus } from "@/shared/ipc/window";
 
 type DbPhase = "checking" | "upgrading" | "ready";
 
 async function readDbPhase(): Promise<DbPhase> {
-  const status = await invoke<{ phase: string }>("db_boot_status");
+  const status = await dbBootStatus();
   return status.phase === "upgrading" ? "upgrading" : "ready";
 }
 

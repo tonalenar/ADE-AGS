@@ -1,11 +1,11 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
 import { Button, CloseIcon } from "neogestify-ui-components";
 
 import { TEXT_SIZES, type CanvasImage, type CanvasText } from "./board";
 import { canvasActions, useActiveBoardKey } from "./store";
+import { canvasAssetLoad } from "./ipc";
 
 // ── Texto ───────────────────────────────────────────────────────────
 
@@ -130,7 +130,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<I
     }
     let alive = true;
     let held = false;
-    invoke<string>("canvas_asset_load", { id: image.asset })
+    canvasAssetLoad(image.asset)
       .then((url) => {
         if (!alive) return;
         acquireImageAsset(image.asset, url);

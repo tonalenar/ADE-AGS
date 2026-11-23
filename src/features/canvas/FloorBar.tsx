@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Button, CloseIcon } from "neogestify-ui-components";
 import { AlertaToast } from "@/shared/ui/alerts";
@@ -13,18 +12,7 @@ import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { floorBadge, type LandPreview, type LandResult } from "./floorsModel";
 import { LandFloorDialog } from "./LandFloorDialog";
 import { NewFloorDialog } from "./NewFloorDialog";
-
-interface Floor {
-  id: string;
-  name: string;
-  branch: string;
-  cwd: string;
-}
-
-interface FloorList {
-  ground: string;
-  floors: Floor[];
-}
+import { floorDelete, floorLandPreview, floorList, type Floor, type FloorList } from "./ipc";
 
 const inside = (cwd: string, folder: string) => {
   const here = comparablePath(cwd).replace(/\/+$/, "");
@@ -81,7 +69,7 @@ export function FloorBar({ inline = false }: { inline?: boolean }) {
     if (!cwd) return;
     let alive = true;
     setList(null);
-    const load = () => invoke<FloorList>("floor_list", { cwd }).then((l) => alive && setList(l)).catch((error: unknown) => {
+    const load = () => floorList(cwd).then((l) => alive && setList(l)).catch((error: unknown) => {
       if (!alive) return;
       setList(null);
       AlertaToast(t("canvas.floor.title"), t("canvas.floor.loadError", { error: String(error) }), "warning", 9000);
@@ -114,7 +102,7 @@ export function FloorBar({ inline = false }: { inline?: boolean }) {
 
   const refresh = async () => {
     try {
-      setList(await invoke<FloorList>("floor_list", { cwd: active.cwd }));
+      setList(await floorList(active.cwd));
     } catch (error) {
       setList(null);
       AlertaToast(t("canvas.floor.title"), t("canvas.floor.loadError", { error: String(error) }), "warning", 9000);
@@ -126,7 +114,7 @@ export function FloorBar({ inline = false }: { inline?: boolean }) {
     const last = badgeAt.current[floor.id] ?? 0;
     if (Date.now() - last < BADGE_TTL_MS) return;
     badgeAt.current[floor.id] = Date.now();
-    invoke<LandPreview>("floor_land_preview", { id: floor.id, target: null })
+    floorLandPreview(floor.id, null)
       .then((preview) => setBadges((cur) => ({ ...cur, [floor.id]: preview })))
       .catch(() => { delete badgeAt.current[floor.id]; });
   };
@@ -143,7 +131,7 @@ export function FloorBar({ inline = false }: { inline?: boolean }) {
     }
     setBusy(true);
     try {
-      const dropped = await invoke<{ name: string; branch: string; branchKept: boolean }>("floor_delete", { id: floor.id });
+      const dropped = await floorDelete(floor.id);
       await refresh();
       AlertaToast(t("canvas.floor.title"), t(dropped.branchKept ? "canvas.floor.deletedKept" : "canvas.floor.deleted", { name: dropped.name, branch: dropped.branch }), "info", 7000);
     } catch (e) {

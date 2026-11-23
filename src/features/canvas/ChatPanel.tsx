@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AlertaToast } from "@/shared/ui/alerts";
 
@@ -27,6 +26,7 @@ import { CHAT_MARGIN, clampSize, isDefaultSize, loadChatSize, resizeBy, saveChat
 import { dateLocale } from "@/i18n/dateLocale";
 import { useDockWidth } from "./dockWidth";
 import { MissionScopeOverlaps } from "@/features/missions/ScopeOverlapNotice";
+import { chatSend } from "./ipc";
 
 /** Los siete hilos, en el orden en que los conoce el backend (`chat::THREADS`). */
 export const THREADS = ["blue", "purple", "pink", "red", "orange", "yellow", "green"] as const;
@@ -278,7 +278,7 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
     setSending(true);
     setDraft("");
     try {
-      await invoke("chat_send", { tabId: to.id, thread: "blue", text });
+      await chatSend(to.id, "blue", text);
       setNotes((all) => [...all, { key: `u${Date.now()}`, atMs: Date.now(), toName: to.name, text }]);
     } catch (e) {
       setDraft(typed);
@@ -296,7 +296,7 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
     setSending(true);
     setDraft("");
     try {
-      await invoke("chat_send", { tabId: currentId, thread, text });
+      await chatSend(currentId, thread, text);
     } catch (e) {
       // No llegó: se devuelve lo escrito para no perderlo.
       setDraft(typed);
