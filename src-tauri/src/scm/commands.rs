@@ -995,3 +995,48 @@ pub async fn scm_worktrees(root: String) -> Result<Vec<ScmWorktree>, ScmError> {
     })
     .await
 }
+
+/// Totais `+`/`−` não commitados da pasta, lidos via `git diff --numstat` (sem transferir nem parsear o patch inteiro).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkingDiffStat {
+    pub root: String,
+    pub added: u64,
+    pub removed: u64,
+}
+
+/// Soma as linhas adicionadas e removidas de `git diff --numstat`. Entradas binárias (`-\t-\t...`) contam como zero. Pura.
+pub(crate) fn parse_numstat(raw: &str) -> (u64, u64) {
+    let mut added = 0u64;
+    let mut removed = 0u64;
+    for line in raw.lines() {
+        let mut parts = line.split('\t');
+        let (Some(a), Some(r)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        if let Ok(n) = a.trim().parse::<u64>() {
+            added = added.saturating_add(n);
+        }
+        if let Ok(n) = r.trim().parse::<u64>() {
+            removed = removed.saturating_add(n);
+        }
+    }
+    (added, removed)
+}
+
+/// Totais `+`/`−` não commitados da pasta (`git diff HEAD --numstat`), para o tooltip da barra lateral.
+/// `None` = fora de um repositório git.
+#[tauri::command]
+pub async fn scm_working_diff_stat(cwd: String) -> Result<Option<WorkingDiffStat>, ScmError> {
+    blocking(move || {
+        let Some(root) = repo_root(&cwd) else {
+            return Ok(None);
+        };
+        // Sem commit ainda não há HEAD: aí o que existe é o que está no índice.
+        let raw = run_text(&root, &["diff", "HEAD", "--numstat", "--no-ext-diff", "-M"], LOCAL)
+            .or_else(|_| run_text(&root, &["diff", "--cached", "--numstat", "--no-ext-diff", "-M"], LOCAL))?;
+        let (added, removed) = parse_numstat(&raw);
+        Ok(Some(WorkingDiffStat { root, added, removed }))
+    })
+    .await
+}

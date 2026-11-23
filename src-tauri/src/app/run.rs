@@ -462,6 +462,7 @@ pub fn run() {
             // Control de versiones (panel derecho)
             crate::scm::scm_status,
             crate::scm::scm_working_diff,
+            crate::scm::scm_working_diff_stat,
             crate::conversa::chat_new_worktree,
             crate::conversa::chat_threads,
             crate::conversa::chat_thread_create,

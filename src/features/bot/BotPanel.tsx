@@ -63,22 +63,58 @@ function Card({ label, value, color, sub }: { label: string; value: string; colo
 /**
  * El QG del bot: lo que el bot "hizo" por vos, en una pantalla de fliperama. Se abre con un
  * clic en el bot. Teclado: ← → cambian de pestaña, ↑ ↓ eligen misión, Esc cierra.
+ *
+ * Casca rasa: guarda só a aba e o filtro escolhidos enquanto fechado, sem assinar stores quentes
+ * (canvas, tabs, missões, conversas). Só monta o corpo com os hooks quando `open` está ligado.
  */
 export function BotPanel() {
-  const { t } = useTranslation();
   const open = useBotPanelStore((s) => s.open);
   const setOpen = useBotPanelStore((s) => s.setOpen);
+  const [view, setView] = useState<View>("status");
+  const [selected, setSelected] = useState(0);
+  const [liveFilter, setLiveFilter] = useState("all");
+
+  if (!open) return null;
+
+  return (
+    <BotPanelBody
+      view={view}
+      setView={setView}
+      selected={selected}
+      setSelected={setSelected}
+      liveFilter={liveFilter}
+      setLiveFilter={setLiveFilter}
+      onClose={() => setOpen(false)}
+    />
+  );
+}
+
+function BotPanelBody({
+  view,
+  setView,
+  selected,
+  setSelected,
+  liveFilter,
+  setLiveFilter,
+  onClose,
+}: {
+  view: View;
+  setView: React.Dispatch<React.SetStateAction<View>>;
+  selected: number;
+  setSelected: React.Dispatch<React.SetStateAction<number>>;
+  liveFilter: string;
+  setLiveFilter: React.Dispatch<React.SetStateAction<string>>;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
   const pet = usePetStatus();
   const busy = useAgentActivity((a) => a.count);
   const missions = useMissionsStore((s) => s.missions);
   const missionDetails = useMissionsStore((s) => s.details);
   const loadMissionDetail = useMissionsStore((s) => s.loadDetail);
-  const [view, setView] = useState<View>("status");
-  const [selected, setSelected] = useState(0);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const [timings, setTimings] = useState<MissionTimings | null>(null);
   const [tokens, setTokens] = useState<MissionTokens | null>(null);
-  const [liveFilter, setLiveFilter] = useState("all");
   const [liveReview, setLiveReview] = useState<MissionReview | null>(null);
   // Costo estimado y ahorro de cada misión de la lista (se leen de a una, en segundo plano).
   const [estimates, setEstimates] = useState<Record<string, CostEstimate | null>>({});
@@ -105,38 +141,36 @@ export function BotPanel() {
   const hasCurrentDetail = Boolean(currentDetail);
 
   useEffect(() => {
-    if (!open || view !== "live" || !currentId || hasCurrentDetail) return;
+    if (view !== "live" || !currentId || hasCurrentDetail) return;
     loadMissionDetail(currentId).catch(() => undefined);
-  }, [open, view, currentId, hasCurrentDetail, loadMissionDetail]);
+  }, [view, currentId, hasCurrentDetail, loadMissionDetail]);
 
   useEffect(() => {
-    if (!open || view !== "live" || !currentId) return;
+    if (view !== "live" || !currentId) return;
     let alive = true;
     setLiveReview(null);
     missionReview(currentId).then((data) => alive && setLiveReview(data)).catch(() => undefined);
     return () => { alive = false; };
-  }, [open, view, currentId]);
+  }, [view, currentId]);
 
   // El reloj corre mientras el panel está abierto: las misiones en curso suman tiempo en vivo.
   useEffect(() => {
-    if (!open) return;
     const timer = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
     return () => window.clearInterval(timer);
-  }, [open]);
+  }, []);
 
   // Los detalles de la misión elegida: tiempos y tokens medidos.
   useEffect(() => {
-    if (!open || !current) return;
+    if (!current) return;
     let alive = true;
     setTimings(null);
     setTokens(null);
     getTimings(current.id).then((x) => alive && setTimings(x)).catch(() => undefined);
     getTokens(current.id).then((x) => alive && setTokens(x)).catch(() => undefined);
     return () => { alive = false; };
-  }, [open, current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!open) return;
     let alive = true;
     (async () => {
       for (const m of recent) {
@@ -151,12 +185,11 @@ export function BotPanel() {
       }
     })();
     return () => { alive = false; };
-  }, [open, recent.map((m) => m.id).join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [recent.map((m) => m.id).join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setOpen(false); return; }
+      if (e.key === "Escape") { onClose(); return; }
       if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
         const step = e.key === "ArrowRight" ? 1 : -1;
         setView((v) => VIEWS[(VIEWS.indexOf(v) + step + VIEWS.length) % VIEWS.length]);
@@ -171,9 +204,7 @@ export function BotPanel() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, recent.length, setOpen]);
-
-  if (!open) return null;
+  }, [recent.length, onClose, setView, setSelected]);
 
   const trophyList = trophies(stats, pet.xp, pet.level, busy);
   const unlocked = trophyList.filter((x) => x.unlocked).length;
@@ -186,13 +217,13 @@ export function BotPanel() {
   const currentEstimate = current ? estimates[current.id] ?? estimateOf(tokens) : null;
 
   return (
-    <div className="ags-hq ags-hq__backdrop" role="dialog" aria-modal="true" aria-label={t("botPanel.title")} onClick={() => setOpen(false)}>
+    <div className="ags-hq ags-hq__backdrop" role="dialog" aria-modal="true" aria-label={t("botPanel.title")} onClick={onClose}>
       <div className="ags-hq__screen" onClick={(e) => e.stopPropagation()}>
         <div className="ags-hq__bar">
           <span className="ags-hq__title">{t("botPanel.brand")} <span className="ags-hq__sl">//</span> {t("botPanel.title")}</span>
           <span className="ags-hq__blink">_</span>
           <span className="ags-hq__score"><span>{t("botPanel.hiScore")}</span><b>{scoreDigits(pet.xp, 9)}</b></span>
-          <button type="button" className="ags-hq__close" onClick={() => setOpen(false)}>{t("botPanel.esc")}</button>
+          <button type="button" className="ags-hq__close" onClick={onClose}>{t("botPanel.esc")}</button>
         </div>
 
         <div className="shrink-0 px-4 pb-2 empty:hidden"><AutomationResumeBar compact /></div>

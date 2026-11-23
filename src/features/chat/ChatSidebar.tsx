@@ -1,6 +1,6 @@
 import { formatTimestamp } from "@/shared/timeFormat";
 import { readDisplayPrefs } from "@/features/settings/displayPreferences";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
@@ -160,14 +160,22 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
     return { enabled: workingShelfOn, needs, working };
   }, [cards, liveStates, workingShelfOn]);
   // O canal guarda o começo do turno em milissegundos; a barra compara em segundos, como a hora da abertura.
+  // Para conversas por protocolo, `lastItemAt` fica fora de `threads` e é lido quando a fase muda (`threadSignature`).
   const lastUserAt = useMemo(() => {
     const out: Record<string, number> = {};
+    const lastItems = useStructured.getState().lastItemAt;
     for (const card of cards) {
+      const tid = threadIdOf(card.tabId);
+      if (tid) {
+        const at = lastItems[tid];
+        if (at && at > card.openedAt) out[card.tabId] = at;
+        continue;
+      }
       const started = tabTurn[card.tabId]?.startedAt;
       if (started) out[card.tabId] = started / 1000;
     }
     return out;
-  }, [cards, tabTurn]);
+  }, [cards, tabTurn, threadSignature]);
   // Ordem dos projetos (Configurações → Projetos) e o concluir sozinho: as duas leem o que a barra já sabe.
   const projectOrder = useProjectOrderPrefs();
   const tabIds = useMemo(() => cards.map((c) => c.tabId), [cards]);
@@ -529,6 +537,72 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
     setMenu({ x: r.left, y: r.bottom + 4, items });
   };
 
+  // Lookups O(1) para as linhas memoizadas, evitando `.includes` por linha.
+  const pinnedSet = useMemo(() => new Set(pinned), [pinned]);
+  const unreadSet = useMemo(() => new Set(unread), [unread]);
+  const hiddenKidsSet = useMemo(() => new Set(hiddenKids), [hiddenKids]);
+
+  // Callbacks estáveis para `memo(SessionRow)`: leem sempre o estado mais recente via ref sem recriar funções por linha.
+  const rowActionsRef = useRef({
+    sections,
+    draggingId,
+    commitRename,
+    settle,
+    rowMenu,
+    canDropInSection,
+    dropInSection,
+  });
+  rowActionsRef.current = { sections, draggingId, commitRename, settle, rowMenu, canDropInSection, dropInSection };
+
+  const handleToggleKids = useCallback((tabId: string) => {
+    setHiddenKids((h) => (h.includes(tabId) ? h.filter((x) => x !== tabId) : [...h, tabId]));
+  }, []);
+  const handleRename = useCallback((card: ConversationCard, raw: string) => {
+    rowActionsRef.current.commitRename(card, raw);
+  }, []);
+  const handleCancelRename = useCallback(() => setRenaming(null), []);
+  const handleStartRename = useCallback((tabId: string) => setRenaming(tabId), []);
+  const handleSettle = useCallback((card: ConversationCard) => {
+    rowActionsRef.current.settle(card);
+  }, []);
+  const handleRowMenu = useCallback((card: ConversationCard, x: number, y: number) => {
+    setMenu({ x, y, items: rowActionsRef.current.rowMenu(card) });
+  }, []);
+  const handleRowDragStart = useCallback((card: ConversationCard, e: React.DragEvent<HTMLDivElement>) => {
+    conversationDragProps(card.tabId).onDragStart(e);
+    e.dataTransfer.setData(SESSION_REORDER_MIME, card.tabId);
+    e.dataTransfer.effectAllowed = "copyMove";
+    setDraggingId(card.tabId);
+  }, []);
+  const handleRowDragEnd = useCallback(() => {
+    setDraggingId(null);
+    setDropTarget(null);
+  }, []);
+  const handleRowDragOver = useCallback((sectionId: string, tabId: string, e: React.DragEvent<HTMLDivElement>) => {
+    const { draggingId: activeDrag, sections: list, canDropInSection: canDrop } = rowActionsRef.current;
+    const section = list.find((s) => s.id === sectionId);
+    if (!activeDrag || !section || !canDrop(activeDrag, section)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const position: DropPosition = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    setDropTarget({ sectionId: section.id, tabId, position });
+  }, []);
+  const handleRowDrop = useCallback((sectionId: string, tabId: string, e: React.DragEvent<HTMLDivElement>) => {
+    const { draggingId: activeDrag, sections: list, canDropInSection: canDrop, dropInSection: drop } = rowActionsRef.current;
+    const section = list.find((s) => s.id === sectionId);
+    const sourceId = e.dataTransfer.getData(SESSION_REORDER_MIME) || activeDrag;
+    if (!sourceId || !section || !canDrop(sourceId, section)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const position: DropPosition = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    const targetIndex = section.items.findIndex((item) => item.tabId === tabId) + (position === "after" ? 1 : 0);
+    drop(sourceId, section, targetIndex);
+    setDraggingId(null);
+    setDropTarget(null);
+  }, []);
+
   // ↑ ↓ andam pelas conversas à vista; o foco vai para a linha (que já abre com Enter).
   const onNavKey = (e: React.KeyboardEvent) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -733,43 +807,20 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
             onNew={section.kind === "project" && section.items[0]?.cwd ? () => onNewIn(section.items[0]!.cwd) : undefined}>
             {section.items.map((card) => {
               const kids = grouping.groups[card.tabId] ?? [];
-              const kidsHidden = hiddenKids.includes(card.tabId);
+              const kidsHidden = hiddenKidsSet.has(card.tabId);
               const rowPosition = dropTarget?.sectionId === section.id && dropTarget.tabId === card.tabId ? dropTarget.position ?? null : null;
               return (
                 <Fragment key={card.tabId}>
-                  <SessionRow card={card} diff={diffs[card.cwd]} selected={card.tabId === selectedId} asks={asksBy[card.tabId] ?? 0}
-                    pinned={pinned.includes(card.tabId)} unread={unread.includes(card.tabId)} renaming={renaming === card.tabId} onOpened={onOpened}
-                    kids={kids.length} kidsHidden={kidsHidden} onToggleKids={() => setHiddenKids((h) => (h.includes(card.tabId) ? h.filter((x) => x !== card.tabId) : [...h, card.tabId]))}
-                    onRename={(raw) => commitRename(card, raw)} onCancelRename={() => setRenaming(null)} onStartRename={() => setRenaming(card.tabId)}
-                    onSettle={() => settle(card)} onMenu={(x, y) => setMenu({ x, y, items: rowMenu(card) })}
+                  <SessionRow sectionId={section.id} card={card} diff={diffs[card.cwd]} selected={card.tabId === selectedId} asks={asksBy[card.tabId] ?? 0}
+                    pinned={pinnedSet.has(card.tabId)} unread={unreadSet.has(card.tabId)} renaming={renaming === card.tabId} onOpened={onOpened}
+                    kids={kids.length} kidsHidden={kidsHidden} onToggleKids={handleToggleKids}
+                    onRename={handleRename} onCancelRename={handleCancelRename} onStartRename={handleStartRename}
+                    onSettle={handleSettle} onMenu={handleRowMenu}
                     dropPosition={rowPosition}
-                    onDragStart={(e) => {
-                      conversationDragProps(card.tabId).onDragStart(e);
-                      e.dataTransfer.setData(SESSION_REORDER_MIME, card.tabId);
-                      e.dataTransfer.effectAllowed = "copyMove";
-                      setDraggingId(card.tabId);
-                    }}
-                    onDragEnd={() => { setDraggingId(null); setDropTarget(null); }}
-                    onDragOver={(e) => {
-                      if (!draggingId || !canDropInSection(draggingId, section)) return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const position: DropPosition = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
-                      setDropTarget({ sectionId: section.id, tabId: card.tabId, position });
-                    }}
-                    onDrop={(e) => {
-                      const sourceId = e.dataTransfer.getData(SESSION_REORDER_MIME) || draggingId;
-                      if (!sourceId || !canDropInSection(sourceId, section)) return;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const position: DropPosition = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
-                      const targetIndex = section.items.findIndex((item) => item.tabId === card.tabId) + (position === "after" ? 1 : 0);
-                      dropInSection(sourceId, section, targetIndex);
-                      setDraggingId(null);
-                      setDropTarget(null);
-                    }} />
+                    onDragStart={handleRowDragStart}
+                    onDragEnd={handleRowDragEnd}
+                    onDragOver={handleRowDragOver}
+                    onDrop={handleRowDrop} />
                   {kids.length > 0 && !kidsHidden && (
                     <TeamMembers orchestrator={card.tabId} members={kids} cards={cards} selectedId={selectedId} />
                   )}
@@ -986,18 +1037,19 @@ function ProjectShortcut({ project, archived = false, onOpen, onMenu }: {
  * bolinha de "não lida" ou "aguardando você", o "⑂ N" de quem tem integrantes do time e a seta que os
  * esconde; o ⋯ aparece no hover e no foco. A selecionada leva fundo cinza arredondado.
  */
-function SessionRow({ card, diff, selected, asks, pinned, unread, renaming, onOpened, kids, kidsHidden, onToggleKids, onRename, onCancelRename, onStartRename, onSettle, onMenu, dropPosition, onDragStart, onDragEnd, onDragOver, onDrop }: {
+const SessionRow = memo(function SessionRow({ sectionId, card, diff, selected, asks, pinned, unread, renaming, onOpened, kids, kidsHidden, onToggleKids, onRename, onCancelRename, onStartRename, onSettle, onMenu, dropPosition, onDragStart, onDragEnd, onDragOver, onDrop }: {
+  sectionId: string;
   card: ConversationCard; diff: FolderDiff | undefined; selected: boolean; asks: number;
   pinned: boolean; unread: boolean; renaming: boolean; onOpened?: () => void;
-  kids: number; kidsHidden: boolean; onToggleKids: () => void;
-  onRename: (title: string) => void; onCancelRename: () => void; onStartRename: () => void; onSettle: () => void;
+  kids: number; kidsHidden: boolean; onToggleKids: (tabId: string) => void;
+  onRename: (card: ConversationCard, title: string) => void; onCancelRename: () => void; onStartRename: (tabId: string) => void; onSettle: (card: ConversationCard) => void;
   /** Abre o menu de contexto na posição da tela. */
-  onMenu: (x: number, y: number) => void;
+  onMenu: (card: ConversationCard, x: number, y: number) => void;
   dropPosition: DropPosition | null;
-  onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDragStart: (card: ConversationCard, e: React.DragEvent<HTMLDivElement>) => void;
   onDragEnd: () => void;
-  onDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
-  onDrop: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDragOver: (sectionId: string, tabId: string, e: React.DragEvent<HTMLDivElement>) => void;
+  onDrop: (sectionId: string, tabId: string, e: React.DragEvent<HTMLDivElement>) => void;
 }) {
   const { t } = useTranslation();
   const live = useLiveSummary(card.tabId);
@@ -1016,24 +1068,24 @@ function SessionRow({ card, diff, selected, asks, pinned, unread, renaming, onOp
   // Uma edição de nome termina uma vez: o blur que chega depois do Enter (ou do Esc) não grava de novo.
   const renameSettled = useRef(false);
   useEffect(() => { if (renaming) renameSettled.current = false; }, [renaming]);
-  const commitRename = (value: string) => { if (renameSettled.current) return; renameSettled.current = true; onRename(value); };
+  const commitRename = (value: string) => { if (renameSettled.current) return; renameSettled.current = true; onRename(card, value); };
   const cancelRename = () => { renameSettled.current = true; onCancelRename(); };
   const open = () => { setUnread(card.tabId, false); openCard(card.tabId); onOpened?.(); };
   const stateLabel = needsYou ? t("chat.status.approval") : working ? t("chat.sidebar.working") : unread ? t("chat.sidebar.unread") : null;
   const tip = [card.cwd, card.branch, diff && diff.added + diff.removed > 0 ? `+${diff.added} −${diff.removed}` : null].filter(Boolean).join(" · ");
   return (
     <div role="button" tabIndex={0} draggable={!renaming} data-session-id={card.tabId} onClick={() => { if (!renaming) open(); }} aria-current={selected ? "page" : undefined} title={tip}
-      onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop}
-      onContextMenu={(e) => { e.preventDefault(); onMenu(e.clientX, e.clientY); }}
+      onDragStart={(e) => onDragStart(card, e)} onDragEnd={onDragEnd} onDragOver={(e) => onDragOver(sectionId, card.tabId, e)} onDrop={(e) => onDrop(sectionId, card.tabId, e)}
+      onContextMenu={(e) => { e.preventDefault(); onMenu(card, e.clientX, e.clientY); }}
       onKeyDown={(e) => {
         if (renaming || e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
-        else if (e.key === "F2") { e.preventDefault(); onStartRename(); }
-        else if (e.key === "Delete") { e.preventDefault(); onSettle(); }
+        else if (e.key === "F2") { e.preventDefault(); onStartRename(card.tabId); }
+        else if (e.key === "Delete") { e.preventDefault(); onSettle(card); }
         else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
           e.preventDefault();
           const r = e.currentTarget.getBoundingClientRect();
-          onMenu(r.left + 24, r.top + 24);
+          onMenu(card, r.left + 24, r.top + 24);
         }
       }}
       className={`group w-full h-8 shrink-0 flex items-center gap-2 pl-2.5 pr-1.5 rounded-lg text-left cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent-500/70
@@ -1059,7 +1111,7 @@ function SessionRow({ card, diff, selected, asks, pinned, unread, renaming, onOp
       )}
       {kids > 0 && (
         <button type="button" aria-expanded={!kidsHidden} aria-label={t("chat.sidebar.kids")} title={t("chat.sidebar.kids")}
-          onClick={(e) => { e.stopPropagation(); onToggleKids(); }}
+          onClick={(e) => { e.stopPropagation(); onToggleKids(card.tabId); }}
           className="shrink-0 w-4 h-5 flex items-center justify-center text-[8px] text-gray-400 dark:text-white/40 hover:text-gray-800 dark:hover:text-white">
           <span aria-hidden="true" className={kidsHidden ? "-rotate-90 inline-block" : "inline-block"}>▼</span>
         </button>
@@ -1068,13 +1120,13 @@ function SessionRow({ card, diff, selected, asks, pinned, unread, renaming, onOp
       {working && <span role="img" aria-label={stateLabel ?? ""} className="shrink-0 w-3 h-3 rounded-full border-2 border-gray-300 dark:border-white/25 border-t-accent-500 animate-spin" />}
       {!working && (needsYou || unread) && <span role="img" aria-label={stateLabel ?? ""} className="shrink-0 w-2 h-2 rounded-full bg-amber-500" />}
       <button type="button" aria-label={t("chat.sidebar.more")} title={t("chat.sidebar.more")} aria-haspopup="menu"
-        onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); onMenu(r.left, r.bottom + 4); }}
+        onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); onMenu(card, r.left, r.bottom + 4); }}
         className="hidden group-hover:flex group-focus-within:flex shrink-0 w-6 h-6 items-center justify-center rounded text-gray-500 dark:text-white/50 hover:bg-gray-300/60 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white">
         <MoreHorizontalIcon className="w-3.5 h-3.5" />
       </button>
     </div>
   );
-}
+});
 
 function SectionHeader({ label, count, open, onToggle }: { label: string; count: number; open: boolean; onToggle: () => void }) {
   return (
