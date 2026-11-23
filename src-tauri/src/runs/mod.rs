@@ -43,6 +43,8 @@ pub(crate) mod store;
 pub(crate) mod supervisor;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod failure_test;
 pub(crate) mod types;
 
 /// Delega a validação do schema ao adapter headless, que conhece as restrições da própria CLI.

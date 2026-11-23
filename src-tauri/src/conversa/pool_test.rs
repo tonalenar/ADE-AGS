@@ -140,7 +140,7 @@ fn a_troca_passa_a_conta_esquece_a_sessao_e_guarda_a_origem() {
 fn a_conversa_so_liga_a_um_pool_quando_a_pessoa_escolhe() {
     let db = db_with_thread();
     assert!(pending(&db, "t1").is_none());
-    assert_eq!(mode(&db), Mode::Off);
+    assert_eq!(mode(&db), Mode::Ask);
     crate::database::set_setting(&db, "chat.pool.mode", "auto").unwrap();
     assert_eq!(mode(&db), Mode::Auto);
     crate::database::set_setting(&db, "chat.pool.mode", "qualquer-coisa").unwrap();
@@ -977,4 +977,64 @@ fn erro_jsonrpc_acp_considera_error_data_para_limite_e_reset_sem_vazar_segredos(
         disp_blk.contains("map::rpc_error_text(error)"),
         "opencode::dispatch deve usar map::rpc_error_text(error)"
     );
+}
+
+#[test]
+fn modo_ausente_e_perguntar_como_nas_tarefas_e_valor_desconhecido_desliga() {
+    let db = db_with_thread();
+    assert_eq!(mode(&db), Mode::Ask);
+    crate::database::set_setting(&db, "chat.pool.mode", "off").unwrap();
+    assert_eq!(mode(&db), Mode::Off);
+}
+
+#[test]
+fn oferta_de_adesao_ignora_pool_pausado() {
+    let existing: std::collections::HashSet<String> = ["ton", "x"].into_iter().map(String::from).collect();
+    let mut p = pool("p1", "claude", &[Some("ton"), Some("x")]);
+    p.paused = true;
+    assert!(offer_pool(&[p], "claude", &Some("ton".into()), &existing).is_none());
+}
+
+#[test]
+fn conversa_com_conta_fixa_membro_de_pool_ganha_o_pool_implicito_e_fica_registrado() {
+    let db = db_with_thread();
+    let row = crate::conversa::api::thread(&db, "t1").unwrap();
+    assert!(effective_pool(&db, "t1").is_none(), "sem pool nenhum");
+    let account = row.account_id.clone();
+    crate::accounts::pools::save(&db, &[pool("p1", &row.agent_id, &[account.as_deref(), Some("outra")])]).unwrap();
+    assert_eq!(effective_pool(&db, "t1").as_deref(), Some("p1"));
+    // a escolha fica gravada: não depende de a ordem dos pools mudar depois
+    assert_eq!(bound(&db, "t1").as_deref(), Some("p1"));
+}
+
+#[test]
+fn conversa_ligada_ao_pool_explicito_mantem_o_pool_escolhido() {
+    let db = db_with_thread();
+    let row = crate::conversa::api::thread(&db, "t1").unwrap();
+    let account = row.account_id.clone();
+    crate::accounts::pools::save(&db, &[
+        pool("p1", &row.agent_id, &[account.as_deref(), Some("outra")]),
+        pool("p2", &row.agent_id, &[account.as_deref(), Some("outra")]),
+    ])
+    .unwrap();
+    bind(&db, "t1", Some("p2")).unwrap();
+    assert_eq!(effective_pool(&db, "t1").as_deref(), Some("p2"));
+}
+
+#[test]
+fn subagente_sem_conta_escolhida_nasce_no_pool_padrao_do_agente() {
+    let db = db_with_thread();
+    crate::accounts::pools::save(&db, &[pool("p1", "claude-code", &[Some("a"), Some("b")])]).unwrap();
+    assert_eq!(default_pool_ref(&db, "claude-code").as_deref(), Some("pool:Pool p1"));
+    assert_eq!(default_pool_ref(&db, "codex"), None);
+    // a conta escolhida pela pessoa nunca é trocada; conversa solta (sem pai) também não
+    assert_eq!(with_default_pool(&db, "claude-code", Some("a".into()), true), Some("a".into()));
+    assert_eq!(with_default_pool(&db, "claude-code", None, false), None);
+    assert_eq!(with_default_pool(&db, "claude-code", None, true).as_deref(), Some("pool:Pool p1"));
+}
+
+#[test]
+fn sem_pool_ativo_o_subagente_segue_sem_conta() {
+    let db = db_with_thread();
+    assert_eq!(with_default_pool(&db, "claude-code", None, true), None);
 }

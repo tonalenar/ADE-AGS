@@ -350,6 +350,7 @@ pub fn run() {
             crate::ipc::commands::pool::pool_remove,
             crate::ipc::commands::pool::pool_pick,
             crate::ipc::commands::pool::pool_preview_picks,
+            crate::ipc::commands::pool::pool_default_ref,
             crate::android::android_list,
             crate::android::android_start_avd,
             crate::android::android_frame,
