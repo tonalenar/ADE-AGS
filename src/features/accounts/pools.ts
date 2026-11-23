@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import i18n from "i18next";
 import { create } from "zustand";
 
 import { formatPoolError, isPoolValue, poolNameOf } from "@/features/accounts/poolRef";
@@ -108,8 +109,6 @@ export async function resolveAccountChoice(agentId: string, value: string | unde
     return (await poolPick(agentId, poolNameOf(value))) ?? undefined;
   } catch (e) {
     const raw = e instanceof Error ? e.message : String(e);
-    // i18n sob demanda: importar no topo inicializa o catálogo (localStorage) em quem só usa o store.
-    const { default: i18n } = await import("@/i18n");
     const formatted = formatPoolError(raw, (key, vars) => i18n.t(key, vars));
     if (formatted !== raw) throw new Error(formatted);
     throw e;

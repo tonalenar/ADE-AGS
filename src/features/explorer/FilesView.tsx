@@ -580,7 +580,7 @@ export function FilesView({ cwd, repo, title }: {
               const dropHere = drag?.target != null && drag.target !== cwd && isInside(entry.path, drag.target);
               const isCut = clipboard?.cut === true && isInside(entry.path, clipboard.path);
               return (
-                <div key={entry.path}>
+                <div key={entry.path} className="[content-visibility:auto] [contain-intrinsic-size:auto_22px]">
                   <Button variant="custom"
                     data-tree-path={entry.path}
                     data-tree-dir={entry.isDir ? "1" : "0"}

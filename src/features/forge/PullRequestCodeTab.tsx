@@ -571,7 +571,7 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
                   key={file.path}
                   type="button"
                   onClick={() => { setFileLoadError(""); setCommentTarget(null); setEditingDraftId(null); setSelectedPath(file.path); setViewMode(file.status === "removed" ? "diff" : "file"); }}
-                  className={`flex w-full min-w-0 items-center gap-2 border-b border-gray-100 px-2.5 py-2 text-left dark:border-white/5 ${selectedPath === file.path ? "bg-gray-100 dark:bg-white/8" : "hover:bg-gray-50 dark:hover:bg-white/4"}`}
+                  className={`[content-visibility:auto] [contain-intrinsic-size:auto_33px] flex w-full min-w-0 items-center gap-2 border-b border-gray-100 px-2.5 py-2 text-left dark:border-white/5 ${selectedPath === file.path ? "bg-gray-100 dark:bg-white/8" : "hover:bg-gray-50 dark:hover:bg-white/4"}`}
                 >
                   <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-gray-700 dark:text-white/75" title={file.path}>{file.path}</span>
                   <span className="shrink-0 text-[9px] text-emerald-600 dark:text-emerald-400">+{file.additions}</span>
@@ -619,7 +619,7 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
                         || (line.kind === "context" && line.oldLine !== null && line.newLine !== null);
                       const active = commentTarget && reviewTargetKey(commentTarget.path, commentTarget.oldLine, commentTarget.newLine) === locationKey;
                       return (
-                        <div key={`${selectedPath}:${index}`}>
+                        <div key={`${selectedPath}:${index}`} className="[content-visibility:auto] [contain-intrinsic-size:auto_20px]">
                           <div data-old-line={line.oldLine ?? undefined} data-new-line={line.newLine ?? undefined} className={`grid min-w-max grid-cols-[3.25rem_3.25rem_1.75rem_minmax(0,1fr)] ${line.kind === "added" ? "bg-[var(--cc-diff-add-bg)]" : line.kind === "removed" ? "bg-[var(--cc-diff-del-bg)]" : line.kind === "meta" ? "bg-gray-100 text-gray-500 dark:bg-white/5 dark:text-white/45" : ""}`}>
                             <span className="select-none pr-2 text-right font-mono text-gray-400 dark:text-white/30">{line.oldLine ?? ""}</span>
                             <span className="select-none pr-2 text-right font-mono text-gray-400 dark:text-white/30">{line.newLine ?? ""}</span>

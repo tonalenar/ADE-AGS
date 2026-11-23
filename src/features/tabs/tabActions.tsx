@@ -31,7 +31,7 @@ import { sendAutonomous } from "@/features/terminal/safeWrite";
 import { CheckpointsDialog } from "@/features/tabCheckpoints/CheckpointsDialog";
 import { tabCheckpointCreate } from "@/features/tabCheckpoints/ipc";
 import { AlertaToast } from "@/shared/ui/alerts";
-import i18n from "@/i18n";
+import i18n from "i18next";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { UsersIcon } from "@/features/chat/chatIcons";
 import { ContextMenu } from "@/shared/ui/ContextMenu";

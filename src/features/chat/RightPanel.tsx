@@ -352,7 +352,7 @@ function DiffView({ tabId, cwd }: { tabId: string | null; cwd: string | null }) 
             const active = index === activeFindIndex;
             return <button key={`${result.id}-${index}`} ref={targetRef(result.id)} type="button" aria-current={active ? "true" : undefined}
               onClick={() => setFindIndex(index)} title={result.line ? `${result.path}:${result.line}` : result.path}
-              className={`block w-full border-b border-gray-100 px-3 py-2 text-left dark:border-white/[0.05] ${active ? "bg-accent-500/10" : "hover:bg-gray-100 dark:hover:bg-white/[0.04]"}`}>
+              className={`[content-visibility:auto] [contain-intrinsic-size:auto_48px] block w-full border-b border-gray-100 px-3 py-2 text-left dark:border-white/[0.05] ${active ? "bg-accent-500/10" : "hover:bg-gray-100 dark:hover:bg-white/[0.04]"}`}>
               <span className="block truncate font-mono text-chat-note text-gray-500 dark:text-white/45">
                 {result.path}{result.line ? `:${result.line}` : ""}
               </span>
@@ -368,7 +368,7 @@ function DiffView({ tabId, cwd }: { tabId: string | null; cwd: string | null }) 
               <span className="font-mono"><span className="text-emerald-700 dark:text-emerald-400">+{file.added}</span>{" "}<span className="text-red-700 dark:text-red-400">−{file.removed}</span></span>
             </div>
             <div className="font-mono leading-[1.75]" data-quotable="" data-quote-source={`${t("chat.panel.diffSource")}: ${file.path}`}>
-              {file.lines.map((line, i) => <div key={i} className={`px-3 whitespace-pre-wrap break-all
+              {file.lines.map((line, i) => <div key={i} className={`[content-visibility:auto] [contain-intrinsic-size:auto_21px] px-3 whitespace-pre-wrap break-all
                 ${line.kind === "hunk" ? "text-gray-500 dark:text-white/45 bg-gray-100 dark:bg-white/[0.05]"
                   : line.kind === "add" ? "text-emerald-800 dark:text-emerald-300 bg-emerald-500/10"
                     : line.kind === "del" ? "text-red-800 dark:text-red-300 bg-red-500/10" : "text-gray-800 dark:text-white/75"}`}>

@@ -10,6 +10,7 @@ import { BROWSER_HINT, computerUseHint } from "@/features/canvas/portalNotice";
 import { canvasActions, missionBoardKey, setWorkMode } from "@/features/canvas/store";
 import type { FunctionalRole, Squad, SubagentDefault } from "@/features/squads/types";
 import { useTabsStore } from "@/features/tabs/store";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { neutralizeAngles, untrustedBlock } from "@/shared/untrusted";
 import type { SendTimings } from "@/features/terminal/terminalRegistry";
 import { mostraResultado, sendAutonomous, writeToAgent } from "@/features/terminal/safeWrite";
@@ -522,7 +523,7 @@ export async function startMissionInTerminals(
   if (mirror) void mirrorMission(mirror).catch((e) => console.warn("[missão] espelho no chat:", e));
   const firstTerminal = leadAgentId === "gemini-desktop" ? memberTabIds.find((_,i) => team[i].agentId !== "gemini-desktop") : leadTabId;
   if (firstTerminal) activateTab(firstTerminal);
-  if (desktopCount) (await import("@/features/tabs/viewStore")).useViewTabsStore.getState().openGemini(mission.cwd);
+  if (desktopCount) useViewTabsStore.getState().openGemini(mission.cwd);
 
   // Cronómetro: cuánto tardó cada terminal en estar lista, y cuánto en contestar el briefing.
   const openedAt = Date.now();

@@ -165,7 +165,7 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
 // Elegir un agente —desde la barra, el panel izquierdo, un atajo o la CLI— es querer ver
 // su terminal. Se engancha acá una sola vez en vez de repetirlo en cada lugar que activa
 // una tab: alcanza con que cambie la tab activa.
-useTabsStore.subscribe((state, prev) => {
+useTabsStore.subscribe?.((state, prev) => {
   if (state.activeTabId !== prev.activeTabId && useViewTabsStore.getState().activeViewId !== null) {
     useViewTabsStore.getState().showTerminal();
   }

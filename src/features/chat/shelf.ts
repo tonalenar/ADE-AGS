@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
+import { requestCloseItem } from "@/features/tabs/tabActions";
 
 import { openConversation } from "./chatActions";
 import { moveVisibleByOne, toggleIn } from "./sidebar/sessionsModel";
@@ -295,9 +296,6 @@ export function expireSnoozed(now = Date.now()): void {
 export async function settleConversation(tabId: string): Promise<void> {
   const tab = useTabsStore.getState().tabs.find((t) => t.id === tabId);
   if (!tab) return;
-  // Import tardio: `tabActions` puxa a UI inteira (diálogos, i18n) e, importado por aqui, entrava em ciclo com
-  // `structured/store` (que só precisa do snooze) e carregava tudo isso em quem só lê o store.
-  const { requestCloseItem } = await import("@/features/tabs/tabActions");
   await requestCloseItem(agentKey(tabId));
   // O título pode ter sido atualizado ao fechar (ver `requestCloseItem`).
   const title = useTabsStore.getState().tabs.find((t) => t.id === tabId)?.title ?? tab.title;
