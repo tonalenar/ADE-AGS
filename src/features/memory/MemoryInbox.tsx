@@ -16,7 +16,7 @@ import * as memoryIpc from "./ipc";
 import { ReviewMarks } from "./ReviewMarks";
 import { usePendingMemoryStore } from "./pendingStore";
 import { isDeletion } from "./bulkReview";
-import { allHinted, fetchHints, hintTone, jevApprovedIds, type JevHint } from "./jevHints";
+import { allHinted, fetchHints, hintTone, isMemoryHintsEnabled, jevApprovedIds, type JevHint } from "./jevHints";
 import { evidenceParts, reviewFlag } from "./review";
 import type { MemoryPendingCounts, MemoryReviewItem } from "./types";
 
@@ -86,6 +86,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [confirm, setConfirm] = useState<Confirm>(null);
+  const [pendingSecret, setPendingSecret] = useState<MemoryReviewItem[]>([]);
   const [drafts, setDrafts] = useState<DraftsState>({ status: "loading" });
   // Contagens por dono (workspace e cada missão) para o aviso de caixa cheia; `null` = sem dado.
   const [ownerCounts, setOwnerCounts] = useState<MemoryPendingCounts | null>(null);
@@ -141,18 +142,43 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
   const all = useMemo(() => flatten(groups), [groups]);
   const chosen = useMemo(() => selectedItems(groups, selected), [groups, selected]);
 
-  // O que o Jev achou de cada proposta (só mostra; quem decide é a pessoa). A consulta ao provedor roda em
-  // segundo plano quando a revisão abre, então as dicas chegam depois: tenta de novo até todas terem uma.
+  // O que o Jev achou de cada proposta (só mostra; quem decide é a pessoa). Só consulta quando o ponto
+  // `memory_approval` está ligado e para assim que todas as propostas têm dica.
   const [hints, setHints] = useState<Record<string, JevHint>>({});
   useEffect(() => {
     if (all.length === 0) return;
     let alive = true;
-    const timers: number[] = [];
-    const pull = () => {
-      fetchHints(all).then((found) => { if (alive) setHints((cur) => ({ ...cur, ...found })); }).catch(() => {});
+    let timer: number | null = null;
+    const delays = [400, 1500, 4000, 9000];
+    let step = 0;
+    let latest: Record<string, JevHint> = {};
+    const schedule = () => {
+      if (!alive || step >= delays.length) return;
+      const ms = delays[step++];
+      timer = window.setTimeout(() => {
+        void pull();
+      }, ms);
     };
-    [400, 1500, 4000, 9000].forEach((ms) => timers.push(window.setTimeout(pull, ms)));
-    return () => { alive = false; timers.forEach((id) => window.clearTimeout(id)); };
+    const pull = async () => {
+      try {
+        const found = await fetchHints(all);
+        if (!alive) return;
+        latest = { ...latest, ...found };
+        setHints((cur) => ({ ...cur, ...found }));
+        if (!allHinted(all, latest)) {
+          schedule();
+        }
+      } catch {
+        // Falha silenciosa: a revisão continua sem dicas do Jev.
+      }
+    };
+    void isMemoryHintsEnabled().then((enabled) => {
+      if (alive && enabled) schedule();
+    });
+    return () => {
+      alive = false;
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [all]);
   const jevApproves = useMemo(() => jevApprovedIds(all, hints), [all, hints]);
   const hintsDone = useMemo(() => allHinted(all, hints), [all, hints]);
@@ -164,6 +190,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     if (o.skippedDuplicates.length) parts.push(t("memoryInbox.skippedDuplicates", { keys: o.skippedDuplicates.join(", ") }));
     if (o.skippedDeletions.length) parts.push(t("memoryInbox.skippedDeletions", { keys: o.skippedDeletions.join(", ") }));
     setMessage(parts.join(" "));
+    setPendingSecret(o.needsSecretConfirmation ?? []);
     try {
       await load();
       loadCounts();
@@ -174,11 +201,11 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     }
   };
 
-  const approve = async (items: MemoryReviewItem[], acknowledge: boolean, explicit = false) => {
+  const approve = async (items: MemoryReviewItem[], acknowledge: boolean, explicit = false, acknowledgeSecret = false) => {
     if (busy || items.length === 0) return;
     setBusy(true);
     setConfirm(null);
-    await finish(await approveBulk(items, memoryIpc.decideMemory, { acknowledgeContradictions: acknowledge, explicit }));
+    await finish(await approveBulk(items, memoryIpc.decideMemory, { acknowledgeContradictions: acknowledge, explicit, acknowledgeSecret }));
   };
   const reject = async (items: MemoryReviewItem[]) => {
     if (busy || items.length === 0) return;
@@ -242,6 +269,19 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
         <div className="px-5 pt-2.5"><DreamSection workspaceId={workspaceId} onChanged={(o) => { if (o) void finish(o); else void load(); }} /></div>
 
         {message && <p role="alert" className="px-5 pt-2 text-[11px] text-red-600 dark:text-red-400">{message}</p>}
+        {pendingSecret.length > 0 && (
+          <div role="alert" className="mx-5 mt-2 flex flex-col gap-2 rounded-xl bg-amber-500/10 p-3 text-xs leading-4 text-amber-900 dark:text-amber-200">
+            <p>{t("sharedMemory.secret", { key: pendingSecret.map((item) => item.key).join(", ") })}</p>
+            <div className="flex gap-2">
+              <button type="button" disabled={busy} onClick={() => void approve(pendingSecret, true, true, true)} className={BTN_OK}>
+                {t("sharedMemory.confirmApprove")}
+              </button>
+              <button type="button" disabled={busy} onClick={() => setPendingSecret([])} className={BTN_SEC}>
+                {t("sharedMemory.cancel")}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
           <DraftsSection workspaceId={workspaceId} state={drafts} pending={maxPendingPerOwner(ownerCounts)} onReload={loadDrafts}
@@ -275,7 +315,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                         <input type="checkbox" className="size-3.5 accent-accent-500" checked={selected.has(id)} onChange={() => toggle(id)} aria-label={t("memoryInbox.selectItem", { key: item.key })} />
                         <span className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-gray-50" title={item.key}>{item.key}</span>
                         {hints[id] && (
-                          <span title={t("memoryInbox.jev.title", { provider: hints[id].provider, confidence: hints[id].confidence === null ? "—" : Math.round((hints[id].confidence ?? 0) * 100) + "%", secret: hints[id].secret ? t("memoryInbox.jev.secretYes") : t("memoryInbox.jev.secretNo") })}
+                          <span title={t("memoryInbox.jev.title", { provider: hints[id].provider, probability: hints[id].probability === null ? "—" : Math.round((hints[id].probability ?? 0) * 100) + "%", secret: hints[id].secret ? t("memoryInbox.jev.secretYes") : t("memoryInbox.jev.secretNo") })}
                             data-testid="jev-hint" data-tone={hintTone(hints[id])}
                             className={`inline-flex h-[18px] items-center rounded-full px-2 text-[10px] font-semibold ${hintTone(hints[id]) === "approve"
                               ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"

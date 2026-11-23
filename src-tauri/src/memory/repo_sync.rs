@@ -40,6 +40,7 @@ use crate::database::DbConnection;
 use super::repo::{self, ExportResult, GitRunner};
 
 pub const SYNC_EVENT: &str = "cc-memory-repo-sync";
+pub const MAX_ATTEMPTS: u32 = 6;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +50,10 @@ pub struct RepoSyncStatus {
     pub error: Option<String>,
     pub commit: Option<String>,
     pub pending: u32,
+    #[serde(default)]
+    pub attempts: u32,
+    #[serde(default)]
+    pub exhausted: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
 }
@@ -239,7 +244,8 @@ impl RepoSync {
             if slot.paused {
                 // O purge está reescrevendo este repo. Não publica agora.
             } else if slot.phase == Phase::Failed {
-                // Mantém o erro na tela, mas uma aprovação nova não espera o backoff inteiro.
+                // Mantém o erro na tela, mas uma aprovação nova reinicia as tentativas sem esperar o backoff inteiro.
+                slot.attempts = 0;
                 let soon = Instant::now() + Duration::from_millis(200);
                 slot.retry_at = Some(slot.retry_at.map_or(soon, |at| at.min(soon)));
             } else if slot.phase != Phase::Syncing {
@@ -275,6 +281,7 @@ impl RepoSync {
             let mut state = self.lock_state();
             if let Some(slot) = state.slots.get_mut(workspace) {
                 if slot.generation > slot.synced {
+                    slot.attempts = 0;
                     slot.retry_at = Some(Instant::now());
                     self.inner.wake.notify_all();
                 }
@@ -298,6 +305,8 @@ impl RepoSync {
                 error: Some(error),
                 commit: None,
                 pending: 0,
+                attempts: 0,
+                exhausted: false,
                 warnings: Vec::new(),
             };
         }
@@ -319,6 +328,8 @@ impl RepoSync {
             error: Some(error.to_string()),
             commit: None,
             pending: 0,
+            attempts: 0,
+            exhausted: false,
             warnings: Vec::new(),
         };
         self.emit(&status);
@@ -568,6 +579,8 @@ fn snapshot(state: &SyncState, workspace: &str) -> RepoSyncStatus {
             error: None,
             commit: None,
             pending: 0,
+            attempts: 0,
+            exhausted: false,
             warnings: Vec::new(),
         };
     };
@@ -577,6 +590,8 @@ fn snapshot(state: &SyncState, workspace: &str) -> RepoSyncStatus {
         error: slot.error.clone(),
         commit: slot.commit.clone(),
         pending: slot.generation.saturating_sub(slot.synced.max(slot.skip_until)) as u32,
+        attempts: slot.attempts,
+        exhausted: slot.phase == Phase::Failed && slot.attempts >= MAX_ATTEMPTS,
         warnings: slot.warnings.clone(),
     }
 }
@@ -600,6 +615,9 @@ fn next_job(state: &SyncState, now: Instant) -> Option<Job> {
         if slot.paused || slot.generation <= covered(slot) {
             continue;
         }
+        if slot.attempts >= MAX_ATTEMPTS && slot.retry_at.is_none() {
+            continue;
+        }
         if slot.retry_at.is_some_and(|at| at > now) {
             continue;
         }
@@ -617,6 +635,9 @@ fn next_delay(state: &SyncState, now: Instant) -> Option<Duration> {
     let mut soonest: Option<Duration> = None;
     for slot in state.slots.values() {
         if slot.paused || slot.generation <= covered(slot) {
+            continue;
+        }
+        if slot.attempts >= MAX_ATTEMPTS && slot.retry_at.is_none() {
             continue;
         }
         if let Some(at) = slot.retry_at {
@@ -760,8 +781,13 @@ fn apply_result(inner: &Inner, state: &mut SyncState, job: &Job, result: Attempt
                 slot.retry_at = None;
             } else if slot.generation != job.generation {
                 // Chegou aprovação mais nova durante a tentativa; publica sem esperar o backoff.
+                slot.attempts = 0;
                 slot.retry_at = Some(Instant::now());
                 slot.phase = Phase::Queued;
+            } else if slot.attempts >= MAX_ATTEMPTS {
+                // Após 6 falhas consecutivas, pausa novas tentativas automáticas até clique manual ou nova aprovação.
+                slot.retry_at = None;
+                slot.phase = Phase::Failed;
             } else {
                 slot.retry_at = Some(Instant::now() + (inner.backoff)(slot.attempts));
                 slot.phase = Phase::Failed;
@@ -2076,5 +2102,30 @@ mod tests {
         assert_ne!(depois.phase, "failed", "{depois:?}");
         assert_ne!(sync.status("w").phase, "failed");
 
+    }
+
+    #[test]
+    fn para_de_reagendar_apos_seis_falhas_consecutivas() {
+        // Sem thread nem relógio: aplica as falhas direto no estado e confere o agendamento.
+        let git: GitRunner = Arc::new(|_, _| Err("simulated permanent outage".into()));
+        let root = std::env::temp_dir().join(format!("ade-sync-max-{}", uuid::Uuid::new_v4()));
+        let sync = RepoSync::with_runner(fixture(), root, git, Arc::new(|_| Duration::from_millis(1)));
+        let mut state = SyncState { slots: BTreeMap::new() };
+        state.slots.insert("w".into(), Slot { generation: 1, ..Slot::default() });
+        let job = Job { workspace: "w".into(), generation: 1, approval: None, pending_approvals: 0 };
+        let later = Instant::now() + Duration::from_secs(3600);
+        let fail = || Attempt::Failed { error: "simulated permanent outage".into(), warnings: Vec::new() };
+
+        for attempt in 1..MAX_ATTEMPTS {
+            apply_result(&sync.inner, &mut state, &job, fail());
+            assert!(state.slots["w"].retry_at.is_some(), "falha {attempt} ainda reagenda");
+            assert!(next_job(&state, later).is_some(), "falha {attempt} ainda tenta de novo");
+        }
+        apply_result(&sync.inner, &mut state, &job, fail());
+        assert_eq!(state.slots["w"].attempts, MAX_ATTEMPTS);
+        assert!(state.slots["w"].retry_at.is_none());
+        assert!(next_job(&state, later).is_none(), "não tenta de novo após 6 falhas");
+        assert!(next_delay(&state, later).is_none(), "RepoSync continuou reagendando após 6 falhas consecutivas");
+        assert!(snapshot(&state, "w").exhausted, "a UI recebe o estado esgotado");
     }
 }

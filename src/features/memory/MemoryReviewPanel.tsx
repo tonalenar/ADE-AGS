@@ -23,6 +23,7 @@ export function MemoryReviewPanel({ missionId, workspaceId, refreshKey = "" }: {
   const [summary, setSummary] = useState<MemoryReviewSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [pendingSecret, setPendingSecret] = useState<MemoryReviewItem[]>([]);
   const loadPending = usePendingMemoryStore((s) => s.load);
 
   const load = useCallback(
@@ -35,11 +36,13 @@ export function MemoryReviewPanel({ missionId, workspaceId, refreshKey = "" }: {
     void load();
   }, [load, refreshKey]);
 
-  const run = async (items: MemoryReviewItem[], approve: boolean) => {
+  const run = async (items: MemoryReviewItem[], approve: boolean, acknowledgeSecret = false) => {
     if (busy || items.length === 0) return;
     setBusy(true);
     setMessage("");
-    const result = await decideAll(items, approve, memoryIpc.decideMemory);
+    setPendingSecret([]);
+    const result = await decideAll(items, approve, memoryIpc.decideMemory, acknowledgeSecret);
+    if (result.needsSecretConfirmation?.length) setPendingSecret(result.needsSecretConfirmation);
     if (result.failed.length > 0) setMessage(t("memoryReview.failed", { keys: result.failed.join(", ") }));
     await load();
     await loadPending(workspaceId).catch(() => undefined);
@@ -70,6 +73,21 @@ export function MemoryReviewPanel({ missionId, workspaceId, refreshKey = "" }: {
       </header>
       <p className="text-[10.5px] leading-[14px] text-gray-500 dark:text-white/40">{t("memoryReview.note")}</p>
       {message && <p className="text-[11px] text-red-600 dark:text-red-400">{message}</p>}
+      {pendingSecret.length > 0 && (
+        <div role="alert" className="flex flex-col gap-2 rounded-xl bg-amber-500/10 p-3 text-xs leading-4 text-amber-900 dark:text-amber-200">
+          <p>{t("sharedMemory.secret", { key: pendingSecret.map((item) => item.key).join(", ") })}</p>
+          <div className="flex gap-2">
+            <button type="button" disabled={busy} onClick={() => void run(pendingSecret, true, true)}
+              className="h-6 rounded-md bg-emerald-600 px-2.5 text-[11px] font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
+              {t("sharedMemory.confirmApprove")}
+            </button>
+            <button type="button" disabled={busy} onClick={() => setPendingSecret([])}
+              className="h-6 rounded-md bg-gray-200/80 px-2.5 text-[11px] font-medium text-gray-800 hover:bg-gray-300/70 disabled:opacity-50 dark:bg-surface-overlay dark:text-gray-100">
+              {t("sharedMemory.cancel")}
+            </button>
+          </div>
+        </div>
+      )}
       <ul className="flex flex-col divide-y divide-gray-200 dark:divide-white/[0.08]">
         {items.map((item) => {
           const flag = reviewFlag(item);

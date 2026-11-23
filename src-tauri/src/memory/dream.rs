@@ -91,7 +91,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 }
 
 pub fn check_input(text: &str) -> Result<(), String> {
-    if super::agent::looks_like_secret(text) {
+    if super::agent::looks_like_user_secret(text) {
         return Err("O histórico contém uma credencial; expurgue o dado antes de sonhar.".into());
     }
     let lower = text.to_lowercase();
@@ -140,6 +140,7 @@ pub fn history_with_repo(
     }
     let mut sources = Vec::<String>::new();
     let mut approved = Vec::<Value>::new();
+    let mut omitted_inputs: usize = 0;
     let mut stmt=conn.prepare(&format!("SELECT e.id,e.key,e.scope,e.mission_id,r.revision,r.kind,r.body,r.source_run_id,r.source_task_id,e.source_mission FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id AND r.revision=e.current_revision AND r.status='approved' WHERE e.workspace_id=?1 AND e.status='active' AND (e.scope='workspace' OR e.mission_id IN (SELECT id FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT ?2)) AND {} ORDER BY e.priority DESC,e.id LIMIT 96", super::repo_scope::sql_match("?3", repo_fail_closed))).map_err(|e|e.to_string())?;
     for row in stmt
         .query_map(params![workspace, n, repo_key], |r| {
@@ -160,8 +161,11 @@ pub fn history_with_repo(
     {
         let (id, key, scope, mission, revision, kind, body, run, task, source_mission) =
             row.map_err(|e| e.to_string())?;
-        check_input(&key)?;
-        check_input(&body)?;
+        if check_input(&key).is_err() || check_input(&body).is_err() {
+            omitted_inputs += 1;
+            eprintln!("[dream] entrada aprovada {id} omitida do histórico por filtro de segurança/injeção");
+            continue;
+        }
         // A fonte: o run da Frota, ou a missão em terminais que a propôs.
         let source = run
             .as_ref()
@@ -193,7 +197,11 @@ pub fn history_with_repo(
         .map_err(|e| e.to_string())?
     {
         let (id, run, task, kind, body) = row.map_err(|e| e.to_string())?;
-        check_input(&body)?;
+        if check_input(&body).is_err() {
+            omitted_inputs += 1;
+            eprintln!("[dream] fato {id} omitido do histórico por filtro de segurança/injeção");
+            continue;
+        }
         let source = format!("ags://run/{run}/fact/{id}");
         sources.push(source.clone());
         facts.push(
@@ -213,7 +221,11 @@ pub fn history_with_repo(
         .map_err(|e| e.to_string())?
     {
         let (task, run, body) = row.map_err(|e| e.to_string())?;
-        check_input(&body)?;
+        if check_input(&body).is_err() {
+            omitted_inputs += 1;
+            eprintln!("[dream] handoff da task {task} omitido do histórico por filtro de segurança/injeção");
+            continue;
+        }
         let source = format!("ags://run/{run}/task/{task}");
         sources.push(source.clone());
         handoffs.push(json!({"taskId":task,"runId":run,"body":super::truncate_utf8(&body,4096),"source":source}));
@@ -244,6 +256,8 @@ pub fn history_with_repo(
         {
             let (id, mission, from, body) = row.map_err(|e| e.to_string())?;
             if check_input(&body).is_err() {
+                omitted_inputs += 1;
+                eprintln!("[dream] entrega {id} da missão {mission} omitida do histórico por filtro de segurança/injeção");
                 continue;
             }
             let source = format!("ags://mission/{mission}/handoff/{id}");
@@ -254,19 +268,27 @@ pub fn history_with_repo(
     let mut rejected = Vec::<Value>::new();
     let mut stmt=conn.prepare(&format!("SELECT r.entry_id,r.revision,r.operation,r.kind,r.decided_at FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.workspace_id=?1 AND r.status='rejected' AND {} ORDER BY r.decided_at DESC LIMIT 32", super::repo_scope::sql_match("?2", repo_fail_closed))).map_err(|e|e.to_string())?;
     for row in stmt.query_map(params![workspace, repo_key],|r|Ok(json!({"entryId":r.get::<_,String>(0)?,"revision":r.get::<_,i64>(1)?,"operation":r.get::<_,String>(2)?,"kind":r.get::<_,String>(3)?,"decidedAt":r.get::<_,Option<i64>>(4)?}))).map_err(|e|e.to_string())? {rejected.push(row.map_err(|e|e.to_string())?);}
-    let index = if repo_fail_closed {
-        let mut index = String::from("# Approved memory for this repository\n\n");
+    let fallback_index = || {
+        let mut out = String::from("# Approved memory for this repository\n\n");
         for item in &approved {
-            index.push_str(&format!("- [{}] {}\n", item["scope"].as_str().unwrap_or("workspace"), item["key"].as_str().unwrap_or("")));
+            out.push_str(&format!("- [{}] {}\n", item["scope"].as_str().unwrap_or("workspace"), item["key"].as_str().unwrap_or("")));
         }
-        index
+        out
+    };
+    let mut index = if repo_fail_closed {
+        fallback_index()
     } else {
         super::repo::render(conn, workspace, &[])?.get("MEMORY.md").cloned().unwrap_or_default()
     };
-    check_input(&index)?;
+    if check_input(&index).is_err() {
+        index = fallback_index();
+        if check_input(&index).is_err() {
+            index = String::from("# Approved memory\n");
+        }
+    }
     sources.sort();
     sources.dedup();
-    let mut result = json!({"approvedMemory":approved,"facts":facts,"handoffs":handoffs,"rejectedMetadata":rejected,"memoryMarkdown":index,"sources":sources,"truncated":false});
+    let mut result = json!({"approvedMemory":approved,"facts":facts,"handoffs":handoffs,"rejectedMetadata":rejected,"memoryMarkdown":index,"sources":sources,"truncated":false,"omittedInputs":omitted_inputs});
     // Keep the API bounded; remove whole records so sources never point at omitted evidence.
     while result.to_string().len() > HISTORY_BYTES {
         let mut removed = false;
@@ -291,6 +313,16 @@ pub fn history_with_repo(
 }
 
 pub fn validate_start(conn: &Connection, workspace: &str) -> Result<Value, String> {
+    validate_start_with_repo(conn, workspace, None, false, None)
+}
+
+pub fn validate_start_with_repo(
+    conn: &Connection,
+    workspace: &str,
+    repo_key: Option<&str>,
+    repo_fail_closed: bool,
+    history_scope: Option<&super::repo_scope::TaskHistoryScope>,
+) -> Result<Value, String> {
     let pending:i64=conn.query_row("SELECT COUNT(*) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.workspace_id=?1 AND r.status='proposed'",[workspace],|r|r.get(0)).map_err(|e|e.to_string())?;
     if pending >= super::PENDING_MAX {
         return Err("Revise as propostas pendentes antes de sonhar (limite: 32).".into());
@@ -299,7 +331,14 @@ pub fn validate_start(conn: &Connection, workspace: &str) -> Result<Value, Strin
     if running {
         return Err("Já existe um sonho em andamento neste workspace.".into());
     }
-    let input = history(conn, workspace, HISTORY_MISSIONS)?;
+    let input = history_with_repo(
+        conn,
+        workspace,
+        HISTORY_MISSIONS,
+        repo_key,
+        repo_fail_closed,
+        history_scope,
+    )?;
     if input["sources"].as_array().is_none_or(Vec::is_empty) {
         return Err("Este workspace ainda não tem histórico com fontes para sonhar.".into());
     }
@@ -489,7 +528,34 @@ pub async fn memory_dream_start(
         .inner()
         .clone();
     let check_id = workspace_id.clone();
-    crate::database::blocking_db(&db, move |conn| validate_start(conn, &check_id)).await?;
+    let cwd: Option<String> = crate::database::blocking_db(&db, move |conn| {
+        Ok(conn
+            .query_row(
+                "SELECT cwd FROM runs WHERE workspace_id=?1 AND cwd<>'' ORDER BY created_at DESC LIMIT 1",
+                [&check_id],
+                |r| r.get(0),
+            )
+            .ok())
+    })
+    .await?;
+    let (repo_key, history_scope) = match cwd.as_deref() {
+        Some(path) => {
+            let scope = super::repo_scope::workspace_history_scope_unlocked(&db, &workspace_id, path)?;
+            (scope.repo_key.clone(), Some(scope))
+        }
+        None => (None, None),
+    };
+    let check_id = workspace_id.clone();
+    crate::database::blocking_db(&db, move |conn| {
+        validate_start_with_repo(
+            conn,
+            &check_id,
+            repo_key.as_deref(),
+            cwd.is_some(),
+            history_scope.as_ref(),
+        )
+    })
+    .await?;
     crate::runs::start_memory_dream(&app, &db, &workspace_id).await
 }
 

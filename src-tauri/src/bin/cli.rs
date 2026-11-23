@@ -465,8 +465,8 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
   Orquestração da frota: gemini_desktop_status, gemini_desktop_consult, gemini_desktop_result,
     agent_roster, run_plan, task_add, delegate_task, task_handoff, task_status, task_result,
     run_await, fact_add, facts_read, fact_read, task_reroute, task_cancel
-  Memória da frota: memory_list, memory_get, memory_search, memory_open, memory_propose,
-    memory_update, memory_delete, memory_promote_fact
+  Memória da frota: memory_workspace_history, memory_list, memory_get, memory_search, memory_open,
+    memory_propose, memory_update, memory_delete, memory_promote_fact
   Conta de git: git_account, git_repos, git_pr_list, git_pr_view, git_checks, git_pr_files,
     git_issue_list, git_issue_view, git_fetch, git_pull, git_push, git_pr_create, git_issue_create,
     git_tag, git_release_list, git_release_create, git_comment

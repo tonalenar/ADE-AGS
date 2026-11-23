@@ -250,3 +250,33 @@ fn missao_de_teste_nao_escreve_na_memoria_do_projeto() {
     assert_eq!(scope_of("mt", "qa-v9-01"), "mission");
     assert_eq!(scope_of("mr", "real-01"), "workspace");
 }
+
+#[test]
+fn proposta_em_aba_solta_grava_repo_key_da_aba() {
+    let c = crate::database::test_db();
+    c.execute(
+        "INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w1','W1',0,0)",
+        [],
+    )
+    .unwrap();
+    let res = propose_for_workspace_with_repo(
+        &c,
+        "w1",
+        &AgentProposal {
+            mission_id: "",
+            scope: "workspace",
+            key: "regra-aba-solta",
+            kind: "note",
+            body: "Regra do repositório da aba solta",
+            priority: 1,
+            author: Author::Worker,
+            author_name: "agente",
+        },
+        Some("github.com/acme/repo-solto"),
+    )
+    .unwrap();
+    let stored: Option<String> = c
+        .query_row("SELECT repo_key FROM memory_entries WHERE id = ?1", [&res.entry_id], |r| r.get(0))
+        .unwrap();
+    assert_eq!(stored.as_deref(), Some("github.com/acme/repo-solto"));
+}

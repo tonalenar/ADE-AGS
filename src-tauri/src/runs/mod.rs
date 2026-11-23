@@ -1566,13 +1566,21 @@ pub async fn start_memory_dream(
         .map_err(|_| "Workspace sem pasta no histórico.".to_string())?
     };
     let repository_key = crate::memory::repo_scope::repo_key(std::path::Path::new(&cwd));
+    let history_scope =
+        crate::memory::repo_scope::workspace_history_scope_unlocked(db, workspace, &cwd)?;
     let repository_commit = crate::memory::repo::current_commit_for_db(db, workspace);
     let (task, dream_id) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let tx =
             rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
                 .map_err(|e| e.to_string())?;
-        let input = crate::memory::dream::validate_start(&tx, workspace)?;
+        let input = crate::memory::dream::validate_start_with_repo(
+            &tx,
+            workspace,
+            repository_key.as_deref(),
+            true,
+            Some(&history_scope),
+        )?;
         let run = store::create_run_with_memory_snapshot_and_commit(
             &tx,
             workspace,

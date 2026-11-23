@@ -200,6 +200,34 @@ fn hooks_do_ai_memory_que_o_usuario_ja_tem_nao_sao_duplicados() {
 }
 
 #[test]
+fn mcp_config_preexistente_com_hooks_globais_marca_estado_on() {
+    let root = Root::with_scope();
+    fs::write(
+        root.home().join(".claude/settings.json"),
+        r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"ai-memory hook --event session-start"}]}]}}"#,
+    )
+    .unwrap();
+    let config_path = root.mcp().join("tab-thread-abc-123.json");
+    let config_arg = crate::util::external_path(&config_path)
+        .to_string_lossy()
+        .into_owned();
+    let mut argv = claude_argv();
+    argv.extend(["--mcp-config".into(), config_arg]);
+    let memory = run(&root, true, Some("/opt/ai-memory"), &argv);
+    assert_eq!(
+        memory.state, "on",
+        "MCP injetado no --mcp-config existente e hooks globais ativos não é off:nothing"
+    );
+    assert!(memory.args.is_empty(), "não deve repetir --mcp-config nem --settings");
+    let config: serde_json::Value =
+        serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    assert_eq!(
+        config["mcpServers"]["ai-memory"]["command"],
+        root.ags().to_string_lossy().as_ref()
+    );
+}
+
+#[test]
 fn o_ajuste_desligado_nao_injeta_e_tira_o_servidor_que_ficou() {
     let root = Root::with_scope();
     drop(run(&root, true, Some("/opt/ai-memory"), &claude_argv()));

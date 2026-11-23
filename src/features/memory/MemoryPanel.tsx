@@ -46,6 +46,7 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [pendingSecret, setPendingSecret] = useState<MemoryReviewItem | null>(null);
   const titles = useMemo(() => new Map(missions.map((m) => [m.id, m.title])), [missions]);
 
   const loadReview = useCallback(async () => {
@@ -78,14 +79,18 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
     if (tab !== "pending" && entries[tab] === null) void loadEntries(tab);
   }, [tab, entries, loadEntries]);
 
-  const decide = async (item: MemoryReviewItem, approve: boolean) => {
+  const decide = async (item: MemoryReviewItem, approve: boolean, acknowledgeSecret = false) => {
     if (busy) return;
     setBusy(true);
     setMessage("");
+    setPendingSecret(null);
     try {
       const outcome = approve
-        ? await approveBulk([item], memoryIpc.decideMemory, { acknowledgeContradictions: true, explicit: true })
+        ? await approveBulk([item], memoryIpc.decideMemory, { acknowledgeContradictions: true, explicit: true, acknowledgeSecret })
         : await rejectBulk([item], memoryIpc.decideMemory);
+      if (outcome.needsSecretConfirmation?.length) {
+        setPendingSecret(outcome.needsSecretConfirmation[0]);
+      }
       if (outcome.failed.length) setMessage(t("memoryReview.failed", { keys: outcome.failed.join(", ") }));
       await loadReview();
       setEntries({ approved: null, rejected: null });
@@ -163,6 +168,19 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
           </div>
         )}
         {message && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{message}</p>}
+        {pendingSecret && (
+          <div role="alert" className="flex flex-col gap-2 rounded-xl bg-amber-500/10 p-3 text-xs leading-4 text-amber-900 dark:text-amber-200">
+            <p>{t("sharedMemory.secret", { key: pendingSecret.key })}</p>
+            <div className="flex gap-2">
+              <button type="button" disabled={busy} onClick={() => void decide(pendingSecret, true, true)} className={BTN_OK}>
+                {t("sharedMemory.confirmApprove")}
+              </button>
+              <button type="button" disabled={busy} onClick={() => setPendingSecret(null)} className={BTN_SEC}>
+                {t("sharedMemory.cancel")}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="cc-scroll min-h-0 flex-1 px-4 pb-4">

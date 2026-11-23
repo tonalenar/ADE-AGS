@@ -240,6 +240,70 @@ pub fn mission_repo_keys_unlocked(
         .collect())
 }
 
+/// Lê o `cwd` da aba sob o mutex e o `.git/config` com o lock solto.
+pub fn tab_repo_key_unlocked(db: &DbConnection, tab_id: &str) -> Result<Option<String>, String> {
+    let cwd: Option<String> = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        conn.query_row("SELECT cwd FROM tabs WHERE id = ?1", [tab_id], |r| r.get(0))
+            .ok()
+    };
+    Ok(cwd.as_deref().and_then(|c| repo_key(Path::new(c))))
+}
+
+/// Reúne os IDs de evidência do repositório de `cwd` no workspace; só consulta o filesystem após soltar o lock.
+pub fn workspace_history_scope_unlocked(
+    db: &DbConnection,
+    workspace: &str,
+    cwd: &str,
+) -> Result<TaskHistoryScope, String> {
+    let (runs, missions) = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        let runs = {
+            let mut statement = conn.prepare(
+                "SELECT r.id,COALESCE(m.cwd,r.cwd) FROM runs r LEFT JOIN missions m ON m.id=r.mission_id WHERE r.workspace_id=?1 ORDER BY r.created_at DESC,r.id LIMIT 128",
+            ).map_err(|e| e.to_string())?;
+            statement.query_map([workspace], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .map_err(|e| e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
+        };
+        let missions = {
+            let mut statement = conn.prepare(
+                "SELECT id,cwd FROM missions WHERE workspace_id=?1 ORDER BY created_at DESC,id LIMIT 128",
+            ).map_err(|e| e.to_string())?;
+            statement.query_map([workspace], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .map_err(|e| e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
+        };
+        (runs, missions)
+    };
+    let target = repo_key(Path::new(cwd));
+    let matches = |candidate: Option<&str>| match target.as_deref() {
+        Some(key) => candidate.is_none_or(|value| value == key),
+        None => candidate.is_none(),
+    };
+    let run_ids = runs.into_iter().filter_map(|(id, run_cwd)| {
+        matches(repo_key(Path::new(&run_cwd)).as_deref()).then_some(id)
+    }).collect();
+    let mission_ids = missions.into_iter().filter_map(|(id, mission_cwd)| {
+        matches(repo_key(Path::new(&mission_cwd)).as_deref()).then_some(id)
+    }).collect();
+    Ok(TaskHistoryScope { repo_key: target, run_ids, mission_ids })
+}
+
+/// Marca uma memória recém-criada com o repositório dela (sem alterar entradas já existentes com revisões anteriores).
+pub fn tag_new_entry_repo(
+    conn: &Connection,
+    entry_id: &str,
+    key: Option<&str>,
+) -> Result<(), String> {
+    let Some(key) = key else { return Ok(()) };
+    conn.execute(
+        "UPDATE memory_entries SET repo_key = ?1 WHERE id = ?2 AND repo_key IS NULL
+            AND (SELECT COUNT(*) FROM memory_revisions r WHERE r.entry_id = memory_entries.id) <= 1",
+        params![key, entry_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Marca uma memória recém-criada por uma missão com o repositório dela. Correção de uma memória
 /// existente não muda a chave (uma memória sem chave, de antes, continua valendo em todos).
 pub fn tag_new_entry(
@@ -252,14 +316,7 @@ pub fn tag_new_entry(
     // dream terminava com «falta de evidência citável»).
     conn.execute("UPDATE memory_entries SET source_mission = ?1 WHERE id = ?2 AND source_mission IS NULL", params![mission_id, entry_id])
         .map_err(|e| e.to_string())?;
-    let Some(key) = key else { return Ok(()) };
-    conn.execute(
-        "UPDATE memory_entries SET repo_key = ?1 WHERE id = ?2 AND repo_key IS NULL
-            AND (SELECT COUNT(*) FROM memory_revisions r WHERE r.entry_id = memory_entries.id) <= 1",
-        params![key, entry_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    tag_new_entry_repo(conn, entry_id, key)
 }
 
 /// O repositório dominante entre as missões de um workspace: o que tem pelo menos `share` das missões

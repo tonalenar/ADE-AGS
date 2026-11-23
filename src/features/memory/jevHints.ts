@@ -26,6 +26,16 @@ export interface JevHint {
  */
 export const HINT_SELECT_MIN_PROBABILITY = 0.45;
 
+/** Confere se o ponto `memory_approval` está ligado nas configurações de decisões (sem chamada externa). */
+export async function isMemoryHintsEnabled(): Promise<boolean> {
+  try {
+    const cfg = await invoke<{ enabled?: boolean; memoryApproval?: boolean }>("decision_settings_get");
+    return Boolean(cfg?.enabled && cfg?.memoryApproval);
+  } catch {
+    return false;
+  }
+}
+
 /** Pergunta ao backend o que o log já tem sobre estas propostas. Sem Jev configurado, volta vazio. */
 export async function fetchHints(items: MemoryReviewItem[]): Promise<Record<string, JevHint>> {
   if (items.length === 0) return {};
