@@ -478,7 +478,7 @@ fn restaurar_adiadas_se_prazo(app: &AppHandle, decorrido: Duration, prazo: Durat
 ///
 /// Idempotente: la primera llamada se las lleva, y las ventanas que ella misma abre
 /// vuelven a pedir esto al montar. Sin filas pendientes no hace nada.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn restore_deferred_windows(app: tauri::AppHandle) -> Result<(), String> {
     let Some(deferred) = app.try_state::<super::startup::DeferredRestore>() else {
         return Ok(());

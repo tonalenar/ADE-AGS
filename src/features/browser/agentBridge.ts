@@ -17,10 +17,9 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import { comparablePath, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
-import { setColumnTabResource, setRightPanel, toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
+import { comparablePath, isBlankUrl, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
+import { markChatBrowserAutoShown, openChatBrowserFloating, setColumnTabResource, useChatStore } from "@/features/chat/store";
 import { browserScope } from "@/features/chat/columnTabs";
-import { subscribeToMeasuredChatBrowser } from "@/features/chat/browserMeasurement";
 import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { useStructured } from "@/features/chat/structured/store";
 
@@ -417,13 +416,10 @@ async function openPortalFor(owner: ViewOwner, url: string): Promise<string | nu
   return created.id;
 }
 
-/** Uma espera por vista: a miniatura abre na primeira medida real do slot que mostra a página do agente. */
-const pendingMiniatureMeasures = new Map<string, () => void>();
-
 /**
- * Mostra sobre o chat a página que o agente acabou de abrir, quando a conversa é a atual. O slot do navegador só monta
- * com o painel no navegador, então o painel abre primeiro, a aba de navegador da coluna passa a mostrar a página do
- * agente, e a miniatura abre na primeira medida real desse slot. Não há retângulo inventado: a origem é essa medida.
+ * Mostra sobre o chat a página que o agente abriu, quando a conversa é a atual, sem abrir nem fechar o painel direito:
+ * se já há uma superfície visível (PiP ou painel no navegador), usa-a; senão abre o PiP diretamente UMA única vez por
+ * vista e respeita caso o usuário feche a prévia.
  */
 export function autoShowAgentBrowser(viewId: string, owner: ViewOwner | null): void {
   if (!owner || !readBrowserPreferences().autoShowFloatingPreview || !chatShellOn(useUiStore.getState())) return;
@@ -435,22 +431,21 @@ export function autoShowAgentBrowser(viewId: string, owner: ViewOwner | null): v
   const view = useViewTabsStore.getState().views.find((candidate) => candidate.id === viewId);
   if (!belongsToCurrentChat || !view || view.kind !== "browser") return;
   if (chat.browserFloating && chat.browser?.viewId === viewId) return;
-  // Se o painel do navegador já está aberto e visível, apenas garante a página na coluna sem forçar salto para PiP.
+  // Se o painel do navegador já está aberto e visível, usa essa superfície sem saltar para PiP
+  // e sem trocar silenciosamente uma página não-vazia diferente que o usuário abriu ali.
   if (chat.panel === "browser" && !chat.browserFloating) {
-    adoptBrowserInColumn(view.cwd, owner, viewId);
+    const shownView = chat.browser
+      ? useViewTabsStore.getState().views.find((candidate) => candidate.id === chat.browser?.viewId)
+      : null;
+    const canAdopt = !chat.browser
+      || chat.browser.viewId === viewId
+      || (shownView?.kind === "browser" && isBlankUrl(shownView.url));
+    if (canAdopt) adoptBrowserInColumn(view.cwd, owner, viewId);
+    markChatBrowserAutoShown(viewId);
     return;
   }
-  pendingMiniatureMeasures.get(viewId)?.();
-  // Painel no navegador: é a única forma de o slot montar e medir. Com o painel fechado a miniatura nunca abria.
-  if (chat.panel !== "browser") setRightPanel("browser");
-  adoptBrowserInColumn(view.cwd, owner, viewId);
-  const stop = subscribeToMeasuredChatBrowser(viewId, (measured) => {
-    pendingMiniatureMeasures.delete(viewId);
-    const current = useChatStore.getState();
-    if (current.browserFloating || current.browser?.viewId !== measured.viewId) return;
-    toggleChatBrowserFloating();
-  });
-  pendingMiniatureMeasures.set(viewId, stop);
+  if (chat.browserFloatDismissed[viewId] || chat.browserAutoShown[viewId]) return;
+  openChatBrowserFloating(viewId);
 }
 
 /** A aba de navegador da coluna passa a mostrar a página do agente nesse escopo: o slot mede o que a aba mostra. */

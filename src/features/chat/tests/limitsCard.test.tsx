@@ -134,6 +134,57 @@ describe("o cartão Limites de uso", () => {
     expect(text()).not.toMatch(/\d+%/);
   });
 
+  it("erro de atualização com valor recente em cache mostra barras + idade ('medido há 3 min') em vez de 'a leitura falhou'", async () => {
+    useUsageStore.setState({
+      claude: {
+        "system:claude-code": {
+          ...live(42, 17),
+          fetchedAt: NOW - 180,
+          cached: true,
+          problem: "accounts.plan.problem.rateLimited",
+          retryAt: NOW + 120,
+        },
+      },
+    });
+    await mount();
+    expect(bars().map((b) => b.getAttribute("aria-valuenow"))).toEqual(["42", "17"]);
+    expect(text()).not.toContain("chat.summary.limits.reason.failed");
+    expect(text()).toContain("chat.summary.limits.measuredAgo");
+    expect(text()).toContain("chat.summary.limits.refreshRetryIn");
+  });
+
+  it("falha real específica: sessão expirada e rate limit com tempo mostram motivos traduzidos específicos", async () => {
+    useUsageStore.setState({
+      claude: {
+        "system:claude-code": {
+          available: false, session: null, week: null, weekModels: [], fetchedAt: 0, cached: false, problem: "accounts.auth.expired",
+        },
+      },
+    });
+    await mount();
+    expect(text()).toContain("chat.summary.limits.reason.authExpired");
+    expect(text()).not.toContain("chat.summary.limits.reason.failed");
+
+    useUsageStore.setState({
+      claude: {
+        "system:claude-code": {
+          available: false, session: null, week: null, weekModels: [], fetchedAt: 0, cached: false, problem: "accounts.plan.problem.rateLimited", retryAt: NOW + 120,
+        },
+      },
+    });
+    await mount();
+    expect(text()).toContain('chat.summary.limits.reason.rateLimitedRetry{"time":"2 min"}');
+  });
+
+  it("conta extra do Claude por API key mostra 'conta por API key' sem consultar /usage", async () => {
+    const apiAcc = account("api-claude", "claude-code", "Anthropic API", { kind: "api_key" });
+    useAccountsStore.setState({ accounts: [TON, apiAcc], systemAccounts: [SYS_CLAUDE, SYS_CODEX] });
+    useTabsStore.setState({ tabs: [tab("api-claude")] } as never);
+    await mount();
+    expect(text()).toContain("chat.summary.limits.reason.apiKey");
+    expect(refreshes).toEqual([]);
+  });
+
   it("conta sem login: 'não medido · conta sem login'", async () => {
     useAccountsStore.setState({ systemAccounts: [{ ...SYS_CLAUDE, loggedIn: false }, SYS_CODEX] });
     useUsageStore.setState({ claude: { "system:claude-code": live(42, 17) } });

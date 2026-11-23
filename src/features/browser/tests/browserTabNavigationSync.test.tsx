@@ -81,7 +81,8 @@ beforeEach(() => {
     Object.assign(HTMLElement.prototype, { checkVisibility: () => true });
   }
   handlers.clear();
-  navigateSpy.mockClear();
+  navigateSpy.mockReset();
+  navigateSpy.mockImplementation(() => Promise.resolve());
   emulateSpy.mockClear();
   openSpy.mockClear();
   placeSpy.mockClear();
@@ -100,13 +101,22 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-function renderView(viewId: string, active = true) {
-  function Wrapper() {
-    const current = useViewTabsStore((s) => s.views.find((v): v is BrowserView => v.id === viewId && v.kind === "browser"));
-    if (!current) return null;
-    return <BrowserTab view={current} active={active} />;
-  }
-  act(() => root.render(<Wrapper />));
+function ViewWrapper({ viewId, active, surfaceActive, floatingPreview }: {
+  viewId: string;
+  active: boolean;
+  surfaceActive?: boolean;
+  floatingPreview?: boolean;
+}) {
+  const current = useViewTabsStore((s) => s.views.find((v): v is BrowserView => v.id === viewId && v.kind === "browser"));
+  if (!current) return null;
+  return <BrowserTab view={current} active={active} surfaceActive={surfaceActive} floatingPreview={floatingPreview} />;
+}
+
+function renderView(viewId: string, arg: boolean | { active?: boolean; surfaceActive?: boolean; floatingPreview?: boolean } = {}) {
+  const props = typeof arg === "boolean" ? { active: arg } : arg;
+  act(() => root.render(
+    <ViewWrapper viewId={viewId} active={props.active ?? true} surfaceActive={props.surfaceActive} floatingPreview={props.floatingPreview} />,
+  ));
 }
 
 describe("BrowserTab: sincronia de URL nativa e emulação inicial", () => {
@@ -159,6 +169,91 @@ describe("BrowserTab: sincronia de URL nativa e emulação inicial", () => {
     expect(emulateSpy).toHaveBeenCalledTimes(1);
     expect(emulateSpy.mock.calls[0]?.[1]).toBe("ios");
   });
+
+  it("abertura_com_url_dispara_apenas_uma_navegacao_nativa", async () => {
+    const id = useViewTabsStore.getState().openBrowser("/projeto", "https://example.com/", { activate: true });
+    renderView(id);
+    await act(async () => undefined);
+
+    // RealBrowserView já abre a URL inicial em `realBrowserOpen`; BrowserTab não deve disparar segundo `realBrowserNavigate`.
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(openSpy.mock.calls[0]?.[1]).toBe("https://example.com/");
+    expect(navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("redirect_durante_realBrowserNavigate_nao_regride_url_apos_await", async () => {
+    const id = useViewTabsStore.getState().openBrowser("/projeto", "https://example.com/", { activate: true });
+    renderView(id);
+    await act(async () => undefined);
+    navigateSpy.mockClear();
+
+    let resolveNavigate: (() => void) | null = null;
+    navigateSpy.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveNavigate = resolve;
+    }));
+
+    // Simula navegação para URL que redireciona enquanto `realBrowserNavigate` ainda está pendente.
+    act(() => {
+      useViewTabsStore.getState().updateView(id, { url: "https://example.com/start" });
+    });
+    await act(async () => undefined);
+    expect(navigateSpy).toHaveBeenCalledTimes(1);
+    expect(navigateSpy).toHaveBeenCalledWith(id, "https://example.com/start");
+
+    // O CEF entrega o redirect antes do `await realBrowserNavigate` resolver.
+    emit("real-browser-url", { id, url: "https://example.com/login" });
+    await act(async () => undefined);
+
+    // Quando o `await` termina, a URL não pode regredir para `/start` nem disparar outra navegação.
+    await act(async () => { resolveNavigate?.(); });
+    await act(async () => undefined);
+
+    const view = useViewTabsStore.getState().views.find((v) => v.id === id) as BrowserView;
+    expect(view.url).toBe("https://example.com/login");
+    expect(navigateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("onTitle_igual_nao_regrava_viewStore", async () => {
+    const id = useViewTabsStore.getState().openBrowser("/projeto", "https://example.com/", { activate: true });
+    renderView(id);
+    await act(async () => undefined);
+
+    let storeWrites = 0;
+    const unsubscribe = useViewTabsStore.subscribe(() => { storeWrites += 1; });
+    try {
+      emit("real-browser-title", { id, title: "Painel" });
+      expect(storeWrites).toBe(1);
+
+      emit("real-browser-title", { id, title: "Painel" });
+      emit("real-browser-title", { id, title: "Painel" });
+      expect(storeWrites).toBe(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("motor_nativo_envia_view_hidden_e_view_shown_para_o_cursor", async () => {
+    const id = useViewTabsStore.getState().openBrowser("/projeto", "https://example.com/", { activate: false });
+    renderView(id, { active: false, surfaceActive: false });
+    await act(async () => undefined);
+    postSpy.mockClear();
+
+    // Assim que a vista nativa sinaliza pronta ou carrega um novo documento, recebe `view:hidden` se oculta.
+    emit("real-browser-url", { id, url: "https://example.com/" });
+    await act(async () => undefined);
+    expect(postSpy).toHaveBeenCalledWith(id, { source: "ade-ags", type: "view:hidden" });
+
+    postSpy.mockClear();
+    emit("real-browser-page", { id, message: { source: "ags-preview", type: "page:ready", payload: { doc: "d1", url: "https://example.com/" } } });
+    await act(async () => undefined);
+    expect(postSpy).toHaveBeenCalledWith(id, { source: "ade-ags", type: "view:hidden" });
+
+    // Quando volta a ficar visível, envia `view:shown`.
+    postSpy.mockClear();
+    renderView(id, { active: true, surfaceActive: true });
+    await act(async () => undefined);
+    expect(postSpy).toHaveBeenCalledWith(id, { source: "ade-ags", type: "view:shown" });
+  });
 });
 
 const types = () => postSpy.mock.calls.map((c) => (c[1] as { type: string }).type);
@@ -168,6 +263,9 @@ describe("BrowserTab: o motor nativo também avisa se a aba está à vista", () 
     const id = useViewTabsStore.getState().openBrowser("/projeto", "https://example.com/", { activate: false });
     renderView(id, false);
     await act(async () => undefined);
+    // Desde o #427 o aviso sai quando a página fica pronta (realReady / page:ready).
+    emit("real-browser-page", { id, message: { source: "ags-preview", type: "page:ready", payload: { url: "https://example.com/", doc: "d0" } } });
+    await act(async () => undefined);
     expect(types()).toContain("view:hidden");
     expect(types()).not.toContain("view:shown");
   });
@@ -175,6 +273,9 @@ describe("BrowserTab: o motor nativo também avisa se a aba está à vista", () 
   it("aba ativa manda view:shown", async () => {
     const id = useViewTabsStore.getState().openBrowser("/projeto", "https://example.com/", { activate: true });
     renderView(id, true);
+    await act(async () => undefined);
+    // Desde o #427 o aviso sai quando a página fica pronta (realReady / page:ready).
+    emit("real-browser-page", { id, message: { source: "ags-preview", type: "page:ready", payload: { url: "https://example.com/", doc: "d0" } } });
     await act(async () => undefined);
     expect(types()).toContain("view:shown");
   });

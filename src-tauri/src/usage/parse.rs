@@ -54,9 +54,26 @@ fn percent_used(line: &str) -> Option<u8> {
 
 /// El `Resets …` de un renglón, sin la palabra.
 fn resets_in(line: &str) -> Option<String> {
-    let at = line.find("Resets")?;
-    let text = line[at + "Resets".len()..].trim();
-    (!text.is_empty()).then(|| text.to_string())
+    if let Some(at) = line.find("Resets") {
+        let text = line[at + "Resets".len()..].trim();
+        if !text.is_empty() {
+            return Some(text.to_string());
+        }
+    }
+    let lower = line.to_ascii_lowercase();
+    if let Some(at) = lower.find("· resets ") {
+        let text = line[at + "· resets ".len()..].trim();
+        if !text.is_empty() {
+            return Some(text.to_string());
+        }
+    }
+    if lower.starts_with("resets ") {
+        let text = line["resets ".len()..].trim();
+        if !text.is_empty() {
+            return Some(text.to_string());
+        }
+    }
+    None
 }
 
 /// La barra de un rótulo: su porcentaje y, si lo dice, cuándo se reinicia.
@@ -65,9 +82,10 @@ fn meter_at(lines: &[&str], label: usize) -> Option<Meter> {
     // Desde el rótulo mismo: en una terminal angosta el número le queda al lado.
     let (at, percent) = (label..=last).find_map(|i| percent_used(lines[i]).map(|p| (i, p)))?;
 
+    // Em terminais estreitos, "Resets ..." pode ficar na própria linha do rótulo.
     let resets_last = (at + RESETS_WITHIN).min(lines.len() - 1);
-    let resets = (at..=resets_last).find_map(|i| resets_in(lines[i]));
-    Some(Meter { percent, resets })
+    let resets = (label..=resets_last).find_map(|i| resets_in(lines[i]));
+    Some(Meter { percent, resets, resets_at: None })
 }
 
 /// El modelo de un rótulo `Current week (Fable)`. `all models` es la semana entera, no un
@@ -79,11 +97,28 @@ fn model_of(label: &str) -> Option<String> {
     (!inside.is_empty() && !inside.eq_ignore_ascii_case("all models")).then(|| inside.to_string())
 }
 
-/// Lee el panel: la ventana en curso, la semana y las semanas por modelo.
-///
-/// De cada rótulo gana la ÚLTIMA aparición: lo que quedó arriba de la pantalla son pintadas
-/// anteriores, y la última es la única completa.
-pub(super) fn parse_usage_screen(raw: &str) -> LiveUsage {
+/// Detecta se o painel já trouxe barras do cache do Claude acompanhadas de aviso de falha/rate-limit.
+fn refresh_notice(screen: &str) -> Option<&'static str> {
+    let lower = screen.to_lowercase();
+    if lower.contains("temporarily limiting requests")
+        || lower.contains("rate limited until")
+        || lower.contains("requests temporarily limited")
+        || lower.contains("rate limited")
+    {
+        return Some("accounts.plan.problem.rateLimited");
+    }
+    if lower.contains("couldn't refresh")
+        || lower.contains("could not refresh")
+        || lower.contains("couldn't load usage")
+        || lower.contains("failed to load usage")
+    {
+        return Some("accounts.plan.problem.loadFailed");
+    }
+    None
+}
+
+/// Lee el panel y também sinaliza se o Claude exibiu aviso de erro/rate-limit ao lado do cache.
+pub(super) fn parse_usage_screen_with_notice(raw: &str) -> (LiveUsage, Option<&'static str>) {
     let screen = render(raw);
     let lines: Vec<&str> = screen.lines().map(str::trim).collect();
 
@@ -111,7 +146,8 @@ pub(super) fn parse_usage_screen(raw: &str) -> LiveUsage {
     }
 
     let available = session.is_some() || week.is_some() || !models.is_empty();
-    LiveUsage {
+    let notice = if available { refresh_notice(&screen) } else { None };
+    let usage = LiveUsage {
         available,
         session,
         week,
@@ -119,5 +155,14 @@ pub(super) fn parse_usage_screen(raw: &str) -> LiveUsage {
         problem: (!available)
             .then(|| "accounts.plan.problem.panelMissing".to_string()),
         ..Default::default()
-    }
+    };
+    (usage, notice)
+}
+
+/// Lee el panel: la ventana en curso, la semana y las semanas por modelo.
+///
+/// De cada rótulo gana la ÚLTIMA aparición: lo que quedó arriba de la pantalla son pintadas
+/// anteriores, y la última es la única completa.
+pub(super) fn parse_usage_screen(raw: &str) -> LiveUsage {
+    parse_usage_screen_with_notice(raw).0
 }

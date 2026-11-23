@@ -782,6 +782,7 @@ pub fn run() {
             crate::decisions::delivery::decision_classify_report,
             crate::decisions::routing::decision_route_turn,
             crate::decisions::browse::decision_pick_step,
+            crate::decisions::browse::decision_pilot_status,
             crate::decisions::browse::decision_preconnect,
             crate::decisions::vision::decision_pick_visual,
             crate::database::db_boot_status,

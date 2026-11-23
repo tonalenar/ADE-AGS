@@ -1541,3 +1541,40 @@ describe("um add pendente não sobra para o passo seguinte (A196)", () => {
     expect(h.calls.filter((c) => c === "click e1")).toHaveLength(2);
   });
 });
+
+describe("estado do Jev antes de autoFill", () => {
+  const SEARCH_PAGE = [
+    'page: "Loja" http://localhost/',
+    "viewport: 1280×800 · scroll 0/800",
+    '- searchbox "Pesquisar" [ref=e1] value=""',
+    '- button "Buscar" [ref=e2]',
+  ].join("\n");
+
+  it("Jev desligado com --fill: consulta o estado antes de autoFill e não digita nem aperta Enter", async () => {
+    const h = harness([ok("done")], [SEARCH_PAGE]);
+    (h.deps as PilotDeps & { status?: () => Promise<{ status: string; reason: string | null }> }).status = async () => ({
+      status: "off",
+      reason: "O Jev não está pilotando navegadores: ligue em Ajustes → Decisões.",
+    });
+    const result = await runPilot("pesquisar fone", ["Pesquisar=fone"], undefined, h.deps);
+    expect(result.outcome).toBe("off");
+    expect(result.note).toContain("pilotando");
+    expect(h.calls).toEqual([]);
+    expect(h.asked).toEqual([]);
+    expect(result.finalSnapshot).toContain('searchbox "Pesquisar"');
+  });
+
+  it("Jev sem saldo (402 / no_credit) com --fill: não digita nem envia busca e devolve fallback limpo", async () => {
+    const h = harness([ok("done")], [SEARCH_PAGE]);
+    (h.deps as PilotDeps & { status?: () => Promise<{ status: string; reason: string | null }> }).status = async () => ({
+      status: "no_credit",
+      reason: "O Jev está sem saldo ou com a cota esgotada (http 402): confira em Ajustes → Decisões.",
+    });
+    const result = await runPilot("pesquisar fone", ["Pesquisar=fone"], undefined, h.deps);
+    expect(result.outcome).toBe("error");
+    expect(result.note).toContain("sem saldo");
+    expect(h.calls).toEqual([]);
+    expect(h.asked).toEqual([]);
+    expect(result.finalSnapshot).toContain('searchbox "Pesquisar"');
+  });
+});

@@ -336,7 +336,7 @@ pub async fn ai_memory_migrate(
 }
 
 /// Registro da cópia do workspace, sem o corpo das memórias.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ai_memory_migration_report(
     workspace_id: String,
     db: tauri::State<'_, DbConnection>,

@@ -20,7 +20,7 @@ use super::types::{
 /// Lee el SKILL.md elegido y devuelve su metadata parseada más la lista de campos
 /// "sugeridos" que no vinieron en el frontmatter — el frontend usa `missing` para
 /// decidir si mostrar un formulario de metadata antes de instalar.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn preview_skill_metadata(source_file: String) -> Result<SkillPreview, String> {
     let (file, folder) = resolve_skill_file(&source_file)?;
     let Some((meta, _content)) = scan_skill_file(&file) else {
@@ -34,7 +34,7 @@ pub fn preview_skill_metadata(source_file: String) -> Result<SkillPreview, Strin
     Ok(SkillPreview { meta: meta.into(), folder_name, missing })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn install_skill(
     source_file: String,
     overrides: Option<SkillFrontmatterInput>,
@@ -284,7 +284,7 @@ pub(crate) fn delete_skills_of_registry(
     Ok(removed)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_skill(skill_id: String, db: tauri::State<DbConnection>) -> Result<(), String> {
     delete_skill_internal(&skill_id, &db)
 }

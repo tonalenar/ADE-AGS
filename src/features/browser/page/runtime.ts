@@ -1238,26 +1238,42 @@ declare global {
     return el.dispatchEvent(event);
   }
 
-  /** Dónde tocar el elemento, trayéndolo a la vista. Falla si otra cosa lo tapa: eso es un
+  function isInViewport(rect: DOMRect): boolean {
+    return rect.width > 0 && rect.height > 0
+      && rect.top >= 0 && rect.left >= 0
+      && rect.bottom <= window.innerHeight && rect.right <= window.innerWidth;
+  }
+
+  function scrollIntoViewIfNeeded(el: Element): DOMRect {
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0 || isInViewport(rect)) return rect;
+    el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    return el.getBoundingClientRect();
+  }
+
+  /** Dónde tocar el elemento, trayéndolo a la vista solo si está fuera. Falla si otra cosa lo tapa: eso es un
    *  bug de la página (un overlay que quedó abierto), y un click que lo atraviesa lo
    *  escondería. */
   function aim(el: Element): { x: number; y: number; target: Element } {
-    el.scrollIntoView({ block: "center", inline: "center" });
     let target = el;
-    let rect = el.getBoundingClientRect();
+    let rect = scrollIntoViewIfNeeded(el);
     // Los checkbox "lindos" esconden el input (0×0 o transparente) y se tocan por su label.
     const labels = isFormControl(el) ? (el as HTMLInputElement).labels : null;
     if ((rect.width === 0 || rect.height === 0) && labels && labels.length) {
       target = labels[0];
-      target.scrollIntoView({ block: "center", inline: "center" });
-      rect = target.getBoundingClientRect();
+      rect = scrollIntoViewIfNeeded(target);
     }
     if (rect.width === 0 || rect.height === 0) throw new Error(`${describeElement(el)} não está visível (mede 0×0).`);
     const reaches = (hit: Element | null) => !hit || hit === target || target.contains(hit) || hit.contains(target)
       || (labels !== null && Array.from(labels).some((l) => l === hit || l.contains(hit)));
     // Uma camada decorativa sobre o centro (o corte de um título numa loja) não impede um clique de verdade em outro ponto
-    // do elemento: tenta o centro e, se está coberto, as bordas. Só falha se NENHUM ponto chega ao elemento.
-    const clear = probePoints(rect).find((point) => reaches(document.elementFromPoint(point.x, point.y)));
+    // do elemento: tenta o centro e, se está coberto, as bordas. Se ainda estiver atrás de barra fixa, centraliza uma vez.
+    let clear = probePoints(rect).find((point) => reaches(document.elementFromPoint(point.x, point.y)));
+    if (!clear) {
+      target.scrollIntoView({ block: "center", inline: "center" });
+      rect = target.getBoundingClientRect();
+      clear = probePoints(rect).find((point) => reaches(document.elementFromPoint(point.x, point.y)));
+    }
     if (!clear) {
       const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       throw new Error(`${describeElement(el)} está coberto por ${hit ? describeElement(hit) : "outro elemento"} (${hit ? selectorOf(hit) : "?"}). `

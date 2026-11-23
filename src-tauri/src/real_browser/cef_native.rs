@@ -29,7 +29,7 @@ use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 use tokio::sync::oneshot;
 
-use super::surface::{diff_place, effective_zoom, open_step, visibility_change, ClipState, keeps_pumping, OpenStep, outline, rounded_parts, CreationState, PathStep, PlaceState, RoundedPart};
+use super::surface::{diff_place, effective_frame, effective_zoom, needs_layer_transaction, open_step, visibility_change, ClipState, keeps_pumping, OpenStep, outline, rounded_parts, CreationState, PathStep, PlaceState, RoundedPart};
 use super::{emit, on_binding};
 
 const CEF_FRAMEWORK_BUNDLE: &str = "Chromium Embedded Framework.framework";
@@ -1013,17 +1013,18 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
                 // Só o que mudou desde o último `place` é reaplicado: a posição, a máscara, o zoom e a repintura do CEF.
                 // SAFETY: `portal.host_view` é uma `ADEPortalHost` válida na thread principal; `superview` retorna referência autorretida segura.
                 let parent = unsafe { portal.host_view.superview() };
+                let frame = effective_frame(rect, portal.last_place.as_ref().map(|state| state.frame));
                 let zoom = effective_zoom(zoom, portal.last_place.as_ref().map(|state| state.zoom));
-                let next = PlaceState { frame: rect, parts: parts.clone(), radius: corner_radius, zoom };
+                let next = PlaceState { frame, parts: parts.clone(), radius: corner_radius, zoom };
                 let changes = diff_place(portal.last_place.as_ref(), &next);
                 let hidden_change = visibility_change(&mut portal.clip, parts.is_empty(), !visible);
-                let mutates_layers = changes.frame || (changes.mask && !parts.is_empty()) || hidden_change.is_some() || changes.resized;
+                let mutates_layers = needs_layer_transaction(&changes, parts.is_empty(), hidden_change);
                 let tx = mutates_layers.then(DisableActionsTransaction::begin);
                 if changes.frame {
-                    portal.host_view.setFrame(parent.as_deref().map(|parent| frame_in_parent(parent, rect)).unwrap_or_else(|| view_frame(rect)));
+                    portal.host_view.setFrame(parent.as_deref().map(|parent| frame_in_parent(parent, frame)).unwrap_or_else(|| view_frame(frame)));
                 }
                 if changes.mask && !parts.is_empty() {
-                    apply_rect_mask(&portal.host_view, rect[2], rect[3], &parts, corner_radius);
+                    apply_rect_mask(&portal.host_view, frame[2], frame[3], &parts, corner_radius);
                 }
                 // Só a transição de escondido para visível (ou o contrário) mexe na vista: um recorte vazio de um
                 // quadro não a esconde, e a desmontagem (`visible: false`) esconde na hora.
@@ -1038,13 +1039,15 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
                         if !child.is_null() {
                             // SAFETY: `child` vem de `host.window_handle()` não nulo na thread principal e aponta para a `NSView` filha do CEF.
                             let view: &NSView = unsafe { &*child.cast() };
-                            view.setFrame(view_frame([0, 0, rect[2], rect[3]]));
+                            view.setFrame(view_frame([0, 0, frame[2], frame[3]]));
                         }
                     }
-                    drop(tx);
+                    // Aplica zoom e resize dentro da mesma `CATransaction` (antes do commit em `drop(tx)`),
+                    // evitando quadro intermediário desalinhado/piscando enquanto o Chromium repinta.
                     if changes.zoom { host.set_zoom_level(chrome_zoom_level(zoom)); }
                     if changes.resized { host.was_resized(); }
                 }
+                drop(tx);
                 portal.last_place = Some(next);
             }
         });

@@ -138,9 +138,17 @@ impl SystemOneHttpProvider {
             match self.once(client, &url, &payload, timeout, stats) {
                 Ok(response) => {
                     note_latency(&self.base_url, attempt_started.elapsed());
+                    clear_quota_exhausted(self.provider, &self.base_url);
                     return Ok(response);
                 }
                 Err(failure) => {
+                    if matches!(failure.error, DecisionError::QuotaExhausted { .. }) {
+                        mark_quota_exhausted(
+                            self.provider,
+                            &self.base_url,
+                            failure.error.explain(stats.attempts, stats.timeout_ms),
+                        );
+                    }
                     let retry = policy == RetryPolicy::Patient
                         && stats.attempts <= MAX_RETRIES
                         && started.elapsed() < RETRY_DEADLINE
@@ -203,6 +211,18 @@ impl SystemOneHttpProvider {
             }),
             // 401 fica só o código: o corpo de autenticação não diz como corrigir o pedido.
             401 => Err(fail(DecisionError::Unauthorized)),
+            402 => {
+                let message = super::protocol::client_error_message(&text);
+                Err(fail(DecisionError::QuotaExhausted { code: 402, message }))
+            }
+            429 => {
+                let message = super::protocol::client_error_message(&text);
+                if super::protocol::is_quota_exhausted(429, &message, &text) {
+                    Err(fail(DecisionError::QuotaExhausted { code: 429, message }))
+                } else {
+                    Err(fail(DecisionError::Status { code: 429, message }))
+                }
+            }
             code => {
                 let message = if (400..500).contains(&code) {
                     super::protocol::client_error_message(&text)
@@ -219,14 +239,58 @@ impl SystemOneHttpProvider {
     }
 }
 
-/// Um motivo passageiro: o provedor sobrecarregado (429/502/503/504/529), a conexão que não abriu, ou o primeiro timeout.
+/// Um motivo passageiro: o provedor sobrecarregado (rate limit 429 temporário, 502/503/504/529), a conexão que não abriu, ou o primeiro timeout.
+/// Cota/crédito esgotado (`QuotaExhausted`) nunca é repetido.
 fn retryable(failure: &Failure, attempts: u32) -> bool {
     match &failure.error {
         DecisionError::Status { code, .. } => matches!(code, 429 | 502 | 503 | 504 | 529),
         DecisionError::Timeout => attempts == 1,
         DecisionError::Transport(_) => failure.connect,
+        DecisionError::QuotaExhausted { .. } => false,
         _ => false,
     }
+}
+
+/// Quanto tempo mantemos em memória o aviso de saldo/cota esgotada antes de deixar tentar de novo
+/// (se o usuário recarregar fora do app sem clicar em "Testar conexão" ou "Salvar").
+const QUOTA_EXHAUSTED_TTL: Duration = Duration::from_secs(60);
+
+fn quota_state() -> &'static Mutex<HashMap<String, (Instant, String)>> {
+    static QUOTA: OnceLock<Mutex<HashMap<String, (Instant, String)>>> = OnceLock::new();
+    QUOTA.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn quota_key(provider: ProviderKind, base_url: &str) -> String {
+    format!("{}|{}", provider.as_str(), base_url.trim().trim_end_matches('/'))
+}
+
+pub(super) fn mark_quota_exhausted(provider: ProviderKind, base_url: &str, reason: String) {
+    if let Ok(mut map) = quota_state().lock() {
+        map.insert(quota_key(provider, base_url), (Instant::now(), reason));
+    }
+}
+
+pub(super) fn clear_quota_exhausted(provider: ProviderKind, base_url: &str) {
+    if let Ok(mut map) = quota_state().lock() {
+        map.remove(&quota_key(provider, base_url));
+    }
+}
+
+pub(super) fn clear_all_quota_exhausted() {
+    if let Ok(mut map) = quota_state().lock() {
+        map.clear();
+    }
+}
+
+pub(super) fn quota_exhausted_reason(provider: ProviderKind, base_url: &str) -> Option<String> {
+    let mut map = quota_state().lock().ok()?;
+    let key = quota_key(provider, base_url);
+    let (at, reason) = map.get(&key)?;
+    if at.elapsed() > QUOTA_EXHAUSTED_TTL {
+        map.remove(&key);
+        return None;
+    }
+    Some(reason.clone())
 }
 
 /// Quanto esperar antes da repetição de número `attempt` (1 = depois da primeira falha): 250, 500, 1000 ms, ou o
@@ -575,5 +639,48 @@ mod tests {
         let url = serve_sequence(vec![(422, "", "{\"error\":\"chave-secreta-xyz\"}")]);
         let (result, _) = provider(&url, 1_000).decide_with(&request(), RetryPolicy::Patient);
         assert!(!result.unwrap_err().code().contains("chave-secreta-xyz"));
+    }
+
+    #[test]
+    fn cota_esgotada_em_429_nao_repete_e_devolve_sem_saldo() {
+        let url = serve_sequence(vec![
+            (429, "Retry-After: 1\r\n", r#"{"error":{"code":"insufficient_quota","message":"You exceeded your current quota, please add credits"}}"#),
+            (200, "", OK),
+        ]);
+        let (result, stats) = provider(&url, 1_000).decide_with(&request(), RetryPolicy::Patient);
+        let error = result.expect_err("cota esgotada deve falhar sem repetir");
+        assert_eq!(stats.attempts, 1, "não pode fazer retry quando a cota/crédito acabou");
+        assert_eq!(stats.backoff_ms, 0, "não deve esperar backoff em cota esgotada");
+        assert_eq!(error.fault(), crate::decisions::protocol::Fault::Local);
+        let explained = error.explain(stats.attempts, stats.timeout_ms).to_lowercase();
+        assert!(explained.contains("sem saldo"), "{explained}");
+    }
+
+    #[test]
+    fn rate_limit_temporario_em_429_repete_respeitando_retry_after() {
+        let url = serve_sequence(vec![
+            (429, "Retry-After: 0\r\n", r#"{"error":{"code":"rate_limit_exceeded","message":"Too many requests, try again shortly"}}"#),
+            (200, "", OK),
+        ]);
+        let (result, stats) = provider(&url, 1_000).decide_with(&request(), RetryPolicy::Patient);
+        let response = result.expect("rate limit temporário deve repetir até responder");
+        assert_eq!(response.answers["operacao"].label, "click");
+        assert_eq!(stats.attempts, 2);
+        assert!(stats.backoff_ms >= BACKOFF_BASE_MS, "backoff esperado: {}", stats.backoff_ms);
+    }
+
+    #[test]
+    fn http_402_sem_saldo_nao_repete_e_devolve_sem_saldo() {
+        let url = serve_sequence(vec![
+            (402, "", r#"{"error":"payment required: no credits left"}"#),
+            (200, "", OK),
+        ]);
+        let (result, stats) = provider(&url, 1_000).decide_with(&request(), RetryPolicy::Patient);
+        let error = result.expect_err("402 deve falhar sem repetir");
+        assert_eq!(stats.attempts, 1);
+        assert_eq!(stats.backoff_ms, 0);
+        assert_eq!(error.fault(), crate::decisions::protocol::Fault::Local);
+        let explained = error.explain(stats.attempts, stats.timeout_ms).to_lowercase();
+        assert!(explained.contains("sem saldo"), "{explained}");
     }
 }

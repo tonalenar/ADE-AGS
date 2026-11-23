@@ -410,7 +410,7 @@ pub fn swarm_write(
 }
 
 /// Frontend lifecycle name; keep the existing database command compatible.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn workspace_restore(
     workspace_id: String,
     db: tauri::State<crate::database::DbConnection>,
@@ -440,7 +440,7 @@ pub async fn workspace_deleted_list(
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_export(
     workspace_id: String,
     db: tauri::State<crate::database::DbConnection>,
