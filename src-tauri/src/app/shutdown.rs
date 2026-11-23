@@ -25,6 +25,11 @@ pub(crate) fn shutdown_once() {
     run_steps_once(
         &SHUTDOWN,
         &mut [
+            &mut || {
+                if let Err(err) = crate::canvas::flush_pending_saves() {
+                    eprintln!("canvas: falha ao gravar alterações pendentes na saída: {err}");
+                }
+            },
             &mut || crate::ipc::cleanup(),
             &mut || crate::terminal::kill_all_sessions(),
             &mut || crate::sim_host::stop(),
@@ -72,5 +77,17 @@ mod tests {
             assert!(!src.contains("kill_all_sessions()"), "{rel} não limpa por conta própria");
             assert!(!src.contains("ipc::cleanup()"), "{rel} não limpa por conta própria");
         }
+    }
+
+    #[test]
+    fn a_saida_grava_alteracoes_pendentes_do_canvas() {
+        let src = include_str!("shutdown.rs");
+        let start = src.find("pub(crate) fn shutdown_once()").expect("shutdown_once");
+        let end = src[start..].find("pub(crate) fn run_steps_once").expect("fim de shutdown_once");
+        let body = &src[start..start + end];
+        assert!(
+            body.contains("crate::canvas::flush_pending_saves()"),
+            "shutdown_once precisa chamar crate::canvas::flush_pending_saves() para não perder dados do canvas"
+        );
     }
 }
