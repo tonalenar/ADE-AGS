@@ -869,7 +869,7 @@ impl Motor {
         let method = msg.get("method").and_then(Value::as_str);
         match (method, msg.get("id").and_then(Value::as_u64)) {
             (None, Some(ACP_SESSAO)) => match msg.get("error") {
-                Some(e) => self.recusou(e.get("message").and_then(Value::as_str).unwrap_or("erro do OpenCode").to_string()),
+                Some(e) => self.recusou(opencode_map::rpc_error_text(e)),
                 None => match msg.pointer("/result/sessionId").and_then(Value::as_str) {
                     Some(id) => self.abriu(id),
                     None => self.recusou("O OpenCode não devolveu a sessão".into()),
@@ -880,7 +880,7 @@ impl Motor {
                     self.acp_out(out);
                 }
                 let fim = match (msg.get("error"), msg.get("result")) {
-                    (Some(e), _) => TurnResult { interrupted: false, error: Some(opencode_map::error_text(e.get("message").and_then(Value::as_str).unwrap_or("erro do OpenCode"))), duration_ms: None },
+                    (Some(e), _) => TurnResult { interrupted: false, error: Some(opencode_map::error_text(&opencode_map::rpc_error_text(e))), duration_ms: None },
                     (None, result) => {
                         let done = result.cloned().unwrap_or(Value::Null);
                         if let Some(usage) = opencode_map::usage_item("bancada", &done, Some(now)) {
