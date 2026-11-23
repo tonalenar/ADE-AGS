@@ -6,8 +6,7 @@
 //! - `codex_map`: o item do Codex virando o `canal::timeline::Item` da timeline (puro);
 //! - `codex`: o processo `app-server` de cada conversa (JSON por linha no stdio);
 //! - `claude_map` e `claude`: o mesmo para o Claude Code (`claude -p`, stream-json no stdio);
-//! - `opencode_map` e `opencode`: o mesmo para o OpenCode (Agent Client Protocol, JSON-RPC no stdio);
-//! - `agy_map` e `agy`: parser legado de `agy --input-format stream-json`, mantido para fixtures e histórico;
+//! - `opencode_map` e `opencode`: o mesmo para o OpenCode e Antigravity (Agent Client Protocol, JSON-RPC no stdio);
 //! - `cursor_map` e `cursor`: o mesmo para o Cursor (`cursor-agent -p --output-format stream-json`);
 //! - `turn`: abrir e fechar o turno no banco, comum aos motores mais novos;
 //! - `attach`: os anexos das mensagens (conferir caminhos, miniaturas e imagens em linha do Claude);
@@ -17,8 +16,6 @@
 //! - `commands`: os comandos Tauri;
 //! - `worktree`: o worktree de uma conversa nova.
 
-pub mod agy;
-pub mod agy_map;
 pub mod answer;
 pub mod api;
 pub mod attach;

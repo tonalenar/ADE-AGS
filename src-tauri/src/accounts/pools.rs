@@ -68,6 +68,7 @@ impl PoolMode {
         }
     }
 
+    #[cfg(test)]
     pub fn as_str(self) -> &'static str {
         match self {
             PoolMode::Off => "off",
@@ -82,6 +83,7 @@ pub fn load_mode(db: &DbConnection) -> PoolMode {
     PoolMode::parse_setting(raw.as_deref())
 }
 
+#[cfg(test)]
 pub fn save_mode(db: &DbConnection, mode: PoolMode) -> Result<(), String> {
     crate::database::set_setting(db, MODE_KEY, mode.as_str())
 }
@@ -440,6 +442,7 @@ where
 /// El pool listo para elegir, y avanza su turno: cada pedido de `round_robin` arranca un
 /// lugar más allá que el anterior (el ruteo salta las que no se pueden usar).
 /// Prefira [`with_pool_pick`] para só avançar quando a escolha suceder.
+#[cfg(test)]
 pub fn spec_for(db: &DbConnection, wanted: &str) -> Result<PoolSpec, String> {
     with_pool_pick(db, wanted, |spec| Ok(spec.clone()))
 }

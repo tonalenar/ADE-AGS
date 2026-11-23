@@ -47,14 +47,7 @@ pub struct Candidate {
 /// Colapsa espaços, corta em `max` caracteres e marca o corte. Pura.
 fn clip(text: &str, max: usize) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if max == 0 {
-        return String::new();
-    }
-    if flat.chars().count() > max {
-        flat.chars().take(max.saturating_sub(1)).collect::<String>() + "…"
-    } else {
-        flat
-    }
+    crate::util::clip(&flat, max)
 }
 
 /// As candidatas que saem: as primeiras `MAX_CANDIDATES`, sem segredo e sem chave repetida (vale a

@@ -50,18 +50,7 @@ pub struct Worktree {
 /// es un repo" y "falló" son lo mismo). Acá no: "la rama ya existe" o "el repo no tiene
 /// commits" es justo lo que el usuario necesita leer.
 pub(crate) fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
-    // `-C` también: el directorio canónico llega como `\\?\C:\...` y git lo rechaza
-    // igual que al argumento de `worktree add`.
-    let dir = external_path(dir);
-    let mut cmd = crate::util::spawn::hidden_command("git");
-    cmd.arg("-C").arg(&dir).args(args);
-    let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("não foi possível rodar o git: {e}"))?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string())
-    } else {
-        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        Err(if err.is_empty() { format!("git {} falló", args.join(" ")) } else { err })
-    }
+    crate::util::git::run(dir, args, limit)
 }
 
 /// La raíz del repo que contiene `cwd`. Error si no es un repo, o si no tiene commits —

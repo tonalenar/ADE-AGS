@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::bancada::{abrir, conferir, rodar, simular, tocar, Espera, Evento, Passo, Protocolo, Roteiro, Saida, PRAZO_PEDIDO_MS};
+use super::bancada::{abrir, conferir, rodar, simular, tocar, Espera, Evento, Passo, Protocolo, Roteiro, Saida};
 use super::pool::{decide, move_account, reset_at, Decision, Input, Mode};
 use super::resume::{open_resuming, Opened, ResumeFailure, RETRY_PAUSES};
 use crate::runs::failure::FailureKind;
@@ -287,24 +287,6 @@ fn o_motor_guarda_a_tarefa_e_o_item_do_subagente() {
 }
 
 /// B1, parte do Antigravity: o leitor percorre o fluxo sem o prazo de abertura dos outros motores.
-/// As duas linhas são o mínimo que o mapeador já aceita nos testes dele. Não descrevem um turno real.
-#[test]
-fn o_agy_le_o_fluxo_sem_prazo_de_silencio() {
-    let init = json!({ "event": "init", "conversation_id": "cv-leitura" });
-    let result = json!({ "event": "result", "result": { "status": "SUCCESS", "response": "lido", "conversation_id": "cv-leitura" } });
-    let saidas = vec![
-        Saida { at_ms: 0, evento: Evento::Linha(init.to_string()) },
-        Saida { at_ms: PRAZO_PEDIDO_MS + 5_000, evento: Evento::Linha(result.to_string()) },
-    ];
-    let r = rodar(Protocolo::AgyStream, &saidas);
-    assert_eq!(r.sessao(), Some("cv-leitura"));
-    assert_eq!(r.texto(), "lido");
-    assert!(r.fim.as_ref().is_some_and(|f| f.error.is_none() && !f.interrupted), "{:?}", r.fim);
-    assert!(r.silencio_max_ms > PRAZO_PEDIDO_MS, "o buraco de tempo não fecha o turno");
-    assert!(tocar(&Roteiro::new(Protocolo::AgyStream, vec![Passo::Sessao { id: "x".into() }])).is_err(), "o roteiro não sintetiza este protocolo");
-    assert_eq!(serde_json::from_value::<Protocolo>(json!("agy-stream")).unwrap(), Protocolo::AgyStream);
-}
-
 /// B6: o `read_turn` do Cursor, com o relógio do transcript. A linha cujo `atMs` passa de `quiet_after`
 /// não entra. Não é um turno do provider: o formato é o mínimo que o mapeador já lê nos testes dele.
 #[test]
@@ -418,7 +400,6 @@ mod retomada {
                 Protocolo::ClaudeStream => "Claude",
                 Protocolo::CodexAppServer => "Codex",
                 Protocolo::Acp => "OpenCode",
-                Protocolo::AgyStream => "Antigravity",
                 Protocolo::CursorStream => "Cursor",
             }).as_str()), "{protocolo:?}");
             assert_eq!((novas, pausas), (1, RETRY_PAUSES.to_vec()), "{protocolo:?}");
@@ -633,15 +614,6 @@ mod replay_protocolo {
         ]));
         assert!(filho.unwrap_err().contains("FerramentaNova"), "o filho não fura o guard");
 
-        let negado = rodar("agy-stream", serde_json::json!([
-            { "atMs": 0, "out": { "event": "result", "result": { "status": "SUCCESS", "denied_actions": ["git push"] } } },
-        ]));
-        assert!(negado.is_ok(), "denied está na lista do agy: {negado:?}");
-        let solto = rodar("agy-stream", serde_json::json!([
-            { "atMs": 0, "out": { "event": "step_update", "step_update": { "step_index": 1, "state": "DONE", "step_type": "xyzzy", "tool_name": "xyzzy" } } },
-        ]));
-        assert!(solto.unwrap_err().contains("xyzzy"), "nome fora da lista do agy cai");
-
         let mcp = rodar("cursor-stream", serde_json::json!([
             { "atMs": 0, "out": { "type": "tool_call", "subtype": "started", "call_id": "c", "session_id": "s",
                 "tool_call": { "mcpToolCall": { "args": { "toolName": "mcp" } } } } },
@@ -805,32 +777,6 @@ mod replay_protocolo {
         oraculo_estado(Protocolo::CodexAppServer, &saidas, "ok", Some("conteúdo"));
     }
 
-    /// Variante derivada de `antigravity-feliz`: o DONE da ferramenta chega depois do texto de resposta.
-    #[test]
-    fn replay_derivado_antigravity_ferramenta_depois_do_texto() {
-        let mut saidas = captura("antigravity-feliz");
-        mover(
-            &mut saidas,
-            |out| {
-                out["event"] == "step_update"
-                    && out.pointer("/step_update/step_index") == Some(&Value::from(2))
-                    && out.pointer("/step_update/state") == Some(&Value::String("DONE".into()))
-            },
-            |out| {
-                out["event"] == "step_update"
-                    && out.pointer("/step_update/step_index") == Some(&Value::from(3))
-                    && out.pointer("/step_update/state") == Some(&Value::String("ACTIVE".into()))
-            },
-            true,
-        );
-        oraculo_estado(
-            Protocolo::AgyStream,
-            &saidas,
-            "ok",
-            Some("conteúdo do arquivo"),
-        );
-    }
-
     /// Variante derivada de `cursor-feliz`: o fim da leitura chega após a resposta textual final.
     #[test]
     fn replay_derivado_cursor_ferramenta_depois_do_texto() {
@@ -850,13 +796,12 @@ mod replay_protocolo {
         oraculo_estado(Protocolo::CursorStream, &saidas, "ok", Some("O arquivo"));
     }
 
-    /// Cortes derivados: cada prefixo termina no meio de uma ferramenta (Claude/Cursor) ou texto (Codex/agy).
+    /// Cortes derivados: cada prefixo termina no meio de uma ferramenta (Claude/Cursor) ou texto (Codex).
     #[test]
     fn replay_derivado_streams_parciais_ficam_abertos() {
         for (id, protocol, predicado, texto) in [
             ("claude-feliz", Protocolo::ClaudeStream, 0, None),
             ("codex-feliz", Protocolo::CodexAppServer, 1, Some("O")),
-            ("antigravity-feliz", Protocolo::AgyStream, 2, Some("O")),
             ("cursor-feliz", Protocolo::CursorStream, 3, None),
         ] {
             let parcial = ate_frame(captura(id), move |out| match predicado {
@@ -866,12 +811,6 @@ mod replay_protocolo {
                             == Some(&Value::String("tool_use".into()))
                 }
                 1 => out["method"] == "item/agentMessage/delta",
-                2 => {
-                    out["event"] == "step_update"
-                        && out.pointer("/step_update/step_index") == Some(&Value::from(3))
-                        && out.pointer("/step_update/state")
-                            == Some(&Value::String("ACTIVE".into()))
-                }
                 _ => out["type"] == "tool_call" && out["subtype"] == "started",
             });
             oraculo_estado(protocol, &parcial, "aberto", texto);
@@ -884,13 +823,11 @@ mod replay_protocolo {
         for (id, protocol, final_frame) in [
             ("claude-feliz", Protocolo::ClaudeStream, 0),
             ("codex-feliz", Protocolo::CodexAppServer, 1),
-            ("antigravity-feliz", Protocolo::AgyStream, 2),
             ("cursor-feliz", Protocolo::CursorStream, 3),
         ] {
             let ocioso = sem_frame_final(captura(id), move |out| match final_frame {
                 0 => out["type"] == "result",
                 1 => out["method"] == "turn/completed",
-                2 => out["event"] == "result",
                 _ => out["type"] == "result",
             });
             oraculo_estado(protocol, &ocioso, "aberto", None);
@@ -984,22 +921,6 @@ mod replay_protocolo {
         );
     }
 
-    /// Variante derivada de `antigravity-feliz`: some o DONE do `read_file` (passo 2). A ferramenta fica ACTIVE e o
-    /// `result` SUCCESS chega mesmo assim, então o fim é normal e a ferramenta não tem desfecho.
-    #[test]
-    fn replay_derivado_agy_fim_normal_marca_ferramenta_sem_resultado() {
-        let mut saidas = captura("antigravity-feliz");
-        cortar(&mut saidas, |out| {
-            out["event"] == "step_update"
-                && out.pointer("/step_update/step_index") == Some(&Value::from(2))
-                && out.pointer("/step_update/state") == Some(&Value::String("DONE".into()))
-        });
-        let resultado = bancada::rodar(Protocolo::AgyStream, &saidas);
-        assert_fim_normal(&resultado);
-        assert_eq!(resultado.ferramentas(), ["Read:running"]);
-        afirma_desfecho_desconhecido(&fechar_no_banco("antigravity", &resultado), "Read");
-    }
-
     /// Variante derivada de `cursor-feliz`: some o `completed` da leitura. O silêncio não fecha o turno com ferramenta
     /// `running`, então o fim é o `result`, normal, e a ferramenta continua sem desfecho.
     #[test]
@@ -1022,11 +943,10 @@ mod replay_protocolo {
         afirma_desfecho_desconhecido(&fechar_no_banco("opencode", &resultado), "Edit");
     }
 
-    /// Controle: com a ferramenta concluída antes do fim, o fim normal não marca nada, nos três motores.
+    /// Controle: com a ferramenta concluída antes do fim, o fim normal não marca nada.
     #[test]
     fn replay_derivado_fim_normal_com_ferramenta_concluida_fica_intacta() {
         let casos = [
-            ("antigravity", bancada::rodar(Protocolo::AgyStream, &captura("antigravity-feliz")), "Read"),
             ("cursor", bancada::rodar(Protocolo::CursorStream, &captura("cursor-feliz")), "Read"),
             ("opencode", bancada::rodar(Protocolo::Acp, &acp_turno("completed")), "Edit"),
         ];
@@ -1076,7 +996,7 @@ mod replay_protocolo {
         }).collect();
         assert!(ordem.windows(4).any(|w| w == ["interrupt", "erro", "started", "completed"]), "{ordem:?}");
 
-        for id in ["cursor-queda", "antigravity-queda"] {
+        for id in ["cursor-queda"] {
             let f = gravada(id);
             assert!(outs(&f).iter().all(|o| o.get("type") != Some(&Value::String("result".into())) && o.get("event") != Some(&Value::String("result".into()))), "{id}");
             assert!(f["transcript"].as_array().unwrap().iter().any(|e| e.get("close").is_some()), "{id}");

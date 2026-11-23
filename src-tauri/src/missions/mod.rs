@@ -51,7 +51,7 @@ pub use types::{
 use std::path::Path;
 
 use rusqlite::Connection;
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::database::DbConnection;
 use crate::runs::routing::{Assignment, RouteRequest};
@@ -80,11 +80,7 @@ pub(crate) fn notify_for_run<R: Runtime>(app: &AppHandle<R>, conn: &Connection, 
 }
 
 fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
-    Ok(app
-        .try_state::<DbConnection>()
-        .ok_or_else(|| "o banco de dados não está disponível".to_string())?
-        .inner()
-        .clone())
+    crate::database::db_of(app)
 }
 
 // ── Lo que no lanza nada ────────────────────────────────────────

@@ -920,15 +920,14 @@ mod retomada_por_turno {
     use std::cell::RefCell;
 
     use super::super::resume::{lost_notice, run_turn_resuming, TurnAttempt};
-    use super::super::{agy_map, cursor_map};
+    use super::super::cursor_map;
 
     type Refused = fn(&[String]) -> bool;
 
     /// A frase que cada CLI escreveria para uma sessão inexistente.
-    fn motores() -> [(&'static str, Refused, &'static str); 2] {
+    fn motores() -> [(&'static str, Refused, &'static str); 1] {
         [
             ("cursor", cursor_map::session_refused, "Error: chat not found: abc"),
-            ("antigravity", agy_map::session_refused, "AGY_ERROR: {\"status\":\"NOT_FOUND\",\"message\":\"conversation abc not found\"}"),
         ]
     }
 

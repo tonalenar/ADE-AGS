@@ -575,7 +575,6 @@ fn motores_de_conversa_usam_apply_account_env_em_vez_de_envs_cru() {
         ("claude.rs", include_str!("claude.rs")),
         ("codex.rs", include_str!("codex.rs")),
         ("opencode.rs", include_str!("opencode.rs")),
-        ("agy.rs", include_str!("agy.rs")),
     ] {
         assert!(
             fonte.contains("crate::agents::apply_account_env(&mut cmd, &env)"),

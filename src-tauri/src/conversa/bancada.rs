@@ -23,7 +23,6 @@ use serde_json::{json, Value};
 use crate::canal::timeline::{Item, ItemKind, ToolKind};
 use crate::runs::failure::{classify, FailureKind};
 
-use super::agy_map::{self, Out as AgyOut};
 use super::claude_map::{self, Out as ClaudeOut, TurnResult};
 use super::codex_map;
 use super::cursor_map::{self, Read as CursorRead};
@@ -52,12 +51,9 @@ pub enum Protocolo {
     /// `codex app-server` (JSON-RPC por linha).
     #[serde(rename = "codex-app-server")]
     CodexAppServer,
-    /// Agent Client Protocol (`opencode acp`).
+    /// Agent Client Protocol (`opencode acp`, `agy acp`).
     #[serde(rename = "acp")]
     Acp,
-    /// Stream-json do Antigravity. Cada `result` encerra o turno; em produção o processo continua aberto.
-    #[serde(rename = "agy-stream")]
-    AgyStream,
     /// `cursor-agent -p --output-format stream-json`. O turno fecha no `result` ou quando o próximo
     /// `atMs` passa de `Mapper::quiet_after` (relógio falso, sem espera real).
     #[serde(rename = "cursor-stream")]
@@ -70,7 +66,6 @@ impl Protocolo {
             Protocolo::ClaudeStream => "Claude",
             Protocolo::CodexAppServer => "Codex",
             Protocolo::Acp => "OpenCode",
-            Protocolo::AgyStream => "Antigravity",
             Protocolo::CursorStream => "Cursor",
         }
     }
@@ -81,7 +76,6 @@ impl Protocolo {
             Protocolo::ClaudeStream => "initialize",
             Protocolo::CodexAppServer => "thread/resume",
             Protocolo::Acp => "session/resume",
-            Protocolo::AgyStream => "init",
             Protocolo::CursorStream => "system/init",
         }
     }
@@ -408,7 +402,7 @@ impl Fake {
             (Passo::Fim, CodexAppServer) => self.fim_codex("completed", None),
             (Passo::Fim, Acp) => self.linha(json!({ "jsonrpc": "2.0", "id": ACP_PROMPT, "result": { "stopReason": "end_turn", "usage": { "totalTokens": 42 } } })),
             // O replay lê um transcript. Sintetizar o fluxo aqui afirmaria um formato que a captura real ainda não confirmou.
-            (_, AgyStream | CursorStream) => return Err("o roteiro sintetizado não cobre Antigravity nem Cursor: use um transcript no replay".into()),
+            (_, CursorStream) => return Err("o roteiro sintetizado não cobre Cursor: use um transcript no replay".into()),
         }
         Ok(())
     }
@@ -577,7 +571,7 @@ pub fn rodar(protocolo: Protocolo, saidas: &[Saida]) -> Resultado {
     if protocolo == Protocolo::CursorStream {
         return rodar_cursor(saidas);
     }
-    let mut motor = Motor { protocolo, out: Resultado::default(), claude: claude_map::Mapper::default(), acp: opencode_map::Mapper::new("bancada"), agy: agy_map::Mapper::new("bancada"), turno: false };
+    let mut motor = Motor { protocolo, out: Resultado::default(), claude: claude_map::Mapper::default(), acp: opencode_map::Mapper::new("bancada"), turno: false };
     let mut ultimo = 0u64;
     for saida in saidas {
         let silencio = saida.at_ms.saturating_sub(ultimo);
@@ -585,8 +579,7 @@ pub fn rodar(protocolo: Protocolo, saidas: &[Saida]) -> Resultado {
         ultimo = saida.at_ms;
         motor.out.relogio_ms = saida.at_ms;
         // Abrindo, o silêncio maior que o prazo do pedido é o "não respondeu" do motor.
-        // O Antigravity fecha cada turno no `result`; o processo de produção continua aberto entre turnos.
-        if protocolo != Protocolo::AgyStream && motor.out.abertura.is_none() && silencio > PRAZO_PEDIDO_MS {
+        if motor.out.abertura.is_none() && silencio > PRAZO_PEDIDO_MS {
             motor.out.abertura = Some(Err(format!("O {} não respondeu a {}", protocolo.nome(), protocolo.pedido_de_abertura())));
             return motor.out;
         }
@@ -618,7 +611,6 @@ fn rodar_cursor(saidas: &[Saida]) -> Resultado {
         out: Resultado::default(),
         claude: claude_map::Mapper::default(),
         acp: opencode_map::Mapper::new("bancada"),
-        agy: agy_map::Mapper::new("bancada"),
         turno: true,
     };
     let agora = Arc::new(AtomicU64::new(0));
@@ -717,7 +709,6 @@ struct Motor {
     out: Resultado,
     claude: claude_map::Mapper,
     acp: opencode_map::Mapper,
-    agy: agy_map::Mapper,
     /// Há um turno aberto (que o processo caindo fecharia como erro).
     turno: bool,
 }
@@ -763,7 +754,6 @@ impl Motor {
             Protocolo::ClaudeStream => self.claude(msg, now),
             Protocolo::CodexAppServer => self.codex(msg, now),
             Protocolo::Acp => self.acp(msg, now),
-            Protocolo::AgyStream => self.agy(msg, now),
             // O Cursor sai antes, em `rodar_cursor` (`read_turn`). Este braço não roda.
             Protocolo::CursorStream => {}
         }
@@ -922,18 +912,6 @@ impl Motor {
         }
     }
 
-    /// `agy.rs`: o laço lê cada linha e aplica o mapeador. Sem prazo.
-    fn agy(&mut self, msg: Value, now: i64) {
-        for out in self.agy.feed(&msg, now) {
-            match out {
-                AgyOut::Item(item) => self.out.guardar(*item),
-                AgyOut::Delta { item_id, delta, .. } => self.out.deltas.push((item_id, delta)),
-                AgyOut::Session(id) => self.abriu(&id),
-                AgyOut::Done(result) => self.terminou(result),
-            }
-        }
-    }
-
     fn acp_out(&mut self, out: AcpOut) {
         match out {
             AcpOut::Item(item) => self.out.guardar(*item),
@@ -1084,12 +1062,11 @@ fn id_de_opt(v: &Value) -> Option<String> {
 }
 
 /// Nomes de `ToolKind::Other` que o guard deixa passar. Vazio = qualquer Other reprova.
-/// Não é o catálogo do provider. `denied` é o nome que o `agy_map` grava na ação negada. `mcp` só
-/// existe para o teste do guard do Cursor ter um nome dentro da lista; a captura real é que acrescenta os outros.
+/// Não é o catálogo do provider. `mcp` só existe para o teste do guard do Cursor ter um nome
+/// dentro da lista; a captura real é que acrescenta os outros.
 fn other_aceito(protocolo: Protocolo) -> &'static [&'static str] {
     match protocolo {
         Protocolo::ClaudeStream | Protocolo::CodexAppServer | Protocolo::Acp => &[],
-        Protocolo::AgyStream => &["denied"],
         Protocolo::CursorStream => &["mcp"],
     }
 }

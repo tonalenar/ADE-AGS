@@ -20,7 +20,7 @@ use crate::database::DbConnection;
 
 use super::handoff::{self, Strategy};
 use super::store::{self, ThreadRow};
-use super::{agy, api, claude, codex, cursor, opencode, turn};
+use super::{api, claude, codex, cursor, opencode, turn};
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
@@ -225,7 +225,6 @@ fn close_processes(thread_id: &str) {
     codex::close(thread_id);
     claude::close(thread_id);
     opencode::close(thread_id);
-    agy::close(thread_id);
     cursor::close(thread_id);
 }
 

@@ -141,6 +141,7 @@ pub fn recent(history: &[i64], now: i64) -> Vec<i64> {
 
 /// O texto do handoff: reaproveita `conversa/handoff.rs` (prefixo `[ADE AGS]`, bloco `untrusted_data`,
 /// redação de segredos e `END_MARK`) para a tela esconder o contexto e conciliar o balão otimista.
+#[cfg(test)]
 pub fn handoff_text(items: &[Item], pending: Option<&str>) -> String {
     handoff_text_for(items, "", "anterior", "nova conta", pending)
 }
@@ -571,6 +572,7 @@ async fn switch_to(app: &AppHandle, db: &DbConnection, thread_id: &str, _pool_id
 
 /// A parte de banco da troca: sem janela, para testar.
 /// Preserva `pending` e grava `handoff_key` até que o envio da mensagem de handoff confirme `Ok` (`commit_switch_sent`).
+#[cfg(test)]
 pub(super) fn move_account(db: &DbConnection, thread_id: &str, from: &Option<String>, to: &Option<String>, resets_at: i64, now: i64) -> Result<(), String> {
     move_account_inner(None, db, thread_id, from, to, resets_at, now)
 }
@@ -691,6 +693,7 @@ impl PreparedSend {
 
 /// A parte de banco de [`before_send`], sem janela, para testar.
 /// Confere `working` sob `pool_gate` e nunca limpa `handoff_key`/`pending` antes de o envio dar `Ok`.
+#[cfg(test)]
 pub(super) fn prepare_before_send_db(
     db: &DbConnection,
     thread_id: &str,
@@ -816,6 +819,7 @@ pub fn check_manual_switch(working: bool, pending_requests: usize, current: &Opt
 
 /// A parte de banco da troca manual: valida, passa a conta, esquece a sessão e deixa o resumo para a próxima
 /// mensagem. Devolve (conta anterior, conta nova). Não conta no teto do pool nem ativa a volta à original.
+#[cfg(test)]
 pub(super) fn set_account_manual(db: &DbConnection, thread_id: &str, to: &Option<String>, working: bool, now: i64) -> Result<(Option<String>, Option<String>), String> {
     set_account_manual_inner(None, db, thread_id, to, working, now)
 }

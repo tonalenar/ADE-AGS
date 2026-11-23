@@ -147,7 +147,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::ChildResult, Scope::Session, Proof::None, &["src-tauri/src/conversa/opencode_map.rs"], "sem vínculo de resultado de subagente"),
             unsup(Capability::ChildStop, Scope::Session, Proof::None, &["src-tauri/src/conversa/opencode_map.rs"], "sem controle do ciclo de vida de subagentes"),
             sup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/conversa/opencode.rs"], "usa `session/resume` ou `session/load` com o id ACP persistido"),
-            unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/conversa/api.rs:103-111", "src-tauri/src/conversa/agy_map.rs:249-250"], "`context_compaction=false`; o step «compaction» é ignorado"),
+            unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/conversa/api.rs:103-111"], "`context_compaction=false`"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/conversa/api.rs:103-111"], "`persistent_goal=false`"),
             sup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/conversa/opencode.rs"], "o modo Plano é aplicado pela opção ACP `mode=plan`"),
             unsup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/conversa/opencode_map.rs"], "sem checkpoint no adapter ACP"),

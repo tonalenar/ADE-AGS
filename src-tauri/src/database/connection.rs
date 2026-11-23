@@ -54,6 +54,17 @@ pub fn db_boot_status() -> DbBootStatus {
 /// admite escrituras concurrentes, así que el `Mutex` es el que serializa el acceso.
 pub type DbConnection = Arc<Mutex<Connection>>;
 
+/// Obtém o handle compartilhado do banco registrado no estado do Tauri.
+pub fn try_db(app: &tauri::AppHandle) -> Option<DbConnection> {
+    use tauri::Manager;
+    app.try_state::<DbConnection>().map(|s| s.inner().clone())
+}
+
+/// Obtém o handle compartilhado do banco ou devolve erro amigável quando ainda não está pronto.
+pub fn db_of(app: &tauri::AppHandle) -> Result<DbConnection, String> {
+    try_db(app).ok_or_else(|| "o banco de dados não está disponível".to_string())
+}
+
 /// Roda `work` com a conexão travada numa thread de bloqueio, fora do runtime async.
 pub(crate) async fn blocking_db<T, F>(db: &DbConnection, work: F) -> Result<T, String>
 where

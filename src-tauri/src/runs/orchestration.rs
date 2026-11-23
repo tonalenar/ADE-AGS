@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use crate::database::DbConnection;
 
@@ -33,11 +33,7 @@ pub struct Caller {
 }
 
 fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
-    Ok(app
-        .try_state::<DbConnection>()
-        .ok_or("o banco de dados não está disponível")?
-        .inner()
-        .clone())
+    crate::database::db_of(app)
 }
 
 fn text(body: String) -> Value {
