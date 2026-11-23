@@ -336,8 +336,8 @@ MISSÕES (também sem interface: `ade-ags --headless`)
   worktrees prune [--cwd <caminho>] [--dry-run]  Limpa missões encerradas integradas; mantém órfãos para revisão
   mission precheck <id>                       O que o repositório e as missões anteriores já dizem sobre o objetivo
   mission startcheck <id>                     Evidência de briefing e atividade por agente; limite de 2 minutos
-  memory search \"<tema>\" --mission <id> [--limit 5] [--at <YYYY-MM-DD|YYYY-MM-DDTHH:MM|unix-seconds>]
-                                              Busca a memória vigente agora ou nesse instante (datas em UTC)
+  memory search \"<tema>\" [--mission <id>] [--limit 5] [--at <YYYY-MM-DD|YYYY-MM-DDTHH:MM|unix-seconds>]
+                                              Ai-memory do projeto primeiro; anexa histórico SQLite. --at só busca o histórico (UTC)
   memory history --mission <id> --key <nome> --scope workspace|mission
                                               Revisões aprovadas e seus intervalos de validade
   memory suggest [--mission <id>] --key <nome> --body \"...\" [--scope workspace|mission]
@@ -383,7 +383,7 @@ MEMÓRIA COMPARTILHADA (os agentes usam por MCP; veja docs/ade-ags/SHARED_MEMORY
                                               o que se propõe espera aprovação.
   memory index                              Índice aprovado da tab ou missão atual
   memory usage [--since <unix-seconds>]      Quem leu a memória: buscas, aberturas e memórias nunca lidas
-  memory open <página|entryId|chave>         Página do índice ou UMA entrada inteira (DADOS NÃO CONFIÁVEIS)
+  memory open <página|entryId|chave>         Página ai-memory do projeto ou UMA entrada histórica (DADOS NÃO CONFIÁVEIS)
   swarm note|question <texto>                Dados de sessão da missão, não memória durável
   swarm read                                  O quadro da missão: as notas publicadas, numeradas (#1, #2...)
   swarm promote <note-id> <key>              Propõe a nota; aprovação exclusiva do usuário

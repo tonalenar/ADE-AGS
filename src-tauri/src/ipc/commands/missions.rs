@@ -271,9 +271,13 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
         .map(|tab| tab.cwd).ok_or("a aba autenticada não está aberta")?;
     let mut tags = vec!["ade-ags".to_string()];
     if scope == "mission" {
-        if let Some(id) = mission { tags.push(format!("mission-{}", id.chars().take(32).collect::<String>())); }
+        if let Some(id) = mission.as_deref() { tags.push(format!("mission-{}", id.chars().take(32).collect::<String>())); }
     }
-    crate::ai_memory::write_agent_memory(&cwd, &key, &kind, &body, &tags, None)?;
+    crate::ai_memory::write_agent_memory_for_scope(
+        &cwd,
+        (scope == "mission").then_some(mission.as_deref()).flatten(),
+        &key, &kind, &body, &tags, None,
+    )?;
     Ok(json!({
         "status": "saved",
         "destination": "ai-memory",
@@ -281,9 +285,8 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
     }))
 }
 
-/// `ags memory search "<assunto>" [--mission <id>]`: busca por relevância no histórico SQLite aprovado do
-/// workspace e (quando em missão) da missão; funciona em missão e em aba solta. Páginas atuais do ai-memory
-/// ficam nas tools MCP escopadas.
+/// `ags memory search "<assunto>" [--mission <id>]`: prioriza páginas do ai-memory do projeto da aba
+/// autenticada e anexa o histórico SQLite legado; `--at` consulta apenas esse histórico.
 pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let tab = authenticated_tab(args)?;
     let query = arg_str(args, "query")?;
@@ -307,23 +310,40 @@ pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, Stri
         Some(id) => crate::memory::repo_scope::mission_repo_key_unlocked(&db, Some(id))?,
         None => crate::memory::repo_scope::tab_repo_key_unlocked(&db, &tab)?,
     };
+    let mut ai_results = Vec::new();
+    if at.is_none() && crate::ai_memory::memory_enabled(&db) {
+        let cwd = super::peers::open_tabs(app).ok().and_then(|tabs| {
+            tabs.into_iter().find(|open_tab| open_tab.id == tab).map(|open_tab| open_tab.cwd)
+        });
+        if let Some(cwd) = cwd
+            && let Ok(hits) = crate::ai_memory::search_project_pages(&cwd, &query)
+        {
+            ai_results = hits.into_iter().take(limit).map(|hit| json!({
+                "path": hit.path,
+                "title": hit.title,
+                "snippet": hit.snippet,
+                "source": "ai-memory",
+            })).collect();
+        }
+    }
     let conn = db.lock().map_err(|e| e.to_string())?;
     let current_owner = workspace_for_caller(&conn, &tab)?;
     if current_owner != (workspace.clone(), mission.clone()) {
         return Err("o contexto da aba mudou durante a busca de memória".into());
     }
     let fail_closed = mission.is_some() && repo_key.is_none();
-    memory_search_in(
+    let legacy = memory_search_legacy_hits_in(
         &conn,
         &workspace,
         mission.as_deref(),
         &query,
-        limit,
+        limit.saturating_sub(ai_results.len()),
         at,
         repo_key.as_deref(),
         fail_closed,
         Some(tab.as_str()),
-    )
+    )?;
+    Ok(memory_search_response(&query, at, ai_results, legacy))
 }
 
 /// O núcleo de `memory_search`, com o banco já aberto: lê só as memórias aprovadas da missão.
@@ -364,6 +384,23 @@ pub(super) fn memory_search_in(
     fail_closed: bool,
     tab: Option<&str>,
 ) -> Result<Value, String> {
+    let hits = memory_search_legacy_hits_in(
+        conn, workspace_id, mission_id, query, limit, at, repo_key, fail_closed, tab,
+    )?;
+    Ok(memory_search_response(query, at, Vec::new(), hits))
+}
+
+fn memory_search_legacy_hits_in(
+    conn: &rusqlite::Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    query: &str,
+    limit: usize,
+    at: Option<i64>,
+    repo_key: Option<&str>,
+    fail_closed: bool,
+    tab: Option<&str>,
+) -> Result<Vec<Value>, String> {
     let hits = match at {
         Some(at) => crate::memory::search::search_at_with_repo(
             conn,
@@ -399,10 +436,28 @@ pub(super) fn memory_search_in(
             entry_keys: &keys,
         },
     );
-    Ok(crate::memory::untrusted_memory_value(&match at {
-        Some(at) => json!({ "query": query, "at": at, "results": hits }),
-        None => json!({ "query": query, "results": hits }),
-    }))
+    Ok(hits.into_iter().map(|hit| {
+        let mut value = serde_json::to_value(hit).unwrap_or(Value::Null);
+        if let Some(object) = value.as_object_mut() {
+            object.insert("source".into(), json!("legacy"));
+        }
+        value
+    }).collect())
+}
+
+pub(crate) fn memory_search_response(
+    query: &str,
+    at: Option<i64>,
+    mut ai_results: Vec<Value>,
+    legacy_results: Vec<Value>,
+) -> Value {
+    ai_results.extend(legacy_results);
+    let mut data = json!({ "query": query, "results": ai_results });
+    if let Some(at) = at {
+        data["at"] = json!(at);
+        data["note"] = json!("--at consulta apenas o histórico SQLite legado; páginas do ai-memory representam o estado atual.");
+    }
+    crate::memory::untrusted_memory_value(&data)
 }
 
 pub(super) fn memory_repo_read(
@@ -417,6 +472,22 @@ pub(super) fn memory_repo_read(
     };
     let tab = authenticated_tab(args)?;
     let db = db(app)?;
+    if !index && path.ends_with(".md") && crate::ai_memory::memory_enabled(&db) {
+        let cwd = super::peers::open_tabs(app).ok().and_then(|tabs| {
+            tabs.into_iter().find(|open_tab| open_tab.id == tab).map(|open_tab| open_tab.cwd)
+        });
+        if let Some(cwd) = cwd
+            && let Ok(Some(page)) = crate::ai_memory::read_project_page(&cwd, &path)
+        {
+            let envelope = crate::memory::untrusted_memory_value(&json!({
+                "path": page.path,
+                "title": page.title,
+                "body": page.body,
+                "source": "ai-memory",
+            }));
+            return Ok(json!({ "path": path, "text": envelope["text"].clone() }));
+        }
+    }
     let (workspace, mission) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         workspace_for_caller(&conn, &tab)?
@@ -550,7 +621,9 @@ pub(super) fn swarm_promote(app: &AppHandle, args: &Value) -> Result<Value, Stri
         "ade-ags".to_string(),
         format!("mission-{}", mission.chars().take(32).collect::<String>()),
     ];
-    crate::ai_memory::write_agent_memory(&cwd, &key, "note", &body, &tags, None)?;
+    crate::ai_memory::write_agent_memory_for_scope(
+        &cwd, Some(&mission), &key, "note", &body, &tags, None,
+    )?;
     Ok(json!({
         "status": "saved",
         "destination": "ai-memory",

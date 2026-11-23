@@ -4791,6 +4791,8 @@ fn una_falla_se_clasifica_por_lo_que_dijo_la_cli() {
         "API error: RESOURCE_EXHAUSTED (429)",
         "You have exhausted your capacity on this model. Try again later.",
         "model capacity exhausted",
+        "CAPACITY_EXHAUSTED",
+        "QUOTA_EXCEEDED",
     ] {
         assert_eq!(classify(text), RateLimited, "{text}");
     }

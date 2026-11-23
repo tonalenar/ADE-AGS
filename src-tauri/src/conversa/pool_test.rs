@@ -734,3 +734,247 @@ fn avisos_do_pool_sao_json_estruturado_e_emite_thread_account_id() {
     }
     assert!(!src.contains("const CHAIN_SECS"), "heurística CHAIN_SECS deve ter sido removida (M-4)");
 }
+
+// ── S-1: formatos de reset_at e erro JSON-RPC com error.data ─────────────────────────────────────────────
+
+/// 2026-11-22T14:34:00Z (11:34 em UTC-3). Fixo, sem relógio real nem fuso da máquina.
+const S1_NOW: i64 = 1_795_358_040;
+/// 2026-11-22T18:00:00Z.
+const S1_18Z: i64 = 1_795_370_400;
+
+#[test]
+fn renovacao_respeita_fuso_explicito_entre_parenteses_e_mantem_iana_no_fuso_local() {
+    let sp = -3 * 3600;
+    let tokyo = 9 * 3600;
+    // (UTC) e (GMT) ignoram o fuso local e resolvem para 18:00Z independente da máquina.
+    assert_eq!(reset_at_known("You've hit your limit · resets 6pm (UTC)", S1_NOW, sp), Some(S1_18Z));
+    assert_eq!(reset_at_known("You've hit your limit · resets 6pm (UTC)", S1_NOW, tokyo), Some(S1_18Z));
+    assert_eq!(reset_at_known("resets 6pm (GMT)", S1_NOW, sp), Some(S1_18Z));
+    assert_eq!(reset_at_known("resets 18:00 (Etc/UTC)", S1_NOW, sp), Some(S1_18Z));
+    // Offsets explícitos ±HH:MM / UTC±H / GMT±H.
+    assert_eq!(reset_at_known("resets 18:00 (+02:00)", S1_NOW, sp), Some(S1_NOW + 3600 + 26 * 60));
+    assert_eq!(reset_at_known("resets 15:00 (-03:00)", S1_NOW, tokyo), Some(S1_18Z));
+    assert_eq!(reset_at_known("resets 1:10pm (GMT-3)", S1_NOW, tokyo), Some(S1_NOW + 3600 + 36 * 60));
+    // 16:00 (+02:00) = 14:00Z, já passou às 14:34Z → dia seguinte (14:00Z + 24h).
+    assert_eq!(
+        reset_at_known("resets 16:00 (UTC+02:00)", S1_NOW, sp),
+        Some(S1_NOW - 34 * 60 + 86_400)
+    );
+    // Offset com minutos (+05:30): 18:30 (+05:30) = 13:00Z → já passou → amanhã 13:00Z.
+    assert_eq!(
+        reset_at_known("resets 18:30 (+05:30)", S1_NOW, sp),
+        Some(S1_NOW - (3600 + 34 * 60) + 86_400)
+    );
+    // Sem crate de tzdb no Cargo.toml, nomes IANA preservam o comportamento atual (usa offset_secs).
+    assert_eq!(
+        reset_at_known("resets 3pm (America/Sao_Paulo)", S1_NOW, sp),
+        Some(S1_18Z)
+    );
+    assert_eq!(
+        reset_at_known("resets 3pm (America/Los_Angeles)", S1_NOW, -8 * 3600),
+        Some(S1_NOW + 8 * 3600 + 26 * 60)
+    );
+}
+
+#[test]
+fn renovacao_aceita_formato_24h_e_iso8601() {
+    let sp = -3 * 3600;
+    // 24h local (11:34 -> 18:00 local = +6h26m) e com "at" e com UTC.
+    assert_eq!(reset_at_known("resets 18:00", S1_NOW, sp), Some(S1_NOW + 6 * 3600 + 26 * 60));
+    assert_eq!(reset_at_known("resets at 18:00", S1_NOW, 0), Some(S1_18Z));
+    assert_eq!(reset_at_known("resets 18:00 UTC", S1_NOW, sp), Some(S1_18Z));
+    assert_eq!(reset_at_known("resets 00:30", S1_NOW, 0), Some(S1_NOW + 9 * 3600 + 56 * 60));
+    assert_eq!(reset_at_known("resets 23:59:30 (UTC)", S1_NOW, sp), Some(S1_NOW + 9 * 3600 + 25 * 60 + 30));
+
+    // ISO-8601 com Z, com offset e com fração de segundo (independe do fuso local).
+    for msg in [
+        "resets at 2026-11-22T18:00:00Z",
+        "Quota exhausted. Resets at 2026-11-22T15:00:00-03:00.",
+        "RESOURCE_EXHAUSTED: resets 2026-11-22T20:30:00+02:30",
+        "reset_time: 2026-11-22T18:00:00.500Z",
+        "Retry-After: 2026-11-22T18:00:00Z",
+    ] {
+        assert_eq!(reset_at_known(msg, S1_NOW, sp), Some(S1_18Z), "{msg}");
+        assert_eq!(reset_at_known(msg, S1_NOW, 9 * 3600), Some(S1_18Z), "{msg}");
+    }
+}
+
+#[test]
+fn renovacao_aceita_duracao_relativa() {
+    let casos = [
+        ("Quota exceeded, try again in 42 minutes", 42 * 60),
+        ("Rate limit reached. retry after 2h", 2 * 3600),
+        ("in 1 hour 30 minutes", 3600 + 30 * 60),
+        ("Please retry in 37s", 37),
+        ("Please retry in 37.4s", 38),
+        ("resets in 1h 15m 20s", 3600 + 15 * 60 + 20),
+        ("You've hit your usage limit. Upgrade to Pro or try again in 2 hours.", 2 * 3600),
+        ("RESOURCE_EXHAUSTED: retry in 1 hour and 30 minutes", 3600 + 30 * 60),
+        ("Retry-After: 120", 120),
+        ("RESOURCE_EXHAUSTED; retryDelay: 45s", 45),
+    ];
+    for (msg, delta) in casos {
+        assert_eq!(reset_at_known(msg, S1_NOW, -3 * 3600), Some(S1_NOW + delta), "{msg}");
+        assert_eq!(reset_at(msg, S1_NOW, -3 * 3600), S1_NOW + delta, "{msg}");
+    }
+}
+
+#[test]
+fn renovacao_rejeita_falsos_positivos_e_mantem_fallback_de_cinco_horas() {
+    let falsos = [
+        "rate limited",
+        "resets soon",
+        "presets 3pm",
+        "resets 13pm",
+        "resets 0am",
+        "resets 25:00",
+        "resets 18:60",
+        "resets 18:0",
+        "resets 18:00pm",
+        "resets 5",
+        "5-hour limit reached",
+        "[2026-11-22T14:30:00Z] ERROR: RESOURCE_EXHAUSTED",
+        "resets at 2026-11-22T14:00:00Z",
+        "resets at 2026-13-40T18:00:00Z",
+        "completed in 3s",
+        "finished in 2 minutes",
+        "failed in 10s",
+        "timeout after 30s",
+        "in 5 files",
+        "in 250ms",
+        "retry in 0s",
+        "in 2hosts",
+        "in 3months",
+        "within 5 minutes",
+        "in the last 2 hours",
+    ];
+    for msg in falsos {
+        assert_eq!(reset_at_known(msg, S1_NOW, -3 * 3600), None, "não devia casar: {msg}");
+        assert_eq!(reset_at(msg, S1_NOW, -3 * 3600), S1_NOW + WINDOW_SECS, "fallback 5h: {msg}");
+    }
+}
+
+#[test]
+fn erro_jsonrpc_acp_considera_error_data_para_limite_e_reset_sem_vazar_segredos() {
+    use crate::conversa::opencode_map::rpc_error_text;
+    use crate::runs::failure::{classify, FailureKind};
+
+    // 1. data como string
+    let err_str = serde_json::json!({
+        "code": -32603,
+        "message": "Internal error",
+        "data": "RESOURCE_EXHAUSTED: You have exhausted your capacity. Please retry in 37s"
+    });
+    let txt_str = rpc_error_text(&err_str);
+    assert_eq!(classify(&txt_str), FailureKind::RateLimited, "{txt_str}");
+    assert_eq!(reset_at_known(&txt_str, S1_NOW, 0), Some(S1_NOW + 37), "{txt_str}");
+
+    // 2. data como objeto com status/message/details (formato estilo Google/gRPC)
+    let err_obj = serde_json::json!({
+        "code": -32603,
+        "message": "Internal error",
+        "data": {
+            "status": "RESOURCE_EXHAUSTED",
+            "message": "Model capacity exhausted",
+            "details": [
+                { "reason": "RATE_LIMIT_EXCEEDED", "retryDelay": "42s" }
+            ]
+        }
+    });
+    let txt_obj = rpc_error_text(&err_obj);
+    assert_eq!(classify(&txt_obj), FailureKind::RateLimited, "{txt_obj}");
+    assert_eq!(reset_at_known(&txt_obj, S1_NOW, 0), Some(S1_NOW + 42), "{txt_obj}");
+
+    // 3. data como objeto com reason CAPACITY_EXHAUSTED e resetTime ISO-8601
+    let err_iso = serde_json::json!({
+        "code": -32603,
+        "message": "Internal error",
+        "data": {
+            "reason": "CAPACITY_EXHAUSTED",
+            "resetTime": "2026-11-22T18:00:00Z"
+        }
+    });
+    let txt_iso = rpc_error_text(&err_iso);
+    assert_eq!(classify(&txt_iso), FailureKind::RateLimited, "{txt_iso}");
+    assert_eq!(reset_at_known(&txt_iso, S1_NOW, -3 * 3600), Some(S1_18Z), "{txt_iso}");
+
+    // 4. data como lista de strings
+    let err_list = serde_json::json!({
+        "code": -32603,
+        "message": "Internal error",
+        "data": ["RESOURCE_EXHAUSTED", "try again in 42 minutes"]
+    });
+    let txt_list = rpc_error_text(&err_list);
+    assert_eq!(classify(&txt_list), FailureKind::RateLimited, "{txt_list}");
+    assert_eq!(reset_at_known(&txt_list, S1_NOW, 0), Some(S1_NOW + 42 * 60), "{txt_list}");
+
+    // 5. data com erro aninhado + código 429 e relógio UTC
+    let err_nested = serde_json::json!({
+        "code": -32603,
+        "message": "Internal error",
+        "data": {
+            "error": {
+                "code": 429,
+                "details": "resets 18:00 (UTC)"
+            }
+        }
+    });
+    let txt_nested = rpc_error_text(&err_nested);
+    assert_eq!(classify(&txt_nested), FailureKind::RateLimited, "{txt_nested}");
+    assert_eq!(reset_at_known(&txt_nested, S1_NOW, -3 * 3600), Some(S1_18Z), "{txt_nested}");
+
+    // 6. Segredos dentro de error.data não vazam no texto retornado
+    let jwt = "eyJhbGciOiJIUzI1NiJ9.abcdefghijklmno.123456";
+    let api_key = "sk-ant-api03-1234567890abcdefghij";
+    let err_secret = serde_json::json!({
+        "code": -32603,
+        "message": "Internal error",
+        "data": {
+            "message": format!("RESOURCE_EXHAUSTED for Bearer {jwt}"),
+            "authorization": "Bearer supersecret12345678",
+            "api_key": api_key,
+            "headers": { "Authorization": "Bearer secret99999999" }
+        }
+    });
+    let txt_secret = rpc_error_text(&err_secret);
+    assert_eq!(classify(&txt_secret), FailureKind::RateLimited, "{txt_secret}");
+    assert!(!txt_secret.contains(jwt), "JWT vazou: {txt_secret}");
+    assert!(!txt_secret.contains(api_key), "API key vazou: {txt_secret}");
+    assert!(!txt_secret.contains("supersecret12345678"), "header authorization vazou: {txt_secret}");
+    assert!(!txt_secret.contains("secret99999999"), "headers aninhados vazaram: {txt_secret}");
+
+    // 7. Limite de tamanho em error.data gigante
+    let err_huge = serde_json::json!({
+        "code": -32603,
+        "message": "Internal error",
+        "data": format!("RESOURCE_EXHAUSTED {}", "a".repeat(20_000))
+    });
+    let txt_huge = rpc_error_text(&err_huge);
+    assert!(txt_huge.len() <= 1_500, "erro com data gigante deve ser limitado: len={}", txt_huge.len());
+    assert_eq!(classify(&txt_huge), FailureKind::RateLimited);
+
+    // 8. Falso positivo: erro comum em error.data continua Other e sem reset_at
+    let err_other = serde_json::json!({
+        "code": -32603,
+        "message": "Internal error",
+        "data": { "message": "syntax error at src/main.rs:429:5", "details": ["completed in 3s"] }
+    });
+    let txt_other = rpc_error_text(&err_other);
+    assert_eq!(classify(&txt_other), FailureKind::Other, "{txt_other}");
+    assert_eq!(reset_at_known(&txt_other, S1_NOW, 0), None, "{txt_other}");
+
+    // 9. Sem duplicar quando data repete message, e fallback limpo sem data
+    let err_dup = serde_json::json!({ "code": -32603, "message": "RESOURCE_EXHAUSTED", "data": "RESOURCE_EXHAUSTED" });
+    assert_eq!(rpc_error_text(&err_dup), "RESOURCE_EXHAUSTED");
+    let err_plain = serde_json::json!({ "code": -32603, "message": "Internal error" });
+    assert_eq!(rpc_error_text(&err_plain), "Internal error");
+
+    // 10. Garante que opencode.rs::dispatch realmente usa rpc_error_text ao ler erro JSON-RPC
+    let oc_src = include_str!("opencode.rs");
+    let disp_pos = oc_src.find("fn dispatch(").expect("fn dispatch em opencode.rs");
+    let disp_blk = &oc_src[disp_pos..disp_pos + 1200];
+    assert!(
+        disp_blk.contains("map::rpc_error_text(error)"),
+        "opencode::dispatch deve usar map::rpc_error_text(error)"
+    );
+}

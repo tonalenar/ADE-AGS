@@ -49,6 +49,23 @@ fn campos_opcionais_omitidos_e_dados_nao_confiaveis_tem_contrato_explicito() {
     assert!(value["data"].get("future").is_none());
 }
 
+#[test]
+fn caminho_de_gravacao_separa_missoes_e_preserva_workspace() {
+    use sha2::{Digest, Sha256};
+    let tags = Vec::new();
+    let workspace = super::commands::prepare_agent_write("mesma chave", None, "note", "corpo", &tags, None).unwrap();
+    let mission_a = super::commands::prepare_agent_write("mesma chave", Some("1234567890-abcdef"), "note", "corpo", &tags, None).unwrap();
+    let mission_b = super::commands::prepare_agent_write("mesma chave", Some("abcdef0123456789"), "note", "corpo", &tags, None).unwrap();
+
+    let digest = Sha256::digest("mesma chave");
+    let suffix = digest[..8].iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    assert_eq!(workspace.path, format!("ade-ags/mesma-chave-{suffix}.md"));
+    assert!(mission_a.path.starts_with("ade-ags/mission-1234567890-abcdef-"));
+    assert!(mission_b.path.starts_with("ade-ags/mission-abcdef0123456789-"));
+    assert_ne!(mission_a.path, mission_b.path);
+    assert_ne!(workspace.path, mission_a.path);
+}
+
 #[cfg(unix)]
 mod processo {
     use super::*;
@@ -204,6 +221,27 @@ mod processo {
                 .unwrap()
                 .data
                 .is_empty()
+        );
+        fake.fixture("search-populated.json");
+        assert_eq!(
+            client.read::<Vec<SearchHit>>(Read::SearchScoped {
+                query: "consulta".into(),
+                workspace: "ade-test".into(),
+                project: "probe".into(),
+            }).unwrap().data[0].path,
+            "notes/probe.md"
+        );
+        let argv = fs::read_to_string(fake.root.join("argv")).unwrap();
+        assert!(argv.contains("--workspace=ade-test"));
+        assert!(argv.contains("--project=probe"));
+        fake.fixture("read-page-populated.json");
+        assert_eq!(
+            client.read::<Page>(Read::PageScoped {
+                path: "notes/probe.md".into(),
+                workspace: "ade-test".into(),
+                project: "probe".into(),
+            }).unwrap().data.path,
+            "notes/probe.md"
         );
         fake.fixture("projects.json");
         assert_eq!(
