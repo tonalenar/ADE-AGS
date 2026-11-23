@@ -80,6 +80,19 @@ pub struct ConnectionTest {
     pub error: Option<String>,
 }
 
+/// Estado em edição na tela de Ajustes → Decisões, para testar conexão antes de salvar.
+/// A chave em `api_key` fica só em memória durante o teste (nunca vai ao banco nem ao log).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionTestDraft {
+    pub provider: String,
+    pub base_url: String,
+    pub model: String,
+    pub timeout_ms: u64,
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+
 fn dto(settings: &Settings) -> DecisionSettingsDto {
     DecisionSettingsDto {
         enabled: settings.enabled,
@@ -182,6 +195,7 @@ pub async fn decision_settings_set(
             let conn = db.lock().map_err(|error| error.to_string())?;
             config::load(&conn)?
         };
+        http::clear_all_quota_exhausted();
         Ok(dto(&stored))
     })
     .await
@@ -192,7 +206,9 @@ pub async fn decision_settings_set(
 #[tauri::command]
 pub async fn decision_key_set(key: String, slot: Option<String>) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        config::save_key_in(config::KeySlot::parse(slot.as_deref()), &key)
+        config::save_key_in(config::KeySlot::parse(slot.as_deref()), &key)?;
+        http::clear_all_quota_exhausted();
+        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -201,21 +217,99 @@ pub async fn decision_key_set(key: String, slot: Option<String>) -> Result<(), S
 #[tauri::command]
 pub async fn decision_key_clear(slot: Option<String>) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        config::clear_key_in(config::KeySlot::parse(slot.as_deref()))
+        config::clear_key_in(config::KeySlot::parse(slot.as_deref()))?;
+        http::clear_all_quota_exhausted();
+        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
+/// Constrói o alvo de teste a partir do rascunho da tela, validando URL e modelo como no `persist`.
+/// Se o usuário digitou uma chave no campo, usa essa chave (em memória); senão, o chamador carrega do cofre.
+pub(crate) fn target_from_draft(
+    draft: &ConnectionTestDraft,
+) -> Result<(Settings, Option<String>), String> {
+    let provider = ProviderKind::parse(&draft.provider);
+    if matches!(provider, ProviderKind::None | ProviderKind::Clef) {
+        return Ok((
+            Settings {
+                provider,
+                ..Settings::default()
+            },
+            None,
+        ));
+    }
+    let raw_url = if draft.base_url.trim().is_empty() {
+        provider.default_base_url().to_string()
+    } else {
+        draft.base_url.clone()
+    };
+    let base_url = config::normalize_base_url(&raw_url)?;
+    let raw_model = if draft.model.trim().is_empty() {
+        provider.default_model().to_string()
+    } else {
+        draft.model.clone()
+    };
+    let model = provider.coerce_model(&config::normalize_model(&raw_model)?);
+    let typed_key = draft
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .map(str::to_string);
+    if let Some(key) = typed_key.as_deref() {
+        config::validate_api_key(key)?;
+    }
+    Ok((
+        Settings {
+            enabled: true,
+            provider,
+            base_url,
+            model,
+            timeout_ms: config::clamp_timeout(draft.timeout_ms),
+            ..Settings::default()
+        },
+        typed_key,
+    ))
+}
+
 /// Comando síncrono roda na thread principal do Tauri: a chamada de rede (até o timeout, que
-/// pode chegar a 30 s) congelaria a janela. Aqui só se lê o ajuste; o resto vai para fora.
+/// pode chegar a 30 s) congelaria a janela. Quando `draft` vem preenchido, testa o que está na
+/// tela antes de salvar; sem `draft`, usa o estado salvo no SQLite.
 #[tauri::command]
 pub async fn decision_test_connection(
     db: State<'_, DbConnection>,
     slot: Option<String>,
+    draft: Option<ConnectionTestDraft>,
 ) -> Result<ConnectionTest, String> {
-    let settings = crate::database::blocking_db(&db, |conn| config::load(conn)).await?;
     let slot = config::KeySlot::parse(slot.as_deref());
+    if let Some(draft) = draft {
+        let (target, typed_key) = match target_from_draft(&draft) {
+            Ok(pair) => pair,
+            Err(error) => {
+                return Ok(ConnectionTest {
+                    ok: false,
+                    latency_ms: 0,
+                    error: Some(error),
+                });
+            }
+        };
+        if slot == config::KeySlot::Secondary && matches!(target.provider, ProviderKind::None) {
+            return Ok(ConnectionTest {
+                ok: false,
+                latency_ms: 0,
+                error: Some("Escolha o segundo provedor antes de testar.".into()),
+            });
+        }
+        return tauri::async_runtime::spawn_blocking(move || {
+            let key = typed_key.or_else(|| config::load_key_in(slot));
+            ping(&target, key)
+        })
+        .await
+        .map_err(|error| error.to_string());
+    }
+    let settings = crate::database::blocking_db(&db, |conn| config::load(conn)).await?;
     let target = match (slot, &settings.secondary) {
         (config::KeySlot::Secondary, Some(second)) => settings.with_endpoint(second),
         (config::KeySlot::Secondary, None) => {

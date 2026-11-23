@@ -4,8 +4,8 @@ import { useTranslation } from "react-i18next";
 
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
-import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, jevModels, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
-import { NO_HEURISTIC, POINT_MODE, shadowSummary, type PointMode } from "@/features/settings/decisionsModel";
+import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, jevModels, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type ConnectionTestDraft, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
+import { NO_HEURISTIC, POINT_MODE, activateJevBrowser, deactivateJevBrowser, isJevBrowserReady, setBrowserPilotSetting, setBrowserVisionSetting, shadowSummary, type PointMode } from "@/features/settings/decisionsModel";
 import { applyDecisionModelUpdate, defaultDecisionSettings, isDirty, modelAfterProviderChange, modelOptions, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
 import { uiErrorText } from "@/shared/uiErrorText";
 
@@ -89,7 +89,7 @@ function Stat({ label, value, muted = false }: { label: string; value: string; m
 }
 
 /** O campo da chave: escondida por padrão, com o olho para mostrar e, se já há uma no cofre, o botão de apagar. */
-function KeyField({ label, hint, placeholder, value, onChange, saved, onClear, clearLabel }: {
+function KeyField({ label, hint, placeholder, value, onChange, saved, onClear, clearLabel, inputRef }: {
   label: string;
   clearLabel: string;
   hint: string;
@@ -98,6 +98,7 @@ function KeyField({ label, hint, placeholder, value, onChange, saved, onClear, c
   onChange: (value: string) => void;
   saved: boolean;
   onClear: () => void;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
 }) {
   const { t } = useTranslation();
   const [show, setShow] = useState(false);
@@ -106,6 +107,7 @@ function KeyField({ label, hint, placeholder, value, onChange, saved, onClear, c
       <span className="flex items-center gap-1.5">
         <span className="relative">
           <input
+            ref={inputRef}
             aria-label={label}
             type={show ? "text" : "password"}
             autoComplete="off"
@@ -172,6 +174,7 @@ export function DecisionsSection() {
   const [report, setReport] = useState<ShadowReport | null>(null);
   const [jevList, setJevList] = useState<string[]>([]);
   const dirtyRef = useRef(false);
+  const primaryKeyRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const loadSettings = () => getDecisionSettings()
@@ -219,41 +222,72 @@ export function DecisionsSection() {
     && settings.secondaryModel === modelAfterProviderChange(settings.model, settings.provider);
   const hosts = remoteHosts(settings);
 
-  const save = async () => {
+  const persistAll = async (target: DecisionSettings, successMessage: string) => {
     setStatus("");
     try {
+      const primaryKey = keyDraft.trim();
+      const secondaryKey = secondaryKeyDraft.trim();
+      // Grava primeiro no keyring: se o cofre falhar ou for cancelado, nenhuma flag fica ligada no SQLite.
+      if (primaryKey) {
+        await setDecisionKey(primaryKey, "primary");
+        setKeyDraft("");
+      }
+      if (secondaryKey) {
+        await setDecisionKey(secondaryKey, "secondary");
+        setSecondaryKeyDraft("");
+      }
+      const normalizedVision = target.browserPilot && target.browserVision;
       const next = await setDecisionSettings({
-        enabled: settings.enabled,
-        provider: settings.provider,
-        baseUrl: settings.baseUrl,
-        model: modelAfterProviderChange(settings.model, settings.provider),
-        timeoutMs: timeoutDraft === null ? parseTimeout(String(settings.timeoutMs)) : parseTimeout(timeoutDraft),
-        memoryApproval: settings.memoryApproval,
-        dreamTriage: settings.dreamTriage,
-        fleetGate: settings.fleetGate,
-        missionGate: settings.missionGate,
-        deliveryGate: settings.deliveryGate,
-        memoryRelevance: settings.memoryRelevance,
-        turnRouting: settings.turnRouting,
-        browserPilot: settings.browserPilot,
-        browserVision: settings.browserVision,
-        secondaryProvider: settings.secondaryProvider,
-        secondaryBaseUrl: settings.secondaryBaseUrl,
-        secondaryModel: modelAfterProviderChange(settings.secondaryModel, settings.secondaryProvider),
-        modelAutoUpdate: settings.modelAutoUpdate,
+        enabled: target.enabled,
+        provider: target.provider,
+        baseUrl: target.baseUrl,
+        model: modelAfterProviderChange(target.model, target.provider),
+        timeoutMs: timeoutDraft === null ? parseTimeout(String(target.timeoutMs)) : parseTimeout(timeoutDraft),
+        memoryApproval: target.memoryApproval,
+        dreamTriage: target.dreamTriage,
+        fleetGate: target.fleetGate,
+        missionGate: target.missionGate,
+        deliveryGate: target.deliveryGate,
+        memoryRelevance: target.memoryRelevance,
+        turnRouting: target.turnRouting,
+        browserPilot: target.browserPilot,
+        browserVision: normalizedVision,
+        secondaryProvider: target.secondaryProvider,
+        secondaryBaseUrl: target.secondaryBaseUrl,
+        secondaryModel: modelAfterProviderChange(target.secondaryModel, target.secondaryProvider),
+        modelAutoUpdate: target.modelAutoUpdate,
       });
-      if (keyDraft.trim()) await setDecisionKey(keyDraft.trim(), "primary");
-      if (secondaryKeyDraft.trim()) await setDecisionKey(secondaryKeyDraft.trim(), "secondary");
-      setKeyDraft("");
-      setSecondaryKeyDraft("");
       const fresh = await getDecisionSettings();
-      const stored = { ...next, keySaved: fresh.keySaved, secondaryKeySaved: fresh.secondaryKeySaved };
+      const stored = {
+        ...next,
+        keySaved: fresh?.keySaved ?? (target.keySaved || primaryKey !== ""),
+        secondaryKeySaved: fresh?.secondaryKeySaved ?? (target.secondaryKeySaved || secondaryKey !== ""),
+      };
       setSettings(stored);
       setSaved(stored);
-      setStatus(t("settings.decisions.saved"));
+      setStatus(successMessage);
     } catch (error) {
       setStatus(uiErrorText(error));
     }
+  };
+
+  const save = () => persistAll(settings, t("settings.decisions.saved"));
+
+  const toggleQuickJevBrowser = async () => {
+    if (isJevBrowserReady(settings) && (settings.keySaved || keyDraft.trim() !== "")) {
+      const next = deactivateJevBrowser(settings);
+      setSettings(next);
+      await persistAll(next, t("settings.decisions.quickBrowser.disabledSaved"));
+      return;
+    }
+    const next = activateJevBrowser(settings);
+    setSettings(next);
+    if (next.keySaved || keyDraft.trim() !== "") {
+      await persistAll(next, t("settings.decisions.quickBrowser.enabledSaved"));
+      return;
+    }
+    setStatus(t("settings.decisions.quickBrowser.pasteKeyHint"));
+    primaryKeyRef.current?.focus();
   };
 
   const removeKey = async (slot: KeySlot) => {
@@ -274,7 +308,23 @@ export function DecisionsSection() {
     put(null);
     setTesting(slot);
     try {
-      const result = await testDecisionConnection(slot);
+      const timeoutMs = timeoutDraft === null ? parseTimeout(String(settings.timeoutMs)) : parseTimeout(timeoutDraft);
+      const draft: ConnectionTestDraft = slot === "primary"
+        ? {
+            provider: settings.provider,
+            baseUrl: settings.baseUrl,
+            model: modelAfterProviderChange(settings.model, settings.provider),
+            timeoutMs,
+            ...(keyDraft.trim() ? { apiKey: keyDraft.trim() } : {}),
+          }
+        : {
+            provider: settings.secondaryProvider,
+            baseUrl: settings.secondaryBaseUrl,
+            model: modelAfterProviderChange(settings.secondaryModel, settings.secondaryProvider),
+            timeoutMs,
+            ...(secondaryKeyDraft.trim() ? { apiKey: secondaryKeyDraft.trim() } : {}),
+          };
+      const result = await testDecisionConnection(slot, draft);
       put(result.ok
         ? { ok: true, text: t("settings.decisions.testOk", { ms: result.latencyMs }) }
         : { ok: false, text: t("settings.decisions.testFail", { ms: result.latencyMs, error: result.error ?? "" }) });
@@ -308,9 +358,38 @@ export function DecisionsSection() {
   const pointName = (point: string) => (POINT_LABEL[point] ? t(POINT_LABEL[point]) : point);
   const providerName = (id: string) => (PROVIDERS.includes(id as DecisionProviderId) ? providerLabel(id as DecisionProviderId) : id);
 
+  const jevBrowserOn = isJevBrowserReady(settings);
+  const jevBrowserHasKey = settings.keySaved || keyDraft.trim() !== "";
+  const jevBrowserActive = jevBrowserOn && jevBrowserHasKey;
   const pill = <StatusPill on={active} label={t(active ? "settings.decisions.status.on" : "settings.decisions.status.off")} />;
   const body = (
     <>
+      <SettingsGroup>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <div className="flex items-center gap-2">
+              <span className="text-[14px] font-medium text-gray-900 dark:text-white">{t("settings.decisions.quickBrowser.title")}</span>
+              <StatusPill
+                on={jevBrowserActive}
+                label={t(jevBrowserActive
+                  ? "settings.decisions.quickBrowser.active"
+                  : jevBrowserOn
+                    ? "settings.decisions.quickBrowser.needsKey"
+                    : "settings.decisions.quickBrowser.off")}
+              />
+            </div>
+            <p className="m-0 text-[13px] text-gray-500 dark:text-white/50">{t("settings.decisions.quickBrowser.hint")}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void toggleQuickJevBrowser()}
+            className={jevBrowserActive ? BTN : BTN_PRIMARY}
+          >
+            {t(jevBrowserActive ? "settings.decisions.quickBrowser.disable" : "settings.decisions.quickBrowser.enable")}
+          </button>
+        </div>
+      </SettingsGroup>
+
       <div className="flex items-center gap-2"><span className="flex-1"><Heading>{t("settings.decisions.provider")}</Heading></span>{pill}</div>
       <SettingsGroup>
         <SettingsToggleRow
@@ -384,6 +463,7 @@ export function DecisionsSection() {
           </span>
         </SettingsRow>
         <KeyField
+          inputRef={primaryKeyRef}
           label={t("settings.decisions.key")}
           hint={settings.keySaved ? t("settings.decisions.key.saved") : t(settings.provider === "jev" ? "settings.decisions.keyHintRequired" : "settings.decisions.keyHint")}
           placeholder={t(settings.provider === "jev" ? "settings.decisions.key.placeholderRequired" : "settings.decisions.key.placeholder")}
@@ -470,8 +550,24 @@ export function DecisionsSection() {
         <SettingsToggleRow badge={<ModeBadge point="delivery_gate" />} checked={settings.deliveryGate} onChange={(deliveryGate) => setSettings({ ...settings, deliveryGate })} label={t("settings.decisions.point.delivery")} description={t("settings.decisions.point.deliveryHint")} />
         <SettingsToggleRow badge={<ModeBadge point="memory_relevance" />} checked={settings.memoryRelevance} onChange={(memoryRelevance) => setSettings({ ...settings, memoryRelevance })} label={t("settings.decisions.point.relevance")} description={t("settings.decisions.point.relevanceHint")} />
         <SettingsToggleRow badge={<ModeBadge point="turn_routing" />} checked={settings.turnRouting} onChange={(turnRouting) => setSettings({ ...settings, turnRouting })} label={t("settings.decisions.point.routing")} description={t("settings.decisions.point.routingHint")} />
-        <SettingsToggleRow badge={<ModeBadge point="browser_step" />} checked={settings.browserPilot} onChange={(browserPilot) => setSettings({ ...settings, browserPilot })} label={t("settings.decisions.point.browser")} description={t("settings.decisions.point.browserHint")} />
-        <SettingsToggleRow badge={<ModeBadge point="browser_vision" />} checked={settings.browserVision} onChange={(browserVision) => setSettings({ ...settings, browserVision })} label={t("settings.decisions.point.browserVision")} description={t("settings.decisions.point.browserVisionHint")} />
+        <SettingsToggleRow
+          badge={<ModeBadge point="browser_step" />}
+          checked={settings.browserPilot}
+          onChange={(browserPilot) => setSettings(setBrowserPilotSetting(settings, browserPilot))}
+          label={t("settings.decisions.point.browser")}
+          description={t("settings.decisions.point.browserHint")}
+        />
+        <SettingsToggleRow
+          badge={<ModeBadge point="browser_vision" />}
+          checked={settings.browserPilot && settings.browserVision}
+          onChange={(browserVision) => setSettings(setBrowserVisionSetting(settings, browserVision))}
+          label={t("settings.decisions.point.browserVision")}
+          description={t("settings.decisions.point.browserVisionHint")}
+        >
+          {!settings.browserPilot && (
+            <p className="m-0 text-[12px] text-amber-700 dark:text-amber-300">{t("settings.decisions.point.browserVisionRequiresPilot")}</p>
+          )}
+        </SettingsToggleRow>
       </SettingsGroup>
 
       <div className="flex flex-wrap items-center gap-2">
