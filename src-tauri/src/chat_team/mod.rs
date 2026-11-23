@@ -5,6 +5,7 @@
 //! - `model`: o que é um integrante, as políticas, os papéis e os textos para os agentes (puro);
 //! - `store`: as tabelas `chat_team` e `chat_team_member`, só aditivas;
 //! - `api`: criar, ligar, desligar, mudar papel e política, o fio de delegações;
+//! - `awareness`: a consciência do orquestrador (carga, limite, sobreposição, fila com condição);
 //! - `watch`: o vigia do chat (puro): o que o orquestrador precisa saber dos integrantes;
 //! - `commands`: os comandos Tauri da tela.
 //!
@@ -12,6 +13,7 @@
 //! criar a corda entre ele e o orquestrador (e a coroa), como numa missão. O time não abre outro canal.
 
 pub mod api;
+pub mod awareness;
 pub mod commands;
 pub mod env;
 pub mod model;

@@ -199,6 +199,8 @@ fn o_briefing_diz_o_papel_a_branch_e_como_responder() {
     let roster = model::roster_notice(&[me]);
     assert!(roster.contains("Codex (codex; Frontend; aceita edições, team/ui)"));
     assert!(roster.contains("ags peer tell"));
+    assert!(roster.contains("ags system load") && roster.contains("ags team queue add") && roster.contains("Nunca faça polling"), "o orquestrador recebe a consciência: carga, fila, sem polling");
+    assert!(roster.ends_with("Use `ags team list` para ver o time."), "a tela corta o resumo pelo fecho");
     assert!(model::roster_notice(&[]).contains("ainda não há ninguém"));
 }
 

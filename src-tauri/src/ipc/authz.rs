@@ -228,6 +228,8 @@ pub(crate) const METHODS: &[(&str, Class)] = &[
     ("team.unlink", CALLER),
     ("team.role", CALLER),
     ("team.delegate", CALLER),
+    ("team.queue", CALLER),
+    ("system.load", CALLER_OR_OUTSIDE),
     ("say.send", CALLER),
     ("recall.get", CALLER),
     ("floor.list", CALLER),

@@ -181,7 +181,7 @@ pub fn states(conn: &Connection, now: i64) -> Result<Vec<MemberState>, String> {
 }
 
 /// Normaliza a referência da UI para o destinatário real da fila e só vigia um pai que ainda existe.
-fn parent_target(conn: &Connection, parent_ref: &str) -> Result<Option<String>, String> {
+pub(crate) fn parent_target(conn: &Connection, parent_ref: &str) -> Result<Option<String>, String> {
     if let Some(thread_id) = parent_ref.strip_prefix("thread:") {
         return Ok(chat::thread(conn, thread_id).map_err(err)?.filter(|row| row.state == "active").map(|_| parent_ref.to_string()));
     }

@@ -775,3 +775,20 @@ async fn working_diff_stat_conta_totais_com_e_sem_head() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn leitura_do_scm_define_git_optional_locks_zero_e_escrita_nao() {
+    use std::ffi::OsStr;
+    let read_cmd = super::git::base_command("/repo", &["status"], true);
+    let read_envs: Vec<_> = read_cmd.get_envs().collect();
+    assert!(
+        read_envs.contains(&(OsStr::new("GIT_OPTIONAL_LOCKS"), Some(OsStr::new("0")))),
+        "leituras do SCM devem definir GIT_OPTIONAL_LOCKS=0: {read_envs:?}"
+    );
+    let write_cmd = super::git::base_command("/repo", &["commit", "-m", "x"], false);
+    let write_envs: Vec<_> = write_cmd.get_envs().collect();
+    assert!(
+        !write_envs.iter().any(|(k, _)| *k == OsStr::new("GIT_OPTIONAL_LOCKS")),
+        "escritas do SCM não devem silenciar locks opcionais: {write_envs:?}"
+    );
+}

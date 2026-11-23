@@ -11,6 +11,7 @@ mod renders;
 mod floor;
 pub mod chat;
 pub mod chat_watch;
+pub mod consciencia;
 pub mod child_delivery;
 pub mod conversas;
 pub(crate) mod peers;

@@ -5,6 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 
+import {
+  androidFrame, androidKey, androidStartAvd, androidSwipe, androidTap, useAndroidList, type AndroidFrame,
+} from "@/features/android/ipc";
 import { toDevicePoint } from "@/features/canvas/DeviceNode";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { DEFAULT_SCREEN } from "@/features/simulator/geometry";
@@ -34,7 +37,6 @@ import { androidLabel, deviceFrame, iosLabel, LOCATION_PRESETS, parseCoord, type
 import { insertIntoComposer, setDeviceControl, setPanelDevice, useChatStore } from "./store";
 import { useDocumentVisible } from "@/shared/useDocumentVisible";
 import { usePopover } from "./usePopover";
-import { androidFrame, androidKey, androidList, androidStartAvd, androidSwipe, androidTap, type AndroidFrame as Frame, type AndroidList } from "@/features/android/ipc";
 
 /*
  * As abas de aparelho do painel direito (pranchetas 9 e 10): o simulador iOS e o Android ao lado da
@@ -518,33 +520,22 @@ function IosMore({ device, booted, onBoot, onDone, onError }: { device: SimDevic
 // Android (prancheta 10)
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-
 /** Os mesmos ritmos do nó do canvas: `screencap` demora, e um emulador demora a aparecer. */
 const FRAME_EVERY_MS = 700;
-const LIST_EVERY_MS = 4000;
 const SWIPE_PX = 12;
 const LOGCAT_LINES = 200;
 
 export function AndroidPane({ composerTarget }: { composerTarget?: string | null }) {
   const { t } = useTranslation();
-  const [list, setList] = useState<AndroidList | null>(null);
   const [infos, setInfos] = useState<Record<string, AndroidInfo>>({});
   const picked = useChatStore((s) => s.devices.android);
-  const [frame, setFrame] = useState<Frame | null>(null);
+  const [frame, setFrame] = useState<AndroidFrame | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const img = useRef<HTMLImageElement>(null);
   const down = useRef<{ x: number; y: number } | null>(null);
   const { ref, size } = useBoxSize();
   const documentVisible = useDocumentVisible();
-
-  useEffect(() => {
-    if (!documentVisible) return;
-    let alive = true;
-    const load = () => androidList().then((l) => alive && setList(l)).catch(() => undefined);
-    void load();
-    const timer = window.setInterval(load, LIST_EVERY_MS);
-    return () => { alive = false; window.clearInterval(timer); };
-  }, [documentVisible]);
+  const list = useAndroidList(documentVisible);
 
   const ready = useMemo(() => (list?.devices ?? []).filter((d) => d.state === "device"), [list]);
   const chosen = picked && ready.some((d) => d.serial === picked) ? picked : ready[0]?.serial ?? null;

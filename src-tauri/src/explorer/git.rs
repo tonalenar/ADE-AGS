@@ -12,9 +12,9 @@ use serde::Serialize;
 
 use crate::util::output_with_timeout;
 
-/// Un repo grande con el índice frío puede tardar; más de esto y el panel prefiere
-/// mostrarse sin marcas antes que congelarse.
-const GIT_TIMEOUT: Duration = Duration::from_secs(4);
+/// Un repo grande con el índice frío o sob carga pode tardar; timeout longo evita falso
+/// "não é repo", e estouro volta erro para o front tentar de novo com backoff.
+const GIT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// El estado de una ruta en el árbol de trabajo, resumido a una letra para el panel.
 /// `git status` da dos (índice y árbol); acá gana la más "fuerte" porque el panel tiene
@@ -66,14 +66,61 @@ impl RepoInfo {
     }
 }
 
-fn git(cwd: &str, args: &[&str]) -> Option<String> {
+/// Resultado de uma leitura git do explorer: distingue "não é repo" de timeout sob carga.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum GitProbe {
+    Ok(String),
+    NotRepo,
+    TimedOut(Duration),
+    Unavailable,
+}
+
+/// Monta o comando git de leitura do explorer com `GIT_OPTIONAL_LOCKS=0` para não disputar
+/// `index.lock` com os agentes.
+pub(crate) fn git_command(cwd: &str, args: &[&str]) -> std::process::Command {
     let mut cmd = crate::util::spawn::hidden_command("git");
-    cmd.arg("-C").arg(cwd).args(args);
-    let out = output_with_timeout(&mut cmd, GIT_TIMEOUT).ok()?;
-    if !out.status.success() {
-        return None;
+    cmd.arg("-C").arg(crate::util::external_path(std::path::Path::new(cwd)));
+    cmd.args(["-c", "core.fsmonitor=false"]);
+    cmd.args(args);
+    cmd.env("GIT_OPTIONAL_LOCKS", "0");
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+    cmd.env("GCM_INTERACTIVE", "never");
+    cmd
+}
+
+fn git_probe(cwd: &str, args: &[&str], timeout: Duration) -> GitProbe {
+    let mut cmd = git_command(cwd, args);
+    match output_with_timeout(&mut cmd, timeout) {
+        Ok(out) if out.status.success() => {
+            GitProbe::Ok(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string())
+        }
+        Ok(_) => GitProbe::NotRepo,
+        Err(err) if err.kind() == std::io::ErrorKind::TimedOut => GitProbe::TimedOut(timeout),
+        Err(_) => GitProbe::Unavailable,
     }
-    Some(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string())
+}
+
+/// Traduz os resultados das sondas em `RepoInfo`, mas devolve erro em timeout para o front
+/// não gravar "não é repo" ou "árvore limpa" no cache.
+pub(crate) fn repo_info_from_git_probes(
+    rev: GitProbe,
+    status: impl FnOnce() -> GitProbe,
+) -> Result<RepoInfo, String> {
+    let rev_text = match rev {
+        GitProbe::Ok(text) => text,
+        GitProbe::NotRepo | GitProbe::Unavailable => return Ok(RepoInfo::none()),
+        GitProbe::TimedOut(limit) => {
+            return Err(format!("git rev-parse excedeu o prazo de {}s", limit.as_secs()));
+        }
+    };
+    let status_text = match status() {
+        GitProbe::Ok(text) => Some(text),
+        GitProbe::NotRepo | GitProbe::Unavailable => None,
+        GitProbe::TimedOut(limit) => {
+            return Err(format!("git status excedeu o prazo de {}s", limit.as_secs()));
+        }
+    };
+    Ok(repo_info_from_probes(Some(&rev_text), status_text.as_deref()))
 }
 
 /// Traduce las dos columnas de `git status --porcelain` a una sola marca.
@@ -272,9 +319,9 @@ pub async fn explorer_repo_info(path: String) -> Result<RepoInfo, String> {
 
 fn repo_info_sync(path: &str) -> Result<RepoInfo, String> {
     // Un solo `rev-parse` responde toplevel y los dos directorios de git, los dos en
-    // absoluto (`--path-format` aplica a `--git-dir` y a `--git-common-dir`). Si falla,
-    // no es un repo (o no hay `git`): no se lanza el `status`.
-    let rev = git(
+    // absoluto (`--path-format` aplica a `--git-dir` y a `--git-common-dir`). Si falla por
+    // timeout, volta erro (o front não cacheia); se não for repo, devolve `RepoInfo::none()`.
+    let rev = git_probe(
         path,
         &[
             "rev-parse",
@@ -283,9 +330,10 @@ fn repo_info_sync(path: &str) -> Result<RepoInfo, String> {
             "--git-dir",
             "--git-common-dir",
         ],
+        GIT_TIMEOUT,
     );
-    let status = if rev.is_some() {
-        git(
+    repo_info_from_git_probes(rev, || {
+        git_probe(
             path,
             &[
                 "status",
@@ -294,9 +342,7 @@ fn repo_info_sync(path: &str) -> Result<RepoInfo, String> {
                 "-z",
                 "--untracked-files=normal",
             ],
+            GIT_TIMEOUT,
         )
-    } else {
-        None
-    };
-    Ok(repo_info_from_probes(rev.as_deref(), status.as_deref()))
+    })
 }

@@ -866,3 +866,30 @@ fn a_repeticao_do_codex_le_os_argumentos_json() {
     ]);
     assert_eq!(state.repeat.as_ref().map(|r| (r.step, r.summary.as_str())), Some((3, "bash -lc cargo build")));
 }
+
+#[test]
+fn codex_rollout_e_cacheado_e_invalida_quando_arquivo_some() {
+    let root = std::env::temp_dir().join(format!("ags-codex-rollout-{}", uuid::Uuid::new_v4()));
+    let day_a = root.join("2026").join("11").join("23");
+    let day_b = root.join("2026").join("11").join("24");
+    std::fs::create_dir_all(&day_a).unwrap();
+    let sid = "sessao-cache-test";
+    let file_a = day_a.join(format!("rollout-2026-11-23-{sid}.jsonl"));
+
+    // Ausente: não cacheia None; quando o arquivo surge, passa a encontrá-lo.
+    assert_eq!(codex_rollout_by_id(&root, sid), None);
+    std::fs::write(&file_a, "{}\n").unwrap();
+    assert_eq!(codex_rollout_by_id(&root, sid), Some(file_a.clone()));
+
+    // Em cache: mesmo se houver outro diretório, devolve o caminho já conhecido enquanto existe.
+    assert_eq!(codex_rollout_by_id(&root, sid), Some(file_a.clone()));
+
+    // Se o arquivo original some, invalida o cache e encontra o substituto.
+    std::fs::remove_file(&file_a).unwrap();
+    std::fs::create_dir_all(&day_b).unwrap();
+    let file_b = day_b.join(format!("rollout-2026-11-24-{sid}.jsonl"));
+    std::fs::write(&file_b, "{}\n").unwrap();
+    assert_eq!(codex_rollout_by_id(&root, sid), Some(file_b.clone()));
+
+    let _ = std::fs::remove_dir_all(&root);
+}

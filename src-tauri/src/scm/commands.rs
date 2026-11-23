@@ -12,7 +12,7 @@ use std::{
 use serde::Serialize;
 use tauri::Manager;
 
-use super::git::{network, repo_root, run, run_text, ScmError, COMMIT, LOCAL};
+use super::git::{network, repo_root, run, run_readonly, run_readonly_text, run_text, ScmError, COMMIT, LOCAL};
 use super::parse::{
     parse_branches, parse_log, parse_name_status, parse_status_v2, parse_tags, Branch, Commit, ScmEntry, StatusInfo,
     Tag, BRANCH_FORMAT, LOG_FORMAT, TAG_FORMAT,
@@ -53,7 +53,7 @@ pub(super) fn with_paths<'a>(args: &[&'a str], paths: &'a [String]) -> Vec<&'a s
 }
 
 fn operation_in_progress(root: &str) -> Option<String> {
-    let dir = run_text(root, &["rev-parse", "--absolute-git-dir"], LOCAL).ok()?;
+    let dir = run_readonly_text(root, &["rev-parse", "--absolute-git-dir"], LOCAL).ok()?;
     let dir = Path::new(dir.trim());
     let op = if dir.join("MERGE_HEAD").exists() {
         "merge"
@@ -75,12 +75,12 @@ fn operation_in_progress(root: &str) -> Option<String> {
 pub async fn scm_status(cwd: String) -> Result<Option<ScmStatus>, ScmError> {
     blocking(move || {
         let Some(root) = repo_root(&cwd) else { return Ok(None) };
-        let raw = run_text(
+        let raw = run_readonly_text(
             &root,
             &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"],
             LOCAL,
         )?;
-        let remotes = run_text(&root, &["remote", "-v"], LOCAL)
+        let remotes = run_readonly_text(&root, &["remote", "-v"], LOCAL)
             .map(|r| parse_remotes(&r))
             .unwrap_or_default();
         let info = parse_status_v2(&raw);
@@ -122,7 +122,7 @@ pub async fn scm_unstage(root: String, paths: Vec<String>) -> Result<(), ScmErro
         let targets = if paths.is_empty() { &all } else { &paths };
         // Sin ningún commit no hay HEAD al que volver: `restore --staged` falla, y lo que
         // corresponde es sacar los archivos del índice.
-        let initial = run(&root, &["rev-parse", "--verify", "-q", "HEAD"], LOCAL).is_err();
+        let initial = run_readonly(&root, &["rev-parse", "--verify", "-q", "HEAD"], LOCAL).is_err();
         let args = if initial {
             with_paths(&["rm", "--cached", "-r", "-q"], targets)
         } else {
@@ -191,7 +191,7 @@ pub async fn scm_generate_commit_message(
     let root = blocking(move || {
         let root = repo_root(&root)
             .ok_or_else(|| ScmError::Git("A pasta não contém um repositório Git".into()))?;
-        let raw = run_text(
+        let raw = run_readonly_text(
             &root,
             &[
                 "diff",
@@ -214,7 +214,7 @@ pub async fn scm_generate_commit_message(
         } else {
             diff
         };
-        let history = run_text(&root, &["log", "-8", "--format=%s"], LOCAL).unwrap_or_default();
+        let history = run_readonly_text(&root, &["log", "-8", "--format=%s"], LOCAL).unwrap_or_default();
         Ok((root, diff, history))
     })
     .await
@@ -290,7 +290,7 @@ pub async fn scm_generate_commit_message(
 pub async fn scm_branches(root: String) -> Result<Vec<Branch>, ScmError> {
     blocking(move || {
         let format = format!("--format={BRANCH_FORMAT}");
-        let raw = run_text(&root, &["for-each-ref", &format, "refs/heads", "refs/remotes"], LOCAL)?;
+        let raw = run_readonly_text(&root, &["for-each-ref", &format, "refs/heads", "refs/remotes"], LOCAL)?;
         Ok(parse_branches(&raw))
     })
     .await
@@ -311,13 +311,13 @@ pub async fn scm_checkout(root: String, name: String, create: bool, remote: bool
             return Err(ScmError::Git(format!("«{name}» no es un nombre de rama válido")));
         }
         if create {
-            run(&root, &["check-ref-format", "--branch", &name], LOCAL)
+            run_readonly(&root, &["check-ref-format", "--branch", &name], LOCAL)
                 .map_err(|_| ScmError::Git(format!("«{name}» no es un nombre de rama válido")))?;
             return run(&root, &["switch", "-c", &name], LOCAL).map(|_| ());
         }
         if remote {
             let local = name.split_once('/').map(|(_, rest)| rest).unwrap_or(&name).to_string();
-            let exists = run(&root, &["rev-parse", "--verify", "-q", &format!("refs/heads/{local}")], LOCAL).is_ok();
+            let exists = run_readonly(&root, &["rev-parse", "--verify", "-q", &format!("refs/heads/{local}")], LOCAL).is_ok();
             return if exists {
                 run(&root, &["switch", &local], LOCAL).map(|_| ())
             } else {
@@ -348,7 +348,7 @@ pub(crate) async fn sync(app: &tauri::AppHandle, root: String, op: Sync) -> Resu
     match op {
         Sync::Fetch => {
             let r = root.clone();
-            let remotes = blocking(move || Ok(parse_remotes(&run_text(&r, &["remote", "-v"], LOCAL)?))).await?;
+            let remotes = blocking(move || Ok(parse_remotes(&run_readonly_text(&r, &["remote", "-v"], LOCAL)?))).await?;
             let mut first_error = None;
             for remote in remotes {
                 let env = crate::forge::git_env_for_remote(app, &root, &remote.name, false).await;
@@ -380,11 +380,11 @@ pub(crate) async fn sync(app: &tauri::AppHandle, root: String, op: Sync) -> Resu
 }
 
 fn config_value(root: &str, key: &str) -> Option<String> {
-    run_text(root, &["config", "--get", key], LOCAL).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    run_readonly_text(root, &["config", "--get", key], LOCAL).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
 fn current_branch(root: &str) -> Result<String, ScmError> {
-    run_text(root, &["symbolic-ref", "--short", "-q", "HEAD"], LOCAL)
+    run_readonly_text(root, &["symbolic-ref", "--short", "-q", "HEAD"], LOCAL)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -428,12 +428,12 @@ pub(super) fn integrate_upstream(root: &str, branch: &str) -> Result<String, Scm
 /// El remoto al que va a ir `push`: el que git elige para una rama publicada
 /// (`pushRemote`, `remote.pushDefault`, su upstream) o aquel en el que se la publicaría.
 pub(super) fn push_remote(root: &str) -> Result<String, ScmError> {
-    let raw = run_text(root, &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"], LOCAL)?;
+    let raw = run_readonly_text(root, &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"], LOCAL)?;
     let info = parse_status_v2(&raw);
     let Some(branch) = info.branch else {
         return Err(ScmError::Git("No hay una rama activa (HEAD desprendido)".to_string()));
     };
-    let remotes = parse_remotes(&run_text(root, &["remote", "-v"], LOCAL)?);
+    let remotes = parse_remotes(&run_readonly_text(root, &["remote", "-v"], LOCAL)?);
     let chosen = if is_published(info.upstream.as_deref(), &branch, &remotes) {
         config_value(root, &format!("branch.{branch}.pushRemote"))
             .or_else(|| config_value(root, "remote.pushDefault"))
@@ -447,12 +447,12 @@ pub(super) fn push_remote(root: &str) -> Result<String, ScmError> {
 /// Push de la rama actual. Si todavía no tiene upstream la publica en `origin` (o en el
 /// único remoto que haya), que es lo que se quiere la primera vez.
 pub(super) fn push(root: &str, env: &[(String, String)]) -> Result<String, ScmError> {
-    let raw = run_text(root, &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"], LOCAL)?;
+    let raw = run_readonly_text(root, &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"], LOCAL)?;
     let info = parse_status_v2(&raw);
     let Some(branch) = info.branch else {
         return Err(ScmError::Git("No hay una rama activa (HEAD desprendido)".to_string()));
     };
-    let remotes = parse_remotes(&run_text(root, &["remote", "-v"], LOCAL)?);
+    let remotes = parse_remotes(&run_readonly_text(root, &["remote", "-v"], LOCAL)?);
     if is_published(info.upstream.as_deref(), &branch, &remotes) {
         network(root, &["push"], env)?;
         return Ok(format!("Pushed {branch}."));
@@ -512,10 +512,10 @@ pub async fn scm_log(root: String, limit: u32, refs: Option<Vec<String>>) -> Res
     blocking(move || {
         let n = format!("-n{}", limit.clamp(1, 500));
         let format = format!("--format={LOG_FORMAT}");
-        let remotes: Vec<String> = run_text(&root, &["remote"], LOCAL)
+        let remotes: Vec<String> = run_readonly_text(&root, &["remote"], LOCAL)
             .map(|r| r.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect())
             .unwrap_or_default();
-        let upstream = run_text(&root, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], LOCAL)
+        let upstream = run_readonly_text(&root, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], LOCAL)
             .ok()
             .map(|u| u.trim().to_string())
             .filter(|u| !u.is_empty());
@@ -526,7 +526,7 @@ pub async fn scm_log(root: String, limit: u32, refs: Option<Vec<String>>) -> Res
         } else if requested.is_empty() {
             Vec::new()
         } else {
-            let existing = run_text(&root, &["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"], LOCAL)
+            let existing = run_readonly_text(&root, &["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"], LOCAL)
                 .unwrap_or_default();
             existing_branch_refs(&requested, &existing)
         };
@@ -544,12 +544,12 @@ pub async fn scm_log(root: String, limit: u32, refs: Option<Vec<String>>) -> Res
         // Que ninguna ref se pueda leer como ruta.
         args.push("--");
         // Un repo sin commits hace fallar a `git log`: no es un error, es una lista vacía.
-        let mut commits = run_text(&root, &args, LOCAL).map(|raw| parse_log(&raw, &remotes)).unwrap_or_default();
+        let mut commits = run_readonly_text(&root, &args, LOCAL).map(|raw| parse_log(&raw, &remotes)).unwrap_or_default();
 
         // `<` = solo en la rama local (sin subir), `>` = solo en el upstream (sin traer).
         let sides = upstream
             .as_ref()
-            .and_then(|_| run_text(&root, &["rev-list", "--left-right", "HEAD...@{u}"], LOCAL).ok());
+            .and_then(|_| run_readonly_text(&root, &["rev-list", "--left-right", "HEAD...@{u}"], LOCAL).ok());
         if let Some(sides) = sides {
             let mut outgoing = std::collections::HashSet::new();
             let mut incoming = std::collections::HashSet::new();
@@ -620,19 +620,19 @@ pub async fn scm_compare(root: String, base: String, head: String) -> Result<Com
         let range = format!("{base}..{head}");
         let format = format!("--format={LOG_FORMAT}");
         let n = format!("-n{}", COMPARE_LIMIT + 1);
-        let raw = run_text(&root, &["log", n.as_str(), format.as_str(), range.as_str(), "--"], LOCAL)?;
+        let raw = run_readonly_text(&root, &["log", n.as_str(), format.as_str(), range.as_str(), "--"], LOCAL)?;
         let mut commits = parse_log(&raw, &[]);
         let truncated = commits.len() > COMPARE_LIMIT;
         commits.truncate(COMPARE_LIMIT);
 
         let behind_range = format!("{head}..{base}");
-        let behind = run_text(&root, &["rev-list", "--count", behind_range.as_str(), "--"], LOCAL)
+        let behind = run_readonly_text(&root, &["rev-list", "--count", behind_range.as_str(), "--"], LOCAL)
             .ok()
             .and_then(|c| c.trim().parse().ok())
             .unwrap_or(0);
         // Con tres puntos: contra el ancestro común, que es lo que muestra el host.
         let diff_range = format!("{base}...{head}");
-        let (files, insertions, deletions) = run_text(&root, &["diff", "--shortstat", diff_range.as_str(), "--"], LOCAL)
+        let (files, insertions, deletions) = run_readonly_text(&root, &["diff", "--shortstat", diff_range.as_str(), "--"], LOCAL)
             .map(|s| parse_shortstat(&s))
             .unwrap_or_default();
         Ok(Compare { commits, truncated, behind, files, insertions, deletions })
@@ -653,11 +653,11 @@ pub async fn scm_commit_files(root: String, hash: String) -> Result<Vec<ScmEntry
         if !valid_hash(&hash) {
             return Err(ScmError::Git(format!("«{hash}» no es un commit")));
         }
-        let line = run_text(&root, &["rev-list", "--parents", "-n1", &hash], LOCAL)?;
+        let line = run_readonly_text(&root, &["rev-list", "--parents", "-n1", &hash], LOCAL)?;
         let parent = line.split_whitespace().nth(1).map(str::to_string);
         let raw = match parent {
-            Some(p) => run_text(&root, &["diff", "--name-status", "-z", "-M", &p, &hash], LOCAL)?,
-            None => run_text(
+            Some(p) => run_readonly_text(&root, &["diff", "--name-status", "-z", "-M", &p, &hash], LOCAL)?,
+            None => run_readonly_text(
                 &root,
                 &["diff-tree", "--root", "--no-commit-id", "-r", "-M", "--name-status", "-z", &hash],
                 LOCAL,
@@ -683,7 +683,7 @@ pub async fn scm_file_at(root: String, path: String, rev: String) -> Result<Opti
             }
             format!("{rev}:{path}")
         };
-        let Ok(bytes) = run(&root, &["show", &spec], LOCAL) else { return Ok(None) };
+        let Ok(bytes) = run_readonly(&root, &["show", &spec], LOCAL) else { return Ok(None) };
         if bytes.contains(&0) {
             return Err(ScmError::Git("Es un archivo binario".to_string()));
         }
@@ -699,7 +699,7 @@ pub async fn scm_file_at(root: String, path: String, rev: String) -> Result<Opti
 pub async fn scm_tags(root: String) -> Result<Vec<Tag>, ScmError> {
     blocking(move || {
         let format = format!("--format={TAG_FORMAT}");
-        let raw = run_text(&root, &["for-each-ref", "--sort=-creatordate", &format, "refs/tags"], LOCAL)?;
+        let raw = run_readonly_text(&root, &["for-each-ref", "--sort=-creatordate", &format, "refs/tags"], LOCAL)?;
         Ok(parse_tags(&raw))
     })
     .await
@@ -711,7 +711,7 @@ fn check_tag_name(root: &str, name: &str) -> Result<(), ScmError> {
     if name.is_empty() || name.starts_with('-') {
         return Err(invalid());
     }
-    run(root, &["check-ref-format", &format!("refs/tags/{name}")], LOCAL).map_err(|_| invalid())?;
+    run_readonly(root, &["check-ref-format", &format!("refs/tags/{name}")], LOCAL).map_err(|_| invalid())?;
     Ok(())
 }
 
@@ -747,7 +747,7 @@ pub(crate) async fn push_tag(app: &tauri::AppHandle, root: String, name: String)
     let (r, n) = (root.clone(), name.clone());
     let remote = blocking(move || {
         check_tag_name(&r, &n)?;
-        let remotes = parse_remotes(&run_text(&r, &["remote", "-v"], LOCAL)?);
+        let remotes = parse_remotes(&run_readonly_text(&r, &["remote", "-v"], LOCAL)?);
         remotes
             .iter()
             .find(|r| r.name == "origin")
@@ -811,8 +811,8 @@ pub async fn scm_working_diff(cwd: String) -> Result<Option<WorkingDiff>, ScmErr
     blocking(move || {
         let Some(root) = repo_root(&cwd) else { return Ok(None) };
         // Sem commit ainda não há HEAD: aí o que existe é o que está no índice.
-        let raw = run_text(&root, &["diff", "HEAD", "--no-color", "--no-ext-diff", "-M"], LOCAL)
-            .or_else(|_| run_text(&root, &["diff", "--cached", "--no-color", "--no-ext-diff", "-M"], LOCAL))?;
+        let raw = run_readonly_text(&root, &["diff", "HEAD", "--no-color", "--no-ext-diff", "-M"], LOCAL)
+            .or_else(|_| run_readonly_text(&root, &["diff", "--cached", "--no-color", "--no-ext-diff", "-M"], LOCAL))?;
         let (text, truncated) = clip_diff(raw, WORKING_DIFF_MAX);
         Ok(Some(WorkingDiff { root, text, truncated }))
     })
@@ -851,7 +851,7 @@ pub async fn scm_working_files(cwd: String) -> Result<Option<WorkingFiles>, ScmE
         let root_path = Path::new(&root)
             .canonicalize()
             .map_err(|e| ScmError::Git(format!("No se pudo resolver la carpeta del repo: {e}")))?;
-        let status = run_text(
+        let status = run_readonly_text(
             &root,
             &["status", "--porcelain=v2", "-z", "--untracked-files=all"],
             LOCAL,
@@ -990,7 +990,7 @@ pub(crate) fn worktrees_from_porcelain(raw: &str, root: &str) -> Vec<ScmWorktree
 #[tauri::command]
 pub async fn scm_worktrees(root: String) -> Result<Vec<ScmWorktree>, ScmError> {
     blocking(move || {
-        let raw = run_text(&root, &["worktree", "list", "--porcelain"], LOCAL)?;
+        let raw = run_readonly_text(&root, &["worktree", "list", "--porcelain"], LOCAL)?;
         Ok(worktrees_from_porcelain(&raw, &root))
     })
     .await

@@ -309,6 +309,12 @@ pub fn create_child_async(
     create_inner(db, input, Some(identity), true)
 }
 
+/// O pedido já tem recibo: repeti-lo devolve a mesma conversa e não cria nada novo.
+pub fn child_request_seen(db: &DbConnection, identity: &ChildRequestIdentity) -> bool {
+    let Ok(conn) = db.lock() else { return false };
+    store::child_chat_receipt(&conn, &identity.caller_key, &identity.request_id).ok().flatten().is_some()
+}
+
 fn existing_child_outcome(
     conn: &rusqlite::Connection,
     identity: &ChildRequestIdentity,

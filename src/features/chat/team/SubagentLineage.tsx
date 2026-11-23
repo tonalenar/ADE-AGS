@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { selectConversation } from "@/features/chat/unified/selectionActions";
 
 import { chatTeamStates } from "./ipc";
-import { buildLineage, formatElapsed, stateLabelKey, type Lineage, type LineageEntry, type MemberStateRow } from "./lineageModel";
+import { buildLineage, formatElapsed, stateLabelKey, waitingSummary, type Lineage, type LineageEntry, type MemberStateRow } from "./lineageModel";
 import { AgentMono } from "./TeamParts";
 import { interruptThread, useStructured } from "../structured/store";
 import { threadKey, threadStatusSignature } from "../structured/model";
@@ -38,14 +38,19 @@ export function useLineage(threadId: string): { lineage: Lineage; now: number } 
   return { lineage, now };
 }
 
-/** Uma linha por subagente rodando: "Trabalhando · título · 2h 35m 50s · Detalhes · Parar" (como o T3 Code). */
+/**
+ * Com um subagente rodando, uma linha: "Trabalhando · título · 2h 35m 50s · Detalhes · Parar". Com vários, a linha do
+ * T3 Code: "Aguardando N subagentes · nomes · Detalhes · Parar" (Detalhes abre uma linha por subagente; Parar interrompe todos).
+ */
 export function SubagentStatusLines({ threadId }: { threadId: string }) {
   const { t } = useTranslation();
   const { lineage, now } = useLineage(threadId);
-  if (lineage.running.length === 0) return null;
-  return (
-    <div role="group" aria-label={t("chat.lineage.title", { n: lineage.running.length })} className="flex flex-col gap-0.5 px-1 py-1">
-      {lineage.running.map((entry) => (
+  const [expanded, setExpanded] = useState(false);
+  const running = lineage.running;
+  if (running.length === 0) return null;
+  const perAgent = (
+    <>
+      {running.map((entry) => (
         <div key={entry.threadId} className="flex items-center gap-2 min-w-0 text-chat-note text-gray-500 dark:text-white/50">
           <span className="shrink-0">{t(stateLabelKey(entry.state))}</span>
           <span className="shrink-0">·</span>
@@ -57,6 +62,23 @@ export function SubagentStatusLines({ threadId }: { threadId: string }) {
             className="shrink-0 font-medium text-gray-900 dark:text-white hover:underline">{t("chat.lineage.stop")}</button>
         </div>
       ))}
+    </>
+  );
+  if (running.length === 1) {
+    return <div role="group" aria-label={t("chat.lineage.title", { n: 1 })} className="flex flex-col gap-0.5 px-1 py-1">{perAgent}</div>;
+  }
+  const summary = waitingSummary(running);
+  return (
+    <div role="group" aria-label={t("chat.lineage.title", { n: summary.count })} className="flex flex-col gap-0.5 px-1 py-1">
+      <div className="flex items-center gap-2 min-w-0 text-chat-note text-gray-500 dark:text-white/50">
+        <span className="shrink-0">{t("chat.lineage.waiting", { count: summary.count })}</span>
+        <span className="truncate min-w-0" title={summary.names}>{summary.names}</span>
+        <button type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}
+          className="shrink-0 font-medium text-gray-900 dark:text-white hover:underline">{expanded ? t("chat.lineage.hideDetails") : t("chat.lineage.details")}</button>
+        <button type="button" title={t("chat.lineage.stopAll")} onClick={() => running.forEach((entry) => interruptThread(entry.threadId))}
+          className="shrink-0 font-medium text-gray-900 dark:text-white hover:underline">{t("chat.lineage.stop")}</button>
+      </div>
+      {expanded && perAgent}
     </div>
   );
 }

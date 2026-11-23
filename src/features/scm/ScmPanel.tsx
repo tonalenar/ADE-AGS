@@ -22,6 +22,7 @@ import { CommitGraph } from "./CommitGraph";
 import { CreateTagDialog } from "./CreateTagDialog";
 import { GraphBranchFilter, logRefs, useGraphRefs, useGraphRefsLabel } from "./GraphBranchFilter";
 import { scmHeadline } from "./headline";
+import { nextScmPollMs, SCM_POLL_BASE_MS, SCM_POLL_SLOW_MS } from "./pollBackoff";
 import { readCommitWritingPreferences } from "./writingStyle";
 import { TagsSection } from "./TagsSection";
 import { ScmWorktreesSection } from "./WorktreesSection";
@@ -29,10 +30,6 @@ import {
   scmCheckout, scmCommit, scmDiscard, scmFetch, scmGenerateCommitMessage, scmInit, scmLog, scmPull, scmPush, scmStage, scmStatus, scmUnstage,
 } from "./ipc";
 import { isScmError, type Commit, type Provider, type ScmEntry, type ScmError, type ScmStatus } from "./types";
-
-/** Cada cuánto se vuelve a leer el estado mientras el panel está a la vista. Los agentes
- *  escriben archivos todo el tiempo; sin esto la lista quedaría vieja enseguida. */
-const POLL_MS = 4000;
 
 function branchHeadline(status: ScmStatus, t: (key: string, options?: Record<string, unknown>) => string): string {
   const headline = scmHeadline(status);
@@ -131,24 +128,34 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
    *  (el número sobre el icono, las marcas del árbol) también tienen que enterarse. */
   const lastCount = useRef<number | null>(null);
 
-  /** Una generación por panel: dos paneles no pueden descartar la lectura del otro. */
+  /** Uma leitura em voo por vez: o poll pula enquanto a anterior ainda não voltou. */
+  const inFlightRef = useRef(false);
+  /** Uma generación por panel: dos paneles no pueden descartar la lectura del otro. */
   const [gens] = useState(() => ({ status: createGeneration(), log: createGeneration() }));
 
-  const load = useCallback(async () => {
-    if (!cwd) return;
+  const load = useCallback(async (): Promise<{ elapsedMs: number; failed: boolean }> => {
+    if (!cwd) return { elapsedMs: 0, failed: false };
     const gen = gens.status.next();
+    const started = Date.now();
+    inFlightRef.current = true;
     try {
       const next = await scmStatus(cwd);
-      if (!gens.status.isCurrent(gen)) return;
+      const elapsedMs = Math.max(0, Date.now() - started);
+      if (!gens.status.isCurrent(gen)) return { elapsedMs, failed: false };
       setStatus(next);
       if (next) {
         const count = next.staged.length + next.unstaged.length + next.untracked.length + next.conflicted.length;
         if (lastCount.current !== null && lastCount.current !== count) invalidateRepoInfo(next.root);
         lastCount.current = count;
       }
+      return { elapsedMs, failed: false };
     } catch (e) {
-      if (!gens.status.isCurrent(gen)) return;
+      const elapsedMs = Math.max(0, Date.now() - started);
+      if (!gens.status.isCurrent(gen)) return { elapsedMs, failed: true };
       setError(isScmError(e) ? e : { kind: "git", message: uiErrorText(e) });
+      return { elapsedMs, failed: true };
+    } finally {
+      if (gens.status.isCurrent(gen)) inFlightRef.current = false;
     }
   }, [cwd, gens]);
 
@@ -161,18 +168,42 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
     lastCount.current = null;
     setBranchMenu(false);
     setGraphMenu(false);
-    load();
+    void load();
   }, [load]);
 
   useEffect(() => {
-    if (!documentVisible) return;
-    const id = setInterval(() => {
-      // Mientras corre una operación, el estado va a cambiar al terminar: leerlo a mitad
-      // mostraría un estado intermedio que parpadea.
-      if (document.visibilityState === "visible" && !busyRef.current) load();
-    }, POLL_MS);
-    return () => clearInterval(id);
-  }, [load, documentVisible]);
+    if (!documentVisible || !cwd) return;
+    let alive = true;
+    let streak = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const schedule = (ms: number) => {
+      if (!alive) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        void tick();
+      }, ms);
+    };
+
+    const tick = async () => {
+      if (!alive) return;
+      // Mientras corre una operación o una leitura anterior, pula o tick sem empilhar git.
+      if (document.visibilityState !== "visible" || busyRef.current || inFlightRef.current) {
+        schedule(SCM_POLL_BASE_MS);
+        return;
+      }
+      const { elapsedMs, failed } = await load();
+      if (!alive) return;
+      streak = failed || elapsedMs >= SCM_POLL_SLOW_MS ? streak + 1 : 0;
+      schedule(nextScmPollMs({ elapsedMs, failed, streak }));
+    };
+
+    schedule(SCM_POLL_BASE_MS);
+    return () => {
+      alive = false;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [load, documentVisible, cwd]);
 
   const root = status?.root ?? null;
   const [graphRefs, setGraphRefs] = useGraphRefs(root);

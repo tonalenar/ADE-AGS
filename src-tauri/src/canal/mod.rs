@@ -142,10 +142,28 @@ pub fn transcript_path(agent_id: &str, cwd: &str, session_id: &str, profile: Opt
     }
 }
 
+fn codex_rollout_cache() -> &'static Mutex<HashMap<(PathBuf, String), PathBuf>> {
+    static CACHE: OnceLock<Mutex<HashMap<(PathBuf, String), PathBuf>>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
 /// O rollout do Codex com este id: o nome é `rollout-<data>-<id>.jsonl`, então basta listar as
 /// pastas de data, sem abrir arquivo nenhum. Os `.jsonl.zst` (sessões antigas compactadas) não
 /// crescem mais e ficam de fora.
+///
+/// O caminho do rollout não muda durante a sessão: cacheamos por `(root, session_id)` para não
+/// varrer `~/.codex/sessions` inteira a cada 15 s. Se o arquivo sumir, o cache invalida e varre.
 pub fn codex_rollout_by_id(root: &Path, session_id: &str) -> Option<PathBuf> {
+    let key = (root.to_path_buf(), session_id.to_string());
+    // A trava é solta antes de checar o arquivo: reabrir o cache com ela na mão travava (deadlock).
+    let cached = codex_rollout_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key).cloned();
+    if let Some(cached) = cached {
+        if cached.is_file() {
+            return Some(cached);
+        }
+        codex_rollout_cache().lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+    }
+
     let suffix = format!("-{session_id}.jsonl");
     let mut stack = vec![root.to_path_buf()];
     let mut found: Option<(std::time::SystemTime, PathBuf)> = None;
@@ -164,7 +182,15 @@ pub fn codex_rollout_by_id(root: &Path, session_id: &str) -> Option<PathBuf> {
             }
         }
     }
-    found.map(|(_, path)| path)
+    let resolved = found.map(|(_, path)| path);
+    if let Some(path) = &resolved {
+        let mut cache = codex_rollout_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if cache.len() >= 512 {
+            cache.clear();
+        }
+        cache.insert(key, path.clone());
+    }
+    resolved
 }
 
 // ── O acompanhamento de uma aba ───────────────────────────────────────
