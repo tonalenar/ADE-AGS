@@ -930,17 +930,6 @@ pub async fn run_fix_decide(
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-pub async fn run_fix_list(scope: String, db: tauri::State<'_, crate::database::DbConnection>) -> Result<Vec<FixView>, String> {
-    let db = db.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        list_scope(&conn, &scope)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 pub fn cli(app: &tauri::AppHandle, command: &str, args: &Value) -> Result<Value, String> {
     // `fix.decide` gasta rodada e define o destino da entrega: só o orquestrador da missão (provado) ou a pessoa, pela tela.
     if command == "fix.decide" {

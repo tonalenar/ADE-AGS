@@ -9,7 +9,6 @@ Todas as funções são assíncronas e retornam `Result<Untrusted<T>, String>`. 
 | Comando | Argumentos do invoke | `T` |
 |---|---|---|
 | `ai_memory_probe` | `{cwd: string}` | `Probe` |
-| `ai_memory_status` | `{cwd: string}` | `Status` |
 | `ai_memory_handoffs` | `{cwd: string}` | `Handoff[]` |
 | `ai_memory_recent` | `{cwd: string}` | `RecentPage[]` |
 | `ai_memory_search` | `{cwd: string, query: string}` | `SearchHit[]` |
