@@ -7,20 +7,22 @@ import type { PhoneActions } from "./deviceActions";
 /**
  * O que o aparelho desenha em volta da página. A vista nativa do navegador é um retângulo por cima da janela e não
  * aceita nada desenhado sobre ela.
- * - iPhone: a barra de status translúcida e o vidro do Safari ficam DENTRO da página (`device_chrome.js`), para o
- *   conteúdo passar por baixo deles; aqui só sobram as faixas laterais quando deitado.
+ * - iPhone: a barra de status translúcida, o vidro do Safari e a ilha (no topo, ou na lateral quando deitado) ficam
+ *   DENTRO da página (`device_chrome.js`), para o conteúdo passar por baixo deles; a página ocupa a tela toda, em pé e
+ *   deitada, e o recorte dos cantos é só da máscara nativa.
  * - Android: a barra de status e a barra do Chrome são opacas no topo, como no Chrome real, e ficam aqui, fora da
  *   página, com os botões funcionando direto pelos handlers do navegador. A página vai até o fim da tela; a alça de
- *   gestos fica por cima dela (`device_chrome.js`), como no Chrome real.
+ *   gestos fica por cima dela (`device_chrome.js`), como no Chrome real. Deitado, a faixa do furo da câmera vai de ponta
+ *   a ponta na esquerda (o furo fica no meio da altura do aparelho) e a barra do Chrome fica à direita dela.
  */
 export type Platform = "ios" | "android";
 
 /** O tamanho, em px de página, das faixas que o aparelho ocupa em volta da página. Pura. */
 export function chromeInsets(platform: Platform, landscape: boolean): { top: number; bottom: number; left: number; right: number } {
   if (platform === "ios") {
-    return landscape ? { top: 0, bottom: 0, left: 47, right: 47 } : { top: 0, bottom: 0, left: 0, right: 0 };
+    return { top: 0, bottom: 0, left: 0, right: 0 };
   }
-  return landscape ? { top: 44, bottom: 0, left: 36, right: 0 } : { top: 92, bottom: 0, left: 0, right: 0 };
+  return landscape ? { top: 44, bottom: 0, left: 44, right: 0 } : { top: 92, bottom: 0, left: 0, right: 0 };
 }
 
 /** O endereço como o navegador do aparelho o mostra: sem protocolo nem `www.`. Pura. */
@@ -94,21 +96,21 @@ function AndroidTop({ time, url, address, landscape, actions }: { time: string; 
     return () => window.removeEventListener("pointerdown", outside);
   }, [menu]);
   useEffect(() => { if (editing !== null) input.current?.select(); }, [editing !== null]); // eslint-disable-line react-hooks/exhaustive-deps
-  const icon = "flex items-center justify-center rounded-full hover:bg-black/5 active:bg-black/10";
+  const icon = "flex items-center justify-center rounded-full hover:bg-black/5 active:bg-black/10 dark:hover:bg-white/10 dark:active:bg-white/15";
   return (
-    <div ref={root} className="relative shrink-0 bg-white text-[#1f1f1f]">
+    <div ref={root} className="relative shrink-0 bg-white text-gray-900 dark:bg-surface dark:text-gray-100">
       {!landscape && (
         <div className="relative flex items-center justify-between px-6" style={{ height: 36 }}>
           <span style={{ fontSize: 14, fontWeight: 500 }}>{time}</span>
           <span className="absolute left-1/2 -translate-x-1/2 rounded-full bg-black" style={{ top: 11, width: 14, height: 14 }} />
-          <span className="flex items-center gap-1.5"><Wifi color="#1f1f1f" /><Signal color="#1f1f1f" /><Battery color="#1f1f1f" percent /></span>
+          <span className="flex items-center gap-1.5"><Wifi color="currentColor" /><Signal color="currentColor" /><Battery color="currentColor" percent /></span>
         </div>
       )}
-      <div className="flex items-center gap-1.5 px-2" style={{ height: landscape ? 44 : 56 }}>
+      <div className="flex items-center gap-1.5" style={{ height: landscape ? 44 : 56, paddingLeft: 8, paddingRight: landscape ? 28 : 8 }}>
         <button type="button" aria-label={t("browser.device.back")} className={icon} style={{ width: 36, height: 36 }} onClick={() => actions?.back()}>
-          <svg width="20" height="20" viewBox="0 0 20 20" stroke="#444" {...stroke} aria-hidden><path d="M12.5 4 6.5 10l6 6" /></svg>
+          <svg width="20" height="20" viewBox="0 0 20 20" stroke="currentColor" {...stroke} aria-hidden><path d="M12.5 4 6.5 10l6 6" /></svg>
         </button>
-        <div className="flex flex-1 min-w-0 items-center gap-2 rounded-full bg-[#eef0f6] px-3" style={{ height: 40 }}>
+        <div className="flex flex-1 min-w-0 items-center gap-2 rounded-full bg-gray-100 dark:bg-surface-raised px-3" style={{ height: 40 }}>
           {editing === null ? (
             <button type="button" className="flex-1 min-w-0 truncate text-left" style={{ fontSize: 15 }} aria-label={t("browser.device.address")}
               onClick={() => setEditing(url)}>{address}</button>
@@ -123,18 +125,18 @@ function AndroidTop({ time, url, address, landscape, actions }: { time: string; 
               }} />
           )}
           <button type="button" aria-label={t("browser.device.reload")} className={icon} style={{ width: 28, height: 28 }} onClick={() => actions?.reload()}>
-            <svg width="16" height="16" viewBox="0 0 20 20" stroke="#444" {...stroke} strokeWidth={2} aria-hidden><path d="M16 10a6 6 0 1 1-1.8-4.3" /><path d="M15.5 2.5v4h-4" /></svg>
+            <svg width="16" height="16" viewBox="0 0 20 20" stroke="currentColor" {...stroke} strokeWidth={2} aria-hidden><path d="M16 10a6 6 0 1 1-1.8-4.3" /><path d="M15.5 2.5v4h-4" /></svg>
           </button>
         </div>
         <button type="button" aria-label={t("browser.device.tabs")} className={icon} style={{ width: 36, height: 36 }} onClick={() => actions?.newTab()}>
-          <span className="flex items-center justify-center rounded-md border-2 border-[#444]" style={{ width: 22, height: 22, fontSize: 11, fontWeight: 700 }}>1</span>
+          <span className="flex items-center justify-center rounded-md border-2 border-current" style={{ width: 22, height: 22, fontSize: 11, fontWeight: 700 }}>1</span>
         </button>
         <button type="button" aria-label={t("browser.device.menu")} aria-expanded={menu} className={icon} style={{ width: 36, height: 36 }} onClick={() => setMenu((open) => !open)}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="#444" aria-hidden><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
         </button>
       </div>
       {menu && (
-        <div data-over-webview role="menu" className="absolute right-2 top-full z-20 mt-1 w-56 rounded-2xl bg-white py-2 shadow-xl" style={{ fontSize: 15 }}>
+        <div data-over-webview role="menu" className="absolute right-2 top-full z-20 mt-1 w-56 rounded-2xl bg-white dark:bg-surface-raised py-2 shadow-xl" style={{ fontSize: 15 }}>
           {([
             ["share", () => actions?.share()],
             ["desktop", () => actions?.desktop()],
@@ -150,8 +152,9 @@ function AndroidTop({ time, url, address, landscape, actions }: { time: string; 
 }
 
 /**
- * A página dentro do aparelho: faixas em volta e `children` (a vista do navegador) no meio. Sem `platform`, é só um
- * contêiner que ocupa tudo, com a MESMA árvore (a vista nativa não pode remontar ao entrar e sair do modo celular).
+ * A página dentro do aparelho: o Chrome do Android em volta e `children` (a vista do navegador) no meio. Sem `platform`,
+ * é só um contêiner que ocupa tudo, com a MESMA árvore (a vista nativa não pode remontar ao entrar e sair do modo
+ * celular nem ao girar): a faixa do furo é irmã absoluta, e a página só ganha uma folga à esquerda.
  */
 export function PhoneChrome({ platform = null, landscape = false, url = "", actions, children }: {
   platform?: Platform | null;
@@ -163,21 +166,16 @@ export function PhoneChrome({ platform = null, landscape = false, url = "", acti
   const time = useClock();
   const address = shownAddress(url);
   const inset = platform ? chromeInsets(platform, landscape) : null;
-  const side = (width: number, island: "ios" | "android" | null, left: boolean) => width > 0 ? (
-    <div className={`relative shrink-0 ${"bg-white"}`} style={{ width }}>
-      {island && left && (island === "ios"
-        ? <span className="absolute top-1/2 -translate-y-1/2 rounded-full bg-black" style={{ left: 12, width: 34, height: 118 }} />
-        : <span className="absolute top-1/2 -translate-y-1/2 rounded-full bg-black" style={{ left: 11, width: 14, height: 14 }} />)}
+  const strip = platform === "android" && landscape && inset ? (
+    <div data-phone-strip aria-hidden className="absolute left-0 top-0 h-full bg-white dark:bg-surface" style={{ width: inset.left }}>
+      <span className="absolute top-1/2 -translate-y-1/2 rounded-full bg-black" style={{ left: 14, width: 15, height: 15 }} />
     </div>
   ) : null;
   return (
-    <div className="flex flex-col w-full h-full min-h-0">
+    <div className="relative flex flex-col w-full h-full min-h-0" style={{ paddingLeft: inset?.left ?? 0 }}>
+      {strip}
       {platform === "android" && <AndroidTop time={time} url={url} address={address} landscape={landscape} actions={actions} />}
-      <div className="flex flex-1 min-h-0 min-w-0">
-        {side(inset?.left ?? 0, platform, true)}
-        <div className="relative flex flex-col flex-1 min-w-0 min-h-0">{children}</div>
-        {side(inset?.right ?? 0, null, false)}
-      </div>
+      <div className="relative flex flex-col flex-1 min-w-0 min-h-0">{children}</div>
     </div>
   );
 }

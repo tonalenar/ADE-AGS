@@ -322,6 +322,7 @@ impl<R> InputAcks<R> {
         resposta
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.fila.is_empty()
     }

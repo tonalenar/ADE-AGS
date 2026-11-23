@@ -319,3 +319,69 @@ fn skills_dir_custom_recusa_ponto_e_parent() {
     assert!(!crate::agents::skills_dir_custom_ok(".."));
     assert!(!crate::agents::skills_dir_custom_ok("../x"));
 }
+
+#[test]
+fn detector_nao_grava_timeout_no_cache_e_aplica_backoff_crescente() {
+    use std::time::{Duration, Instant};
+    use super::detector::{
+        timeout_backoff, AgentInfo, DetectCache, ProbeOutcome, DETECT_TTL, TIMEOUT_BACKOFF_BASE,
+        TIMEOUT_BACKOFF_MAX,
+    };
+
+    let sample = |version: Option<&str>, timed_out: bool| ProbeOutcome {
+        info: AgentInfo {
+            id: "claude-code".into(),
+            label: "Claude Code".into(),
+            command: "claude".into(),
+            launch_args: None,
+            available: true,
+            version: version.map(str::to_string),
+            path: Some("/usr/local/bin/claude".into()),
+            resume: None,
+            skills_dir: None,
+        },
+        timed_out,
+    };
+
+    assert_eq!(timeout_backoff(1), TIMEOUT_BACKOFF_BASE);
+    assert_eq!(timeout_backoff(2), TIMEOUT_BACKOFF_BASE * 2);
+    assert_eq!(timeout_backoff(3), TIMEOUT_BACKOFF_BASE * 4);
+    assert_eq!(timeout_backoff(4), TIMEOUT_BACKOFF_MAX);
+    assert_eq!(timeout_backoff(10), TIMEOUT_BACKOFF_MAX);
+
+    let mut cache = DetectCache::default();
+    let t0 = Instant::now();
+
+    // Timeout inicial: não entra no cache de 5 min e segura nova sonda só pelo backoff curto (10s).
+    let first = cache.record(t0, vec![sample(None, true)]);
+    assert!(!cache.has_fresh(), "resultado com timeout não pode virar cache de 5 min");
+    assert_eq!(first[0].version, None);
+    assert!(cache.lookup(t0 + Duration::from_secs(5), false).is_some(), "dentro do backoff evita tempestade");
+    assert!(cache.lookup(t0 + TIMEOUT_BACKOFF_BASE, false).is_none(), "após o backoff libera nova tentativa");
+    assert!(cache.lookup(t0 + Duration::from_secs(1), true).is_none(), "refresh ignora backoff");
+
+    // Segundo timeout consecutivo dobra o backoff para 20s.
+    let t1 = t0 + TIMEOUT_BACKOFF_BASE;
+    cache.record(t1, vec![sample(None, true)]);
+    assert!(!cache.has_fresh());
+    assert!(cache.lookup(t1 + Duration::from_secs(15), false).is_some());
+    assert!(cache.lookup(t1 + TIMEOUT_BACKOFF_BASE * 2, false).is_none());
+
+    // Sonda limpa sem timeout: grava no cache cheio (5 min) e zera o backoff.
+    let t2 = t1 + TIMEOUT_BACKOFF_BASE * 2;
+    let ok = cache.record(t2, vec![sample(Some("2.1.0"), false)]);
+    assert!(cache.has_fresh());
+    assert_eq!(ok[0].version.as_deref(), Some("2.1.0"));
+    assert_eq!(
+        cache.lookup(t2 + DETECT_TTL - Duration::from_secs(1), false).unwrap()[0].version.as_deref(),
+        Some("2.1.0")
+    );
+    assert!(cache.lookup(t2 + DETECT_TTL, false).is_none());
+
+    // Novo timeout depois de expirar preserva a última versão conhecida no retorno, mas não grava fresh.
+    let t3 = t2 + DETECT_TTL;
+    let preserved = cache.record(t3, vec![sample(None, true)]);
+    assert!(!cache.has_fresh());
+    assert_eq!(preserved[0].version.as_deref(), Some("2.1.0"));
+    assert!(cache.lookup(t3 + TIMEOUT_BACKOFF_BASE, false).is_none(), "backoff reiniciou em 10s");
+}

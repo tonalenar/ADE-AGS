@@ -563,7 +563,7 @@ export function valueFor(fieldName: string, fills: [string, string][], taken: Se
 // ── O laço ──────────────────────────────────────────────────────────
 
 export interface StepReply {
-  status: "ok" | "off" | "secret" | "error";
+  status: "ok" | "off" | "no_credit" | "secret" | "error";
   operation: string | null;
   target: string | null;
   /** A menor entre a probabilidade da operação e a do alvo. */
@@ -576,6 +576,13 @@ export interface StepReply {
   cost?: QueryCost | null;
   /** De quem foi a falha: a rede, o provedor ou a configuração local (plano v2, 4.3). */
   fault?: "rede" | "provedor" | "local" | null;
+}
+
+/** Estado de disponibilidade do piloto antes de agir (ligado, chave, saldo/cota). */
+export interface PilotStatus {
+  status: "ok" | "off" | "no_credit" | "error";
+  reason: string | null;
+  fault?: StepReply["fault"];
 }
 
 /** O que uma consulta ao Jev carregou e custou (espelha `QueryCost` em `decisions/browse.rs`). */
@@ -609,6 +616,8 @@ export interface VisualReply {
 }
 
 export interface PilotDeps {
+  /** Confere se o Jev está ligado e disponível (chave/saldo) antes de qualquer ação automática (`autoFill`), sem gastar cota. Opcional. */
+  status?: () => Promise<PilotStatus>;
   /** Abre a conexão com o Jev enquanto a primeira página é lida (o handshake sai do caminho do primeiro passo). Nunca lança. */
   warm?: () => void;
   /** As ações dos `act` anteriores NESTE portal (D6). Chamada DEPOIS da primeira leitura da página (é aí que se sabe se ela mudou). Opcional. */
@@ -1054,8 +1063,22 @@ export function timed(deps: PilotDeps, t: Timings): PilotDeps {
       return reply;
     },
     warm: deps.warm,
+    status: deps.status,
     prior: deps.prior,
     expectsMet: deps.expectsMet && wrap("snapshot", deps.expectsMet),
+  };
+}
+
+/**
+ * No app Tauri real (quando `deps.status` não foi injetado por fora), consulta o estado local do piloto
+ * (`decision_pilot_status`: ligado, chave e cache de saldo esgotado) sem gastar consulta nem tocar em `agentBridge.ts`.
+ * Em testes Node/happy-dom sem Tauri, devolve `undefined` para manter o piloto puro.
+ */
+function tauriPilotStatus(): (() => Promise<PilotStatus>) | undefined {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return undefined;
+  return async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<PilotStatus>("decision_pilot_status");
   };
 }
 
@@ -1140,6 +1163,21 @@ async function pilotLoop(
 
   const finish = (outcome: PilotResult["outcome"], note: string): PilotResult =>
     ({ outcome, steps: log, note: note + emptyFieldsNote(parseSnapshot(snapshot), fills.length), finalSnapshot: snapshot, timings: { ...timings, total: Date.now() - startedAt } });
+
+  // Confere o estado do Jev ANTES de qualquer preenchimento automático (`autoFill`) ou envio de busca:
+  // com o piloto desligado, sem chave ou sem saldo, não toca na página e devolve o fallback limpo.
+  const checkStatus = deps.status ?? tauriPilotStatus();
+  if (checkStatus) {
+    const availability = await checkStatus();
+    if (availability.status !== "ok") {
+      const fallbackNote = availability.reason ?? (
+        availability.status === "no_credit"
+          ? "O Jev está sem saldo ou com a cota esgotada. Continue pelo caminho local (snapshot/click/type) ou confira em Ajustes → Decisões."
+          : "O Jev não está disponível no navegador. Continue pelo caminho local (snapshot/click/type)."
+      );
+      return finish(availability.status === "off" ? "off" : "error", fallbackNote);
+    }
+  }
 
   const early = missingFill(goal, fills.length, parseSnapshot(snapshot));
   if (early) {
@@ -1448,7 +1486,12 @@ async function pilotLoop(
     if (!lastJev || lastJev.changed === false) query.skipGoalDone = true;
     const reply = await deps.pick(query);
     if (reply.status !== "ok" || !reply.operation) {
-      return finish(reply.status === "off" ? "off" : "error", reply.reason ?? "O Jev não respondeu.");
+      const fallbackNote = reply.reason ?? (
+        reply.status === "no_credit"
+          ? "O Jev está sem saldo ou com a cota esgotada. Continue pelo caminho local (snapshot/click/type) ou confira em Ajustes → Decisões."
+          : "O Jev não respondeu."
+      );
+      return finish(reply.status === "off" ? "off" : "error", fallbackNote);
     }
     const operation = reply.operation;
     // O objetivo já está atingido? Pergunta direta, à parte da operação: depois de acertar (um filtro aplicado, o carrinho

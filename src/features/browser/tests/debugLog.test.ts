@@ -211,9 +211,9 @@ describe("viewport", () => {
   });
 
   it("reconoce un preset en cualquier orientación", () => {
-    expect(presetOf({ width: 390, height: 844 })).toMatchObject({ preset: { id: "phone" }, rotated: false });
-    expect(presetOf(rotate({ width: 390, height: 844 }))).toMatchObject({ preset: { id: "phone" }, rotated: true });
-    expect(presetOf({ width: 391, height: 844 })).toBeUndefined();
+    expect(presetOf({ width: 402, height: 874 })).toMatchObject({ preset: { id: "phone" }, rotated: false });
+    expect(presetOf(rotate({ width: 402, height: 874 }))).toMatchObject({ preset: { id: "phone" }, rotated: true });
+    expect(presetOf({ width: 403, height: 874 })).toBeUndefined();
   });
 
   it("no deja pedir tamaños absurdos", () => {

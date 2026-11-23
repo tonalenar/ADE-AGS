@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { PermissionCard } from "@/features/runs/PermissionCard";
@@ -10,6 +9,7 @@ import { ChatMarkdown } from "./LazyChatMarkdown";
 import { dateLocale } from "@/i18n/dateLocale";
 import { buildFeed, feedFilterOptions, filterFeed, formatMessageText, parseVigiaText, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, type FeedFilter, type FeedItem, type TeamMessage, type TerminalPromptItem, type UserNote } from "./teamFeedModel";
 import { answerTerminalPrompt } from "./useTerminalPrompts";
+import { missionMessages } from "./ipc";
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 
@@ -31,7 +31,7 @@ export function useTeamMessages(missionId: string | null, enabled = true): TeamM
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       if (inflight) { again = true; return; }
       inflight = true;
-      invoke<TeamMessage[]>("mission_messages", { missionId, afterId: last.current })
+      missionMessages(missionId, last.current)
         .then((fresh) => {
           if (!alive || fresh.length === 0) return;
           last.current = Math.max(last.current, ...fresh.map((m) => m.id));
@@ -139,7 +139,7 @@ function MessageBody({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   const shown = useMemo(() => formatMessageText(text), [text]);
   return (
-    <div className="rounded-2xl bg-gray-100 px-4 py-3 text-[13px] leading-[21px] break-words text-gray-900 dark:bg-surface-raised dark:text-[#f5f5f7] [&_.chat-md_p]:my-2.5 [&_.chat-md_ol]:my-2.5 [&_.chat-md_ol]:gap-2 [&_.chat-md_ul]:my-2.5 [&_.chat-md_ul]:gap-2 [&_.chat-md_strong]:font-semibold [&_.chat-md_strong]:text-gray-950 dark:[&_.chat-md_strong]:text-white [&_.chat-md_code]:break-all [&_.chat-md_code]:rounded-md [&_.chat-md_code]:bg-black/[0.06] [&_.chat-md_code]:px-1.5 [&_.chat-md_code]:py-0.5 [&_.chat-md_code]:text-[11.5px] [&_.chat-md_code]:font-medium [&_.chat-md_code]:text-accent-700 dark:[&_.chat-md_code]:bg-white/[0.08] dark:[&_.chat-md_code]:text-accent-300">
+    <div className="rounded-2xl bg-gray-100 px-4 py-3 text-[13px] leading-[21px] break-words text-gray-900 dark:bg-surface-raised dark:text-ink [&_.chat-md_p]:my-2.5 [&_.chat-md_ol]:my-2.5 [&_.chat-md_ol]:gap-2 [&_.chat-md_ul]:my-2.5 [&_.chat-md_ul]:gap-2 [&_.chat-md_strong]:font-semibold [&_.chat-md_strong]:text-gray-950 dark:[&_.chat-md_strong]:text-white [&_.chat-md_code]:break-all [&_.chat-md_code]:rounded-md [&_.chat-md_code]:bg-black/[0.06] [&_.chat-md_code]:px-1.5 [&_.chat-md_code]:py-0.5 [&_.chat-md_code]:text-[11.5px] [&_.chat-md_code]:font-medium [&_.chat-md_code]:text-accent-700 dark:[&_.chat-md_code]:bg-white/[0.08] dark:[&_.chat-md_code]:text-accent-300">
       <div className={long && !open ? "max-h-[9rem] overflow-hidden [mask-image:linear-gradient(to_bottom,black_70%,transparent)]" : undefined}>
         <ChatMarkdown text={shown} />
       </div>
@@ -229,7 +229,7 @@ export function TeamFeed({ items, colors = {} }: {
             <span title={item.who} className="truncate">{t("canvas.team.permission", { who: item.who })}</span>
             <span className="ml-auto font-mono text-[11px] font-normal tabular-nums text-gray-400 dark:text-white/35">{clock(item.atMs)}</span>
           </div>
-          <p className="text-[13px] font-medium leading-[18px] text-gray-900 dark:text-[#f5f5f7]">{item.prompt.title}</p>
+          <p className="text-[13px] font-medium leading-[18px] text-gray-900 dark:text-ink">{item.prompt.title}</p>
           {item.prompt.detail && (
             <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/[0.05] px-2.5 py-2 font-mono text-[11.5px] leading-[17px] text-gray-700 dark:bg-white/[0.06] dark:text-white/75">{item.prompt.detail}</pre>
           )}
@@ -270,7 +270,7 @@ export function TeamFeed({ items, colors = {} }: {
         {!continuation && (
           <div className="mb-1 flex items-center gap-1.5 text-[11.5px] leading-4">
             <Avatar name={m.fromName} color={colors[m.fromTabId]} />
-            <span title={m.fromName} className="max-w-[34%] truncate font-semibold text-gray-900 dark:text-[#f5f5f7]">{m.fromName}</span>
+            <span title={m.fromName} className="max-w-[34%] truncate font-semibold text-gray-900 dark:text-ink">{m.fromName}</span>
             <svg viewBox="0 0 16 16" aria-hidden className="h-3 w-3 shrink-0 text-gray-400 dark:text-white/40" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h10M9 4l4 4-4 4" /></svg>
             <Avatar name={m.toName} color={colors[m.toTabId]} />
             <span title={m.toName} className="max-w-[34%] truncate text-gray-600 dark:text-white/65">{m.toName}</span>

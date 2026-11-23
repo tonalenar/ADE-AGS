@@ -89,5 +89,14 @@ fn tick(app: &AppHandle) -> Result<Option<i64>, String> {
         changed(app, Some(&msg.to_tab_id));
         ensure_worker(app, &msg.to_tab_id);
     }
+    // A fila de tarefas do time: lança o que as condições liberaram e pede para voltar quando só a carga ou um branch
+    // (que nenhum evento anuncia) a seguram.
+    let wake = match super::consciencia::tick(app) {
+        Ok(Some(after_ms)) => {
+            let at = with_conn(app, store::db_now).unwrap_or(0) + after_ms;
+            Some(wake.map_or(at, |w| w.min(at)))
+        }
+        _ => wake,
+    };
     Ok(wake)
 }

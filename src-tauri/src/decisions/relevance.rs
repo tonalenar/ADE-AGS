@@ -33,7 +33,7 @@ pub const BODY_CHARS: usize = 160;
 const LOCAL_TOP: usize = 8;
 /// Teto de memórias escolhidas: o mesmo de entradas do briefing.
 pub const MAX_CHOSEN: usize = 10;
-/// Orçamento de caracteres do bloco do briefing (o mesmo de `missions::memory_context_text`).
+/// Orçamento de caracteres do bloco do briefing (o mesmo corte do briefing da missão).
 const BRIEFING_CHARS: usize = 2_600;
 
 /// Uma memória aprovada como o Jev a vê. `kind` é o tipo (`note`, `constraint`…).
@@ -47,14 +47,7 @@ pub struct Candidate {
 /// Colapsa espaços, corta em `max` caracteres e marca o corte. Pura.
 fn clip(text: &str, max: usize) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if max == 0 {
-        return String::new();
-    }
-    if flat.chars().count() > max {
-        flat.chars().take(max.saturating_sub(1)).collect::<String>() + "…"
-    } else {
-        flat
-    }
+    crate::util::clip(&flat, max)
 }
 
 /// As candidatas que saem: as primeiras `MAX_CANDIDATES`, sem segredo e sem chave repetida (vale a

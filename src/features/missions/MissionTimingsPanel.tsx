@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { maxFixRound } from "@/features/runs/fixRounds";
+import { startVisiblePolling } from "@/shared/visiblePolling";
 
 import { activeSourceKey, formatActive, formatDuration, getMissionEfficiency, getTimings, shareOf, testStatsView, type MissionEfficiency, type MissionTimings } from "./timings";
 
@@ -18,12 +19,13 @@ export function MissionTimingsPanel({ missionId }: { missionId: string }) {
 
   useEffect(() => {
     let alive = true;
-    const load = () => getTimings(missionId).then((d) => alive && setData(d)).catch(() => undefined);
-    void load();
-    const timer = window.setInterval(load, REFRESH_MS);
+    const poll = startVisiblePolling(
+      () => getTimings(missionId).then((d) => { if (alive) setData(d); }).catch(() => undefined),
+      REFRESH_MS,
+    );
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      poll.stop();
     };
   }, [missionId]);
 
@@ -87,12 +89,13 @@ export function MissionEfficiencyCard({ missionId, compact = false }: { missionI
 
   useEffect(() => {
     let alive = true;
-    const load = () => getMissionEfficiency(missionId).then((value) => alive && setData(value)).catch(() => undefined);
-    void load();
-    const timer = window.setInterval(load, REFRESH_MS);
+    const poll = startVisiblePolling(
+      () => getMissionEfficiency(missionId).then((value) => { if (alive) setData(value); }).catch(() => undefined),
+      REFRESH_MS,
+    );
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      poll.stop();
     };
   }, [missionId]);
 

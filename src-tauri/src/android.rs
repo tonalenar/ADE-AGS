@@ -9,8 +9,8 @@
 //! Las partes que leen la salida de `adb` son funciones puras para probarlas sin dispositivo.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -18,6 +18,8 @@ use crate::util::output_with_timeout;
 
 const FAST: Duration = Duration::from_secs(8);
 const SLOW: Duration = Duration::from_secs(25);
+/// Lista de AVDs quase nunca muda e o binário `emulator` é caro para abrir a cada 4 s.
+const AVD_CACHE_TTL: Duration = Duration::from_secs(60);
 
 // ── Encontrar las herramientas ──────────────────────────────────────
 
@@ -67,8 +69,10 @@ fn cached_tool(slot: &'static OnceLock<PathBuf>, find: impl FnOnce() -> Option<P
     Some(slot.get_or_init(|| found))
 }
 
-fn emulator_path() -> Result<PathBuf, String> {
-    find_tool("emulator", "emulator").ok_or_else(|| "Não encontrei o `emulator` do Android SDK.".to_string())
+fn emulator_path() -> Result<&'static PathBuf, String> {
+    static EMULATOR: OnceLock<PathBuf> = OnceLock::new();
+    cached_tool(&EMULATOR, || find_tool("emulator", "emulator"))
+        .ok_or_else(|| "Não encontrei o `emulator` do Android SDK.".to_string())
 }
 
 /// Corre `adb [-s serial] args…` y devuelve su salida cruda (binaria: sirve para `screencap`).
@@ -157,14 +161,72 @@ pub fn devices() -> Result<Vec<Device>, String> {
     Ok(parse_devices(&adb_text(None, &["devices", "-l"], FAST)?))
 }
 
-/// Los AVD (emuladores) creados en esta máquina.
-pub fn avds() -> Vec<String> {
-    let Ok(emulator) = emulator_path() else { return Vec::new() };
+#[derive(Default)]
+struct AvdCache {
+    entry: Option<(Instant, Vec<String>)>,
+}
+
+impl AvdCache {
+    fn invalidate(&mut self) {
+        self.entry = None;
+    }
+}
+
+fn avds_with(
+    slot: &Mutex<AvdCache>,
+    now: impl Fn() -> Instant,
+    ttl: Duration,
+    fetch: impl FnOnce() -> Result<Vec<String>, ()>,
+) -> Vec<String> {
+    {
+        let cache = slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, list)) = &cache.entry
+            && now().saturating_duration_since(*at) < ttl
+        {
+            return list.clone();
+        }
+    }
+    // Executa o processo externo fora do mutex para não bloquear outros leitores.
+    let fetched = fetch();
+    let mut cache = slot.lock().unwrap_or_else(|e| e.into_inner());
+    match fetched {
+        Ok(list) => {
+            cache.entry = Some((now(), list.clone()));
+            list
+        }
+        // Falha ou timeout do `emulator` não entra no cache como lista vazia.
+        Err(()) => cache.entry.as_ref().map(|(_, list)| list.clone()).unwrap_or_default(),
+    }
+}
+
+fn avd_cache() -> &'static Mutex<AvdCache> {
+    static CACHE: OnceLock<Mutex<AvdCache>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+pub(crate) fn invalidate_avds_cache() {
+    avd_cache().lock().unwrap_or_else(|e| e.into_inner()).invalidate();
+}
+
+fn fetch_avds_uncached() -> Result<Vec<String>, ()> {
+    let Ok(emulator) = emulator_path() else { return Err(()) };
     let mut cmd = crate::util::spawn::hidden_command(emulator);
     cmd.arg("-list-avds");
-    output_with_timeout(&mut cmd, FAST)
-        .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("INFO")).map(String::from).collect())
-        .unwrap_or_default()
+    let out = output_with_timeout(&mut cmd, FAST).map_err(|_| ())?;
+    if !out.status.success() {
+        return Err(());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("INFO"))
+        .map(String::from)
+        .collect())
+}
+
+/// Los AVD (emuladores) creados en esta máquina, com cache de [`AVD_CACHE_TTL`].
+pub fn avds() -> Vec<String> {
+    avds_with(avd_cache(), Instant::now, AVD_CACHE_TTL, fetch_avds_uncached)
 }
 
 /// Arranca un AVD y no espera: el emulador tarda en aparecer en `adb devices` y la pantalla
@@ -173,8 +235,10 @@ pub fn start_avd(name: &str) -> Result<(), String> {
     if name.is_empty() || name.starts_with('-') || !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
         return Err("Nome de AVD inválido.".into());
     }
-    if !avds().iter().any(|a| a == name) {
-        return Err(format!("Não existe o AVD '{name}'. Disponíveis: {}.", avds().join(", ")));
+    invalidate_avds_cache();
+    let available = avds();
+    if !available.iter().any(|a| a == name) {
+        return Err(format!("Não existe o AVD '{name}'. Disponíveis: {}.", available.join(", ")));
     }
     // OwnWindow: CREATE_NO_WINDOW | DETACHED_PROCESS. O emulador não pode herdar o
     // console da app e tem que sobreviver quando a app fecha. Não passa por `output()`.

@@ -13,6 +13,8 @@ import { useRunsStore } from "@/features/runs/store";
 import type { Tab } from "@/features/tabs/types";
 import { homeDir } from "@/shared/ipc/window";
 import { openExternalUrl } from "@/shared/openExternalUrl";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
+import { startVisiblePolling } from "@/shared/visiblePolling";
 
 import { ConnectorsSection, ContextSection } from "./AgentSections";
 import { CARD, Row, Section } from "./Section";
@@ -20,7 +22,7 @@ import { backgroundTasks, branchPulls, folderLabel, formatElapsed } from "./pane
 
 export const PR_STATE: Record<string, string> = { open: "text-emerald-500", merged: "text-violet-500", closed: "text-gray-400" };
 
-/** Os PRs da branch com o +/− de cada um. Pede de novo quando a branch muda e a cada minuto. */
+/** Os PRs da branch com o +/− de cada um. Pede de novo quando a branch muda e a cada minuto (só visível). */
 export function usePulls(cwd: string | null, branch: string | null) {
   const [pulls, setPulls] = useState<ForgeItem[] | null>(null);
   const [stats, setStats] = useState<Record<number, { add: number; del: number }>>({});
@@ -29,39 +31,43 @@ export function usePulls(cwd: string | null, branch: string | null) {
     setStats({});
     if (!cwd || !branch) return;
     let alive = true;
-    const load = () => forgePulls(cwd, "all")
-      .then(async (items) => {
-        const mine = branchPulls(items, branch);
-        if (!alive) return;
-        setPulls(mine);
-        for (const pr of mine) {
-          const files = await forgePullFiles(cwd, pr.number).catch(() => null);
-          if (!alive || !files) continue;
-          const add = files.reduce((n, f) => n + f.additions, 0);
-          const del = files.reduce((n, f) => n + f.deletions, 0);
-          setStats((s) => ({ ...s, [pr.number]: { add, del } }));
-        }
-      })
-      // Sem conta do forge ou sem remoto: a seção mostra só o git local.
-      .catch(() => alive && setPulls([]));
-    load();
-    const timer = window.setInterval(load, 60_000);
+    const poll = startVisiblePolling(
+      () =>
+        forgePulls(cwd, "all")
+          .then(async (items) => {
+            const mine = branchPulls(items, branch);
+            if (!alive) return;
+            setPulls(mine);
+            for (const pr of mine) {
+              const files = await forgePullFiles(cwd, pr.number).catch(() => null);
+              if (!alive || !files) continue;
+              const add = files.reduce((n, f) => n + f.additions, 0);
+              const del = files.reduce((n, f) => n + f.deletions, 0);
+              setStats((s) => ({ ...s, [pr.number]: { add, del } }));
+            }
+          })
+          // Sem conta do forge ou sem remoto: a seção mostra só o git local.
+          .catch(() => { if (alive) setPulls([]); }),
+      60_000,
+    );
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      poll.stop();
     };
   }, [cwd, branch]);
   return { pulls, stats };
 }
 
-/** Relógio de segundos só enquanto há tarefa rodando. */
+/** Relógio de segundos só enquanto há tarefa rodando e a janela está visível. */
 function useNow(active: boolean) {
+  const visible = useDocumentVisible();
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    if (!active) return;
+    if (!active || !visible) return;
+    setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [active]);
+  }, [active, visible]);
   return now;
 }
 

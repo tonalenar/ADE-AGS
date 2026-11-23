@@ -21,6 +21,7 @@ import { conversationTimeline } from "./ipc";
 import type { TimelineItem } from "./timeline/types";
 import { canOpenSideChat, clampSideChatAccess, sideChatAccountFor, sideChatDraftDefaults, sideChatFirstMessage, sideChatForkNote, sideChatHistory, sideChatParentReference, type SideChatDraft } from "./sideChatModel";
 import { NewChatIcon, SideChatIcon, XIcon } from "./chatIcons";
+import { onThreadEvent } from "./threadEvents";
 
 function cardForThread(thread: ThreadRow, parent: ConversationCard, label: string): ConversationCard {
   return {
@@ -110,13 +111,13 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
     const offConversation = listen<{ tabId: string }>("cc-conversation-grew", (event) => {
       if (event.payload.tabId === conversation.tabId) load();
     });
-    const offThread = listen<{ threadId: string; type: string }>("cc-chat-thread", (event) => {
-      if (event.payload.threadId === parentThreadId && event.payload.type === "item") load();
+    const offThread = onThreadEvent<{ threadId: string; type: string }>((event) => {
+      if (event.threadId === parentThreadId && event.type === "item") load();
     });
     return () => {
       alive = false;
       offConversation.then((off) => off()).catch(() => undefined);
-      offThread.then((off) => off()).catch(() => undefined);
+      offThread();
     };
   }, [conversation?.tabId, parentThreadId, ref]);
 

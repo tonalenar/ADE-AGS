@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
 import { boardKeyOfTab, conversationOfKey, missionOfKey, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
+import type { Board } from "@/features/canvas/board";
 import { useConversations } from "@/features/chat/unified/useConversations";
 import { teamGridRefs } from "@/features/tabs/teamTabs";
 import { useTabsStore } from "@/features/tabs/store";
@@ -48,12 +49,13 @@ export function gridPlacements(ids: string[], slots: Record<string, GridRect>): 
   return out;
 }
 
+const EMPTY_BOARDS: Record<string, Board> = {};
+
 /** Los ids de las tabs a mostrar en grade en la misión activa, o `null` = vista de abas normal. */
 export function useMissionGrid(): string[] | null {
   const key = useActiveBoardKey();
   const mode = useWorkMode();
   const on = useCanvasStore((s) => (key ? !!s.grids[key] : false));
-  const boards = useCanvasStore((s) => s.boards);
   const tabs = useTabsStore((s) => s.tabs);
   const activeCwd = useTabsStore((s) => {
     const active = s.tabs.find((t) => t.id === s.activeTabId);
@@ -64,9 +66,11 @@ export function useMissionGrid(): string[] | null {
     const view = s.views.find((v) => v.id === s.activeViewId);
     return !!view && comparablePath(view.cwd) === activeCwd;
   });
+  const activeGrid = on && mode === "tabs" && !viewActive;
+  const boards = useCanvasStore((s) => (activeGrid ? s.boards : EMPTY_BOARDS));
   const ids = useMemo(
-    () => (key ? tabs.filter((t) => boardKeyOfTab(t, boards) === key).map((t) => t.id) : []),
-    [key, tabs, boards],
+    () => (activeGrid && key ? tabs.filter((t) => boardKeyOfTab(t, boards) === key).map((t) => t.id) : []),
+    [activeGrid, key, tabs, boards],
   );
   const joined = ids.join("|");
   // O time da aba ativa, do modelo único (terminais e conversas por protocolo): a grade dele no lugar da de missão.

@@ -5,13 +5,17 @@
  * dia). O que não tem fonte, ou falhou, é "não medido": nunca se inventa um número.
  */
 import type { AgyGroup } from "@/features/accounts/ipc";
-import type { LiveUsage } from "@/features/accounts/usage";
+import { accountProblemKey } from "@/features/accounts/problem";
+import type { LiveUsage, Meter } from "@/features/accounts/usage";
 import type { AccountLimits } from "@/features/accounts/types";
 import type { AgyEntry, AntigravityEntry, CodexEntry } from "@/features/canvas/usageStore";
 import { clamp as clampRange } from "@/shared/math";
 
 /** Acima disto a barra fica âmbar; em 100 está esgotada. */
 export const WARN_ABOVE = 80;
+
+/** Janela máxima em que um último valor válido do Claude ainda é exibido quando a atualização falha. */
+export const CLAUDE_STALE_MAX_SECS = 3600;
 
 export type LimitLevel = "unknown" | "ok" | "warn" | "full";
 
@@ -58,11 +62,34 @@ export interface LimitWindow {
   expired: boolean;
 }
 
-export type UnmeasuredReason = "loading" | "failed" | "notLoggedIn" | "apiKey" | "noWindows" | "noSource" | "noQuotaSource" | "unresolved";
+export type UnmeasuredReason =
+  | "loading"
+  | "failed"
+  | "notLoggedIn"
+  | "apiKey"
+  | "noWindows"
+  | "noSource"
+  | "noQuotaSource"
+  | "unresolved"
+  | "authExpired"
+  | "authRequired"
+  | "rateLimited"
+  | "timeout"
+  | "loadFailed"
+  | "trustRequired"
+  | "notInstalled"
+  | "configError";
+
+export interface StaleReading {
+  ageSeconds: number;
+  problemKey: string | null;
+  problemText: string | null;
+  retryInSeconds: number | null;
+}
 
 export type AccountReading =
-  | { state: "measured"; windows: LimitWindow[]; /** O servidor recusou por limite. */ rejected: boolean }
-  | { state: "unmeasured"; reason: UnmeasuredReason };
+  | { state: "measured"; windows: LimitWindow[]; /** O servidor recusou por limite. */ rejected: boolean; stale?: StaleReading }
+  | { state: "unmeasured"; reason: UnmeasuredReason; retryInSeconds?: number };
 
 const unmeasured = (reason: UnmeasuredReason): AccountReading => ({ state: "unmeasured", reason });
 
@@ -71,14 +98,82 @@ function measured(windows: (LimitWindow | null)[], rejected = false): AccountRea
   return list.length > 0 || rejected ? { state: "measured", windows: list, rejected } : unmeasured("noWindows");
 }
 
-/** Claude Code: as barras do `/usage`, com o texto de renovação da própria TUI. */
-export function readClaude(live: LiveUsage | null, loggedIn: boolean, _now: number): AccountReading {
+function claudeProblemReason(problemKey: string | null): UnmeasuredReason {
+  switch (problemKey) {
+    case "accounts.auth.expired":
+      return "authExpired";
+    case "accounts.auth.required":
+      return "authRequired";
+    case "accounts.plan.problem.rateLimited":
+      return "rateLimited";
+    case "accounts.plan.problem.timeout":
+      return "timeout";
+    case "accounts.plan.problem.loadFailed":
+      return "loadFailed";
+    case "accounts.plan.problem.trustRequired":
+      return "trustRequired";
+    case "accounts.plan.problem.notInstalled":
+    case "accounts.plan.problem.commandUnknown":
+      return "notInstalled";
+    case "accounts.plan.problem.configUnavailable":
+    case "accounts.plan.problem.configRead":
+    case "accounts.plan.problem.configWrite":
+    case "accounts.plan.problem.probePath":
+      return "configError";
+    case "accounts.plan.problem.apiKey":
+      return "apiKey";
+    default:
+      return "failed";
+  }
+}
+
+function unmeasuredClaude(live: LiveUsage, now: number): AccountReading {
+  const reason = claudeProblemReason(accountProblemKey(live.problem));
+  if (reason === "rateLimited" && live.retryAt && live.retryAt > now) {
+    return { state: "unmeasured", reason, retryInSeconds: Math.max(1, live.retryAt - now) };
+  }
+  return unmeasured(reason);
+}
+
+/** Claude Code: as barras do `/usage` (ou leitura passiva), preservando valor recente em erro transitório. */
+export function readClaude(live: LiveUsage | null, loggedIn: boolean, now: number): AccountReading {
   if (!loggedIn) return unmeasured("notLoggedIn");
   if (live === null) return unmeasured("loading");
-  if (!live.available) return unmeasured("failed");
-  const meter = (kind: WindowKind, m: { percent: number; resets: string | null } | null): LimitWindow | null =>
-    m ? { kind, label: null, percent: clamp(m.percent), resetsAt: null, resetsText: m.resets, expired: false } : null;
-  return measured([meter("session", live.session), meter("week", live.week)]);
+  const problemKey = accountProblemKey(live.problem);
+  if (problemKey === "accounts.auth.expired" || problemKey === "accounts.auth.required") {
+    return unmeasuredClaude(live, now);
+  }
+  if (!live.available) return unmeasuredClaude(live, now);
+
+  if (live.problem) {
+    const ageSeconds = live.fetchedAt > 0 ? Math.max(0, now - live.fetchedAt) : Infinity;
+    if (ageSeconds > CLAUDE_STALE_MAX_SECS) {
+      return unmeasuredClaude(live, now);
+    }
+  }
+
+  const meter = (kind: WindowKind, m: Meter | null): LimitWindow | null => {
+    if (!m) return null;
+    if (typeof m.resetsAt === "number" && Number.isFinite(m.resetsAt)) {
+      return timed(kind, m.percent / 100, m.resetsAt, now, null, clamp(m.percent));
+    }
+    return { kind, label: null, percent: clamp(m.percent), resetsAt: null, resetsText: m.resets, expired: false };
+  };
+  const reading = measured([meter("session", live.session), meter("week", live.week)]);
+  if (reading.state === "measured" && live.problem) {
+    const ageSeconds = Math.max(0, now - live.fetchedAt);
+    const retryInSeconds = live.retryAt && live.retryAt > now ? Math.max(1, live.retryAt - now) : null;
+    return {
+      ...reading,
+      stale: {
+        ageSeconds,
+        problemKey,
+        problemText: live.problem,
+        retryInSeconds,
+      },
+    };
+  }
+  return reading;
 }
 
 /** Uma janela com horário (0–1 de uso): se já renovou, a porcentagem velha não vale. */
@@ -197,6 +292,7 @@ export interface AccountLike {
   name: string;
   label: string | null;
   loggedIn: boolean;
+  kind?: "login" | "api_key";
 }
 
 export interface AccountEntry {

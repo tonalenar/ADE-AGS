@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 
+import { isDocumentHidden } from "@/shared/visiblePolling";
+
 import { iphoneDevices, iphoneMirrorSessionPaused, iphoneMirrorStatus, IPHONE_SESSION_EVENT, IPHONE_STATUS_EVENT, type DiscoveryError } from "./ipc";
 import { pickedPhysical, sortForPicker, type MirrorStatus, type PhysicalDevice, type Unavailable } from "./model";
 
@@ -50,7 +52,40 @@ export function setPanelPick(id: string | null) {
   useIphoneStore.setState({ panelPick: pick });
 }
 
+export const PHYSICAL_FAST_POLL_MS = 2000;
+export const PHYSICAL_FAST_WINDOW_MS = 20_000;
+export const PHYSICAL_STEADY_POLL_MS = 10_000;
+export const PHYSICAL_SLOW_CALL_MS = 1000;
+export const PHYSICAL_MAX_POLL_MS = 30_000;
+
+/**
+ * Intervalo até a próxima chamada ao `devicectl`:
+ * - 2 s nos primeiros 20 s após abrir o seletor (aparelho recém-surgido no Wi-Fi);
+ * - depois 10 s em regime estável;
+ * - se a chamada anterior levou > 1 s (Mac carregado) ou deu timeout, aplica backoff até 30 s.
+ */
+export function nextPhysicalPollMs(info: {
+  elapsedSinceStartMs: number;
+  lastDurationMs: number;
+  timedOut: boolean;
+  timeoutStreak: number;
+}): number {
+  const { elapsedSinceStartMs, lastDurationMs, timedOut, timeoutStreak } = info;
+  if (timedOut) {
+    const step = Math.max(1, timeoutStreak);
+    return Math.min(PHYSICAL_MAX_POLL_MS, PHYSICAL_STEADY_POLL_MS * 2 ** Math.min(step - 1, 2));
+  }
+  const base = elapsedSinceStartMs < PHYSICAL_FAST_WINDOW_MS ? PHYSICAL_FAST_POLL_MS : PHYSICAL_STEADY_POLL_MS;
+  if (lastDurationMs > PHYSICAL_SLOW_CALL_MS) {
+    return Math.min(PHYSICAL_MAX_POLL_MS, Math.max(base, 8000, Math.round(lastDurationMs * 4)));
+  }
+  return base;
+}
+
 let loading: Promise<void> | null = null;
+let lastDurationMs = 0;
+let lastTimedOut = false;
+let timeoutStreak = 0;
 
 /** Relê a lista do CoreDevice (`devicectl`, ~0,6 s). `force` agenda uma consulta fresca após a atual. */
 export function refreshPhysical(force = false): Promise<void> {
@@ -59,15 +94,24 @@ export function refreshPhysical(force = false): Promise<void> {
   let request!: Promise<void>;
   request = (async () => {
     if (previous) await previous;
+    const started = Date.now();
     try {
       const list = await iphoneDevices();
+      lastDurationMs = Math.max(0, Date.now() - started);
       if (list.error?.kind === "timeout") {
+        lastTimedOut = true;
+        timeoutStreak += 1;
         // Um `devicectl` lento não apaga a lista que a pessoa já via: mantém a última e só registra o atraso.
         useIphoneStore.setState({ discovery: list.error, loaded: true });
       } else {
+        lastTimedOut = false;
+        timeoutStreak = 0;
         useIphoneStore.setState({ devices: sortForPicker(list.devices), unavailable: list.unavailable, discovery: list.error, loaded: true });
       }
     } catch {
+      lastDurationMs = Math.max(0, Date.now() - started);
+      lastTimedOut = true;
+      timeoutStreak += 1;
       useIphoneStore.setState({ loaded: true });
     }
   })().finally(() => {
@@ -77,26 +121,75 @@ export function refreshPhysical(force = false): Promise<void> {
   return request;
 }
 
-/** De quanto em quanto relê a lista enquanto alguém mostra os aparelhos (um iPhone demora a aparecer no Wi-Fi). */
-// A varredura via devicectl leva cerca de 0,3 s neste Mac; 2 s reduz a espera para aparelhos
-// que acabam de surgir no Wi-Fi sem manter consultas mais frequentes que o próprio comando.
-const LIST_EVERY_MS = 2000;
 let watchers = 0;
-let timer: number | undefined;
+let watchStartedAt = 0;
+let timer: ReturnType<typeof setTimeout> | undefined;
+let onVisibilityChange: (() => void) | null = null;
+
+function clearWatchTimer() {
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    timer = undefined;
+  }
+}
+
+function scheduleNextPhysical() {
+  clearWatchTimer();
+  if (watchers === 0 || isDocumentHidden()) return;
+  const delay = nextPhysicalPollMs({
+    elapsedSinceStartMs: Math.max(0, Date.now() - watchStartedAt),
+    lastDurationMs,
+    timedOut: lastTimedOut,
+    timeoutStreak,
+  });
+  timer = setTimeout(() => {
+    timer = undefined;
+    void runWatchTick();
+  }, delay);
+}
+
+async function runWatchTick() {
+  if (watchers === 0 || isDocumentHidden()) return;
+  clearWatchTimer();
+  await refreshPhysical();
+  scheduleNextPhysical();
+}
 
 /** Mantém a lista em dia enquanto algum seletor ou estado vazio está aberto; devolve o "parar". */
 export function watchPhysical(): () => void {
   watchers += 1;
   if (watchers === 1) {
-    void refreshPhysical();
-    timer = window.setInterval(() => { if (!document.hidden) void refreshPhysical(); }, LIST_EVERY_MS);
+    watchStartedAt = Date.now();
+    lastDurationMs = 0;
+    lastTimedOut = false;
+    timeoutStreak = 0;
+    onVisibilityChange = () => {
+      if (watchers === 0) return;
+      if (isDocumentHidden()) {
+        clearWatchTimer();
+        return;
+      }
+      void runWatchTick();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
+    if (!isDocumentHidden()) {
+      void runWatchTick();
+    }
   }
   let stopped = false;
   return () => {
     if (stopped) return;
     stopped = true;
     watchers -= 1;
-    if (watchers === 0) window.clearInterval(timer);
+    if (watchers === 0) {
+      clearWatchTimer();
+      if (onVisibilityChange && typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
+      onVisibilityChange = null;
+    }
   };
 }
 

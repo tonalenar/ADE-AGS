@@ -131,6 +131,8 @@ export interface Meter {
   percent: number;
   /** Cuándo se reinicia, con el texto que muestra la TUI (incluye su zona horaria). */
   resets: string | null;
+  /** Epoch em segundos quando uma fonte passiva informa timestamp exato de renovação. */
+  resetsAt?: number | null;
 }
 
 /** La semana de un modelo concreto, cuando el plan lo mide aparte. */
@@ -150,6 +152,8 @@ export interface LiveUsage {
   /** `true` = salió de la caché, no se volvió a levantar la TUI. */
   cached: boolean;
   problem: string | null;
+  /** Epoch em segundos até o qual o backoff automático evita nova consulta PTY. */
+  retryAt?: number | null;
 }
 
 /**
@@ -165,8 +169,9 @@ export interface LiveUsage {
  */
 export const claudeLiveUsage = (
   accountKey: string,
-  force = false
-) => invoke<LiveUsage>("claude_live_usage", { accountKey, force });
+  force = false,
+  manual = force,
+) => invoke<LiveUsage>("claude_live_usage", { accountKey, force, manual });
 
 /**
  * La antigüedad de lo que se está mostrando, en piezas.

@@ -67,15 +67,15 @@ describe("dock flutuante da miniatura no modo aparelho", () => {
     const buttons = [...host.querySelectorAll<HTMLButtonElement>("button")];
     expect(buttons.length).toBe(7);
     expect(buttons.every((b) => !b.hasAttribute("title"))).toBe(true);
-    expect(floatAspectRatioOf(currentView(viewId).viewport)).toBeCloseTo(390 / 844, 5);
+    expect(floatAspectRatioOf(currentView(viewId).viewport)).toBeCloseTo((390 + 24) / (844 + 24), 5);
 
     // iPhone -> Android
     click("browser.viewport.android");
-    expect(currentView(viewId)).toMatchObject({ mobile: "android", viewport: { width: 412, height: 915 } });
+    expect(currentView(viewId)).toMatchObject({ mobile: "android", viewport: { width: 412, height: 924 } });
 
     // Girar em Android
     click("browser.viewport.rotate");
-    expect(currentView(viewId).viewport).toEqual({ width: 915, height: 412 });
+    expect(currentView(viewId).viewport).toEqual({ width: 924, height: 412 });
 
     // Android -> Desktop (sai de telefone para desktop 1440×900)
     click("browser.viewport.desktop");
@@ -93,7 +93,7 @@ describe("dock flutuante da miniatura no modo aparelho", () => {
 
     // Completo -> Aparelho (volta ao quadro do iPhone)
     click("browser.viewport.frame");
-    expect(currentView(viewId)).toMatchObject({ mobile: "ios", viewport: { width: 390, height: 844 } });
+    expect(currentView(viewId)).toMatchObject({ mobile: "ios", viewport: { width: 402, height: 874 } });
     expect(host.querySelector<HTMLButtonElement>('button[aria-label="browser.viewport.rotate"]')!.disabled).toBe(false);
 
     // Expandir de volta ao painel lateral sem perder a vista

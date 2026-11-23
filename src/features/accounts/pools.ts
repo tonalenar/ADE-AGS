@@ -98,6 +98,9 @@ export const poolSetPaused = (id: string, paused: boolean) => invoke<Pool>("pool
 /** Prévia de qual conta cada pool escolheria agora (reusa `routing::pick_in_pool` sem avançar cursor). */
 export const poolPreviewPicks = () => invoke<PoolPickPreview[]>("pool_preview_picks");
 
+/** `pool:<nome>` padrão de um integrante/subagente novo sem conta escolhida (`null` = o agente não tem pool ativo). */
+export const poolDefaultRef = (agentId: string) => invoke<string | null>("pool_default_ref", { agentId });
+
 /** La cuenta que elige ese pool ahora (`null` = la del sistema). */
 export const poolPick = (agentId: string, pool: string) => invoke<string | null>("pool_pick", { agentId, pool });
 

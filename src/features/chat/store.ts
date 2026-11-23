@@ -58,6 +58,10 @@ interface ChatState {
   browserFloatRect: Rect | null;
   /** O usuário moveu ou redimensionou a miniatura: não reancorar no canto. */
   browserFloatPinned: boolean;
+  /** Vistas cuja miniatura foi fechada pelo usuário nesta sessão: o agente respeita e não reabre. */
+  browserFloatDismissed: Record<string, boolean>;
+  /** Vistas que o agente já exibiu automaticamente uma vez: evita repetir abertura em navegações seguintes. */
+  browserAutoShown: Record<string, boolean>;
   /** O mouse está sobre a página da miniatura (o motor nativo avisa): mostra a pílula de controles. */
   browserMiniHover: Record<string, boolean>;
   /** Um aparelho (iOS ou Android) flutuando sobre a conversa, como o navegador: um preview por vez. `null` = nenhum. */
@@ -204,7 +208,7 @@ const initialColumn = ((): { tabs: ColumnTab[]; active: string | null } => {
 })();
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, columnTabs: initialColumn.tabs, columnActive: initialColumn.active, browser: null, browserFloating: false, browserFloatRect: null, browserFloatPinned: false, browserMiniHover: {}, deviceFloat: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null, timelineFollowNonce: {},
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, columnTabs: initialColumn.tabs, columnActive: initialColumn.active, browser: null, browserFloating: false, browserFloatRect: null, browserFloatPinned: false, browserFloatDismissed: {}, browserAutoShown: {}, browserMiniHover: {}, deviceFloat: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null, timelineFollowNonce: {},
   surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, composerInsertQueue: [], composerAttach: null, composerAttachQueue: [], designOpen: null, panelWidth: readWidth(),
   queues: {}, archivedMessagePreview: null,
@@ -549,7 +553,7 @@ export function toggleChatBrowserFloating(): void {
     return;
   }
   const view = useViewTabsStore.getState().views.find((v) => v.id === state.browser?.viewId);
-  const aspectRatio = floatAspectRatioOf(view?.kind === "browser" ? view.viewport : null);
+  const aspectRatio = floatAspectRatioOf(view?.kind === "browser" ? view.viewport : null, view?.kind === "browser" ? view.mobile ?? null : null);
   const bounds = typeof document !== "undefined" ? chatFloatBounds(document) : null;
   const browserFloatRect = bounds
     ? defaultFloatRect(bounds, { sourceRect: state.browser.rect, aspectRatio })
@@ -576,11 +580,52 @@ export function setChatBrowserMiniHover(viewId: string, inside: boolean): void {
   useChatStore.setState({ browserMiniHover: next });
 }
 
-/** Fecha apenas a miniatura; a aba de navegador segue montada em segundo plano. */
+/** Abre a miniatura flutuante diretamente para `viewId`, sem abrir nem fechar o painel direito do usuário. */
+export function openChatBrowserFloating(viewId: string): void {
+  const state = useChatStore.getState();
+  if (state.browserFloating && state.browser?.viewId === viewId) return;
+  const view = useViewTabsStore.getState().views.find((v) => v.id === viewId);
+  const aspectRatio = floatAspectRatioOf(view?.kind === "browser" ? view.viewport : null);
+  const sourceRect = state.browser?.viewId === viewId && state.browser.rect.width > 0 && state.browser.rect.height > 0
+    ? state.browser.rect
+    : { left: 0, top: 0, width: 1280, height: 800 };
+  const bounds = typeof document !== "undefined" ? chatFloatBounds(document) : null;
+  const browserFloatRect = bounds
+    ? defaultFloatRect(bounds, { sourceRect, aspectRatio })
+    : state.browserFloatRect;
+  useChatStore.setState({
+    browser: { viewId, rect: sourceRect },
+    browserFloating: true,
+    browserFloatRect,
+    browserFloatPinned: false,
+    deviceFloat: null,
+    summaryOpen: false,
+    browserAutoShown: state.browserAutoShown[viewId]
+      ? state.browserAutoShown
+      : { ...state.browserAutoShown, [viewId]: true },
+  });
+}
+
+/** Registra que a vista já foi apresentada ao usuário, evitando reaberturas automáticas repetidas. */
+export function markChatBrowserAutoShown(viewId: string): void {
+  const state = useChatStore.getState();
+  if (state.browserAutoShown[viewId]) return;
+  useChatStore.setState({ browserAutoShown: { ...state.browserAutoShown, [viewId]: true } });
+}
+
+/** Fecha apenas a miniatura; a aba de navegador segue montada em segundo plano e o painel do usuário permanece intacto. */
 export function closeChatBrowserFloating(): void {
   const state = useChatStore.getState();
   if (!state.browserFloating) return;
-  useChatStore.setState({ browserFloating: false, browserFloatRect: null, browserFloatPinned: false, browser: null, panel: null, panelMaximized: false });
+  const dismissedId = state.browser?.viewId;
+  useChatStore.setState({
+    browserFloating: false,
+    browserFloatRect: null,
+    browserFloatPinned: false,
+    browser: null,
+    ...(state.panel === "browser" ? { panel: null, panelMaximized: false } : {}),
+    ...(dismissedId ? { browserFloatDismissed: { ...state.browserFloatDismissed, [dismissedId]: true } } : {}),
+  });
 }
 
 /**

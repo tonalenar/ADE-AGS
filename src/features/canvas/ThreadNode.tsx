@@ -71,7 +71,7 @@ export const ThreadNode = memo(function ThreadNode({ data, selected }: NodeProps
         <div className="ade-node-drag flex items-center gap-2.5 pl-4 pr-3 shrink-0 cursor-grab active:cursor-grabbing select-none border-b border-black/[0.06] dark:border-[rgba(84,84,88,0.55)]"
           style={{ height: HEADER_H }}>
           <span className="flex min-w-0 flex-1 flex-col">
-            <span title={title} className="truncate text-[15px] leading-5 font-semibold text-gray-900 dark:text-[#f5f5f7]">{title}</span>
+            <span title={title} className="truncate text-[15px] leading-5 font-semibold text-gray-900 dark:text-ink">{title}</span>
             <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-[14px] text-gray-500 dark:text-white/60">
               <span aria-hidden className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: agentTile(row?.agentId ?? "") }} />
               <span className="shrink-0">{card?.agentLabel ?? ""}</span>

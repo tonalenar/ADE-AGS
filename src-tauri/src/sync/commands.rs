@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use super::export::export;
 use super::import::{apply, load_pending};
@@ -55,9 +55,7 @@ pub struct SyncResult {
 }
 
 fn db(app: &AppHandle) -> Result<DbConnection, String> {
-    app.try_state::<DbConnection>()
-        .map(|s| s.inner().clone())
-        .ok_or_else(|| "La base de datos no está lista".into())
+    crate::database::db_of(app)
 }
 
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {

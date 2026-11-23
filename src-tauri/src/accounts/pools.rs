@@ -68,6 +68,7 @@ impl PoolMode {
         }
     }
 
+    #[cfg(test)]
     pub fn as_str(self) -> &'static str {
         match self {
             PoolMode::Off => "off",
@@ -82,6 +83,7 @@ pub fn load_mode(db: &DbConnection) -> PoolMode {
     PoolMode::parse_setting(raw.as_deref())
 }
 
+#[cfg(test)]
 pub fn save_mode(db: &DbConnection, mode: PoolMode) -> Result<(), String> {
     crate::database::set_setting(db, MODE_KEY, mode.as_str())
 }
@@ -263,6 +265,30 @@ pub fn find<'a>(pools: &'a [Pool], wanted: &str) -> Result<&'a Pool, String> {
         })
 }
 
+/// Ordem estável para escolher entre pools candidatos: nome sem caixa e depois o id.
+fn stable_order(a: &&Pool, b: &&Pool) -> std::cmp::Ordering {
+    a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.id.cmp(&b.id))
+}
+
+/// O pool que cobre uma conta FIXA (a conversa/tarefa não escolheu `pool:<nome>`): do mesmo agente, não pausado,
+/// com a conta como membro e ao menos outra conta para trocar. Com mais de um candidato vale o primeiro por nome
+/// (sem caixa) e id, sempre o mesmo, independente da ordem em que os pools foram salvos.
+pub fn implicit_pool<'a>(pools: &'a [Pool], agent_id: &str, account: &Option<String>) -> Option<&'a Pool> {
+    pools
+        .iter()
+        .filter(|p| p.agent_id == agent_id && !p.paused && p.members.len() > 1 && p.members.contains(account))
+        .min_by(stable_order)
+}
+
+/// O pool que um subagente/integrante novo usa quando ninguém escolheu conta: o primeiro (por nome e id) do agente
+/// que não está pausado e tem 2+ contas.
+pub fn default_pool_for_agent<'a>(pools: &'a [Pool], agent_id: &str) -> Option<&'a Pool> {
+    pools
+        .iter()
+        .filter(|p| p.agent_id == agent_id && !p.paused && p.members.len() > 1)
+        .min_by(stable_order)
+}
+
 // ── Guardado ────────────────────────────────────────────────────────
 
 /// Lê os pools do JSON salvo aplicando a migração aditiva:
@@ -440,6 +466,7 @@ where
 /// El pool listo para elegir, y avanza su turno: cada pedido de `round_robin` arranca un
 /// lugar más allá que el anterior (el ruteo salta las que no se pueden usar).
 /// Prefira [`with_pool_pick`] para só avançar quando a escolha suceder.
+#[cfg(test)]
 pub fn spec_for(db: &DbConnection, wanted: &str) -> Result<PoolSpec, String> {
     with_pool_pick(db, wanted, |spec| Ok(spec.clone()))
 }

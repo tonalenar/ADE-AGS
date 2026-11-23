@@ -79,3 +79,15 @@ export const usagePriceSet = (model: string, input: number, output: number) =>
   invoke<PricesView>("usage_price_set", { model, input, output });
 
 export const usagePriceClear = (model: string) => invoke<PricesView>("usage_price_clear", { model });
+
+export type SandboxMode = "off" | "auto" | "strict";
+
+export interface SandboxStatus {
+  mode: SandboxMode;
+  backend: "none" | "bubblewrap" | "seatbelt" | "job-object";
+  fsIsolation: boolean;
+  reason: "disabled" | "missing-bwrap" | "missing-sandbox-exec" | "windows" | null;
+}
+
+/** O que o sandbox da Frota garante nesta máquina (`sandbox_status`). */
+export const sandboxStatus = () => invoke<SandboxStatus>("sandbox_status");

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { startVisiblePolling } from "@/shared/visiblePolling";
+
 import { TabCostList } from "./TabCostList";
 import { estimateOf, formatCompactNumber, formatUsd, getTokens, tabsOfAgent, tokenRows, type MissionTokens, type TabTokens, type TokenRow } from "./tokens";
 
@@ -62,12 +64,13 @@ export function MissionTokensPanel({ missionId }: { missionId: string }) {
 
   useEffect(() => {
     let alive = true;
-    const load = () => getTokens(missionId).then((d) => alive && setData(d)).catch(() => undefined);
-    void load();
-    const timer = window.setInterval(load, REFRESH_MS);
+    const poll = startVisiblePolling(
+      () => getTokens(missionId).then((d) => { if (alive) setData(d); }).catch(() => undefined),
+      REFRESH_MS,
+    );
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      poll.stop();
     };
   }, [missionId]);
 

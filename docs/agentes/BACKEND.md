@@ -78,10 +78,11 @@ Cuidados:
 - Nos testes, use `crate::database::test_db()` (banco em memória com o schema real). **Testes nunca tocam `~/.ags`.**
 
 ## Tarefas agendadas do chat
-- `scheduled_tasks.rs` guarda definições e histórico de dispatch em `scheduled-tasks.json`, sidecar JSON versionado com gravação por arquivo temporário e `rename`; não usa DDL nem armazena transcript. O histórico só sai quando a pessoa exclui a tarefa.
+- `scheduled_tasks.rs` guarda definições e histórico de dispatch em `scheduled-tasks.json`, sidecar JSON versionado com gravação por arquivo temporário e `rename`; não usa DDL nem armazena transcript. Cada tarefa guarda só as **últimas 200 execuções** (`MAX_HISTORY`); a gravação é pulada quando nada mudou. Um arquivo inválido ou de versão desconhecida não bloqueia: é movido para `scheduled-tasks.invalido-<ts>-<id>.json` ao lado e a lista recomeça vazia.
 - `ipc::commands::scheduled_task` expõe gestão somente pela interface Tauri. O tick de `ipc::commands::routine` também despacha tarefas; não há segundo scheduler nem rota de criação pela CLI/MCP.
 - Conversa nova é criada como chat estruturado com `access=ask`. Conversa existente usa `QueueAfterActive`; a política de agente por projeto é validada na gestão e novamente no dispatch.
 - Na inicialização, cada horário vencido vira uma única entrada `missed`; recorrências são movidas ao próximo horário futuro, e tarefas únicas ficam desativadas. Não há catch-up automático nem rajada após reabrir o app. O gate `missions::automation` pausa tarefas armadas antes do boot até a pessoa retomar.
+- O horário vencido é reivindicado **antes** do dispatch (`claim_due` avança `next_run` na mesma gravação que abre a execução): se o registro do fim falhar, o próximo tick não reenvia o prompt.
 - O histórico registra snapshot de pasta/agente/modelo, horários, status, resultado resumido e `threadId`; nenhum transcript é copiado para o sidecar.
 
 ## Helpers obrigatórios (`util/`)

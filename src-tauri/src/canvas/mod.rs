@@ -12,13 +12,13 @@
 //! migración al schema de SQLite.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub mod assets;
+mod persistence;
 pub mod roles;
 
 #[cfg(test)]
@@ -153,18 +153,6 @@ pub fn is_note(id: &str) -> bool {
 
 pub type Boards = HashMap<String, Board>;
 
-#[derive(Serialize, Deserialize, Default)]
-struct CanvasFile {
-    #[serde(default)]
-    boards: Boards,
-}
-
-lazy_static::lazy_static! {
-    /// Lectura-modificación-escritura del archivo: dos ventanas guardando a la vez no
-    /// pueden pisarse a medias.
-    static ref LOCK: Mutex<()> = Mutex::new(());
-}
-
 #[cfg(test)]
 thread_local! {
     static TEST_FILE_PATH: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
@@ -180,26 +168,20 @@ fn file_path() -> Result<PathBuf, String> {
     Ok(dir.join("canvas.json"))
 }
 
-fn read_file(path: &Path) -> Result<Boards, String> {
-    crate::util::user_json::read_user_json::<CanvasFile>(path)
-        .map(|file| file.map(|f| f.boards).unwrap_or_default())
-        .map_err(|e| e.to_string())
-}
-
-/// Todos los canvas guardados.
+/// Todos os canvas guardados (servidos do cache em memória após a primeira leitura).
 pub fn load_boards() -> Result<Boards, String> {
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    read_file(&file_path()?)
+    persistence::load_boards(&file_path()?)
 }
 
-/// Reemplaza un canvas. Se escribe a un temporal y se renombra: si la app se cae a la
-/// mitad, queda el archivo viejo entero y no uno cortado.
+/// Reemplaza un canvas: atualiza o cache na hora e coalesce a gravação atômica (`tmp` + `rename`)
+/// em segundo plano, deixando o `fsync` para o intervalo maior ou para o fechamento.
 pub fn save_board(key: &str, board: Board) -> Result<(), String> {
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let path = file_path()?;
-    let mut boards = read_file(&path)?;
-    boards.insert(key.to_string(), board);
-    crate::util::user_json::write_user_json(&path, &CanvasFile { boards })
+    persistence::save_board(&file_path()?, key, board)
+}
+
+/// Grava em disco com `fsync` qualquer alteração pendente do canvas antes do encerramento da app.
+pub fn flush_pending_saves() -> Result<(), String> {
+    persistence::flush_pending_saves()
 }
 
 /// Las tabs conectadas con `tab`, en cualquier canvas. Sin repetidos y sin ella misma.
@@ -429,11 +411,15 @@ pub fn reachable(boards: &Boards, tab: &str) -> BTreeSet<String> {
 // ── Comandos Tauri ───────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn canvas_load() -> Result<Boards, String> {
-    load_boards()
+pub async fn canvas_load() -> Result<Boards, String> {
+    tauri::async_runtime::spawn_blocking(load_boards)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn canvas_save(key: String, board: Board) -> Result<(), String> {
-    save_board(&key, board)
+pub async fn canvas_save(key: String, board: Board) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || save_board(&key, board))
+        .await
+        .map_err(|e| e.to_string())?
 }

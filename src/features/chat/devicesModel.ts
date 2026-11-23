@@ -20,7 +20,7 @@ export interface DeviceFrame {
   screenRadius: number;
 }
 
-/** As medidas da prancheta, relativas à largura da tela: iPhone 300×620 com moldura de 10 e cantos 52/42; Pixel 296×620, 9 e 40/32. */
+/** As medidas da prancheta, relativas ao LADO MENOR da tela (a largura em pé), para girar não engordar a moldura: iPhone 300×620 com moldura de 10 e cantos 52/42; Pixel 296×620, 9 e 40/32. */
 const LOOK = {
   ios: { pad: 10 / 280, outer: 52 / 280, screen: 42 / 280 },
   ipad: { pad: 10 / 280, outer: 22 / 280, screen: 14 / 280 },
@@ -34,9 +34,10 @@ export const MAX_DEVICE_H = 680;
 export function deviceFrame(look: keyof typeof LOOK, screen: Size, box: Size, maxH = MAX_DEVICE_H): DeviceFrame {
   const ratio = LOOK[look];
   if (screen.w <= 0 || screen.h <= 0 || box.w <= 0 || box.h <= 0) return { outerW: 0, outerH: 0, pad: 0, outerRadius: 0, screenRadius: 0 };
-  // Com a tela de largura 1: o aparelho mede (1 + 2·pad) × (h/w + 2·pad).
-  const unitW = 1 + 2 * ratio.pad;
-  const unitH = screen.h / screen.w + 2 * ratio.pad;
+  // Com o lado menor da tela valendo 1: o aparelho mede (w/lado + 2·pad) × (h/lado + 2·pad).
+  const short = Math.min(screen.w, screen.h);
+  const unitW = screen.w / short + 2 * ratio.pad;
+  const unitH = screen.h / short + 2 * ratio.pad;
   const scale = Math.max(0, Math.min(box.w / unitW, Math.min(box.h, maxH) / unitH));
   const round = (n: number) => Math.round(n * 10) / 10;
   return {

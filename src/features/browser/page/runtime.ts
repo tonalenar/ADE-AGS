@@ -1238,26 +1238,42 @@ declare global {
     return el.dispatchEvent(event);
   }
 
-  /** Dónde tocar el elemento, trayéndolo a la vista. Falla si otra cosa lo tapa: eso es un
+  function isInViewport(rect: DOMRect): boolean {
+    return rect.width > 0 && rect.height > 0
+      && rect.top >= 0 && rect.left >= 0
+      && rect.bottom <= window.innerHeight && rect.right <= window.innerWidth;
+  }
+
+  function scrollIntoViewIfNeeded(el: Element): DOMRect {
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0 || isInViewport(rect)) return rect;
+    el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    return el.getBoundingClientRect();
+  }
+
+  /** Dónde tocar el elemento, trayéndolo a la vista solo si está fuera. Falla si otra cosa lo tapa: eso es un
    *  bug de la página (un overlay que quedó abierto), y un click que lo atraviesa lo
    *  escondería. */
   function aim(el: Element): { x: number; y: number; target: Element } {
-    el.scrollIntoView({ block: "center", inline: "center" });
     let target = el;
-    let rect = el.getBoundingClientRect();
+    let rect = scrollIntoViewIfNeeded(el);
     // Los checkbox "lindos" esconden el input (0×0 o transparente) y se tocan por su label.
     const labels = isFormControl(el) ? (el as HTMLInputElement).labels : null;
     if ((rect.width === 0 || rect.height === 0) && labels && labels.length) {
       target = labels[0];
-      target.scrollIntoView({ block: "center", inline: "center" });
-      rect = target.getBoundingClientRect();
+      rect = scrollIntoViewIfNeeded(target);
     }
     if (rect.width === 0 || rect.height === 0) throw new Error(`${describeElement(el)} não está visível (mede 0×0).`);
     const reaches = (hit: Element | null) => !hit || hit === target || target.contains(hit) || hit.contains(target)
       || (labels !== null && Array.from(labels).some((l) => l === hit || l.contains(hit)));
     // Uma camada decorativa sobre o centro (o corte de um título numa loja) não impede um clique de verdade em outro ponto
-    // do elemento: tenta o centro e, se está coberto, as bordas. Só falha se NENHUM ponto chega ao elemento.
-    const clear = probePoints(rect).find((point) => reaches(document.elementFromPoint(point.x, point.y)));
+    // do elemento: tenta o centro e, se está coberto, as bordas. Se ainda estiver atrás de barra fixa, centraliza uma vez.
+    let clear = probePoints(rect).find((point) => reaches(document.elementFromPoint(point.x, point.y)));
+    if (!clear) {
+      target.scrollIntoView({ block: "center", inline: "center" });
+      rect = target.getBoundingClientRect();
+      clear = probePoints(rect).find((point) => reaches(document.elementFromPoint(point.x, point.y)));
+    }
     if (!clear) {
       const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       throw new Error(`${describeElement(el)} está coberto por ${hit ? describeElement(hit) : "outro elemento"} (${hit ? selectorOf(hit) : "?"}). `
@@ -1335,7 +1351,7 @@ declare global {
   /** Um campo que abre uma lista de sugestões ao digitar (autocomplete): `role=combobox`, `aria-autocomplete` de lista, ou
    *  `aria-haspopup=listbox`, ou um popup controlado (`aria-controls` + `aria-expanded`). */
   function isCombobox(el: Element): boolean {
-    if (el.getAttribute("role")?.trim().split(/s+/)[0] === "combobox") return true;
+    if (el.getAttribute("role")?.trim().split(/\s+/)[0] === "combobox") return true;
     const auto = el.getAttribute("aria-autocomplete");
     if (auto === "list" || auto === "both") return true;
     if (el.getAttribute("aria-haspopup") === "listbox") return true;
@@ -1344,7 +1360,7 @@ declare global {
 
   /** As opções visíveis da lista de um combobox: a que ele controla, ou, sem essa ligação, qualquer opção visível. */
   function visibleOptions(el: Element): Element[] {
-    const ids = `${el.getAttribute("aria-controls") ?? ""} ${el.getAttribute("aria-owns") ?? ""}`.split(/s+/).filter(Boolean);
+    const ids = `${el.getAttribute("aria-controls") ?? ""} ${el.getAttribute("aria-owns") ?? ""}`.split(/\s+/).filter(Boolean);
     const roots = ids.map((id) => document.getElementById(id)).filter((n): n is HTMLElement => !!n);
     const found = roots.length > 0
       ? roots.flatMap((root) => (root.getAttribute("role") === "option" ? [root] : Array.from(root.querySelectorAll("[role=option]"))))
@@ -1698,6 +1714,26 @@ declare global {
     return toTransferable(await fn.call(window));
   }
 
+  let lastResizeAt = 0;
+  window.addEventListener("resize", () => { lastResizeAt = Date.now(); });
+
+  /** Mede o layout depois de a página receber o `resize` (por evento, com teto) e assentar: no lugar de um sleep fixo de 400 ms. */
+  async function layoutAfterResize(since: number, capMs: number): Promise<unknown> {
+    if (lastResizeAt < since) {
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          clearTimeout(timer);
+          window.removeEventListener("resize", finish);
+          resolve();
+        };
+        const timer = setTimeout(finish, Math.min(Math.max(capMs, 0), 2_000));
+        window.addEventListener("resize", finish);
+      });
+    }
+    await activity.settle({ maxMs: 300, quietMs: 60, netIdleMs: 0, pendingMaxMs: 300, minMs: 0 });
+    return layout();
+  }
+
   function layout(): unknown {
     const root = document.documentElement;
     const vw = root.clientWidth;
@@ -2016,7 +2052,7 @@ declare global {
       case "wait": return wait(command);
       case "settle": return settleOp(command);
       case "eval": return evaluate(command.code);
-      case "layout": return layout();
+      case "layout": return command.afterResize ? layoutAfterResize(command.afterResize.since, command.afterResize.capMs) : layout();
       case "storage": return storage(command);
       case "cookies": return cookies(command);
       case "performance": return performanceReport();
@@ -2052,6 +2088,9 @@ declare global {
     } catch (e) {
       payload = { id, ok: false, error: e instanceof Error ? e.message : formatValue(e) };
     }
+    // Lo que la acción haya logueado viaja ANTES de la respuesta (el canal es ordenado): cuando la app recibe el `page:reply`,
+    // el console ya está en el registro y no hace falta esperar a la tanda.
+    flush();
     if (!post({ type: "page:reply", payload })) {
       post({ type: "page:reply", payload: { id, ok: false, error: "O resultado não pode ser transferido para o app." } });
     }
@@ -2060,8 +2099,6 @@ declare global {
     if (fast) fastCommands--;
     cursor.setFast(fastCommands > 0);
     if (activeCommands === 0) commandBaseline = undefined;
-    // Lo que la acción haya logueado viaja enseguida: la app lo junta con la respuesta.
-    flush();
   }
 
   let captchaObserver: MutationObserver | null = null;

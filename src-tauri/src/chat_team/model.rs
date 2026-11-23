@@ -244,6 +244,9 @@ pub struct Named<'a> {
 /// canvas (`agentRole.ts::MESSAGE_RULES`); um teste do front confere que as duas são iguais.
 pub const MESSAGE_RULES: &str = "Se a tarefa chegou como `ask`, a resposta final do seu turno VOLTA SOZINHA a quem perguntou: não repita o mesmo conteúdo por `ags peer tell`. NÃO mande mensagens de prontidão, ciência ou progresso sem ser pedido («estou pronto», «recebi», «vou ler»): só fale com o orquestrador para entregar o resultado, pedir algo que o bloqueia ou responder a uma pergunta. Se for bloqueado por uma pergunta ou permissão que só a pessoa decide, diga isso numa frase ao orquestrador (uma vez) e espere. O resumo da entrega vai uma vez só.";
 
+/// A consciência do orquestrador (carga, limite, fila), no resumo do time. A MESMA frase vai em `teamModel.ts::AWARENESS_RULES`.
+pub const AWARENESS_RULES: &str = "Antes de lançar um agente, consulte `ags system load` (ou a tool system_load): se o limite de agentes simultâneos estiver cheio, a carga estiver alta ou a tarefa mexer nos mesmos arquivos de outra ativa, enfileire com `ags team queue add` (--after, --when-load-low, --after-branch, --area) e espere o aviso da ADE. Nunca faça polling e explique à pessoa por que está esperando.";
+
 /// O que o integrante recebe ao entrar no time: quem é o orquestrador, o papel, a política e a regra
 /// de esperar a tarefa. `instructions` são as do papel no catálogo (vazio = sem). Pura.
 pub fn member_briefing(orchestrator: &str, me: &Named<'_>, instructions: &str) -> String {
@@ -286,7 +289,7 @@ pub fn roster_notice(members: &[Named<'_>]) -> String {
         .join(", ");
     format!(
         "[ADE AGS] Você é o orquestrador deste time: {list}. Delegue em ~2 min com `ags peer tell <nome> --task \"...\" --expecting \"...\"` \
-         e encerre o turno; as entregas voltam como mensagem. Use `ags team list` para ver o time."
+         e encerre o turno; as entregas voltam como mensagem. {AWARENESS_RULES} Use `ags team list` para ver o time."
     )
 }
 

@@ -177,7 +177,7 @@ export function MissionTeamCard({ mission, tasks, squad, blocked }: {
               {m.name.slice(0, 1).toUpperCase()}
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span title={m.name} className="truncate text-[13.5px] leading-[18px] font-medium text-gray-900 dark:text-[#f5f5f7]">{m.name}</span>
+              <span title={m.name} className="truncate text-[13.5px] leading-[18px] font-medium text-gray-900 dark:text-ink">{m.name}</span>
               <span title={m.sub} className="truncate text-[11.5px] leading-[14px] text-gray-500 dark:text-white/60">{m.sub}</span>
             </span>
             <span className={`flex shrink-0 items-center gap-1.5 text-[12px] leading-4 ${TONE[m.tone].text}`}>
@@ -202,7 +202,7 @@ function Metric({ label, value, small, sub, extra, className = "" }: {
   return (
     <div className={`min-w-0 px-[18px] py-4 ${className}`}>
       <div className="text-[11.5px] leading-[14px] text-gray-500 dark:text-white/60">{label}</div>
-      <div className={`mt-2 font-mono font-semibold tracking-[-0.4px] tabular-nums text-gray-900 dark:text-[#f5f5f7] whitespace-nowrap ${typeof value === "string" && value.length > 9 ? "text-[20px] leading-[30px]" : "text-[26px] leading-[30px]"}`}>
+      <div className={`mt-2 font-mono font-semibold tracking-[-0.4px] tabular-nums text-gray-900 dark:text-ink whitespace-nowrap ${typeof value === "string" && value.length > 9 ? "text-[20px] leading-[30px]" : "text-[26px] leading-[30px]"}`}>
         {value}
         {small && <small className="ml-1 font-sans text-[13px] font-medium tracking-normal text-gray-500 dark:text-white/60">{small}</small>}
       </div>

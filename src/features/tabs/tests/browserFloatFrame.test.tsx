@@ -65,6 +65,18 @@ describe("anel da miniatura do navegador", () => {
     container.remove();
   });
 
+  it("com a moldura do celular, não desenha o cartão claro (borda, sombra e cantos) em volta", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => root.render(<BrowserFloatFrame rect={{ left: 500, top: 300, width: 400, height: 300 }} framed />));
+    expect(container.querySelector("[data-browser-float-surface]")).toBeNull();
+    expect(container.querySelector("[data-float-ring=top]")).not.toBeNull();
+    expect(container.innerHTML).not.toContain("border-gray-200");
+    act(() => root.unmount());
+    container.remove();
+  });
+
   it("mantém a proporção do celular ao redimensionar pelas alças externas", () => {
     const shell = document.createElement("div");
     shell.setAttribute("data-chat-shell", "");

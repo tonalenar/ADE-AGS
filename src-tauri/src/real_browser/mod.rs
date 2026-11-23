@@ -361,7 +361,6 @@ pub async fn real_browser_open(
         let args = app.config().app.windows.first().and_then(|w| w.additional_browser_args.clone()).unwrap_or_default();
         let scale = window.scale_factor().unwrap_or(1.0);
         native::create(&app, parent, &id, profile.clone(), args, native_rect(place.rect, scale)).await?;
-        lock(portals()).insert(id.clone(), requested_profile);
         // O piloto antes da primeira página: o canal (binding) e o script em todo documento novo.
         if let Some(script) = script {
             native::cdp(&app, &id, "Runtime.addBinding", json!({ "name": BINDING })).await?;
@@ -370,7 +369,13 @@ pub async fn real_browser_open(
         }
         let white = json!({ "color": { "r": 255, "g": 255, "b": 255, "a": 1 } });
         let _ = native::cdp(&app, &id, "Emulation.setDefaultBackgroundColorOverride", white).await;
-        let url = lock(pending()).remove(&id).unwrap_or(url);
+        // Só registra em `portals()` após o setup e ao consumir `pending()`, garantindo que um `real_browser_navigate`
+        // concorrente durante a abertura substitua a URL inicial em vez de disparar uma segunda navegação.
+        let url = {
+            let pending_url = lock(pending()).remove(&id);
+            lock(portals()).insert(id.clone(), requested_profile);
+            pending_url.unwrap_or(url)
+        };
         if navigable(&url).is_some() {
             import_saved_cookies(&app, &id, &profile_id, &profile, &url).await?;
             native::navigate(&app, &id, url).await?;
@@ -466,6 +471,62 @@ struct Emulated {
     native: Option<surface::NativePlace>,
     /// O aparelho emulado agora (`None`: mesa). Só uma troca dele recarrega a página.
     platform: Option<String>,
+    /// O modelo escolhido (densidade, área segura, `model` do user agent), como o app mandou.
+    hint: Option<Value>,
+    /// A moldura vive dentro da página: só então a área segura acompanha a rotação.
+    chrome: bool,
+}
+
+/// O que vai ao CDP numa mudança de tamanho: as medidas e, com a moldura, a área segura da orientação.
+struct EmuJob {
+    metrics: Value,
+    safe: Option<Value>,
+}
+
+/// Fila de UM pedido por vista: a rotação dispara vários lugares em quadros seguidos, e tarefas soltas podiam
+/// terminar fora de ordem, deixando a página nas medidas da orientação antiga. Um só trabalhador por vista, em ordem,
+/// e só o último pedido importa.
+#[derive(Default)]
+struct EmuQueue {
+    pending: Option<EmuJob>,
+    running: bool,
+}
+
+impl EmuQueue {
+    /// Guarda o pedido; devolve `true` quando é preciso acordar o trabalhador.
+    fn push(&mut self, job: EmuJob) -> bool {
+        self.pending = Some(job);
+        !std::mem::replace(&mut self.running, true)
+    }
+
+    /// O próximo pedido; sem nenhum, solta o trabalhador.
+    fn take(&mut self) -> Option<EmuJob> {
+        let job = self.pending.take();
+        if job.is_none() { self.running = false; }
+        job
+    }
+}
+
+fn emu_queues() -> &'static Mutex<HashMap<String, EmuQueue>> {
+    static Q: OnceLock<Mutex<HashMap<String, EmuQueue>>> = OnceLock::new();
+    Q.get_or_init(Default::default)
+}
+
+/// Enfileira `job` para a vista `id` e, se não há trabalhador, abre um que esvazia a fila em ordem.
+fn enqueue_emulation(app: &AppHandle, id: &str, job: EmuJob) {
+    let start = emu_queues().lock().map(|mut map| map.entry(id.to_string()).or_default().push(job)).unwrap_or(false);
+    if !start { return; }
+    let (app, id) = (app.clone(), id.to_string());
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let next = emu_queues().lock().ok().and_then(|mut map| map.get_mut(&id).and_then(EmuQueue::take));
+            let Some(job) = next else { break };
+            let _ = native::cdp(&app, &id, "Emulation.setDeviceMetricsOverride", job.metrics).await;
+            if let Some(safe) = job.safe {
+                let _ = native::cdp(&app, &id, "Emulation.setSafeAreaInsetsOverride", json!({ "insets": safe })).await;
+            }
+        }
+    });
 }
 
 fn emulated() -> &'static Mutex<HashMap<String, Emulated>> {
@@ -484,7 +545,9 @@ fn device_metrics(width: f64, height: f64, zoom: f64, density: f64) -> (Value, (
     // sobrava uma linha de 1 px sem página na borda direita e na de baixo da tela do aparelho.
     let scale = (width.ceil() / w as f64).max(height.ceil() / h as f64).max(zoom);
     let key = (w, h, (scale * 1000.0).round() as i64);
-    (json!({ "width": w, "height": h, "deviceScaleFactor": density, "mobile": true, "scale": scale }), key)
+    // Deitado, a tela diz `landscapePrimary` a 90°: `screen.orientation` e o CSS de orientação acompanham a rotação.
+    let orientation = if w > h { json!({ "type": "landscapePrimary", "angle": 90 }) } else { json!({ "type": "portraitPrimary", "angle": 0 }) };
+    (json!({ "width": w, "height": h, "deviceScaleFactor": density, "mobile": true, "scale": scale, "screenOrientation": orientation }), key)
 }
 
 /// Guarda o lugar de `id`; com aparelho emulado, reenvia as medidas se mudaram e devolve o zoom que a vista nativa
@@ -498,11 +561,14 @@ fn emulated_place(app: &AppHandle, id: &str, place: &Place, native: surface::Nat
     if place.rect.width <= 0.0 || place.rect.height <= 0.0 { return 1.0; }
     let (metrics, key) = device_metrics(place.rect.width, place.rect.height, place.zoom, density);
     if entry.sent != Some(key) {
+        let turned = entry.sent.map(|(w, h, _)| w > h) != Some(key.0 > key.1);
         entry.sent = Some(key);
-        let (app, id) = (app.clone(), id.to_string());
-        tauri::async_runtime::spawn(async move {
-            let _ = native::cdp(&app, &id, "Emulation.setDeviceMetricsOverride", metrics).await;
-        });
+        let safe = (entry.chrome && turned)
+            .then(|| device_safe_area(entry.platform.as_deref().unwrap_or("ios"), key.0 > key.1, entry.hint.as_ref()));
+        let job = EmuJob { metrics, safe };
+        let id = id.to_string();
+        drop(map);
+        enqueue_emulation(app, &id, job);
     }
     1.0
 }
@@ -655,6 +721,17 @@ pub async fn real_browser_screenshot(app: AppHandle, id: String) -> Result<Value
     Ok(json!({ "data": shot["data"], "width": viewport["clientWidth"], "height": viewport["clientHeight"] }))
 }
 
+/// A foto da página direto para o disco: o PNG do CDP é decodificado uma vez e gravado como captura, sem base64 de ida e volta
+/// pelo IPC nem recodificação no webview. Devolve o caminho. Quem precisa dos pixels (recorte, marcas) usa `real_browser_screenshot`.
+#[tauri::command]
+pub async fn real_browser_screenshot_save(app: AppHandle, id: String, tag: Option<String>) -> Result<String, String> {
+    use base64::Engine as _;
+    let shot = native::cdp(&app, &id, "Page.captureScreenshot", json!({ "format": "png" })).await?;
+    let data = shot["data"].as_str().ok_or("O navegador não devolveu a foto.")?;
+    let png = base64::engine::general_purpose::STANDARD.decode(data).map_err(|_| "A foto do navegador veio inválida.".to_string())?;
+    crate::preview::capture::guardar_png_con_tag(png, tag.as_deref()).await
+}
+
 /// Identidade de aparelho para testes de web mobile: user agent, densidade, `mobile` e toque.
 /// `platform` `None` volta ao navegador de mesa. O tamanho da página continua sendo o da vista
 /// (o quadro que a interface desenha); aqui só muda quem a página acha que é.
@@ -682,27 +759,60 @@ fn emulation_profile(platform: Option<&str>) -> Option<(Value, f64)> {
     }
 }
 
+/// O modelo escolhido pelo app (`device`): a densidade e o `model` do user agent. Valores fora do razoável são ignorados.
+fn apply_device_hint(profile: (Value, f64), hint: Option<&Value>) -> (Value, f64) {
+    let (mut ua, mut dpr) = profile;
+    let Some(hint) = hint else { return (ua, dpr) };
+    if let Some(d) = hint["dpr"].as_f64().filter(|d| (1.0..=4.0).contains(d)) { dpr = d; }
+    if let Some(model) = hint["uaModel"].as_str() {
+        let model: String = model.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_')).take(40).collect();
+        if !model.is_empty() && ua["userAgentMetadata"].is_object() { ua["userAgentMetadata"]["model"] = Value::String(model); }
+    }
+    (ua, dpr)
+}
+
 const IOS_UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1";
 const ANDROID_UA: &str = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36";
 
 /// Faz a página do navegador `id` se comportar como um iPhone (`"ios"`), um Android (`"android"`) ou o
 /// navegador de mesa (`None`), e recarrega para o servidor também ver o aparelho novo.
 #[tauri::command]
-pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<String>, chrome: Option<Value>) -> Result<(), String> {
-    let profile = emulation_profile(platform.as_deref());
+pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<String>, chrome: Option<Value>, device: Option<Value>) -> Result<(), String> {
+    let profile = emulation_profile(platform.as_deref()).map(|p| apply_device_hint(p, device.as_ref()));
     let mobile = profile.is_some();
     // Só a moldura mudou (Aparelho ⇄ Completo, ou o mesmo aparelho de novo): troca ao vivo, sem recarregar. Recarregar
     // só quando o aparelho (o user agent) muda; era isso que fazia a página piscar sem moldura a cada troca.
     // Vista sem registro prévio já está em modo mesa (`None`), então `platform: None` inicial não recarrega nem reemula.
     let same_device = emulated().lock().ok()
         .is_some_and(|map| surface::same_emulated_platform(map.get(&id).map(|entry| entry.platform.as_deref()), platform.as_deref()));
+    let framed = mobile && chrome.is_some();
     if same_device {
+        // Outro modelo do mesmo sistema (ou a mesma densidade de novo): reenvia as medidas ao vivo, sem recarregar.
+        let resend = emulated().lock().ok().and_then(|mut map| {
+            let entry = map.entry(id.clone()).or_default();
+            entry.hint = device.clone();
+            entry.chrome = framed;
+            let density = profile.as_ref().map(|(_, d)| *d)?;
+            if entry.density == Some(density) { return None; }
+            entry.density = Some(density);
+            let (w, h, z) = entry.last?;
+            if w <= 0.0 || h <= 0.0 { return None; }
+            let (metrics, key) = device_metrics(w, h, z, density);
+            entry.sent = Some(key);
+            Some(metrics)
+        });
+        if let Some(metrics) = resend { enqueue_emulation(&app, &id, EmuJob { metrics, safe: None }); }
         if mobile || chrome.is_some() {
-            set_device_chrome(&app, &id, platform.as_deref().filter(|_| mobile && chrome.is_some()), chrome.as_ref()).await;
+            set_device_chrome(&app, &id, platform.as_deref().filter(|_| framed), chrome.as_ref()).await;
         }
         return Ok(());
     }
-    if let Ok(mut map) = emulated().lock() { map.entry(id.clone()).or_default().platform = platform.clone(); }
+    if let Ok(mut map) = emulated().lock() {
+        let entry = map.entry(id.clone()).or_default();
+        entry.platform = platform.clone();
+        entry.hint = device.clone();
+        entry.chrome = framed;
+    }
     match &profile {
         Some((ua, scale)) => {
             native::cdp(&app, &id, "Emulation.setUserAgentOverride", ua.clone()).await?;
@@ -762,14 +872,27 @@ fn device_chrome_source(platform: &str, labels: Option<&Value>) -> String {
     DEVICE_CHROME.replace("__AGS_PLATFORM__", platform).replace("__AGS_LABELS__", &Value::Object(clean).to_string())
 }
 
-/// A área que a moldura ocupa, para `env(safe-area-inset-*)` da página (retrato).
-fn device_safe_area(platform: &str) -> Value {
-    if platform == "ios" {
-        // A barra de status fica fora da página (PhoneChrome.tsx); só a barra de início e o vidro ficam dentro.
-        json!({ "top": 0, "topMax": 0, "bottom": 34, "bottomMax": 34, "left": 0, "leftMax": 0, "right": 0, "rightMax": 0 })
-    } else {
-        json!({ "top": 0, "topMax": 0, "bottom": 0, "bottomMax": 0, "left": 0, "leftMax": 0, "right": 0, "rightMax": 0 })
-    }
+/// A área que a moldura ocupa, para `env(safe-area-inset-*)` da página, na orientação atual. O app manda as medidas do
+/// modelo (`safePortrait`/`safeLandscape`, já descontando o que fica fora da página); sem elas, vale o padrão do sistema.
+/// No iPhone a barra de status vira margem do `<html>` (`device_chrome.js`), por isso o topo é 0; no Android a barra do
+/// Chrome e a faixa da câmera ficam fora da página.
+fn device_safe_area(platform: &str, landscape: bool, hint: Option<&Value>) -> Value {
+    let default = match (platform == "ios", landscape) {
+        (true, false) => [0, 34, 0, 0],
+        (true, true) => [0, 21, 62, 62],
+        _ => [0, 0, 0, 0],
+    };
+    let given = hint.map(|h| &h[if landscape { "safeLandscape" } else { "safePortrait" }]);
+    let side = |i: usize, key: &str| -> i64 {
+        given.and_then(|g| g[key].as_f64()).map(|n| n.clamp(0.0, 120.0).round() as i64).unwrap_or(default[i])
+    };
+    let (top, bottom, left, right) = (side(0, "top"), side(1, "bottom"), side(2, "left"), side(3, "right"));
+    json!({ "top": top, "topMax": top, "bottom": bottom, "bottomMax": bottom, "left": left, "leftMax": left, "right": right, "rightMax": right })
+}
+
+/// Se a tela da vista `id` está deitada (pelo último tamanho visto).
+fn emulated_landscape(id: &str) -> bool {
+    emulated().lock().ok().and_then(|map| map.get(id).and_then(|e| e.last)).is_some_and(|(w, h, _)| w > h)
 }
 
 /// Liga a moldura de `platform` em todo documento novo da vista `id` e desliga a anterior; `None` só desliga.
@@ -787,7 +910,8 @@ async fn set_device_chrome(app: &AppHandle, id: &str, platform: Option<&str>, la
         let _ = native::cdp(app, id, "Emulation.setSafeAreaInsetsOverride", json!({ "insets": {} })).await;
         return;
     };
-    let _ = native::cdp(app, id, "Emulation.setSafeAreaInsetsOverride", json!({ "insets": device_safe_area(platform) })).await;
+    let (landscape, hint) = (emulated_landscape(id), emulated().lock().ok().and_then(|map| map.get(id).and_then(|e| e.hint.clone())));
+    let _ = native::cdp(app, id, "Emulation.setSafeAreaInsetsOverride", json!({ "insets": device_safe_area(platform, landscape, hint.as_ref()) })).await;
     let _ = native::cdp(app, id, "Page.enable", json!({})).await;
     let source = device_chrome_source(platform, labels);
     if let Ok(reply) = native::cdp(app, id, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": source })).await {
@@ -992,7 +1116,7 @@ fn finish_selftest(app: &AppHandle, code: i32) {
 
 #[cfg(test)]
 mod test {
-    use super::{adopt_popup, adopted, device_metrics, emulation_profile, chromium_partition_path, chromium_partitions_of, forget_portal, incognito_partition_path, lock, migrate_legacy_partition, navigable, physical, popup_allowed, portals, project_profile_path, region, subtract, Place, PortalProfile, Rect};
+    use super::{adopt_popup, adopted, apply_device_hint, device_metrics, device_safe_area, EmuJob, EmuQueue, emulation_profile, chromium_partition_path, chromium_partitions_of, forget_portal, incognito_partition_path, lock, migrate_legacy_partition, navigable, physical, popup_allowed, portals, project_profile_path, region, subtract, Place, PortalProfile, Rect};
     use serde_json::json;
 
     #[test]
@@ -1007,6 +1131,77 @@ mod test {
         assert!(430.0 * scale >= 293.0 && 932.0 * scale >= 634.0, "{scale}");
         assert!(scale < 0.69);
         assert_eq!(key, (430, 932, (scale * 1000.0).round() as i64));
+    }
+
+    #[test]
+    fn metricas_mandam_a_orientacao_da_tela() {
+        let (portrait, _) = device_metrics(402.0, 874.0, 1.0, 3.0);
+        assert_eq!(portrait["screenOrientation"], json!({ "type": "portraitPrimary", "angle": 0 }));
+        let (landscape, _) = device_metrics(874.0, 402.0, 1.0, 3.0);
+        assert_eq!(landscape["screenOrientation"], json!({ "type": "landscapePrimary", "angle": 90 }));
+        assert_eq!(landscape["width"], 874);
+        assert_eq!(landscape["height"], 402);
+    }
+
+    #[test]
+    fn area_segura_do_iphone_muda_com_a_orientacao() {
+        let portrait = device_safe_area("ios", false, None);
+        assert_eq!((portrait["bottom"].as_i64(), portrait["left"].as_i64(), portrait["right"].as_i64()), (Some(34), Some(0), Some(0)));
+        let landscape = device_safe_area("ios", true, None);
+        assert_eq!(landscape["top"], 0);
+        assert_eq!(landscape["bottom"], 21);
+        assert_eq!(landscape["left"], 62);
+        assert_eq!(landscape["right"], 62);
+        assert_eq!(landscape["leftMax"], 62);
+    }
+
+    #[test]
+    fn area_segura_do_android_fica_fora_da_pagina_nas_duas_orientacoes() {
+        for landscape in [false, true] {
+            let safe = device_safe_area("android", landscape, None);
+            for key in ["top", "bottom", "left", "right"] {
+                assert_eq!(safe[key], 0, "{key} landscape={landscape}");
+            }
+        }
+    }
+
+    #[test]
+    fn area_segura_usa_as_medidas_do_modelo_e_limita_lixo() {
+        let hint = json!({
+            "safePortrait": { "top": 0, "bottom": 34, "left": 0, "right": 0 },
+            "safeLandscape": { "top": 0, "bottom": 21, "left": 59, "right": -4 },
+        });
+        let landscape = device_safe_area("ios", true, Some(&hint));
+        assert_eq!(landscape["left"], 59);
+        assert_eq!(landscape["right"], 0);
+        let junk = json!({ "safeLandscape": { "left": 9999, "bottom": "x" } });
+        let clamped = device_safe_area("ios", true, Some(&junk));
+        assert_eq!(clamped["left"], 120);
+        assert_eq!(clamped["bottom"], 21);
+    }
+
+    #[test]
+    fn modelo_troca_a_densidade_e_o_modelo_do_user_agent() {
+        let hint = json!({ "dpr": 3.5, "uaModel": "SM-S938B" });
+        let (android, dpr) = apply_device_hint(emulation_profile(Some("android")).unwrap(), Some(&hint));
+        assert_eq!(dpr, 3.5);
+        assert_eq!(android["userAgentMetadata"]["model"], "SM-S938B");
+        let (_, kept) = apply_device_hint(emulation_profile(Some("ios")).unwrap(), Some(&json!({ "dpr": 99 })));
+        assert_eq!(kept, 3.0);
+    }
+
+    #[test]
+    fn fila_de_emulacao_e_ordenada_e_fica_com_o_ultimo_pedido() {
+        let job = |w: i64| EmuJob { metrics: json!({ "width": w }), safe: None };
+        let mut queue = EmuQueue::default();
+        // O primeiro pedido acorda o trabalhador; os seguintes só trocam o pendente.
+        assert!(queue.push(job(402)));
+        assert!(!queue.push(job(874)));
+        assert!(!queue.push(job(402)));
+        assert_eq!(queue.take().map(|j| j.metrics["width"].clone()), Some(json!(402)));
+        // Esvaziada, a fila solta o trabalhador e o próximo pedido o acorda de novo.
+        assert!(queue.take().is_none());
+        assert!(queue.push(job(874)));
     }
 
     #[test]

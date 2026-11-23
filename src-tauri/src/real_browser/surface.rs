@@ -75,6 +75,9 @@ pub(super) struct PlaceChanges {
     pub resized: bool,
 }
 
+/// Tolerância mínima de zoom para evitar reaplicação por ruído de ponto flutuante (o front arredonda em milésimos).
+const ZOOM_EPSILON: f64 = 0.0005;
+
 /// Compara o lugar novo com o último aplicado. Sem último, tudo é aplicado.
 pub(super) fn diff_place(last: Option<&PlaceState>, next: &PlaceState) -> PlaceChanges {
     let Some(last) = last else {
@@ -84,9 +87,23 @@ pub(super) fn diff_place(last: Option<&PlaceState>, next: &PlaceState) -> PlaceC
     PlaceChanges {
         frame: last.frame != next.frame,
         mask: size_changed || last.parts != next.parts || last.radius != next.radius,
-        zoom: last.zoom != next.zoom,
+        zoom: (last.zoom - next.zoom).abs() > ZOOM_EPSILON,
         resized: size_changed,
     }
+}
+
+/// Frame efetivo de um `place`: quando a vista está colapsada (`0×0`), preserva o último frame válido para evitar
+/// redimensionar a `NSView` do CEF para `0×0` e disparar `was_resized()` seguido de reflow ao reaparecer.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn effective_frame(frame: [i32; 4], last: Option<[i32; 4]>) -> [i32; 4] {
+    if frame[2] > 0 && frame[3] > 0 { frame } else { last.unwrap_or(frame) }
+}
+
+/// Indica se um `place` precisa envolver as mudanças numa `CATransaction` sem animações implícitas.
+/// Inclui `changes.zoom` para aplicar frame, máscara, zoom e `was_resized()` atomicamente.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn needs_layer_transaction(changes: &PlaceChanges, parts_empty: bool, hidden_change: Option<bool>) -> bool {
+    changes.frame || (changes.mask && !parts_empty) || hidden_change.is_some() || changes.resized || changes.zoom
 }
 
 /// Decide se a vista fica escondida depois de um `place`. Um quadro sem recorte à vista (uma transição, um

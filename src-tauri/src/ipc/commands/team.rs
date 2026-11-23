@@ -28,7 +28,7 @@ use crate::peer_queue::store::NewMessage;
 const SHELL_AGENT: &str = "bash";
 
 fn db(app: &AppHandle) -> Result<DbConnection, String> {
-    Ok(super::shared::db(app)?.inner().clone())
+    crate::database::db_of(app)
 }
 
 fn with_conn<T>(db: &DbConnection, f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>) -> Result<T, String> {

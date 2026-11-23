@@ -601,3 +601,39 @@ async fn trabalho_de_arquivo_roda_fora_da_thread_chamadora() {
     let worker = super::off_ui(|| Ok(std::thread::current().id())).await.unwrap();
     assert_ne!(worker, caller);
 }
+
+#[test]
+fn explorer_git_define_optional_locks_e_timeout_nao_vira_sem_repo() {
+    use std::ffi::OsStr;
+    use std::time::Duration;
+    use super::git::{git_command, repo_info_from_git_probes, GitProbe};
+
+    let cmd = git_command("/repo", &["status", "--porcelain=v2"]);
+    let envs: Vec<_> = cmd.get_envs().collect();
+    assert!(
+        envs.contains(&(OsStr::new("GIT_OPTIONAL_LOCKS"), Some(OsStr::new("0")))),
+        "explorer git deve definir GIT_OPTIONAL_LOCKS=0: {envs:?}"
+    );
+
+    // Timeout no rev-parse devolve erro, nunca RepoInfo::none() ("não é repo").
+    let mut status_called = false;
+    let err = repo_info_from_git_probes(GitProbe::TimedOut(Duration::from_secs(15)), || {
+        status_called = true;
+        GitProbe::NotRepo
+    })
+    .unwrap_err();
+    assert!(!status_called, "com timeout no rev-parse não deve lançar status");
+    assert!(err.contains("15s"), "{err}");
+
+    // Timeout no status também devolve erro para não cachear árvore sem branch/marcas.
+    let err = repo_info_from_git_probes(
+        GitProbe::Ok("/repo\n/repo/.git\n/repo/.git\n".into()),
+        || GitProbe::TimedOut(Duration::from_secs(15)),
+    )
+    .unwrap_err();
+    assert!(err.contains("status"), "{err}");
+
+    // Pasta que realmente não é repo continua devolvendo root: None sem erro.
+    let none = repo_info_from_git_probes(GitProbe::NotRepo, || panic!("não chama status")).unwrap();
+    assert!(none.root.is_none());
+}

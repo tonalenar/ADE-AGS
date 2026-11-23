@@ -799,6 +799,9 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
                 && *name != "desk_act"
                 && *name != "harness_graph"
                 && *name != "delegate_agent"
+                // A consciência do orquestrador (carga, fila) é de sessão interativa, como o chat.
+                && *name != "system_load"
+                && !name.starts_with("team_queue_")
         })
         .cloned()
         .collect();
@@ -896,7 +899,8 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
             + design
             + computer_use.len()
             + devices.len()
-            + tab.iter().filter(|name| name.starts_with("pool_")).count(),
+            + tab.iter().filter(|name| name.starts_with("pool_")).count()
+            + tab.iter().filter(|name| *name == "system_load" || name.starts_with("team_queue_")).count(),
         offered.len()
     );
 }
@@ -2141,7 +2145,7 @@ fn a_ajuda_e_o_front_conhecem_os_comandos_do_chat() {
         .skip(1)
         .filter_map(|r| r.split('"').next())
         .collect();
-    assert_eq!(chat_tools.len(), 12, "{chat_tools:?}");
+    assert_eq!(chat_tools.len(), 16, "{chat_tools:?}");
     for command in chat_tools
         .iter()
         .filter(|command| command.starts_with("chat."))
@@ -3427,6 +3431,29 @@ mod provas {
     }
 
     #[test]
+    fn so_o_comando_compact_de_tui_e_reconhecido() {
+        let g = super::super::guard::is_compact_command;
+        assert!(g("/compact"));
+        assert!(g("  /compact  \n"));
+        assert!(g("/COMPACT focar no teste"));
+        assert!(!g("/compactar"));
+        assert!(!g("compacte o contexto"));
+        assert!(!g("/clear"));
+    }
+
+    #[test]
+    fn um_agente_nao_digita_compact_em_outra_aba_e_na_propria_so_com_o_autocompact_ligado() {
+        let g = super::super::guard::compact_command_error;
+        let recusa = g(&aba("m1"), "m2", "/compact", true).unwrap();
+        assert!(recusa.contains("própria"), "{recusa}");
+        assert!(g(&aba("lead"), "m2", "  /compact foco", true).is_some(), "nem o orquestrador");
+        assert!(g(&aba("m1"), "m1", "/compact", false).is_some(), "autocompact desligado");
+        assert!(g(&aba("m1"), "m1", "/compact", true).is_none());
+        assert!(g(&aba("m1"), "m2", "rode os testes", true).is_none(), "outro texto não muda");
+        assert!(g(&Caller::Outside, "m2", "/compact", false).is_none(), "a pessoa segue livre");
+    }
+
+    #[test]
     fn quem_abriu_a_aba_fica_registrado_so_com_prova() {
         let (quem, aba_id) = (
             format!("abridor-{}", uuid::Uuid::new_v4()),
@@ -3563,7 +3590,7 @@ mod provas {
             );
         }
         assert!(
-            cli.contains("const GROUPS: [&str; 21]") && cli.contains("\"fix.\""),
+            cli.contains("const GROUPS: [&str; 22]") && cli.contains("\"fix.\""),
             "o grupo fix. não leva quem chama"
         );
     }
@@ -4226,7 +4253,7 @@ mod autorizacao {
         );
     }
     const LIVRE: usize = 28;
-    const ESCOPO: usize = 194;
+    const ESCOPO: usize = 196;
     const PESSOA: usize = 4;
     const PAPEL: usize = 2;
 
@@ -4439,7 +4466,6 @@ mod autorizacao {
             "chat.open",
             "chat.settle",
             "chat.goal",
-            "chat.compact",
         ] {
             let ok = |de: &str, alvo: &str, abriu: &[(&str, &str)]| {
                 decide(metodo, json!({ "thread": alvo }), aba(de), abriu).is_ok()
@@ -4467,6 +4493,21 @@ mod autorizacao {
                 "{metodo}: a pessoa em terminal próprio"
             );
         }
+    }
+
+    #[test]
+    fn um_agente_so_compacta_a_propria_conversa_e_a_pessoa_continua_podendo() {
+        let compactar = |de: Result<Principal, String>, alvo: &str, abriu: &[(&str, &str)]| {
+            decide("chat.compact", json!({ "thread": alvo }), de, abriu)
+        };
+        let recusa = compactar(aba("lead"), "filha", &[]).unwrap_err();
+        assert!(recusa.contains("própria conversa"), "{recusa}");
+        assert!(compactar(aba("m1"), "nova", &[("thread:nova", "m1")]).is_err(), "a que ele abriu não é a dele");
+        assert!(compactar(aba("m1"), "da-pessoa", &[]).is_err());
+        assert!(compactar(tarefa("t1"), "eu", &[]).is_err());
+        let entregue = compactar(aba("thread:eu"), "eu", &[]).unwrap();
+        assert_eq!(entregue["from"], "thread:eu", "o handler confere o autocompact pelo `from` provado");
+        assert!(compactar(fora(), "da-pessoa", &[]).unwrap().get("from").is_none());
     }
 
     #[test]
@@ -4772,6 +4813,15 @@ mod autorizacao {
                 "{metodo}: tarefa não declara aba"
             );
         }
+    }
+
+    #[test]
+    fn forge_run_de_aba_sempre_leva_a_aba_provada_para_o_despachante_conferir_a_pasta() {
+        let sem_aba = passa("forge.run", json!({ "cwd": "/outro/repo", "tool": "git_push" }), aba("m1"));
+        assert_eq!(sem_aba["tabId"], "m1", "omitir o tabId não pode contornar a conferência da pasta");
+        assert!(recusa("forge.run", json!({ "cwd": "/x", "tabId": "lead" }), aba("m1")).contains("m1"));
+        let pessoa = passa("forge.run", json!({ "cwd": "/repo", "tool": "git_pr_list" }), fora());
+        assert!(pessoa.get("tabId").is_none(), "a pessoa continua sem aba");
     }
 
     #[test]
@@ -5101,7 +5151,6 @@ mod autorizacao {
                 json!({ "thread": "c-abriu", "text": "agora o teste" }),
             ),
             ("chat.stop", json!({ "thread": "c-abriu" })),
-            ("chat.compact", json!({ "thread": "c-abriu" })),
             (
                 "chat.goal",
                 json!({ "thread": "c-abriu", "action": "show" }),
@@ -5314,8 +5363,8 @@ mod autorizacao {
     fn a_conversa_aberta_por_um_agente_fica_registrada_para_ele_continuar() {
         let conversas = include_str!("commands/conversas.rs");
         let inicio = conversas
-            .find("pub(super) fn chat_new(")
-            .expect("chat_new mudou de forma");
+            .find("pub(super) fn spawn_child(")
+            .expect("spawn_child mudou de forma");
         let corpo = &conversas[inicio..inicio + conversas[inicio..].find("\n}\n").unwrap()];
         assert!(
             corpo.matches("remember_opener(args, &row.id)").count() == 2,
@@ -5804,5 +5853,78 @@ fn tools_do_cofre_despacham_e_recusam_frota() {
     );
     for resp in denied {
         assert_eq!(resp["result"]["isError"], true);
+    }
+}
+
+// ── A consciência do orquestrador: carga, fila do time e porta de entrada ───────
+
+fn tool_call(name: &str, args: serde_json::Value) -> serde_json::Value {
+    json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": name, "arguments": args } })
+}
+
+#[test]
+fn as_ferramentas_da_consciencia_viram_comandos_do_despachador_com_a_identidade_da_sessao() {
+    let ctx = delegate_ctx(Some("thread:pai"));
+    let reply = |_: &str, _: &serde_json::Value| Ok(json!({ "ok": true }));
+
+    let (_, sent) = mcp_session(&ctx, &[tool_call("system_load", json!({ "parent_ref": "thread:forjado" }))], reply);
+    assert_eq!(sent[0].0, "system.load");
+    assert_eq!(sent[0].1["parent_ref"], "thread:pai", "o pai vem da sessão, nunca do modelo");
+
+    let (_, sent) = mcp_session(&ctx, &[tool_call("team_queue_add", json!({ "task": "faça", "after": ["Ana"], "when_load_low": true, "action": "cancel" }))], reply);
+    assert_eq!(sent[0].0, "team.queue");
+    assert_eq!(sent[0].1["action"], "add", "a ação é da ferramenta, não do modelo");
+    assert_eq!(sent[0].1["parent_ref"], "thread:pai");
+    assert_eq!(sent[0].1["cwd"], "/meu/projeto");
+
+    let (_, sent) = mcp_session(&ctx, &[tool_call("team_queue_list", json!({}))], reply);
+    assert_eq!((sent[0].0.as_str(), sent[0].1["action"].as_str()), ("team.queue", Some("list")));
+    let (_, sent) = mcp_session(&ctx, &[tool_call("team_queue_cancel", json!({ "id": "q1" }))], reply);
+    assert_eq!((sent[0].0.as_str(), sent[0].1["action"].as_str(), sent[0].1["id"].as_str()), ("team.queue", Some("cancel"), Some("q1")));
+}
+
+#[test]
+fn a_carga_e_a_lista_da_fila_sao_so_leitura_no_mcp() {
+    for name in ["system_load", "team_queue_list"] {
+        assert_eq!(super::mcp::annotations(name)["readOnlyHint"], true, "{name}");
+    }
+    for name in ["team_queue_add", "team_queue_cancel"] {
+        assert_eq!(super::mcp::annotations(name)["readOnlyHint"], false, "{name}");
+    }
+}
+
+#[test]
+fn a_recusa_da_porta_de_entrada_chega_ao_orquestrador_sem_virar_conversa() {
+    let ctx = delegate_ctx(Some("thread:pai"));
+    let refusal = json!({ "refused": true, "reason": "agent_limit", "message": "o limite de 3 agentes simultâneos está cheio" });
+    let (out, sent) = mcp_session(
+        &ctx,
+        &[delegate_call(json!({ "target": "provider_chat", "task": "faça", "client_request_id": "r9", "areas": ["src/a/**"], "allow_overlap": false }))],
+        |_, _| Ok(refusal.clone()),
+    );
+    assert_eq!(sent[0].1["areas"], json!(["src/a/**"]), "as áreas declaradas chegam à porta de entrada");
+    assert_eq!(sent[0].1["allow_overlap"], false);
+    let text = out[0]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("agent_limit") && text.contains("refused"), "{text}");
+    assert!(!text.contains("threadId"));
+}
+
+#[test]
+fn a_consciencia_recusa_o_cliente_remoto() {
+    let ctx = McpContext::Remote { client: "c1".into(), cwd: "/p".into(), preset: crate::remote::clients::Preset::All, folders: vec!["/p".into()] };
+    let (out, sent) = mcp_session(&ctx, &[tool_call("team_queue_add", json!({ "task": "x", "when_load_low": true }))], |_, _| Ok(json!({})));
+    assert!(sent.is_empty(), "nada vai ao despachador");
+    assert_eq!(out[0]["result"]["isError"], true);
+}
+
+#[test]
+fn a_cli_oferece_a_carga_e_a_fila_e_o_despachador_atende() {
+    let cli = include_str!("../bin/cli.rs");
+    let dispatch = include_str!("commands/dispatch.rs");
+    for command in ["team.queue", "system.load"] {
+        assert!(dispatch.contains(&format!("\"{command}\"")), "{command} sem braço no despachador");
+    }
+    for usage in ["team queue add --task", "team queue cancel <id>", "system load "] {
+        assert!(cli.contains(usage), "falta no USAGE: {usage}");
     }
 }

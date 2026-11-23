@@ -48,6 +48,25 @@ export interface Rect {
   scale?: number;
 }
 
+/** Compara dois retângulos por valor (evita `JSON.stringify` por quadro no canvas). */
+export function sameRect(a: Rect | null | undefined, b: Rect | null | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height && a.scale === b.scale;
+}
+
+/** Compara dois mapas de retângulos por chave e valor sem serializar JSON. */
+export function sameRectMap(a: Record<string, Rect>, b: Record<string, Rect>): boolean {
+  if (a === b) return true;
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (!(key in b) || !sameRect(a[key], b[key])) return false;
+  }
+  return true;
+}
+
 /** Alto de la cabecera de un nodo (nombre, agente, botones). La terminal va debajo. */
 /** Cabeçalho de um terminal no canvas (prancheta 1: nome, agente e função em duas linhas). */
 export const HEADER_H = 56;

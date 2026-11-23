@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button, BoxIcon, HomeIcon, SaveIcon, Tooltip } from "neogestify-ui-components";
@@ -35,7 +35,7 @@ function MenuItem({ icon, label, onClick }: { icon: React.ReactNode; label: stri
  * quede SOLO con las tabs. Mide exactamente lo mismo que el riel más el panel de abajo,
  * así la división vertical es una sola línea de arriba a abajo.
  */
-export function SideHead({ width }: { width: number }) {
+export const SideHead = memo(function SideHead({ width }: { width: number }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const workspacesCollapsed = useUiStore((s) => s.workspacesCollapsed);
@@ -148,4 +148,4 @@ export function SideHead({ width }: { width: number }) {
       {showReset && <ResetDefaultDialog onClose={() => setShowReset(false)} />}
     </>
   );
-}
+});

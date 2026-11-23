@@ -446,6 +446,7 @@ pub fn origin_matches(entry_origin: &str, page_url: &str) -> bool {
 }
 
 /// Recupera a senha pelo id (uso interno do backend).
+#[cfg(test)]
 pub(crate) fn password_for_fill(id: &str) -> Result<VaultSecret, String> {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let entries = load_index()?;
@@ -511,6 +512,7 @@ pub fn revoke_agent(id: &str, agent: &str) -> Result<VaultEntry, String> {
 }
 
 /// Informa se `agent` já tem permissão permanente para este login.
+#[cfg(test)]
 pub fn is_allowed(id: &str, agent: &str) -> bool {
     let Ok(_guard) = STORE_LOCK.lock() else {
         return false;
@@ -524,12 +526,12 @@ pub fn is_allowed(id: &str, agent: &str) -> bool {
         .is_some_and(|item| item.allowed_agents.iter().any(|existing| existing == agent))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_list() -> Result<Vec<VaultEntry>, String> {
     list()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_add(
     origin: String,
     username: String,
@@ -539,7 +541,7 @@ pub fn vault_add(
     add(&origin, &username, &label, &password)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_update(
     id: String,
     username: Option<String>,
@@ -549,22 +551,22 @@ pub fn vault_update(
     update(&id, username.as_deref(), label.as_deref(), password.as_deref())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_remove(id: String) -> Result<(), String> {
     remove(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_allow_agent(id: String, agent: String) -> Result<VaultEntry, String> {
     allow_agent(&id, &agent)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_revoke_agent(id: String, agent: String) -> Result<VaultEntry, String> {
     revoke_agent(&id, &agent)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn vault_secret_for_fill(id: String, page_url: String) -> Result<String, String> {
     let secret = secret_for_fill(&id, &page_url)?;
     Ok(secret.as_str().to_string())

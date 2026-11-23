@@ -8,7 +8,6 @@
 //! não aparece em nenhuma busca nem abertura no período.
 
 use std::collections::{HashMap, HashSet};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, params};
 use serde::Serialize;
@@ -50,10 +49,7 @@ pub struct UsageRow<'a> {
 
 /// Segundos Unix agora.
 pub fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    crate::util::now_ts()
 }
 
 /// Registra uma leitura. Nunca falha: qualquer erro só vai para o log.

@@ -199,6 +199,8 @@ fn o_briefing_diz_o_papel_a_branch_e_como_responder() {
     let roster = model::roster_notice(&[me]);
     assert!(roster.contains("Codex (codex; Frontend; aceita edições, team/ui)"));
     assert!(roster.contains("ags peer tell"));
+    assert!(roster.contains("ags system load") && roster.contains("ags team queue add") && roster.contains("Nunca faça polling"), "o orquestrador recebe a consciência: carga, fila, sem polling");
+    assert!(roster.ends_with("Use `ags team list` para ver o time."), "a tela corta o resumo pelo fecho");
     assert!(model::roster_notice(&[]).contains("ainda não há ninguém"));
 }
 
@@ -499,16 +501,16 @@ mod regras {
     }
 
     #[test]
-    fn o_vigia_do_chat_nasce_ligado_para_bloqueios_e_desligado_para_sem_progresso() {
+    fn o_vigia_do_chat_nasce_ligado_para_bloqueios_e_para_sem_progresso() {
         let conn = db();
         let t = team(&conn, "tab-lead");
         let row = store::team(&conn, &t).unwrap().unwrap();
         assert!(row.watch, "os avisos de bloqueio nascem ligados");
-        assert!(!row.watch_stall, "«sem progresso» nasce desligado, como o Vigia das missões");
+        assert!(row.watch_stall, "«sem progresso» e «ocioso» nascem ligados nos times novos: o orquestrador não espera em silêncio");
         assert!(store::set_watch(&conn, &t, false).unwrap());
-        assert!(store::set_watch_stall(&conn, &t, true).unwrap());
+        assert!(store::set_watch_stall(&conn, &t, false).unwrap());
         let row = store::team(&conn, &t).unwrap().unwrap();
-        assert!(!row.watch && row.watch_stall);
+        assert!(!row.watch && !row.watch_stall);
         assert!(!store::set_watch(&conn, "nao-existe", true).unwrap());
         assert!(!store::set_watch_stall(&conn, "nao-existe", true).unwrap());
     }

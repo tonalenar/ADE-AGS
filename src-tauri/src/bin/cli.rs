@@ -91,7 +91,8 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peer tell <nome> --file <caminho>           O mesmo, com o texto em um arquivo (sem confusão de aspas no Windows)
   peer ask <nome> --file <caminho>            O mesmo que ask, com a pergunta em um arquivo
              (ask/tell --raw: o texto como está, sem o cabeçalho \"[Mensagem de ...]\"; para
-              mandar a uma TUI um comando dela, p. ex. /compact ou /clear)
+              mandar a uma TUI um comando dela, p. ex. /clear; `/compact` a outro agente é recusado: um agente
+              só compacta a própria conversa)
   peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'  Pergunta a vários AO MESMO TEMPO e espera todos
   peer check <nome> [--lines 60]              O que aparece agora no terminal dele
   peer deliver [<nome>] --file entrega.json   Entrega final estruturada (Handoff v1) ao orquestrador
@@ -143,6 +144,18 @@ TIME DO MODO CHAT — uma conversa orquestra outras (abas ou conversas por proto
                [--subagent]                     só a pessoa aumenta (painel Time). --subagent marca apoio que só executa o que você enviar
   team unlink <nome>                          Tira do time (a corda sai; a conversa continua aberta)
   team role <nome> <papel> [--policy read]    Troca o papel (e só baixa a política); [--subagent [false]] liga ou desliga a marca
+  team queue add --task \"...\"                Enfileira uma tarefa com condição; a ADE a lança sozinha (como chat_new) quando valer e avisa
+              [--after <agente[,agente]>]       · quando esse(s) agente(s) seu(s) terminar(em)
+              [--when-load-low]                 · quando a carga da máquina baixar (ver `system load`)
+              [--after-branch <branch>]         · quando o branch existir (ex.: o de outro agente); parta dele
+              [--area src/a,src/b]              · áreas/arquivos em que a tarefa mexe: a ADE não lança enquanto outra tarefa
+                                                  ativa mexer na mesma área (serializa)
+              [--agent ...] [--model ...] [--effort ...] [--account <id>] [--title ...] [--context \"...\"]
+                                                Sem polling: espere o aviso. Até 20 esperando por orquestrador
+  team queue [list] [--all]                   A fila com o motivo de cada espera; --all inclui as já resolvidas
+  team queue cancel <id>                      Cancela uma tarefa que ainda espera
+  system load                                 Só leitura: load average, CPU, memória livre, compilações cargo/rustc, o limite de agentes
+                                              simultâneos (padrão 3) e se um agente novo pode ser lançado agora (canLaunch/why)
   team delegate <nome> --task \"...\"          Entrega o trabalho a uma sessão já ligada ao time (o mesmo que delegate_agent com
                --client-request-id <id>         target=connected_session). A ADE revalida no envio: sessão conectada, livre, da sua
                [--constraints \"...\"]           pasta ou já ligada pela pessoa, política até ask; se algo falhar nada é enviado e o erro
@@ -294,6 +307,7 @@ CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code
   chat new \"...\" [--cwd <pasta>]              Abre uma conversa e manda a mensagem (pasta: a atual)
            [--agent codex|claude-code|opencode|antigravity|cursor] [--model ...] [--effort ...] [--title ...] [--account <id>]
                                               sem --agent/--model, herda o agente e o modelo do projeto (Configurações → Projetos)
+                                              filha de uma conversa do chat (subagente): esforço baixo, salvo --effort
            [--client-request-id <id>]          Permite repetir a criação sem duplicar a conversa ou o primeiro envio
            [--access ask|edits|safe|full|plan] · ask (padrão): a pessoa aprova o que o agente roda;
                                               plan: todos menos o Codex (planeja antes de editar);
@@ -307,6 +321,8 @@ CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code
            [--client-request-id <id>]          Permite repetir o Parar sem interromper outra vez: devolve o recibo (`receipt`)
   chat pending [<id>]                         Aprovações e perguntas esperando a pessoa (só ela responde, na tela) e quem respondeu
                                               as últimas (`decided`: a pessoa, a política do time ou uma regra dela)
+  chat compact <id> [--instructions \"...\"]    Compacta o contexto da PRÓPRIA conversa (Codex e Claude Code, sem turno em curso);
+                                              só com o autocompact da pessoa ligado. De outra conversa: recusado (a pessoa compacta pela tela)
   chat open <id>                              Mostra a conversa na tela do modo chat
   chat settle <id> [--reopen]                 Conclui (o agente fecha; reabrir retoma a mesma thread)
 
@@ -473,7 +489,8 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
   Pares e time: peer_ask, peer_tell, peer_deliver, peer_handoff, peer_receipt, team_list,
     team_candidates, team_create, team_link, team_unlink, team_role
   Conversas do modo chat: chat_list, chat_providers, harness_graph, chat_compact, chat_goal,
-    chat_new, delegate_agent, chat_send, chat_wait, chat_show, chat_stop, chat_pending
+    chat_new, delegate_agent, chat_send, chat_wait, chat_show, chat_stop, chat_pending, system_load,
+    team_queue_add, team_queue_list, team_queue_cancel
   Pools de contas: pool_update
   Pranchetas: design_list, design_get, design_view, design_create, design_open, design_page_add,
     design_page_rename, design_page_delete, design_artboard_add, design_artboard_update,
@@ -1081,10 +1098,10 @@ impl CliError {
 /// conversa do chat que pede um shell (`ADE_TAB_ID=thread:<id>`); comandos `run.*` recebem `tabId`,
 /// que preserva o escopo da conversa ao criar ou consultar tarefas da Frota. Pura.
 fn takes_caller(command: &str) -> bool {
-    const GROUPS: [&str; 21] = [
+    const GROUPS: [&str; 22] = [
         "fix.", "peer.", "team.", "note.", "portal.", "device.", "sim.", "desk.", "notify.",
         "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.",
-        "events.", "secret.", "run.", "render.",
+        "events.", "secret.", "run.", "render.", "system.",
     ];
     command == "tab.create"
         || command == "tab.send"
@@ -1345,6 +1362,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "team.role" => &["to", "role"],
         "team.create" => &["title"],
         "team.delegate" => &["to", "task"],
+        // `ags team queue add --task "..." --after Ana`, `ags team queue cancel q1a2b3`.
+        "team.queue" => &["action", "id"],
         "team.list" | "team.candidates" => &[],
         "ci.watch" => &["pr"],
         // `ags peer deliver --file entrega.json` (ao orquestrador) ou `ags peer deliver QA --file ...`.

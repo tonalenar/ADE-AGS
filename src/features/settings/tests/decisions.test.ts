@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyDecisionModelUpdate, remoteHosts, parseTimeout, clampTimeout, defaultDecisionSettings, defaultModel, isDirty, isJevVersion, isLocalUrl, modelAfterProviderChange, modelOptions, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
+import { activateJevBrowser, applyDecisionModelUpdate, clampTimeout, deactivateJevBrowser, defaultDecisionSettings, defaultModel, isDirty, isJevBrowserReady, isJevVersion, isLocalUrl, modelAfterProviderChange, modelOptions, modelsFor, parseTimeout, remoteHosts, sendsOffMachine, setBrowserPilotSetting, setBrowserVisionSetting, urlAfterProviderChange, urlHost } from "../decisionsModel";
 
 describe("ajustes das decisões em sombra", () => {
   it("nasce desligado, em multilingual, com a Laya local e 800 ms", () => {
@@ -113,5 +113,43 @@ describe("versões do Jev", () => {
   it("formulário sujo não recarrega o modelo novo", () => {
     expect(applyDecisionModelUpdate(true)).toBe("keep");
     expect(applyDecisionModelUpdate(false)).toBe("reload");
+  });
+});
+
+describe("piloto do navegador e reserva visual", () => {
+  it("amarra browserVision a browserPilot: ligar visão liga piloto e desligar piloto desliga visão", () => {
+    const base = defaultDecisionSettings();
+    const withVision = setBrowserVisionSetting(base, true);
+    expect(withVision.browserPilot).toBe(true);
+    expect(withVision.browserVision).toBe(true);
+
+    const pilotOff = setBrowserPilotSetting(withVision, false);
+    expect(pilotOff.browserPilot).toBe(false);
+    expect(pilotOff.browserVision).toBe(false);
+
+    // Desligar só a visão mantém o piloto ligado.
+    const visionOff = setBrowserVisionSetting(withVision, false);
+    expect(visionOff.browserPilot).toBe(true);
+    expect(visionOff.browserVision).toBe(false);
+  });
+
+  it("ativar Jev no navegador em um passo prepara provedor e piloto sem alterar o padrão desligado", () => {
+    const base = defaultDecisionSettings();
+    expect(isJevBrowserReady(base)).toBe(false);
+
+    const activated = activateJevBrowser(base);
+    expect(activated.enabled).toBe(true);
+    expect(activated.provider).toBe("jev");
+    expect(activated.baseUrl).toBe("https://api.typesafe.ai");
+    expect(activated.model).toBe("jev-latest");
+    expect(activated.browserPilot).toBe(true);
+    expect(activated.browserVision).toBe(false);
+    expect(isJevBrowserReady(activated)).toBe(true);
+
+    const deactivated = deactivateJevBrowser({ ...activated, browserVision: true });
+    expect(deactivated.browserPilot).toBe(false);
+    expect(deactivated.browserVision).toBe(false);
+    expect(deactivated.provider).toBe("jev");
+    expect(isJevBrowserReady(deactivated)).toBe(false);
   });
 });

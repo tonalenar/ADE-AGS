@@ -19,7 +19,7 @@ use crate::missions::{MissionDetail, MissionInput};
 const MAX_WAIT_SECS: u64 = 6 * 3600;
 
 fn db(app: &AppHandle) -> Result<crate::database::DbConnection, String> {
-    Ok(super::shared::db(app)?.inner().clone())
+    crate::database::db_of(app)
 }
 
 /// Lo que se devuelve de una misión: lo que un script necesita para decidir, sin el detalle
@@ -373,6 +373,7 @@ pub(super) fn memory_search_on(
 }
 
 /// Busca nas memórias aprovadas de um workspace (e opcionalmente de uma missão), funcionando também em abas soltas.
+#[cfg(test)]
 pub(super) fn memory_search_in(
     conn: &rusqlite::Connection,
     workspace_id: &str,

@@ -190,15 +190,13 @@ impl Precheck {
 }
 
 fn git(dir: &Path, args: &[&str]) -> Vec<String> {
-    let mut cmd = crate::util::spawn::hidden_command("git");
-    cmd.arg("-C").arg(dir).args(args);
-    match crate::util::output_with_timeout(&mut cmd, GIT_TIMEOUT) {
-        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+    match crate::util::git::run(dir, args, GIT_TIMEOUT) {
+        Ok(out) => out
             .lines()
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .collect(),
-        _ => Vec::new(),
+        Err(_) => Vec::new(),
     }
 }
 

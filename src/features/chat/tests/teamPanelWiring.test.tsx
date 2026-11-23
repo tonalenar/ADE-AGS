@@ -61,7 +61,7 @@ let host: HTMLDivElement;
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-  invokeMock.on("scm_working_diff", null);
+  invokeMock.on("scm_working_diff_stat", null);
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);

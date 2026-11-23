@@ -1,5 +1,6 @@
 use super::super::user_json::{
-    read_user_json, read_user_json_snapshot, write_user_json, write_user_json_if_unchanged, UserJsonError,
+    read_user_json, read_user_json_snapshot, sync_user_json, write_user_json,
+    write_user_json_if_unchanged, write_user_json_with_sync, SyncMode, UserJsonError,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -132,4 +133,28 @@ fn escrita_condicional_preserva_alteracao_concorrente() {
         std::fs::read(&path).unwrap(),
         br#"{"value":"novo pelo Claude"}"#
     );
+}
+
+#[test]
+fn gravacao_atomica_sem_fsync_e_sync_posterior_preservam_dados_e_bak() {
+    let (path, _dir) = temp_file("atomic-nosync");
+    let old = Sample {
+        value: "v1".into(),
+    };
+    let new = Sample {
+        value: "v2".into(),
+    };
+    write_user_json_with_sync(&path, &old, SyncMode::AtomicNoSync).unwrap();
+    write_user_json_with_sync(&path, &new, SyncMode::AtomicNoSync).unwrap();
+    sync_user_json(&path).unwrap();
+
+    let backup = path.with_file_name("atomic-nosync.json.bak");
+    assert_eq!(read_user_json::<Sample>(&backup).unwrap(), Some(old));
+    assert_eq!(read_user_json::<Sample>(&path).unwrap(), Some(new));
+    let leftovers = std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+        .count();
+    assert_eq!(leftovers, 0, "nenhum arquivo temporário deve sobrar após o rename");
 }

@@ -197,7 +197,7 @@ pub struct PtySnapshot {
 
 /// O que o processo já escreveu, com a posição exata do fluxo em que o snapshot foi tirado.
 /// Erro se o PTY já terminou (o frontend então não espera mais saída).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_snapshot(id: u32) -> Result<PtySnapshot, String> {
     if !registry().contains_key(&id) {
         return Err(format!("PTY session {id} not found"));
@@ -1742,7 +1742,7 @@ pub fn live_tab_dirs() -> Vec<(String, String)> {
 
 /// Se "conecta" a un PTY que ya existe (p. ej. al mover una tab a otra ventana sin
 /// matar el proceso) y devuelve el scrollback acumulado para reproducirlo en el xterm nuevo.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_attach(id: u32) -> Result<String, String> {
     if !registry().contains_key(&id) {
         return Err(format!("PTY session {id} not found"));
@@ -1830,6 +1830,7 @@ pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {
 
 /// A fila de escrita de uma sessão. Soltá-la fecha o lado mestre (o cancelamento acorda a escrita presa) e mata o
 /// processo. Uma queda de escrita avisa por `avisar`.
+#[cfg(test)]
 pub(crate) fn fila_de_escrita(
     mestre: &dyn MasterPty,
     matador: Box<dyn portable_pty::ChildKiller + Send + Sync>,
@@ -2105,10 +2106,7 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
 
 const POST_KILL_REAP: std::time::Duration = std::time::Duration::from_millis(150);
 
-async fn stop_replaced_sessions(sessions: Vec<PtySession>) {
-    stop_replaced_sessions_with(move || stop_sessions(sessions, std::time::Duration::from_secs(2))).await;
-}
-
+#[cfg(test)]
 async fn stop_replaced_sessions_with<F>(cleanup: F)
 where
     F: FnOnce() -> Result<(), String> + Send + 'static,

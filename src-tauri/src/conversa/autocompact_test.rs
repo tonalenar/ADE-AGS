@@ -33,6 +33,17 @@ fn gate() -> Gate {
     }
 }
 
+#[test]
+fn o_agente_so_pede_a_propria_compactacao_com_o_autocompact_ligado() {
+    assert!(agent_compact_error(&parse_config(None), "codex").is_none());
+    let global_off = parse_config(Some(r#"{"enabled":false}"#));
+    let erro = agent_compact_error(&global_off, "codex").unwrap();
+    assert!(erro.contains("autocompact"), "{erro}");
+    let so_codex_off = parse_config(Some(r#"{"enabled":true,"agents":{"codex":{"enabled":false}}}"#));
+    assert!(agent_compact_error(&so_codex_off, "codex").is_some());
+    assert!(agent_compact_error(&so_codex_off, "claude-code").is_none());
+}
+
 // ── configuração ─────────────────────────────────────────────────────────
 
 #[test]

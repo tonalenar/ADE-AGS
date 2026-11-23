@@ -1,3 +1,4 @@
+import { useDocumentSpellcheck } from "@/features/chat/spellcheckPref";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { lazyWithRetry } from "@/app/lazyWithRetry";
 import { StatusBarRegion } from "@/app/StatusBarRegion";
@@ -91,6 +92,7 @@ function toFrontendTab(row: RestoredTabRow): Tab {
 }
 
 export function AppShell() {
+  useDocumentSpellcheck();
   const { t } = useTranslation();
   useFileDropToTerminal();
   useSessionCheckpoints();
@@ -156,12 +158,19 @@ export function AppShell() {
     () => [...tabs.map((tab) => tab.cwd), ...snapshots.map((s) => s.cwd)],
     [tabs, snapshots]
   ));
+  // O estado ativo da aba é resolvido no render (não na árvore): trocar de aba não refaz `groups`.
   const groups = useMemo(
-    () => buildWorkspaceTree(tabs, repos, activeTabId, snapshots),
-    [tabs, repos, activeTabId, snapshots]
+    () => buildWorkspaceTree(tabs, repos, null, snapshots),
+    [tabs, repos, snapshots]
   );
+  const outletContext = useMemo<ShellOutletContext>(() => ({ groups }), [groups]);
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const activeRepo = activeTab ? repos.get(activeTab.cwd) ?? null : null;
+  const activeChangedCount = activeRepo?.changedCount ?? 0;
+  const tabBarTrailing = useMemo(
+    () => <><PanelButtons changes={activeChangedCount} /><WindowControls className="-my-1.5 -mr-1.5" /></>,
+    [activeChangedCount],
+  );
 
   // El encabezado del lateral mide exactamente lo mismo que el riel más el panel, para
   // que la división vertical sea una sola línea de arriba a abajo.
@@ -320,17 +329,18 @@ export function AppShell() {
           tem a sua barra de título e a sua sidebar. */}
       <div className={chat ? "hidden" : "flex shrink-0"}>
         <SideHead width={sideWidth} />
-        <TabBar showLights={workspacesCollapsed && !railExpanded}
-          trailing={<><PanelButtons changes={activeRepo?.changedCount ?? 0} /><WindowControls className="-my-1.5 -mr-1.5" /></>} />
+        <TabBar showLights={workspacesCollapsed && !railExpanded} trailing={tabBarTrailing} />
       </div>
 
       <div className="relative flex flex-1 min-h-0">
         {/* Izquierda: los AGENTES. Es lo primero que se ve porque en un entorno de
             desarrollo para agentes lo primero es qué está corriendo; el árbol de
             archivos es el panel secundario y va del otro lado. */}
+        {/* No modo chat `AppSessionsSidebar` não fica montada (não tem terminal nem navegador):
+            evita listeners, `useFolderDiffs` e uma segunda `ChatSidebar` rodando ocultos. */}
         <div className={chat ? "hidden" : "contents"}>
           <ActivityRail agentCount={tabs.length} width={RAIL_W} />
-          {!workspacesCollapsed && <PanelBoundary name="sessions"><Suspense fallback={null}><AppSessionsSidebar groups={groups} width={PANEL_W} /></Suspense></PanelBoundary>}
+          {!chat && !workspacesCollapsed && <PanelBoundary name="sessions"><Suspense fallback={null}><AppSessionsSidebar groups={groups} width={PANEL_W} /></Suspense></PanelBoundary>}
         </div>
 
         <div className="relative flex-1 min-w-0 overflow-hidden">
@@ -356,7 +366,7 @@ export function AppShell() {
               el medio). Un scroll acá afuera además reservaría su carril a la derecha de
               TODAS las páginas, incluidas las que no lo necesitan. */}
           {/* No chat as telas cheias (Configurações, Missões…) abrem dentro da casca, no lugar da conversa. */}
-          {chat && <PanelBoundary name="chat"><Suspense fallback={null}><ChatShell groups={groups} page={fullPage && !settingsRoute ? <Outlet context={{ groups } satisfies ShellOutletContext} /> : null} /></Suspense></PanelBoundary>}
+          {chat && <PanelBoundary name="chat"><Suspense fallback={null}><ChatShell groups={groups} page={fullPage && !settingsRoute ? <Outlet context={outletContext} /> : null} /></Suspense></PanelBoundary>}
 
           {!chat && composing && !floatingComposer && <div className="absolute inset-0 z-50 flex min-w-0 flex-col bg-white dark:bg-surface">
             <NewConversation projects={chatProjects(groups)} folder={composeFolder ?? activeTab?.cwd ?? null}
@@ -379,13 +389,13 @@ export function AppShell() {
 
           {!chat && !isWorkspace && !fullPage && (
             <div className="absolute inset-0 z-10 overflow-hidden">
-              <Outlet context={{ groups } satisfies ShellOutletContext} />
+              <Outlet context={outletContext} />
             </div>
           )}
 
           {fullPage && (!chat || settingsRoute) && (
             <RouteModal onClose={() => navigate(tabs.length > 0 ? "/workspace" : "/")}>
-              <Outlet context={{ groups } satisfies ShellOutletContext} />
+              <Outlet context={outletContext} />
             </RouteModal>
           )}
 
