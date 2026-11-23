@@ -597,6 +597,12 @@ pub fn chat_team_watch_stall(app: AppHandle, db: State<'_, DbConnection>, team_i
     Ok(changed)
 }
 
+/// O estado real (trabalhando, esperando entrada, encerrou sem entregar, erro, ocioso) de cada integrante e filho ativo.
+#[tauri::command]
+pub fn chat_team_states(db: State<'_, DbConnection>) -> Result<Vec<super::watch_db::MemberState>, String> {
+    super::watch_db::states(&*lock(&db)?, crate::util::now_ts_ms())
+}
+
 /// Acorda o vigia para ele reler os interruptores (o barramento das conversas é o que ele escuta).
 fn wake_watch(app: &AppHandle) {
     crate::bus::publish(Some(app), crate::bus::Publish::new(crate::ipc::commands::conversas::BUS_TOPIC).data(serde_json::json!({ "type": "watch" })));

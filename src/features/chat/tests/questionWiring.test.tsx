@@ -66,6 +66,8 @@ let root: Root;
 let host: HTMLDivElement;
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  // A linhagem sob a conversa lê o estado do time ao abrir.
+  invokeMock.on("chat_team_states", []);
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);

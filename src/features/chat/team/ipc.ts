@@ -209,3 +209,6 @@ export const chatTeamWorktree = (cwd: string, role: string, agentId: string) =>
 /** As delegações em andamento do time com escopos de escrita sobrepostos (`Escopo:` na delegação). Só aviso. */
 export const chatTeamOverlaps = (teamId: string) =>
   invoke<ScopeOverlap[]>("chat_team_overlaps", { teamId });
+
+/** O estado real de cada integrante e filho ativo (`chat_team::watch::real_state`), calculado no backend. */
+export const chatTeamStates = () => invoke<import("./lineageModel").MemberStateRow[]>("chat_team_states");

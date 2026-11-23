@@ -38,6 +38,12 @@ pub const BLOCK_AFTER_MS: i64 = 20_000;
 /// Sem nenhum item novo por tanto tempo, um turno em andamento é «sem progresso». Generoso: um agente pensando
 /// ou rodando uma suíte longa não produz item por vários minutos.
 pub const STALL_AFTER_MS: i64 = 15 * 60_000;
+/// Uma tarefa que chegou ao integrante e ele não começou, parado por tanto tempo, é «ocioso»: a mensagem pode ter
+/// ficado na fila ou o agente esperar uma entrada que ninguém viu. Calibrado curto (5 min): um agente que recebe uma
+/// tarefa abre o turno em segundos, e o orquestrador não precisa esperar o «sem progresso» (15 min) para saber.
+pub const IDLE_AFTER_MS: i64 = 5 * 60_000;
+/// A folga entre a hora da mensagem e o início do turno (o turno pode abrir um pouco antes do carimbo da entrega).
+pub const START_SLACK_MS: i64 = 10_000;
 /// O watchdog: um turno esperando o modelo (sem ferramenta rodando, sem pedido à pessoa) sem item novo por tanto
 /// tempo é `TIMEOUT`. Mais curto que o «sem progresso», que vale também para uma ferramenta longa.
 pub const TIMEOUT_AFTER_MS: i64 = 5 * 60_000;
@@ -133,6 +139,73 @@ pub struct Member {
     pub calls: Vec<Call>,
     /// A fração da janela de contexto ocupada (`usage` real + estimativa), quando se sabe, e o turno da medida.
     pub context: Option<(f64, String)>,
+    /// Quando o orquestrador mandou a tarefa mais recente (`tell`, `handoff` ou `ask` sem resposta automática), se mandou.
+    pub task_at: Option<i64>,
+}
+
+/// O estado real de um integrante, calculado aqui (não pela cor da tela): o orquestrador e a interface leem o mesmo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RealState {
+    /// Um turno em andamento, sem esperar a pessoa.
+    Working,
+    /// Parado esperando entrada: pedido à pessoa pendente, pergunta sem resposta, ou tarefa na mão que ele não começou.
+    WaitingInput,
+    /// O último turno pedido pelo orquestrador acabou sem o integrante entregar nada a ele.
+    EndedWithoutDelivery,
+    /// O último turno falhou.
+    Failed,
+    /// Parado, sem nada pendente.
+    Idle,
+}
+
+impl RealState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::WaitingInput => "waiting_input",
+            Self::EndedWithoutDelivery => "ended_without_delivery",
+            Self::Failed => "failed",
+            Self::Idle => "idle",
+        }
+    }
+}
+
+/// O estado real de `m` agora. Pura.
+pub fn real_state(m: &Member, now: i64) -> RealState {
+    let pending = m.requests.iter().any(|r| r.state == ReqState::Pending);
+    if m.working.is_some() && !pending {
+        return RealState::Working;
+    }
+    if pending {
+        return RealState::WaitingInput;
+    }
+    if let Some(t) = &m.last_turn {
+        if !t.replied_after {
+            if t.status == TurnStatus::Failed {
+                return RealState::Failed;
+            }
+            if t.status == TurnStatus::Completed && t.final_text.as_deref().is_some_and(asks_the_person) {
+                return RealState::WaitingInput;
+            }
+            if t.from_orchestrator && !t.reported {
+                return RealState::EndedWithoutDelivery;
+            }
+        }
+    }
+    if untouched_task(m).is_some_and(|at| now >= at + IDLE_AFTER_MS) {
+        return RealState::WaitingInput;
+    }
+    RealState::Idle
+}
+
+/// A tarefa do orquestrador que o integrante ainda não começou (nenhum turno iniciou depois dela), parado.
+fn untouched_task(m: &Member) -> Option<i64> {
+    let at = m.task_at?;
+    if m.working.is_some() {
+        return None;
+    }
+    let started_after = m.last_turn.as_ref().and_then(|t| t.started_at).is_some_and(|s| s + START_SLACK_MS >= at);
+    (!started_after).then_some(at)
 }
 
 /// Um aviso do vigia já enviado: a chave e quando.
@@ -195,6 +268,7 @@ pub fn evaluate(input: &Input, now: i64) -> Plan {
         }
         if input.flags.stall {
             timed_out(m, &sent, now, &mut found);
+            idle(m, &sent, now, &mut found, &mut wake);
             stalled(m, &sent, now, &mut found, &mut wake);
             repeated(m, &sent, &mut found);
         }
@@ -277,6 +351,24 @@ fn stalled(m: &Member, sent: &HashSet<&str>, now: i64, out: &mut Vec<Notice>, wa
     let due = base + STALL_AFTER_MS;
     if now >= due {
         out.push(Notice { key, member: m.id.clone(), text: stall_text(m, now - base) });
+    } else {
+        wake_at(wake, due, now);
+    }
+}
+
+/// O aviso de «ocioso com a tarefa na mão», uma vez por tarefa. Só avisa: nada é escrito na conversa do integrante.
+fn idle(m: &Member, sent: &HashSet<&str>, now: i64, out: &mut Vec<Notice>, wake: &mut Option<i64>) {
+    if m.requests.iter().any(|r| r.state == ReqState::Pending) {
+        return;
+    }
+    let Some(at) = untouched_task(m) else { return };
+    let key = format!("{KEY_PREFIX}idle-{}-{at}", m.id);
+    if sent.contains(key.as_str()) {
+        return;
+    }
+    let due = at + IDLE_AFTER_MS;
+    if now >= due {
+        out.push(Notice { key, member: m.id.clone(), text: idle_text(m, now - at) });
     } else {
         wake_at(wake, due, now);
     }
@@ -504,6 +596,14 @@ fn context_text(m: &Member, pressure: f64) -> String {
         "{MARK} {}: o contexto está em ~{}% da janela do modelo. Perto do auto-compact, ele pode esquecer detalhes do que fez: se a tarefa é longa, peça agora um resumo do estado (arquivos, erros, próximo passo) ou um handoff. Só leitura: nada foi escrito na conversa dele.",
         who(m),
         (pressure * 100.0).round() as i64
+    )
+}
+
+fn idle_text(m: &Member, waited: i64) -> String {
+    format!(
+        "{MARK} {} está ocioso: recebeu uma tarefa sua há {} e não começou (nenhum turno aberto depois dela). É só um aviso: nada foi interrompido nem escrito na conversa dele. Veja com ags peer check, peça o status com ags peer ask ou reenvie a tarefa.",
+        who(m),
+        age(waited)
     )
 }
 

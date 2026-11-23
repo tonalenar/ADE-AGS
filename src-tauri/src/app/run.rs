@@ -530,6 +530,7 @@ pub fn run() {
             crate::chat_team::chat_team_allow_tools,
             crate::chat_team::chat_team_watch,
             crate::chat_team::chat_team_watch_stall,
+            crate::chat_team::chat_team_states,
             crate::conversa::chat_permission_notify,
             crate::scm::scm_init,
             crate::scm::scm_stage,

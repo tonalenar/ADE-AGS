@@ -499,16 +499,16 @@ mod regras {
     }
 
     #[test]
-    fn o_vigia_do_chat_nasce_ligado_para_bloqueios_e_desligado_para_sem_progresso() {
+    fn o_vigia_do_chat_nasce_ligado_para_bloqueios_e_para_sem_progresso() {
         let conn = db();
         let t = team(&conn, "tab-lead");
         let row = store::team(&conn, &t).unwrap().unwrap();
         assert!(row.watch, "os avisos de bloqueio nascem ligados");
-        assert!(!row.watch_stall, "«sem progresso» nasce desligado, como o Vigia das missões");
+        assert!(row.watch_stall, "«sem progresso» e «ocioso» nascem ligados nos times novos: o orquestrador não espera em silêncio");
         assert!(store::set_watch(&conn, &t, false).unwrap());
-        assert!(store::set_watch_stall(&conn, &t, true).unwrap());
+        assert!(store::set_watch_stall(&conn, &t, false).unwrap());
         let row = store::team(&conn, &t).unwrap().unwrap();
-        assert!(!row.watch && row.watch_stall);
+        assert!(!row.watch && !row.watch_stall);
         assert!(!store::set_watch(&conn, "nao-existe", true).unwrap());
         assert!(!store::set_watch_stall(&conn, "nao-existe", true).unwrap());
     }
