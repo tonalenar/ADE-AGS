@@ -900,6 +900,16 @@ pub(crate) fn raw_to_thread_refusal(name: &str) -> (&'static str, String) {
     ("raw_to_thread", format!("Não enviei: {name} é uma conversa por protocolo, não um terminal; `--raw` (comando de TUI como /compact) não vale para ela. Mande o texto sem `--raw`. {}", crate::peer_queue::store::REFUSAL_WAY_OUT))
 }
 
+/// `--raw /compact` a outro agente é compactar a conversa dele: a decisão é só da pessoa (AGENTS.md §2.3).
+pub(crate) fn compact_to_other_refusal(name: &str) -> (&'static str, String) {
+    ("compact_to_other", format!("Não enviei: `/compact` para {name} compactaria a conversa dele, e um agente só compacta a própria conversa (e só com o autocompact da pessoa ligado). Se o contexto de {name} precisa ser compactado, avise a pessoa: ela compacta pela tela da ADE AGS. {}", crate::peer_queue::store::REFUSAL_WAY_OUT))
+}
+
+/// A mensagem é um `/compact` cru para outro agente? Todo destino de `peer` é outro (para si mesmo já é recusado). Pura.
+pub(crate) fn raw_compact_to_other(text: &str, raw: bool) -> bool {
+    raw && crate::ipc::guard::is_compact_command(text)
+}
+
 pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let to = arg_str(args, "to")?;
@@ -935,6 +945,10 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
         TellBody::Send(body) => body,
     };
 
+    if raw_compact_to_other(&text, is_raw(args)) {
+        let (reason, message) = compact_to_other_refusal(&target.name);
+        return policy_refusal(app, "tell", &from, &from_name, (&target.id, &target.name), typed, Some(describe(target)), reason, &message);
+    }
     if target.agent_id == crate::desktop_apps::GEMINI_DESKTOP { return queue_gemini(app,target,"tell",&from,&from_name,&text); }
     // Uma conversa por protocolo do time: a mensagem vai como mensagem da conversa (ver `team`).
     if let Some(thread) = crate::chat_team::model::thread_id_of(&target.id) {
@@ -1452,6 +1466,12 @@ struct AskExtra<'a> {
 /// um destino e o que `peer ask --batch` faz com vários ao mesmo tempo.
 #[allow(clippy::too_many_arguments)]
 fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, text: &str, timeout: Duration, raw: bool, extra: AskExtra<'_>) -> Result<Value, String> {
+    if raw_compact_to_other(text, raw) {
+        let (reason, message) = compact_to_other_refusal(&target.name);
+        let new = NewMessage { client_id: extra.client_id, kind: "ask", from_tab_id: from_id, from_name, to_tab_id: &target.id, to_name: &target.name, text, raw, reply: true, ..Default::default() };
+        let record = peer_queue::refuse(app, &new, reason, &message)?;
+        return Ok(ask_refused(target, &record));
+    }
     if target.agent_id == crate::desktop_apps::GEMINI_DESKTOP {
         let queued = queue_gemini(app,target,"ask",from_id,from_name,text)?;
         return wait_for_gemini_reply(app,target,queued,timeout);
@@ -1942,6 +1962,17 @@ mod test {
         assert_eq!(outgoing("Líder", "/compact", true, true), "/compact");
         assert_eq!(outgoing("Líder", "/compact", false, true), "/compact");
         assert!(outgoing("Líder", "oi", true, false).starts_with("[Mensagem de Líder via ADE AGS] oi"));
+    }
+
+    #[test]
+    fn compact_raw_para_outra_aba_ou_conversa_e_recusado_com_a_explicacao() {
+        let (reason, message) = compact_to_other_refusal("Backend");
+        assert_eq!(reason, "compact_to_other");
+        assert!(message.contains("Backend") && message.contains("própria conversa") && message.contains("pessoa"), "{message}");
+        assert!(raw_compact_to_other("/compact", true));
+        assert!(raw_compact_to_other("  /compact foco", true));
+        assert!(!raw_compact_to_other("/compact", false), "sem --raw leva o cabeçalho e não é comando");
+        assert!(!raw_compact_to_other("/clear", true));
     }
 
     #[test]

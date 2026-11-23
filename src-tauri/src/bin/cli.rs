@@ -91,7 +91,8 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peer tell <nome> --file <caminho>           O mesmo, com o texto em um arquivo (sem confusão de aspas no Windows)
   peer ask <nome> --file <caminho>            O mesmo que ask, com a pergunta em um arquivo
              (ask/tell --raw: o texto como está, sem o cabeçalho \"[Mensagem de ...]\"; para
-              mandar a uma TUI um comando dela, p. ex. /compact ou /clear)
+              mandar a uma TUI um comando dela, p. ex. /clear; `/compact` a outro agente é recusado: um agente
+              só compacta a própria conversa)
   peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'  Pergunta a vários AO MESMO TEMPO e espera todos
   peer check <nome> [--lines 60]              O que aparece agora no terminal dele
   peer deliver [<nome>] --file entrega.json   Entrega final estruturada (Handoff v1) ao orquestrador
@@ -308,6 +309,8 @@ CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code
            [--client-request-id <id>]          Permite repetir o Parar sem interromper outra vez: devolve o recibo (`receipt`)
   chat pending [<id>]                         Aprovações e perguntas esperando a pessoa (só ela responde, na tela) e quem respondeu
                                               as últimas (`decided`: a pessoa, a política do time ou uma regra dela)
+  chat compact <id> [--instructions \"...\"]    Compacta o contexto da PRÓPRIA conversa (Codex e Claude Code, sem turno em curso);
+                                              só com o autocompact da pessoa ligado. De outra conversa: recusado (a pessoa compacta pela tela)
   chat open <id>                              Mostra a conversa na tela do modo chat
   chat settle <id> [--reopen]                 Conclui (o agente fecha; reabrir retoma a mesma thread)
 

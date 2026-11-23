@@ -627,6 +627,17 @@ Peça à pessoa para fechar o resto."
                 };
             };
             let key = thread_ref(thread);
+            // Compactar o contexto muda a conversa de quem a usa: o agente só pede a PRÓPRIA (e o handler confere o autocompact).
+            if command == "chat.compact" {
+                return if me == key {
+                    Ok(with_key(args, "from", me))
+                } else {
+                    Err(format!(
+                        "`{command}` só compacta a sua própria conversa, nunca a de outro agente ou a da pessoa: a conversa {thread} não é a sua. \
+Se o contexto dela precisa ser compactado, avise a pessoa; ela compacta pela tela da ADE AGS."
+                    ))
+                };
+            }
             if crate::ipc::guard::in_reach(&boards()?, me, &key, opened_by(&key).as_deref()) {
                 Ok(args.clone())
             } else {
