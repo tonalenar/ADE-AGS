@@ -70,10 +70,6 @@ export async function loadAgentRegistry(): Promise<void> {
   }
 }
 
-export function agentRegistry(): AgentRegistryEntry[] {
-  return REGISTRY;
-}
-
 export function agentDef(id: string): AgentRegistryEntry | undefined {
   return REGISTRY.find((a) => a.id === id);
 }

@@ -4,6 +4,7 @@ import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { Button, CloseIcon } from "neogestify-ui-components";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { basenameOrSelf } from "@/shared/path";
 
 import { readDir } from "@/features/explorer/ipc";
 import type { DirEntry } from "@/features/explorer/types";
@@ -201,7 +202,7 @@ export const FolderNode = memo(function FolderNode({ data, selected }: NodeProps
 
 /** El nombre de la última carpeta de una ruta, con cualquiera de las dos barras. */
 export function baseName(path: string): string {
-  return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+  return basenameOrSelf(path);
 }
 
 function IconButton({ label, onClick, pressed, children }: { label: string; onClick: () => void; pressed?: boolean; children: React.ReactNode }) {

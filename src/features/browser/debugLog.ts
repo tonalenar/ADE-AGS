@@ -7,6 +7,7 @@
  * lleve. Lógica pura, probada en `tests/debugLog.test.ts`; el store y el panel la usan, y
  * el MCP la formatea para un agente con las mismas funciones.
  */
+import { formatBytes as formatSharedBytes } from "@/shared/format";
 import type { CookieReport, ProxyNetworkPage, ProxyRequest } from "./ipc";
 import type { ConsoleEntry, ConsoleLevel, DebugBatch, NetBody, NetErrorKind, PageNetworkEntry } from "./protocol";
 
@@ -311,9 +312,7 @@ export function mergeCookies(pageCookies: { name: string; value: string }[], rep
 
 export function formatBytes(n: number | null): string {
   if (n === null) return "—";
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} kB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return formatSharedBytes(n, { units: ["B", "kB", "MB"], alwaysOneDecimal: true });
 }
 
 export function formatClock(at: number): string {

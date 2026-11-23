@@ -22,8 +22,6 @@ import { formatDuration } from "./timings";
 export const LEAD_STALL_MS = 180_000;
 /** El plazo configurable no baja de acá: menos que esto es ruido (un turno largo de pensar). */
 export const MIN_LEAD_STALL_MS = 30_000;
-/** Cada cuánto se revisa. */
-export const LEAD_STALL_CHECK_MS = 5000;
 /** Un integrante quieto con una pregunta en pantalla durante tanto tiempo está esperando respuesta. */
 export const SCREEN_QUESTION_QUIET_MS = 45_000;
 /** Cuántas líneas del final de la pantalla se miran en busca de una pregunta. */

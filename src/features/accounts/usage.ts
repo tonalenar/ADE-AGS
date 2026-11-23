@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { formatCompactTokens } from "@/shared/format";
 
 import type { AgentAccount } from "./types";
 
@@ -59,9 +60,6 @@ export function isUsageFresh(fetchedAt: number, now: number, ttl = USAGE_TTL): b
   const age = now - fetchedAt;
   return age >= 0 && age < ttl;
 }
-
-/** Cuánto dura la ventana de límite de Claude, en segundos. */
-export const WINDOW_SECS = 5 * 3600;
 
 /**
  * El nombre del plan.
@@ -125,9 +123,7 @@ export function totalOf(w: UsageWindow): number {
 
 /** `1.2M`, `124k`, `840`. Para números que solo importan en orden de magnitud. */
 export function formatTokens(n: number): string {
-  if (n < 1000) return `${n}`;
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
+  return formatCompactTokens(n);
 }
 
 /** Una de las barras del panel de `/usage`. */

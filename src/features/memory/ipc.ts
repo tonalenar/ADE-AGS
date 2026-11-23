@@ -11,9 +11,6 @@ export const listMemory = (workspaceId: string, missionId: string | null, cursor
 export const queryMemory = (workspaceId: string, missionId: string | null, filter: MemoryFilter, cursor?: string | null) =>
   invoke<MemoryPage>("memory_query", { workspaceId, missionId, filter, cursor: cursor ?? null, limit: 32 });
 
-export const getRunMemoryContextMetrics = (runId: string) =>
-  invoke<MemoryContextMetrics>("memory_context_metrics", { runId, missionId: null });
-
 export const getMissionMemoryContextMetrics = (missionId: string) =>
   invoke<MemoryMissionContextMetrics>("memory_context_metrics", { runId: null, missionId });
 

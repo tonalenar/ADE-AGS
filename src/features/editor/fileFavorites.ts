@@ -245,11 +245,6 @@ function mutateFavorite(workspaceRoot: string, candidatePath: string, action: "a
   return { status: shouldExist ? "added" : "removed", isFavorite: shouldExist };
 }
 
-/** Adiciona um caminho se ainda não estiver favoritado. */
-export function addFileFavorite(workspaceRoot: string, candidatePath: string): FileFavoriteMutation {
-  return mutateFavorite(workspaceRoot, candidatePath, "add");
-}
-
 /** Remove um caminho favoritado. */
 export function removeFileFavorite(workspaceRoot: string, candidatePath: string): FileFavoriteMutation {
   return mutateFavorite(workspaceRoot, candidatePath, "remove");

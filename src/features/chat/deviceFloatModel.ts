@@ -1,3 +1,5 @@
+import { clamp } from "@/shared/math";
+
 /** A área da conversa, em coordenadas da janela (o `getBoundingClientRect` do `<main>`). */
 export interface ChatAreaRect {
   readonly left: number;
@@ -16,8 +18,6 @@ export interface DeviceFloatBox {
 
 /** A mesma margem do preview do navegador, do canto de baixo à direita. */
 const FLOAT_MARGIN = 18;
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 /**
  * Onde o aparelho flutua: uma fração da conversa, entre um mínimo e um máximo, encostado no canto de baixo à direita.

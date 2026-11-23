@@ -339,15 +339,6 @@ function setQueue(key: string, list: QueuedMessage[]): void {
   });
 }
 
-/** Esvazia a fila de uma conversa. */
-export function clearQueue(key: string): void {
-  useChatStore.setState((s) => {
-    const queues = { ...s.queues };
-    delete queues[key];
-    return { queues };
-  });
-}
-
 const sameRect = (a: Rect | null, b: Rect | null) =>
   a === b || (!!a && !!b && a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height);
 

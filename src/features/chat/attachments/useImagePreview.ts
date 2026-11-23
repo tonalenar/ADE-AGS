@@ -34,11 +34,6 @@ export function loadImage(path: string): Promise<string | null> {
   return loading;
 }
 
-/** Esquece o que se guardou de um caminho (o arquivo mudou ou foi limpo). */
-export function forgetImage(path: string): void {
-  cache.delete(path);
-}
-
 /**
  * Quando tentar de novo uma imagem que não se leu. A resposta do agente cita o arquivo antes de a ferramenta terminar
  * de gravá-lo (ou de copiá-lo para a pasta), então a primeira leitura falha por "não encontrado" ou "vazio" e o

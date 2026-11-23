@@ -9,6 +9,7 @@ import { repoInfo } from "@/features/explorer/ipc";
 import { scmFileAt } from "@/features/scm/ipc";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { relativeTo, type FileView } from "@/features/tabs/viewTabs";
+import { formatBytes as formatSharedBytes } from "@/shared/format";
 
 import { CodeEditor, type EditorHandle } from "./CodeEditor";
 import { applyDiskReload, dirtyAfterSuccessfulSave } from "./dirtySave";
@@ -29,9 +30,7 @@ const WATCH_MS = 2000;
 type Banner = "changed" | "conflict" | "deleted" | null;
 
 function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return formatSharedBytes(n, { units: ["B", "KB", "MB"], alwaysOneDecimal: true });
 }
 
 /**

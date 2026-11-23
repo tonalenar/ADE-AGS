@@ -12,6 +12,7 @@ import type { AgentSkillScan, SkillSummary } from "@/features/skills/types";
 import { forgePulls } from "@/features/forge/ipc";
 import type { ForgeItem } from "@/features/forge/types";
 
+import { basenameOrSelf } from "@/shared/path";
 import { addSurface, setRightPanel } from "./store";
 import { PROTOCOL_AGENTS, type ProviderSlashCommand } from "./chatModel";
 import { legacyComposerCapabilityAvailable, matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
@@ -89,12 +90,8 @@ function normalized(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
-function basename(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() ?? path;
-}
-
 function skillSlug(skill: SkillSummary): string {
-  return basename(skill.sourcePath) || normalized(skill.name).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return basenameOrSelf(skill.sourcePath) || normalized(skill.name).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 function skillAttached(skill: SkillSummary, workspaceId: string, cwd: string, tabId: string | null): boolean {

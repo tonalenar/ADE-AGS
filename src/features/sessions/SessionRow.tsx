@@ -12,32 +12,13 @@ import { agentIcon } from "@/features/agents/agentIcons";
 import { pickAndExport } from "@/features/sessions/sessionExport";
 
 import { dateLocale } from "@/i18n/dateLocale";
+import { formatRelativeUnit as formatRelative } from "@/shared/time";
 
 function formatDateTime(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleString(dateLocale(), {
     dateStyle: "medium",
     timeStyle: "short",
   });
-}
-
-/** "5m", "2h", "3d": a unidade abreviada pelo idioma (Intl), não por letras fixas. */
-function formatRelative(unixSeconds: number, language = "pt-BR"): string {
-  const diffSeconds = Math.max(0, Math.floor(Date.now() / 1000) - unixSeconds);
-  const units: [number, Intl.NumberFormatOptions["unit"]][] = [
-    [60, "second"], [60, "minute"], [24, "hour"], [30, "day"], [12, "month"], [Infinity, "year"],
-  ];
-  let value = diffSeconds;
-  let unit: Intl.NumberFormatOptions["unit"] = "second";
-  for (const [size, label] of units) {
-    if (value < size) { unit = label; break; }
-    value = Math.floor(value / size);
-    unit = label;
-  }
-  try {
-    return new Intl.NumberFormat(language, { style: "unit", unit, unitDisplay: "narrow" }).format(value);
-  } catch {
-    return `${value} ${unit}`;
-  }
 }
 
 /** Nombre de archivo sugerido al exportar: legible y sin caracteres problemáticos. */

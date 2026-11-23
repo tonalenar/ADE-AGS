@@ -48,10 +48,6 @@ export async function readT3WorkspacePrefs(cwd: string): Promise<ChatT3Workspace
   return parseT3WorkspacePrefs(JSON.parse(file.content));
 }
 
-export async function readT3ThreadEnvMode(cwd: string): Promise<ChatThreadEnvMode | null> {
-  return (await readT3WorkspacePrefs(cwd)).threadEnvMode;
-}
-
 export function resolveChatThreadEnvMode(input: {
   projectOverride: boolean | null;
   machineOverride: ChatThreadEnvMode | null;
@@ -74,15 +70,6 @@ export function resolveChatWorktreeSubmodules(input: {
   if (input.machineOverride !== null) return { mode: input.machineOverride, source: "machine" };
   if (input.t3Default !== null) return { mode: input.t3Default, source: "t3" };
   return { mode: "none", source: "builtin" };
-}
-
-export function loadChatThreadEnvMode(): ChatThreadEnvMode | null {
-  try {
-    const value = localStorage.getItem(MACHINE_DEFAULT_KEY);
-    return value === "local" || value === "worktree" ? value : null;
-  } catch {
-    return null;
-  }
 }
 
 export function saveChatThreadEnvMode(mode: ChatThreadEnvMode | null): void {

@@ -133,8 +133,6 @@ export const realBrowserDeleteProfile = (profileId: string) =>
 export const realBrowserEmulate = (id: string, platform: "ios" | "android" | null, chrome: Record<string, string> | null = null) =>
   invoke<void>("real_browser_emulate", { id, platform, chrome });
 
-export const realBrowserFocus = (id: string) => invoke<void>("real_browser_focus", { id });
-
 /** Uma mensagem do app para o piloto da página (`page:run`, `connect`…). */
 export const realBrowserPost = (id: string, message: unknown) => invoke<void>("real_browser_post", { id, message });
 

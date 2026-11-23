@@ -189,17 +189,11 @@ export const chatTeamUnlead = (teamId: string) => invoke<boolean>("chat_team_unl
 export const chatTeamLead = (input: { teamId: string; orchestrator: string; agentId?: string; label?: string }) =>
   invoke<TeamView>("chat_team_lead", { input });
 
-/** Troca a ref (aba ↔ `thread:<id>`) no roster e nas cordas do canvas. `null` = a ref antiga não estava em time. */
-export const chatTeamRebind = (oldRef: string, newRef: string) =>
-  invoke<{ teamId: string; role: "orchestrator" | "member" } | null>("chat_team_rebind", { oldRef, newRef });
-
 export const chatTeamDissolve = (teamId: string) => invoke<boolean>("chat_team_dissolve", { teamId });
 
 export const chatTeamFeed = (teamId: string, limit?: number) => invoke<TeamFeedItem[]>("chat_team_feed", { teamId, limit: limit ?? null });
 
 export const chatTeamHandoff = (teamId: string, id: number) => invoke<TeamHandoff>("chat_team_handoff", { teamId, id });
-
-export const chatTeamNotice = (teamId: string) => invoke<string>("chat_team_notice", { teamId });
 
 /** Um worktree `team/<papel>` para um integrante novo (a partir do último commit da pasta). */
 export const chatTeamWorktree = (cwd: string, role: string, agentId: string) =>

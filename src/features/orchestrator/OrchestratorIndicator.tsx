@@ -3,17 +3,12 @@ import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 import { formatNumber } from "@/i18n/dateLocale";
+import { formatCompactTokens as formatTokens } from "@/shared/format";
 import { orchestratorStats, resetOrchestratorUsage, type OrchestratorStats } from "./ipc";
 
 /** A partir de acá el chip avisa en ámbar: el orquestador ya lleva consumido más contexto
  *  del que le queda cómodo a una conversación típica. */
 const TOKENS_WARNING = 100_000;
-
-function formatTokens(n: number): string {
-  if (n < 1000) return `${n}`;
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
-}
 
 /**
  * Indicador de consumo del modo orquestador (Fase 9).

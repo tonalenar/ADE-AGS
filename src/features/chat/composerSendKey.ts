@@ -11,8 +11,6 @@
 
 export type SendShortcut = "enter" | "mod-enter-multiline" | "mod-enter";
 
-export const SEND_SHORTCUTS: readonly SendShortcut[] = ["enter", "mod-enter-multiline", "mod-enter"];
-
 export function isSendShortcut(value: unknown): value is SendShortcut {
   return value === "enter" || value === "mod-enter-multiline" || value === "mod-enter";
 }

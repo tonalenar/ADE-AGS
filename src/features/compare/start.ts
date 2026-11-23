@@ -233,7 +233,3 @@ export async function finishComparison(cmp: Comparison): Promise<void> {
   await loadComparisons();
 }
 
-/** A comparação de um id, do store. */
-export function comparisonById(id: string | null): Comparison | undefined {
-  return id ? useCompareStore.getState().comparisons.find((c) => c.id === id) : undefined;
-}

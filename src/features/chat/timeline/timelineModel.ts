@@ -1,3 +1,4 @@
+import { basenameOrSelf } from "@/shared/path";
 import type { PlanStep, TimelineItem } from "./types";
 import { displayUserText } from "./userMessage";
 
@@ -291,6 +292,5 @@ export function formatDuration(ms: number): string {
 
 /** O nome do arquivo de um caminho, para a linha (o caminho inteiro vai no title). */
 export function fileName(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? path;
+  return basenameOrSelf(path);
 }

@@ -103,28 +103,3 @@ export function PlanCard({ plan, itemId, searchHit = false }: { plan: PlanStep[]
   );
 }
 
-/** "Trabalhando · 52 s" no cabeçalho da conversa aberta. */
-export function HeaderLive({ live }: { live: LiveSummary }) {
-  const { t } = useTranslation();
-  const now = useNow(live.working);
-  if (!live.working) return null;
-  return (
-    <span className="shrink-0 inline-flex items-center gap-1.5 text-chat-caption text-orange-700 dark:text-orange-400">
-      <Dots />
-      {live.waiting ? t("chat.live.waitingShort") : t("chat.status.working")}
-      {live.startedAt !== null && <span aria-hidden="true">· {formatElapsed(now - live.startedAt)}</span>}
-    </span>
-  );
-}
-
-/** A linha viva de um cartão da sidebar: "Rodando testes · 1 min 12 s". */
-export function SidebarLiveRow({ live }: { live: LiveSummary }) {
-  const now = useNow(live.working);
-  const text = useActivityText(live.activity);
-  return (
-    <span className="flex items-center gap-1.5 min-w-0 text-chat-caption text-orange-700 dark:text-orange-400">
-      <Dots />
-      <span className="truncate">{text}{live.startedAt !== null ? ` · ${formatElapsed(now - live.startedAt)}` : ""}</span>
-    </span>
-  );
-}

@@ -109,11 +109,6 @@ export function registerVaultSecret(secret: string): void {
   if (secret.length > 0) sessionVaultSecrets.add(secret);
 }
 
-/** Limpa o registro de senhas da sessão (somente para isolamento de testes). */
-export function clearVaultSecretsForTest(): void {
-  sessionVaultSecrets.clear();
-}
-
 /** Troca qualquer ocorrência exata (ou codificada em URL) de segredos do cofre usados na sessão por `[cofre]`. */
 export function redactVaultSecrets(text: string): string {
   if (sessionVaultSecrets.size === 0 || !text) return text;

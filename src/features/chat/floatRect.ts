@@ -5,9 +5,6 @@ export const FLOAT_RING = 10;
 const GAP = 8;
 export const FLOAT_MIN_WIDTH = 220;
 export const FLOAT_MIN_HEIGHT = 160;
-/** Espaço vertical aproximado da dock flutuante quando fica colada embaixo da miniatura. */
-export const FLOAT_DOCK_HEIGHT = 44;
-
 /** Caixa onde a miniatura pode ficar, no sistema do shell. */
 export type FloatBounds = { left: number; top: number; right: number; bottom: number };
 

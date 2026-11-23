@@ -30,20 +30,6 @@ export interface SessionPatch {
   hidden?: boolean;
 }
 
-export const updateHistoryEntry = (historyId: string, patch: SessionPatch) =>
-  invoke<void>("db_update_session_history", { historyId, patch });
-
-/** Os ids de sessão que pertencem a terminais de missões deste workspace: não são conversas comuns do projeto. */
-export const missionSessionIds = (workspaceId: string) =>
-  invoke<string[]>("db_mission_session_ids", { workspaceId });
-
-/** Recalcula os títulos fracos (caminho da pasta, "This session is being continued"…) a partir da sessão real. Devolve quantos mudaram. */
-export const refreshSessionTitles = (workspaceId: string) =>
-  invoke<number>("db_refresh_session_titles", { workspaceId });
-
-export const searchHistory = (workspaceId: string, query: string, limit = 50) =>
-  invoke<SessionHistoryEntry[]>("db_search_session_history", { workspaceId, query, limit });
-
 /** Busca no índice de memória das TUI fechadas do workspace atual. */
 export const searchArchivedSessionMessages = (workspaceId: string | null, query: string, limit = 20) =>
   invoke<ArchivedMessageSearchHit[]>("db_search_archived_session_messages", { workspaceId, query, limit });

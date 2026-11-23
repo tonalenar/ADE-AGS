@@ -75,10 +75,6 @@ export const keyLabel = (entry: PanelEntry): string => entry.key.toUpperCase();
  * Abre o painel Time e foca nele. No macOS é ⌥⌘T; nos outros, Ctrl+Shift+O (Ctrl+Alt+T abre o terminal
  * do Linux e, no Windows, Ctrl+Alt é o AltGr). Conferido contra os atalhos do app: nenhum usa esses acordes.
  */
-export const TEAM_SHORTCUT = DESKTOP_OS === "macos" ? "⌥⌘T" : "Ctrl+Shift+O";
-/** Como a lista das Configurações desenha (cada tecla numa caixinha). */
-export const TEAM_SHORTCUT_KEYS = DESKTOP_OS === "macos" ? "⌥+⌘+T" : "Ctrl+Shift+O";
-
 export interface Chord { key: string; code?: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }
 
 /** O evento é o acorde do Time? Com ⌥ a `key` vira outro caractere no Mac; por isso a tecla física (`code`). Pura. */
