@@ -1,7 +1,8 @@
-//! Sincronização opcional, de mão única, de memórias para um repositório privado no forge (GitHub/GitLab/Gitea).
+//! Sincronização opcional de páginas com repositório privado no forge (GitHub/GitLab/Gitea).
 //!
 //! - Nasce desligada por padrão.
-//! - Confirma pela API do forge que o repositório é privado antes de cada envio.
+//! - Confirma pela API do forge que o repositório é privado antes de cada pull/push.
+//! - Importa páginas novas; divergências ficam para escolha explícita do usuário.
 //! - Filtra segredos (`looks_like_user_secret`) antes de gravar no espelho e lista páginas puladas.
 //! - Mantém um espelho git próprio sob `<app_data_dir>/memory-sync/repo`, sem tocar no repositório
 //!   local de projeção (`~/.ags/memory/ws-<hash>/`).
@@ -12,6 +13,7 @@ mod commands;
 mod credentials;
 mod export;
 mod repo;
+mod restore;
 #[cfg(test)]
 mod test;
 

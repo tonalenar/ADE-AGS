@@ -606,6 +606,8 @@ pub fn run() {
             crate::memory_sync::memory_sync_set_enabled,
             crate::memory_sync::memory_sync_set_auto,
             crate::memory_sync::memory_sync_now,
+            crate::memory_sync::memory_sync_restore_now,
+            crate::memory_sync::memory_sync_resolve_conflict,
             // Actualizaciones desde las releases de GitHub
             crate::updates::update_check,
             crate::updates::update_install,

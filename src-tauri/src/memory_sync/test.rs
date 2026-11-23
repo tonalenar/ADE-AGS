@@ -12,7 +12,7 @@ use super::commands::{
     ForgeClient, set_auto_db, set_enabled_db, setup_with, status_db, sync_now_with,
 };
 use super::credentials::{EphemeralAskpass, fetch_credential_over_loopback, sanitize_error};
-use super::repo::{RemoteCredentials, build_network_git_spec, mirror_dir};
+use super::repo::{RemoteCredentials, build_network_git_spec, fetch_ai_memory_pages, mirror_dir};
 use crate::database::DbConnection;
 use crate::forge::for_sync::{Api, ForgeError, ForgeKind, ForgeRepo};
 use crate::memory::{ProposalActor, ProposalInput, decide, propose};
@@ -93,6 +93,101 @@ fn remote_commit_count(bare: &Path, branch: &str) -> usize {
     run_git(bare, &["rev-list", "--count", branch])
         .parse()
         .unwrap_or(0)
+}
+
+#[test]
+fn parser_de_export_importa_somente_paginas_ai_memory_do_formato_conhecido() {
+    let raw = "---\nsource: ai-memory\nworkspace: \"default\"\nproject: \"ADE-AGS\"\npath: \"notas/decisao.md\"\ntitle: \"Decisão\"\ntier: semantic\npinned: false\nexpired: false\n---\n\n# Decisão\n\nConteúdo restaurado.\n";
+    let page = super::restore::parse_exported_page(raw.as_bytes()).unwrap();
+    assert_eq!(page.workspace, "default");
+    assert_eq!(page.project, "ADE-AGS");
+    assert_eq!(page.path, "notas/decisao.md");
+    assert_eq!(page.title, "Decisão");
+    assert_eq!(page.body, "Conteúdo restaurado.");
+    assert!(super::restore::parse_exported_page("# Histórico legado".as_bytes()).is_none());
+    assert!(super::restore::parse_exported_page(b"---\nsource: unknown\n---\nbody").is_none());
+}
+
+#[test]
+fn caminho_de_pagina_importada_nao_pode_sair_do_projeto() {
+    assert!(super::restore::safe_page_path("notas/decisao.md"));
+    assert!(!super::restore::safe_page_path("../fora.md"));
+    assert!(!super::restore::safe_page_path(".git/config"));
+    assert!(!super::restore::safe_page_path("C:/fora.md"));
+}
+
+#[test]
+fn pull_le_somente_markdown_do_ai_memory_e_tolera_repo_sem_branch() {
+    let root = TempRoot::new("restore-fetch");
+    let data = root.path().join("app-data");
+    let bare = init_bare_remote(root.path(), "restore.git");
+    assert!(fetch_ai_memory_pages(&data, bare.to_str().unwrap(), "main", None).unwrap().is_empty());
+
+    let work = root.path().join("seed");
+    let clone = std::process::Command::new("git").args(["clone", "-q"])
+        .arg(&bare).arg(&work).status().unwrap();
+    assert!(clone.success());
+    std::fs::create_dir_all(work.join("ai-memory/default/ADE-AGS")).unwrap();
+    std::fs::create_dir_all(work.join("sqlite/ws-x/entries")).unwrap();
+    std::fs::write(work.join("ai-memory/default/ADE-AGS/page.md"), "---\nsource: ai-memory\n---\n").unwrap();
+    std::fs::write(work.join("sqlite/ws-x/entries/old.md"), "legacy").unwrap();
+    run_git(&work, &["add", "-A"]);
+    run_git(&work, &["commit", "-q", "-m", "seed"]);
+    run_git(&work, &["push", "-q", "origin", "HEAD:main"]);
+
+    let pages = fetch_ai_memory_pages(&data, bare.to_str().unwrap(), "main", None).unwrap();
+    assert_eq!(pages.len(), 1);
+    assert_eq!(pages[0].0, "ai-memory/default/ADE-AGS/page.md");
+}
+
+#[cfg(unix)]
+#[test]
+fn restaura_paginas_novas_sem_sobrescrever_iguais_conflitos_ou_segredos() {
+    use std::os::unix::fs::PermissionsExt;
+    use crate::ai_memory::client::Client;
+    use super::restore::{ExportedPage, apply_import};
+
+    let root = TempRoot::new("restore-decisions");
+    let cwd = root.path().join("project");
+    let store = root.path().join("store");
+    std::fs::create_dir_all(&cwd).unwrap();
+    std::fs::create_dir_all(&store).unwrap();
+    let program = root.path().join("fake-ai-memory");
+    let script = format!(r#"#!/bin/sh
+if [ "$1" = "--version" ]; then echo 'ai-memory 3.3.0'; exit 0; fi
+if [ "$1" = "read-page" ]; then
+  for arg in "$@"; do case "$arg" in --path=*) p="${{arg#--path=}}";; esac; done
+  case "$p" in
+    notes/equal.md) echo '{{"path":"notes/equal.md","workspace":"default","project":"ADE-AGS","title":"Igual","body":"mesmo corpo","frontmatter":{{}},"expired":false}}'; exit 0 ;;
+    notes/conflict.md) echo '{{"path":"notes/conflict.md","workspace":"default","project":"ADE-AGS","title":"Conflito","body":"versão local","frontmatter":{{}},"expired":false}}'; exit 0 ;;
+    *) echo '404 Not Found' >&2; exit 1 ;;
+  esac
+fi
+if [ "$1" = "write-page" ]; then
+  for arg in "$@"; do case "$arg" in --path=*) p="${{arg#--path=}}";; esac; done
+  cat > "{}/$(basename "$p").body"
+  exit 0
+fi
+exit 99
+"#, store.display());
+    std::fs::write(&program, script).unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let client = Client::at(Some(program.clone()), cwd).unwrap();
+    let pages = vec![
+        ExportedPage { workspace: "default".into(), project: "ADE-AGS".into(), path: "notes/new.md".into(), title: "Nova".into(), body: "novo corpo".into(), pinned: false },
+        ExportedPage { workspace: "default".into(), project: "ADE-AGS".into(), path: "notes/equal.md".into(), title: "Igual".into(), body: "mesmo corpo".into(), pinned: false },
+        ExportedPage { workspace: "default".into(), project: "ADE-AGS".into(), path: "notes/conflict.md".into(), title: "Conflito".into(), body: "versão remota".into(), pinned: false },
+        ExportedPage { workspace: "default".into(), project: "ADE-AGS".into(), path: "notes/secret.md".into(), title: "Segredo".into(), body: "ghp_1234567890123456789012345678901234".into(), pinned: false },
+    ];
+    let report = apply_import(&client, "default", "ADE-AGS", pages.clone(), None).unwrap();
+    assert_eq!((report.imported, report.unchanged, report.conflicts.len(), report.skipped_secrets), (1, 1, 1, 1));
+    assert_eq!(report.conflicts[0].local_body, "versão local");
+    assert_eq!(std::fs::read_to_string(store.join("new.md.body")).unwrap(), "novo corpo");
+    assert!(!store.join("conflict.md.body").exists());
+
+    let accepted = apply_import(&client, "default", "ADE-AGS", pages, Some("notes/conflict.md")).unwrap();
+    assert_eq!(accepted.imported, 2);
+    assert_eq!(std::fs::read_to_string(store.join("conflict.md.body")).unwrap(), "versão remota");
 }
 
 #[derive(Clone)]
@@ -272,6 +367,17 @@ impl FakeAiMemory {
             })
             .collect();
         std::fs::write(store.join("recent.json"), serde_json::to_vec(&recent).unwrap()).unwrap();
+        let mut projects = Vec::new();
+        for (_, _, workspace, project, _) in pages {
+            if !projects.iter().any(|item: &serde_json::Value| item["project_name"] == *project) {
+                projects.push(json!({
+                    "workspace_name": workspace,
+                    "project_name": project,
+                    "page_count": 1
+                }));
+            }
+        }
+        std::fs::write(store.join("projects.json"), serde_json::to_vec(&projects).unwrap()).unwrap();
 
         let mut pages_map = BTreeMap::new();
         for (path, title, ws, proj, body) in pages {
@@ -311,6 +417,10 @@ fi
 if [ "$1" = "recent" ]; then
   if [ "$AI_MEMORY_HOST_CWD" != "{cwd}" ]; then exit 77; fi
   cat "{store}/recent.json"
+  exit 0
+fi
+if [ "$1" = "list-projects" ]; then
+  cat "{store}/projects.json"
   exit 0
 fi
 if [ "$1" = "read-page" ]; then
@@ -826,6 +936,7 @@ async fn nao_mexe_no_repositorio_local_de_projecao_nem_apaga_outros_projetos_no_
     run_git(&seed, &["clone", "-q", bare.to_str().unwrap(), "."]);
     std::fs::create_dir_all(seed.join("ai-memory/default/outro-repo/notes")).unwrap();
     std::fs::write(seed.join("ai-memory/default/outro-repo/notes/keep.md"), "Manter outro projeto").unwrap();
+    std::fs::write(seed.join("README.md"), "README da pessoa").unwrap();
     run_git(&seed, &["add", "-A"]);
     run_git(&seed, &["commit", "-q", "-m", "outro projeto"]);
     run_git(&seed, &["push", "-q", "origin", "HEAD:refs/heads/main"]);
@@ -854,10 +965,11 @@ async fn nao_mexe_no_repositorio_local_de_projecao_nem_apaga_outros_projetos_no_
     assert!(run_git(&local_repo, &["remote"]).is_empty());
     crate::memory::repo::export_at(&db.lock().unwrap(), "w1", &local_memory_root, None).unwrap();
 
-    // O arquivo de outro projeto no remoto foi preservado (mão única por escopo).
+    // Arquivos existentes no remoto são preservados, inclusive README e páginas de outro projeto.
     let remote_files = remote_tree_files(&bare, "main");
     assert_eq!(
         remote_files.get("ai-memory/default/outro-repo/notes/keep.md").map(String::as_str),
         Some("Manter outro projeto")
     );
+    assert_eq!(remote_files.get("README.md").map(String::as_str), Some("README da pessoa"));
 }

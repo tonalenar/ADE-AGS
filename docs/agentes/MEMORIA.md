@@ -17,12 +17,12 @@ Decisão completa em [`docs/decisoes/AI_MEMORY.md`](../decisoes/AI_MEMORY.md).
 - O SQLite abaixo (`memory_entries`…) passa a ser **só leitura**, fonte da migração única para o wiki do ai-memory. Nada é apagado.
 
 ## Backup privado para GitHub (`memory_sync/`)
-- **Opcional e desligado por padrão** em **Configurações → Memória** (`src/features/memorySync/MemorySyncCard.tsx`), com agendamento automático opcional a cada N horas (`MemorySyncRunner.tsx`) e botão **Enviar agora**.
-- **Privado obrigatório**: antes de cada envio (e no setup), confirma pela API do forge que o repositório é privado; se for público ou não der para confirmar, bloqueia o envio e exibe o erro. Contas genéricas (`ForgeKind::Other`, sem API) são recusadas.
-- **Filtro de segredos**: aplica `looks_like_user_secret` antes de gravar no espelho; páginas/revisões suspeitas ficam de fora e aparecem listadas na UI para revisão manual.
+- **Opcional e desligado por padrão** em **Configurações → Memória** (`src/features/memorySync/MemorySyncCard.tsx`), com agendamento automático opcional a cada N horas (`MemorySyncRunner.tsx`) e botões **Enviar agora** e **Restaurar do GitHub agora**.
+- **Privado obrigatório**: antes de cada pull/push (inclusive ao conectar ou ligar o backup), confirma pela API do forge que o repositório é privado; se for público ou não der para confirmar, bloqueia a operação. Contas genéricas (`ForgeKind::Other`, sem API) são recusadas.
+- **Filtro de segredos**: aplica `looks_like_user_secret` às páginas recebidas e enviadas; páginas suspeitas são puladas. Página nova é criada, página igual é ignorada e divergência vira conflito para escolha do usuário.
 - **Espelho isolado**: grava e commita em `<app_data_dir>/memory-sync/repo`. **Nunca** altera nem adiciona remote no repositório local de projeção (`~/.ags/memory/ws-<hash>/`).
 - **Token**: sai do keyring do SO e vai ao `git` somente por `GIT_ASKPASS` efêmero em loopback (`memory_sync/credentials.rs`), validando host e nonce; nunca entra em `argv`, ambiente persistente, URL, arquivo ou log.
-- **Fontes e direção**: exporta páginas do `ai-memory` (via `ai_memory/client.rs`, `--json`, escopo do projeto — nunca `_global`/`_profile`) mais o histórico aprovado do SQLite legado em modo somente leitura. É envio de **mão única** (ADE → remoto); importação de volta fica como trabalho futuro. Desligar interrompe envios e não apaga nada local nem remoto.
+- O histórico SQLite exportado não volta ao banco; nada é apagado local ou remotamente. Desligar pausa sincronizações.
 
 As seções seguintes descrevem o SQLite legado do ADE, que agentes só podem ler. Ele continua como fonte da migração e do histórico antigo.
 

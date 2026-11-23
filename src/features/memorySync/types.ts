@@ -9,6 +9,7 @@ export interface SkippedMemoryPage {
 
 export interface MemorySyncReport {
   at: number;
+  restored: boolean;
   pushed: boolean;
   commit: string | null;
   aiMemoryPages: number;
@@ -16,6 +17,21 @@ export interface MemorySyncReport {
   sqliteRevisions: number;
   skippedPages: SkippedMemoryPage[];
   aiMemoryNote: string | null;
+  restore: MemoryRestoreReport;
+}
+
+export interface MemoryRestoreConflict {
+  path: string;
+  title: string;
+  localBody: string;
+  remoteBody: string;
+}
+
+export interface MemoryRestoreReport {
+  imported: number;
+  unchanged: number;
+  conflicts: MemoryRestoreConflict[];
+  skippedSecrets: number;
 }
 
 export interface MemorySyncStatus {

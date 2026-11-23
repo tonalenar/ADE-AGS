@@ -6,7 +6,8 @@ use tauri::{AppHandle, Manager};
 
 use super::credentials::{WipeString, helper_program, sanitize_error};
 use super::export::{DEFAULT_INTERVAL_HOURS, SkippedMemoryPage, build_export_bundle, load_legacy_snapshot};
-use super::repo::{RemoteCredentials, push_bundle};
+use super::repo::{RemoteCredentials, fetch_ai_memory_pages, push_bundle};
+use super::restore::{RestoreReport, import_project_pages};
 use crate::database::DbConnection;
 use crate::forge::for_sync::{Api, ForgeError, ForgeKind, ForgeRepo, account_api, account_api_and_token};
 use crate::memory::repo_scope;
@@ -28,10 +29,20 @@ const MAX_INTERVAL_HOURS: u32 = 168;
 
 static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+#[derive(Clone, Copy)]
+struct SyncOptions<'a> {
+    workspace_id: Option<&'a str>,
+    cwd: Option<&'a str>,
+    keep_local_path: Option<&'a str>,
+    accept_remote_path: Option<&'a str>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MemorySyncReport {
     pub at: i64,
+    #[serde(default)]
+    pub restored: bool,
     pub pushed: bool,
     pub commit: Option<String>,
     pub ai_memory_pages: usize,
@@ -41,6 +52,8 @@ pub struct MemorySyncReport {
     pub skipped_pages: Vec<SkippedMemoryPage>,
     #[serde(default)]
     pub ai_memory_note: Option<String>,
+    #[serde(default)]
+    pub restore: RestoreReport,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -258,6 +271,25 @@ pub(crate) async fn sync_now_with(
     api: &impl ForgeClient,
     auth: Option<(&str, &str, &str, &Path)>,
 ) -> Result<MemorySyncResult, String> {
+    sync_now_with_choice(
+        db,
+        data_dir,
+        SyncOptions { workspace_id, cwd, keep_local_path: None, accept_remote_path: None },
+        ai_memory_program,
+        api,
+        auth,
+    ).await
+}
+
+async fn sync_now_with_choice(
+    db: &DbConnection,
+    data_dir: &Path,
+    options: SyncOptions<'_>,
+    ai_memory_program: Option<PathBuf>,
+    api: &impl ForgeClient,
+    auth: Option<(&str, &str, &str, &Path)>,
+) -> Result<MemorySyncResult, String> {
+    let SyncOptions { workspace_id, cwd, keep_local_path, accept_remote_path } = options;
     let secrets: Vec<String> = auth
         .as_ref()
         .map(|(_, _, tok, _)| vec![(*tok).to_string()])
@@ -343,19 +375,51 @@ pub(crate) async fn sync_now_with(
         )
     });
 
+    let restore_cwd = clean_cwd.clone();
+    let keep_local_path = keep_local_path.map(str::to_string);
+    let accept_remote_path = accept_remote_path.map(str::to_string);
     let export_push = tokio::task::spawn_blocking(move || -> Result<(MemorySyncReport, String), String> {
+        let make_creds = || owned_auth.as_ref().map(|(h, u, t, p)| RemoteCredentials {
+            host: h.as_str(),
+            git_user: u.as_str(),
+            token: t.0.as_str(),
+            helper_exe: p.as_path(),
+        });
+        let remote_pages = fetch_ai_memory_pages(&data_dir, &remote_url, &branch, make_creds())?;
+        let remote_paths: Vec<String> = remote_pages.iter().map(|(path, _)| path.clone()).collect();
+        let restore = import_project_pages(
+            ai_memory_program.as_deref(),
+            restore_cwd.as_deref(),
+            remote_pages,
+            accept_remote_path.as_deref(),
+        )?;
+        let mut restore = restore;
+        restore.conflicts.retain(|conflict| keep_local_path.as_deref() != Some(conflict.path.as_str()));
         let bundle = build_export_bundle(ai_memory_program.as_deref(), clean_cwd.as_deref(), legacy.as_ref())?;
+        // Conflitos ficam no remoto até a escolha do usuário; o push não pode apagar a cópia GitHub.
+        let mut bundle = bundle;
+        for remote_path in remote_paths {
+            if remote_path.starts_with("ai-memory/")
+                && bundle.files.contains_key(&remote_path)
+                && !restore.allowed_remote_files.contains(&remote_path)
+            {
+                bundle.files.remove(&remote_path);
+            }
+        }
+        for conflict in &restore.conflicts {
+            if keep_local_path.as_deref() == Some(conflict.path.as_str()) {
+                continue;
+            }
+            let prefix = bundle.ai_memory_prefix.as_deref().unwrap_or("");
+            let normalized = conflict.path.trim_start_matches('/');
+            bundle.files.remove(&format!("{prefix}{normalized}"));
+        }
         let outcome = {
-            let creds = owned_auth.as_ref().map(|(h, u, t, p)| RemoteCredentials {
-                host: h.as_str(),
-                git_user: u.as_str(),
-                token: t.0.as_str(),
-                helper_exe: p.as_path(),
-            });
-            push_bundle(&data_dir, &remote_url, &branch, &bundle, creds)?
+            push_bundle(&data_dir, &remote_url, &branch, &bundle, make_creds())?
         };
         let report = MemorySyncReport {
             at: now_ts(),
+            restored: false,
             pushed: outcome.pushed,
             commit: outcome.commit,
             ai_memory_pages: bundle.ai_memory_pages,
@@ -363,6 +427,7 @@ pub(crate) async fn sync_now_with(
             sqlite_revisions: bundle.sqlite_revisions,
             skipped_pages: bundle.skipped_pages,
             ai_memory_note: bundle.ai_memory_note,
+            restore,
         };
         Ok((report, branch))
     })
@@ -398,6 +463,71 @@ pub(crate) async fn sync_now_with(
     })
 }
 
+pub(crate) async fn restore_now_with(
+    db: &DbConnection,
+    data_dir: &Path,
+    cwd: Option<&str>,
+    ai_memory_program: Option<PathBuf>,
+    api: &impl ForgeClient,
+    auth: Option<(&str, &str, &str, &Path)>,
+    accept_remote_path: Option<&str>,
+) -> Result<MemorySyncResult, String> {
+    let secrets: Vec<String> = auth.as_ref().map(|(_, _, token, _)| vec![(*token).to_string()]).unwrap_or_default();
+    let secret_refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+    let (status, stored_branch) = {
+        let db = db.clone();
+        crate::database::blocking_db(&db, |conn| Ok((read_status(conn), get(conn, KEY_BRANCH).unwrap_or_else(|| "main".into())))).await?
+    };
+    if !status.enabled || !status.configured {
+        return Err("O backup privado das memórias está desligado.".into());
+    }
+    let full_name = status.repo.clone().ok_or_else(|| "Nenhum repositório privado configurado.".to_string())?;
+    let verified = match api.find_repo(&full_name).await {
+        Ok(Some(repo)) if repo.private => repo,
+        Ok(Some(_)) => return Err(format!("Restauração recusada: o repositório {full_name} é público.")),
+        Ok(None) => return Err(format!("Não foi possível confirmar pela API se {full_name} é privado.")),
+        Err(err) => {
+            let msg = sanitize_error(&format!("Não foi possível confirmar pela API se {full_name} é privado: {err}"), &secret_refs);
+            record_error(db, &msg);
+            return Err(msg);
+        }
+    };
+    let branch = verified.default_branch.filter(|value| !value.trim().is_empty()).unwrap_or(stored_branch);
+    let remote_url = verified.clone_url;
+    let owned_auth = auth.map(|(host, user, token, helper)| (host.to_string(), user.to_string(), WipeString(token.to_string()), helper.to_path_buf()));
+    let data_dir = data_dir.to_path_buf();
+    let cwd = cwd.map(str::to_string);
+    let accept_remote_path = accept_remote_path.map(str::to_string);
+    let result = tokio::task::spawn_blocking(move || {
+        let credentials = owned_auth.as_ref().map(|(host, user, token, helper)| RemoteCredentials {
+            host, git_user: user, token: &token.0, helper_exe: helper,
+        });
+        let files = fetch_ai_memory_pages(&data_dir, &remote_url, &branch, credentials)?;
+        import_project_pages(ai_memory_program.as_deref(), cwd.as_deref(), files, accept_remote_path.as_deref())
+    }).await.map_err(|err| err.to_string())?;
+    let restore = match result {
+        Ok(report) => report,
+        Err(err) => {
+            let clean = sanitize_error(&err, &secret_refs);
+            record_error(db, &clean);
+            return Err(clean);
+        }
+    };
+    let report = MemorySyncReport {
+        at: now_ts(), restored: true, pushed: false, commit: None, ai_memory_pages: 0,
+        sqlite_entries: 0, sqlite_revisions: 0, skipped_pages: Vec::new(),
+        ai_memory_note: None, restore,
+    };
+    let report_json = serde_json::to_string(&report).map_err(|err| err.to_string())?;
+    let db_clone = db.clone();
+    let updated = crate::database::blocking_db(&db_clone, move |conn| {
+        set(conn, KEY_LAST, &report_json)?;
+        del(conn, KEY_LAST_ERROR);
+        Ok(read_status(conn))
+    }).await?;
+    Ok(MemorySyncResult { status: updated, report })
+}
+
 #[tauri::command]
 pub async fn memory_sync_status(app: AppHandle) -> Result<MemorySyncStatus, String> {
     let db = db(&app)?;
@@ -409,25 +539,51 @@ pub async fn memory_sync_setup(
     app: AppHandle,
     account_id: String,
     repo_name: String,
+    cwd: String,
 ) -> Result<MemorySyncStatus, String> {
     let _guard = LOCK.lock().await;
     let db = db(&app)?;
     let (account, api) = account_api(&app, &account_id)
         .await
         .map_err(|e| e.to_string())?;
-    setup_with(&db, &account.id, &account.login, account.kind, &api, &repo_name).await
+    setup_with(&db, &account.id, &account.login, account.kind, &api, &repo_name).await?;
+    let (account, api, raw_token) = account_api_and_token(&app, &account_id).await.map_err(|e| e.to_string())?;
+    let token = WipeString(raw_token);
+    let data_dir = crate::util::datadir::app_data_dir(&app)?;
+    let helper_exe = helper_program(Some(&app))?;
+    let git_user = account.kind.git_user(&account.login, account.git_user.as_deref());
+    let restored = restore_now_with(
+        &db, &data_dir, Some(&cwd), crate::util::path_env::find_program("ai-memory"), &api,
+        Some((&account.host, &git_user, &token.0, &helper_exe)), None,
+    ).await?;
+    Ok(restored.status)
 }
 
 #[tauri::command]
 pub async fn memory_sync_set_enabled(
     app: AppHandle,
     enabled: bool,
+    cwd: String,
 ) -> Result<MemorySyncStatus, String> {
     let _guard = LOCK.lock().await;
     let db = db(&app)?;
-    tauri::async_runtime::spawn_blocking(move || set_enabled_db(&db, enabled))
+    let db_for_toggle = db.clone();
+    let status = tauri::async_runtime::spawn_blocking(move || set_enabled_db(&db_for_toggle, enabled))
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())??;
+    if !enabled {
+        return Ok(status);
+    }
+    let account_id = status.account_id.clone().ok_or_else(|| "Nenhuma conta git configurada para memórias.".to_string())?;
+    let (account, api, raw_token) = account_api_and_token(&app, &account_id).await.map_err(|e| e.to_string())?;
+    let token = WipeString(raw_token);
+    let helper_exe = helper_program(Some(&app))?;
+    let data_dir = crate::util::datadir::app_data_dir(&app)?;
+    let git_user = account.kind.git_user(&account.login, account.git_user.as_deref());
+    Ok(restore_now_with(
+        &db, &data_dir, Some(&cwd), crate::util::path_env::find_program("ai-memory"), &api,
+        Some((&account.host, &git_user, &token.0, &helper_exe)), None,
+    ).await?.status)
 }
 
 #[tauri::command]
@@ -480,4 +636,60 @@ pub async fn memory_sync_now(
         Some((&account.host, &git_user, &token.0, &helper_exe)),
     )
     .await
+}
+
+#[tauri::command]
+pub async fn memory_sync_restore_now(app: AppHandle, cwd: String) -> Result<MemorySyncResult, String> {
+    let _guard = LOCK.lock().await;
+    let db = db(&app)?;
+    let status = crate::database::blocking_db(&db, |conn| Ok(read_status(conn))).await?;
+    if !status.enabled || !status.configured {
+        return Err("O backup privado das memórias está desligado.".into());
+    }
+    let account_id = status.account_id.ok_or_else(|| "Nenhuma conta git configurada para memórias.".to_string())?;
+    let (account, api, raw_token) = account_api_and_token(&app, &account_id).await.map_err(|e| e.to_string())?;
+    let token = WipeString(raw_token);
+    let helper_exe = helper_program(Some(&app))?;
+    let data_dir = crate::util::datadir::app_data_dir(&app)?;
+    let git_user = account.kind.git_user(&account.login, account.git_user.as_deref());
+    restore_now_with(
+        &db, &data_dir, Some(&cwd), crate::util::path_env::find_program("ai-memory"), &api,
+        Some((&account.host, &git_user, &token.0, &helper_exe)), None,
+    ).await
+}
+
+#[tauri::command]
+pub async fn memory_sync_resolve_conflict(
+    app: AppHandle,
+    workspace_id: Option<String>,
+    cwd: String,
+    path: String,
+    use_remote: bool,
+) -> Result<MemorySyncResult, String> {
+    let _guard = LOCK.lock().await;
+    let db = db(&app)?;
+    let status = crate::database::blocking_db(&db, |conn| Ok(read_status(conn))).await?;
+    if !status.enabled || !status.configured {
+        return Err("O backup privado das memórias está desligado.".into());
+    }
+    if !status.last.as_ref().is_some_and(|report| report.restore.conflicts.iter().any(|conflict| conflict.path == path)) {
+        return Err("Esse conflito não está mais pendente para escolha.".into());
+    }
+    let account_id = status.account_id.ok_or_else(|| "Nenhuma conta git configurada para memórias.".to_string())?;
+    let (account, api, raw_token) = account_api_and_token(&app, &account_id).await.map_err(|e| e.to_string())?;
+    let token = WipeString(raw_token);
+    let helper_exe = helper_program(Some(&app))?;
+    let data_dir = crate::util::datadir::app_data_dir(&app)?;
+    let git_user = account.kind.git_user(&account.login, account.git_user.as_deref());
+    sync_now_with_choice(
+        &db, &data_dir,
+        SyncOptions {
+            workspace_id: workspace_id.as_deref(),
+            cwd: Some(&cwd),
+            keep_local_path: (!use_remote).then_some(path.as_str()),
+            accept_remote_path: use_remote.then_some(path.as_str()),
+        },
+        crate::util::path_env::find_program("ai-memory"), &api,
+        Some((&account.host, &git_user, &token.0, &helper_exe)),
+    ).await
 }

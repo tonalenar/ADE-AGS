@@ -47,6 +47,8 @@ export function MemorySyncCard({ activeCwd, workspaceId }: MemorySyncCardProps) 
   const setEnabled = useMemorySyncStore((s) => s.setEnabled);
   const setAuto = useMemorySyncStore((s) => s.setAuto);
   const syncNow = useMemorySyncStore((s) => s.syncNow);
+  const restoreNow = useMemorySyncStore((s) => s.restoreNow);
+  const resolveConflict = useMemorySyncStore((s) => s.resolveConflict);
 
   const accounts = useForgeStore((s) => s.accounts);
   const loadAccounts = useForgeStore((s) => s.load);
@@ -89,13 +91,13 @@ export function MemorySyncCard({ activeCwd, workspaceId }: MemorySyncCardProps) 
     if (!next) {
       setEditingTarget(false);
     }
-    void setEnabled(next);
+    void setEnabled(next, activeCwd);
   };
 
   const handleConnect = async () => {
     const cleanRepo = repoName.trim() || DEFAULT_REPO_NAME;
     if (!effectiveAccountId) return;
-    await setup(effectiveAccountId, cleanRepo);
+    await setup(effectiveAccountId, cleanRepo, activeCwd);
     const updated = useMemorySyncStore.getState();
     if (updated.status?.configured && !updated.error) {
       setConfiguring(false);
@@ -263,15 +265,26 @@ export function MemorySyncCard({ activeCwd, workspaceId }: MemorySyncCardProps) 
             )}
 
             <SettingsRow label={t("memorySync.manual")} hint={t("memorySync.oneWayNote")}>
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={!status.enabled || running}
-                onClick={() => void syncNow(workspaceId, activeCwd)}
-              >
-                {running && <AnimateSpin className="w-3.5 h-3.5 mr-1.5" />}
-                {running ? t("memorySync.sending") : t("memorySync.sendNow")}
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!status.enabled || running}
+                  onClick={() => void restoreNow(activeCwd)}
+                >
+                  {running && <AnimateSpin className="w-3.5 h-3.5 mr-1.5" />}
+                  {t("memorySync.restoreNow")}
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={!status.enabled || running}
+                  onClick={() => void syncNow(workspaceId, activeCwd)}
+                >
+                  {running && <AnimateSpin className="w-3.5 h-3.5 mr-1.5" />}
+                  {running ? t("memorySync.sending") : t("memorySync.sendNow")}
+                </Button>
+              </div>
             </SettingsRow>
           </>
         )}
@@ -282,31 +295,64 @@ export function MemorySyncCard({ activeCwd, workspaceId }: MemorySyncCardProps) 
           <div className="flex flex-wrap items-center gap-2 text-gray-800 dark:text-white/85">
             <CheckCircleIcon className="w-4 h-4 shrink-0 text-emerald-500" />
             <span className="font-medium">
-              {t("memorySync.last", { time: formatDateTime(status.last.at) })}
+              {t(status.last.restored ? "memorySync.lastRestore" : "memorySync.last", { time: formatDateTime(status.last.at) })}
             </span>
-            <span className="text-gray-500 dark:text-white/50">
+            {!status.last.restored && <span className="text-gray-500 dark:text-white/50">
               {status.last.pushed ? t("memorySync.pushed") : t("memorySync.upToDate")}
-            </span>
+            </span>}
             {status.last.commit && (
               <code className="font-mono text-[11px] text-gray-500 dark:text-white/50">
                 {status.last.commit.slice(0, 7)}
               </code>
             )}
           </div>
-          <p className="m-0 text-[12px] text-gray-500 dark:text-white/50">
+          {!status.last.restored && <p className="m-0 text-[12px] text-gray-500 dark:text-white/50">
             {t("memorySync.counts", {
               pages: status.last.aiMemoryPages,
               entries: status.last.sqliteEntries,
               revisions: status.last.sqliteRevisions,
             })}
-          </p>
+          </p>}
           {status.last.aiMemoryNote && (
             <p className="m-0 text-[12px] text-amber-700 dark:text-amber-300">
               {status.last.aiMemoryNote}
             </p>
           )}
+          <p className="m-0 text-[12px] text-gray-600 dark:text-white/60">
+            {t("memorySync.restoreCounts", {
+              imported: status.last.restore.imported,
+              unchanged: status.last.restore.unchanged,
+              conflicts: status.last.restore.conflicts.length,
+              skipped: status.last.restore.skippedSecrets,
+            })}
+          </p>
         </div>
       )}
+
+      {status?.last?.restore.conflicts.length ? (
+        <div className="flex flex-col gap-3 rounded-xl border border-amber-300/60 bg-amber-50/70 dark:border-amber-400/20 dark:bg-amber-500/[0.06] px-4 py-3">
+          <span className="text-[12.5px] font-medium text-amber-900 dark:text-amber-200">
+            {t("memorySync.conflictsTitle", { count: status.last.restore.conflicts.length })}
+          </span>
+          {status.last.restore.conflicts.map((conflict) => (
+            <div key={conflict.path} className="flex flex-col gap-2 border-t border-amber-300/40 pt-2 first:border-0 first:pt-0">
+              <strong className="text-[12px]">{conflict.title} · <code>{conflict.path}</code></strong>
+              <div className="grid gap-2 md:grid-cols-2">
+                <div className="min-w-0"><span className="text-[11px] font-medium">{t("memorySync.localVersion")}</span><pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-md bg-white/70 dark:bg-black/20 p-2 text-[11px]">{conflict.localBody}</pre></div>
+                <div className="min-w-0"><span className="text-[11px] font-medium">{t("memorySync.remoteVersion")}</span><pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-md bg-white/70 dark:bg-black/20 p-2 text-[11px]">{conflict.remoteBody}</pre></div>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={running} onClick={() => void resolveConflict(workspaceId, activeCwd, conflict.path, false)}>
+                  {t("memorySync.keepLocal")}
+                </Button>
+                <Button size="sm" variant="primary" disabled={running} onClick={() => void resolveConflict(workspaceId, activeCwd, conflict.path, true)}>
+                  {t("memorySync.useRemote")}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {status?.last && status.last.skippedPages.length > 0 && (
         <div className="flex flex-col gap-2 rounded-xl bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-[12.5px] text-amber-900 dark:text-amber-200">
