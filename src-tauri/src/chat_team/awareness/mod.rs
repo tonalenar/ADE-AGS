@@ -5,6 +5,7 @@
 pub mod gate;
 pub mod load;
 pub mod overlap;
+pub mod plan;
 pub mod queue;
 #[cfg(test)]
 mod test;

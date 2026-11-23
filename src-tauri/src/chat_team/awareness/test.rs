@@ -6,6 +6,7 @@ use serde_json::json;
 use super::gate::{self, Busy};
 use super::load::{self, Parts};
 use super::overlap;
+use super::plan::{self, Claim, World};
 use super::queue::{self, Cond, Ctx, NewItem};
 
 fn quiet() -> load::Load {
@@ -240,4 +241,31 @@ fn o_laco_so_precisa_de_relogio_quando_ha_condicao_de_carga_ou_branch() {
     assert!(!queue::needs_load_timer(&[only_member]));
     let with_load = add(&conn, "p", &[low_load()], 2);
     assert!(queue::needs_load_timer(&[with_load]));
+}
+
+fn world<'a>(states: &'a HashMap<String, String>, load: &'a load::Load, branches: &'a HashSet<String>, active: &'a [Busy], claims: &'a [Claim], limit: usize) -> World<'a> {
+    World { ctx: Ctx { states, load, branches }, limit, active, claims }
+}
+
+#[test]
+fn o_item_espera_pelo_limite_pela_carga_e_pela_area_e_diz_cada_motivo() {
+    let conn = db();
+    let args = json!({});
+    let item = queue::enqueue(&conn, &NewItem { parent: "p", cwd: "/r", title: "T", task: "x", args: &args, areas: &areas(&["src/features/chat/**"]), conditions: &[low_load()] }, 1).unwrap();
+    let (states, branches) = (HashMap::new(), HashSet::new());
+    let claims = [Claim { name: "Ana".into(), areas: areas(&["src/features/chat/timeline.tsx"]) }];
+    let calm = quiet();
+    let busy_list = [busy("A"), busy("B"), busy("C")];
+
+    assert!(plan::hold_reasons(&item, &world(&states, &calm, &branches, &[], &[], 3)).is_empty());
+
+    let reasons = plan::hold_reasons(&item, &world(&states, &calm, &branches, &busy_list, &claims, 3));
+    assert_eq!(reasons.len(), 2, "{reasons:?}");
+    assert!(reasons[0].starts_with("limite de 3 agentes simultâneos cheio (A, B, C)"));
+    assert_eq!(reasons[1], "mesma área que Ana (src/features/chat/timeline.tsx)");
+
+    let hot = heavy();
+    let reasons = plan::hold_reasons(&item, &world(&states, &hot, &branches, &[], &[], 3));
+    assert_eq!(reasons.len(), 1, "a carga não aparece duas vezes: {reasons:?}");
+    assert!(reasons[0].contains("carga baixar") || reasons[0].contains("sobrecarregada"));
 }

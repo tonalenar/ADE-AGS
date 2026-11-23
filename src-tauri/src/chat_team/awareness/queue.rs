@@ -19,8 +19,11 @@ pub const KIND_LOAD_LOW: &str = "load_low";
 pub const KIND_BRANCH: &str = "branch";
 
 pub const PENDING: &str = "pending";
+#[cfg(test)]
 pub const LAUNCHED: &str = "launched";
+#[cfg(test)]
 pub const CANCELLED: &str = "cancelled";
+#[cfg(test)]
 pub const FAILED: &str = "failed";
 
 /// Uma condição de espera. `target` é a conversa (`thread:<id>`) ou o branch; `label` é como o orquestrador a chamou.

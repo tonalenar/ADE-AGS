@@ -269,3 +269,6 @@ PRs: #143, #145, #147, #148, #149, #154, #158, #179, #182, #184, #185, #203.
 - O Jev aceita `probability === null`.
 - Ruído do modelo: já atribuiu memórias ao integrante errado, pediu para ligar o Vigia já ligado e repetiu avisos sobre quem estava ocioso de propósito.
 - Com o Vigia desligado, a entrega gera só o aviso do sistema, que não aparece com o app em foco.
+
+## A fila do time e o Vigia do chat
+A fila de tarefas do time (`ags team queue`, ver [ORQUESTRACAO.md](ORQUESTRACAO.md#consciência-do-orquestrador-carga-limite-e-fila)) roda no mesmo laço do vigia do chat, mas **não é um aviso do Vigia**: ela lança conversas filhas pelo mesmo caminho do `chat_new` e só avisa o orquestrador (`[Fila do time]`) pela fila durável, com a mesma regra de sempre: nunca escreve em terminal ou conversa de integrante trabalhando e nunca interrompe um turno. O estado `working` que conta para o limite de agentes é o de `chat_team::watch::real_state`.

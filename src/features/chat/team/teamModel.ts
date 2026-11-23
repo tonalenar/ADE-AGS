@@ -324,6 +324,9 @@ export function rosterSignature(team: TeamView): string {
   return team.members.map((m) => `${m.member}:${m.role}:${m.policy}`).join("|");
 }
 
+/** A consciência do orquestrador (carga, limite, fila): a mesma frase de `chat_team::model::AWARENESS_RULES`. */
+export const AWARENESS_RULES = "Antes de lançar um agente, consulte `ags system load` (ou a tool system_load): se o limite de agentes simultâneos estiver cheio, a carga estiver alta ou a tarefa mexer nos mesmos arquivos de outra ativa, enfileire com `ags team queue add` (--after, --when-load-low, --after-branch, --area) e espere o aviso da ADE. Nunca faça polling e explique à pessoa por que está esperando.";
+
 /**
  * O resumo do time para o orquestrador (espelho de `chat_team::model::roster_notice`). `roleLabel` é o
  * nome do papel; os nomes são os de agora. Pura.
@@ -337,7 +340,7 @@ export function rosterNotice(team: TeamView, nameOf: (ref: string) => string | n
     return `${nameOf(m.member) ?? (m.label || m.member)} (${m.agentId}; ${roleLabel(m.role)}; ${policyLabel(m.policy)}${branch})`;
   }).join(", ");
   return `[ADE AGS] Você é o orquestrador deste time: ${list}. Delegue em ~2 min com \`ags peer tell <nome> --task "..." --expecting "..."\` `
-    + "e encerre o turno; as entregas voltam como mensagem. Use `ags team list` para ver o time.";
+    + `e encerre o turno; as entregas voltam como mensagem. ${AWARENESS_RULES} Use \`ags team list\` para ver o time.`;
 }
 
 // ── A sidebar ────────────────────────────────────────────────────────

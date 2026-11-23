@@ -195,7 +195,32 @@ pub(super) fn child_effort(parented: bool, asked: Option<String>, inherited: Opt
     asked.or(inherited)
 }
 
+/// `chat.new`: abre uma conversa. Quando há um orquestrador por trás (`parent_ref` ou o chamador), a ADE confere antes o
+/// limite de agentes simultâneos, a carga da máquina e a sobreposição de áreas (`consciencia`); a repetição de um
+/// `client_request_id` já atendido devolve a mesma conversa e nunca é recusada.
 pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    if !is_replay(app, args) {
+        if let Some(refusal) = super::consciencia::before_spawn(app, args)? {
+            return Ok(refusal);
+        }
+    }
+    let created = spawn_child(app, args)?;
+    super::consciencia::after_spawn(app, args, &created);
+    Ok(created)
+}
+
+/// A repetição de um pedido já atendido (o recibo existe): a mesma conversa volta, sem passar pela porta de entrada.
+fn is_replay(app: &AppHandle, args: &Value) -> bool {
+    let (Ok(cwd), Ok(db)) = (arg_str(args, "cwd"), db(app)) else { return false };
+    let parent_ref = arg_str_opt(args, "parent_ref");
+    match child_request_identity(args, parent_ref.as_deref(), &cwd) {
+        Ok(Some(identity)) => api::child_request_seen(&db, &identity),
+        _ => false,
+    }
+}
+
+/// O `chat.new` sem a porta de entrada: quem chama já decidiu (a fila do time confere o limite e a carga antes).
+pub(super) fn spawn_child(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let task = arg_str(args, "text")
         .map_err(|_| "Falta a mensagem: ags chat new \"...\" --cwd <pasta>".to_string())?;
     let cwd = arg_str(args, "cwd").map_err(|_| "Falta a pasta: --cwd <pasta>".to_string())?;
