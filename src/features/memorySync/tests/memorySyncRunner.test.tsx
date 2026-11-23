@@ -12,6 +12,8 @@ const ipcMock = vi.hoisted(() => ({
   memorySyncSetEnabled: vi.fn(),
   memorySyncSetAuto: vi.fn(),
   memorySyncNow: vi.fn(),
+  memorySyncRestoreNow: vi.fn(),
+  memorySyncResolveConflict: vi.fn(),
 }));
 
 const tabsMock = vi.hoisted(() => ({
@@ -86,6 +88,7 @@ describe("MemorySyncRunner", () => {
         intervalHours: 6,
         last: {
           at: 1000,
+          restored: false,
           pushed: true,
           commit: "abc",
           aiMemoryPages: 1,
@@ -93,6 +96,7 @@ describe("MemorySyncRunner", () => {
           sqliteRevisions: 0,
           skippedPages: [],
           aiMemoryNote: null,
+          restore: { imported: 0, unchanged: 0, conflicts: [], skippedSecrets: 0 },
         },
       }),
       (1000 + 3600) * 1000,
@@ -109,6 +113,7 @@ describe("MemorySyncRunner", () => {
         lastError: "falha transitória",
         last: {
           at: 1000,
+          restored: false,
           pushed: true,
           commit: "abc",
           aiMemoryPages: 1,
@@ -116,6 +121,7 @@ describe("MemorySyncRunner", () => {
           sqliteRevisions: 0,
           skippedPages: [],
           aiMemoryNote: null,
+          restore: { imported: 0, unchanged: 0, conflicts: [], skippedSecrets: 0 },
         },
       }),
       (1000 + 8 * 3600) * 1000,
@@ -135,6 +141,7 @@ describe("MemorySyncRunner", () => {
       intervalHours: 2,
       last: {
         at: 1_700_000_000,
+        restored: false,
         pushed: true,
         commit: "abc",
         aiMemoryPages: 1,
@@ -142,6 +149,7 @@ describe("MemorySyncRunner", () => {
         sqliteRevisions: 0,
         skippedPages: [],
         aiMemoryNote: null,
+        restore: { imported: 0, unchanged: 0, conflicts: [], skippedSecrets: 0 },
       },
     });
     const updated = statusWith({

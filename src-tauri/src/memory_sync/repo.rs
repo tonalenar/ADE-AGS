@@ -12,6 +12,7 @@ pub(crate) fn mirror_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("memory-sync").join("repo")
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct RemoteCredentials<'a> {
     pub host: &'a str,
     pub git_user: &'a str,
@@ -137,6 +138,72 @@ fn run_local(dir: &Path, git_args: &[&str]) -> Result<String, String> {
     Err(msg)
 }
 
+fn run_local_bytes(dir: &Path, git_args: &[&str]) -> Result<Vec<u8>, String> {
+    let mut cmd = spawn::hidden_command("git");
+    cmd.arg("-C")
+        .arg(external_path(dir))
+        .args(["-c", "core.fsmonitor=false", "-c", "core.autocrlf=false"])
+        .args(git_args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    let out = output_with_timeout(&mut cmd, GIT_LOCAL_TIMEOUT).map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(out.stdout)
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// Busca uma fotografia somente de leitura das páginas exportadas, sem checkout/reset do espelho.
+pub(crate) fn fetch_ai_memory_pages(
+    data_dir: &Path,
+    remote_url: &str,
+    branch: &str,
+    auth: Option<RemoteCredentials<'_>>,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    if !valid_branch(branch) || remote_url.trim().is_empty() {
+        return Err("Branch ou URL do repositório remoto inválido.".into());
+    }
+    let dir = mirror_dir(data_dir);
+    if data_dir.is_symlink() || data_dir.join("memory-sync").is_symlink() || dir.is_symlink() {
+        return Err("Diretório do espelho de memória inválido (symlink).".into());
+    }
+    if !dir.join(".git").exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        run_local(&dir, &["init", "-q"])?;
+        run_local(&dir, &["remote", "add", "origin", remote_url])?;
+    } else {
+        if dir.join(".git").is_symlink() {
+            return Err("Repositório espelho de memória não pode ser symlink.".into());
+        }
+        if run_local(&dir, &["remote", "get-url", "origin"]).ok().as_deref() != Some(remote_url) {
+            return Err("O espelho local aponta para outro repositório remoto.".into());
+        }
+    }
+    let refspec = format!("refs/heads/{branch}:refs/remotes/origin/{branch}");
+    let remote_branch = format!("refs/heads/{branch}");
+    if run_network(&dir, &["ls-remote", "--heads", "origin", &remote_branch], auth)?.is_empty() {
+        return Ok(Vec::new());
+    }
+    run_network(&dir, &["fetch", "--no-tags", "origin", &refspec], auth)?;
+    let reference = format!("refs/remotes/origin/{branch}");
+    let listing = run_local_bytes(&dir, &["ls-tree", "-rz", "--name-only", "-r", &reference, "--", "ai-memory"])?;
+    let mut pages = Vec::new();
+    for raw_path in listing.split(|byte| *byte == 0).filter(|part| !part.is_empty()) {
+        let Ok(path) = std::str::from_utf8(raw_path) else { continue };
+        if !path.starts_with("ai-memory/") || !path.ends_with(".md") || path.contains(['\\', ':']) {
+            continue;
+        }
+        let spec = format!("{reference}:{path}");
+        let bytes = run_local_bytes(&dir, &["show", &spec])?;
+        if bytes.len() <= 2 * 1024 * 1024 {
+            pages.push((path.to_string(), bytes));
+        }
+    }
+    Ok(pages)
+}
+
 fn run_network(
     cwd: &Path,
     git_args: &[&str],
@@ -199,38 +266,21 @@ fn ensure_no_symlinks_on_prefix(root: &Path, rel: &str) -> Result<PathBuf, Strin
     Ok(cur)
 }
 
-fn clean_managed_prefix(dir: &Path, prefix: &str) -> Result<(), String> {
-    let trimmed = prefix.trim_end_matches('/');
-    if trimmed.is_empty() {
-        return Ok(());
-    }
-    let target = ensure_no_symlinks_on_prefix(dir, trimmed)?;
-    if target.is_dir() {
-        std::fs::remove_dir_all(&target).map_err(|e| e.to_string())?;
-    } else if target.exists() {
-        std::fs::remove_file(&target).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
 fn apply_bundle(dir: &Path, bundle: &ExportBundle) -> Result<(), String> {
-    if let Some(prefix) = &bundle.ai_memory_prefix {
-        clean_managed_prefix(dir, prefix)?;
-    }
-    if let Some(prefix) = &bundle.sqlite_prefix {
-        clean_managed_prefix(dir, prefix)?;
-    }
-
     let readme = b"# ADE AGS Memory Backup (Private)\n\n\
-This private repository receives a one-way, secret-filtered export of project memories from ADE AGS.\n\n\
-- `ai-memory/` - scoped project pages exported from `ai-memory`.\n\
-- `sqlite/` - read-only legacy SQLite approved memory history.\n";
-    std::fs::write(dir.join("README.md"), readme).map_err(|e| e.to_string())?;
-    std::fs::write(
-        dir.join(".ade-memory-sync.json"),
-        b"{\n  \"format\": 1,\n  \"oneWay\": true\n}\n",
-    )
-    .map_err(|e| e.to_string())?;
+This private repository stores secret-filtered project memory pages. Project pages can be restored by ADE AGS.\n\n\
+- `ai-memory/` - scoped pages exported from `ai-memory`.\n\
+- `sqlite/` - approved legacy history exported from the read-only ADE SQLite store.\n";
+    if !dir.join("README.md").exists() {
+        std::fs::write(dir.join("README.md"), readme).map_err(|e| e.to_string())?;
+    }
+    if !dir.join(".ade-memory-sync.json").exists() {
+        std::fs::write(
+            dir.join(".ade-memory-sync.json"),
+            b"{\n  \"format\": 1,\n  \"oneWay\": false\n}\n",
+        )
+        .map_err(|e| e.to_string())?;
+    }
 
     for (rel, bytes) in &bundle.files {
         let target = ensure_no_symlinks_on_prefix(dir, rel)?;
@@ -275,11 +325,7 @@ fn clear_working_tree_for_orphan(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn is_non_fast_forward(err: &str) -> bool {
-    err.contains("rejected") || err.contains("fetch first") || err.contains("non-fast-forward")
-}
-
-/// Atualiza o espelho local sob `<data_dir>/memory-sync/repo` e envia em mão única para o remoto.
+/// Atualiza o espelho local sob `<data_dir>/memory-sync/repo` e envia o backup sem remover dados remotos.
 pub(crate) fn push_bundle(
     data_dir: &Path,
     remote_url: &str,
@@ -318,81 +364,74 @@ pub(crate) fn push_bundle(
     let hooks_cfg = format!("core.hooksPath={}", external_path(&no_hooks).display());
     let refspec = format!("HEAD:refs/heads/{branch}");
 
-    for attempt in 0..3 {
-        let fetch_auth = auth.as_ref().map(|a| RemoteCredentials {
-            host: a.host,
-            git_user: a.git_user,
-            token: a.token,
-            helper_exe: a.helper_exe,
-        });
-        run_network(&dir, &["fetch", "-q", "origin"], fetch_auth)?;
+    let fetch_auth = auth.as_ref().map(|a| RemoteCredentials {
+        host: a.host,
+        git_user: a.git_user,
+        token: a.token,
+        helper_exe: a.helper_exe,
+    });
+    run_network(&dir, &["fetch", "-q", "origin"], fetch_auth)?;
 
-        let remote_ref = format!("refs/remotes/origin/{branch}");
-        let remote_rev = run_local(&dir, &["rev-parse", "--verify", "-q", &remote_ref])
-            .ok()
-            .filter(|s| !s.is_empty());
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    let remote_rev = run_local(&dir, &["rev-parse", "--verify", "-q", &remote_ref])
+        .ok()
+        .filter(|s| !s.is_empty());
 
-        match remote_rev {
-            Some(rev) => {
-                run_local(&dir, &["checkout", "-q", "-f", "-B", branch, &rev])?;
-                run_local(&dir, &["clean", "-fdq"])?;
-            }
-            None => {
-                if local_head(&dir).is_some() {
-                    run_local(&dir, &["checkout", "--orphan", branch])?;
-                    let _ = run_local(&dir, &["rm", "-rfq", "--ignore-unmatch", "."]);
-                    clear_working_tree_for_orphan(&dir)?;
-                } else {
-                    run_local(&dir, &["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])?;
-                    clear_working_tree_for_orphan(&dir)?;
-                }
-            }
+    match remote_rev {
+        Some(rev) => {
+            run_local(&dir, &["checkout", "-q", "-f", "-B", branch, &rev])?;
+            run_local(&dir, &["clean", "-fdq"])?;
         }
-
-        apply_bundle(&dir, bundle)?;
-        run_local(&dir, &["add", "-A"])?;
-        if run_local(&dir, &["status", "--porcelain"])?.trim().is_empty() {
-            return Ok(PushOutcome {
-                pushed: false,
-                commit: local_head(&dir),
-            });
-        }
-
-        run_local(
-            &dir,
-            &[
-                "-c",
-                "user.name=ADE AGS",
-                "-c",
-                "user.email=memory-sync@ags.local",
-                "-c",
-                &hooks_cfg,
-                "commit",
-                "-q",
-                "--no-verify",
-                "-m",
-                "chore(memory-sync): backup filtrado de memórias",
-            ],
-        )?;
-        let head = local_head(&dir);
-
-        let push_auth = auth.as_ref().map(|a| RemoteCredentials {
-            host: a.host,
-            git_user: a.git_user,
-            token: a.token,
-            helper_exe: a.helper_exe,
-        });
-        match run_network(&dir, &["push", "-q", "origin", &refspec], push_auth) {
-            Ok(_) => {
-                return Ok(PushOutcome {
-                    pushed: true,
-                    commit: head,
-                });
+        None => {
+            if local_head(&dir).is_some() {
+                run_local(&dir, &["checkout", "--orphan", branch])?;
+                let _ = run_local(&dir, &["rm", "-rfq", "--ignore-unmatch", "."]);
+                clear_working_tree_for_orphan(&dir)?;
+            } else {
+                run_local(&dir, &["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])?;
+                clear_working_tree_for_orphan(&dir)?;
             }
-            Err(err) if attempt < 2 && is_non_fast_forward(&err) => continue,
-            Err(err) => return Err(err),
         }
     }
 
-    Err("O repositório remoto recebeu outro envio simultâneo; tente novamente.".into())
+    apply_bundle(&dir, bundle)?;
+    run_local(&dir, &["add", "-A"])?;
+    if run_local(&dir, &["status", "--porcelain"])?.trim().is_empty() {
+        return Ok(PushOutcome {
+            pushed: false,
+            commit: local_head(&dir),
+        });
+    }
+
+    run_local(
+        &dir,
+        &[
+            "-c",
+            "user.name=ADE AGS",
+            "-c",
+            "user.email=memory-sync@ags.local",
+            "-c",
+            &hooks_cfg,
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            "chore(memory-sync): backup filtrado de memórias",
+        ],
+    )?;
+    let head = local_head(&dir);
+
+    let push_auth = auth.as_ref().map(|a| RemoteCredentials {
+        host: a.host,
+        git_user: a.git_user,
+        token: a.token,
+        helper_exe: a.helper_exe,
+    });
+    match run_network(&dir, &["push", "-q", "origin", &refspec], push_auth) {
+        Ok(_) => Ok(PushOutcome {
+            pushed: true,
+            commit: head,
+        }),
+        Err(err) => Err(err),
+    }
 }

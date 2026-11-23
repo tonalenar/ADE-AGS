@@ -9,6 +9,21 @@ use super::commands::{
 use super::install::{is_installed, target_dir};
 use super::protocol::{Handshake, PROTOCOL_VERSION, Request, Response, arg_str};
 
+/// A restauração existe como comando Tauri da interface, mas não entra na CLI/MCP dos agentes.
+#[test]
+fn comandos_de_restauracao_tem_paridade_com_a_ui_sem_exposicao_a_agentes() {
+    let registro_tauri = include_str!("../app/run.rs");
+    let ipc_front = include_str!("../../../src/features/memorySync/ipc.ts");
+    let cli = include_str!("../bin/cli.rs");
+    let mcp = include_str!("mcp.rs");
+    for command in ["memory_sync_restore_now", "memory_sync_resolve_conflict"] {
+        assert!(registro_tauri.contains(command), "{command} não está registrado no Tauri");
+        assert!(ipc_front.contains(command), "{command} não tem chamada na UI");
+        assert!(!cli.contains(command), "{command} não pode ser CLI de agente");
+        assert!(!mcp.contains(command), "{command} não pode ser tool MCP de agente");
+    }
+}
+
 // ── Handshake con varias instancias ─────────────────────────────
 
 /// Con dos instancias abiertas, el `ipc.json` global solo se reescribe si falta o si es de

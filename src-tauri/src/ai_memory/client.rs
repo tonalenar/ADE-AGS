@@ -144,7 +144,7 @@ fn check_page_path(path: &str) -> Result<(), String> {
 
 /// Única escrita do conector: a cópia da F4. Lista fechada, como `Read`. Não passa `--workspace` nem
 /// `--project`: a CLI resolve o projeto pela pasta da aba (`AI_MEMORY_HOST_CWD`).
-pub(super) struct PageWrite<'a> {
+pub(crate) struct PageWrite<'a> {
     pub path: &'a str,
     pub title: &'a str,
     pub kind: &'a str,
@@ -397,7 +397,7 @@ impl Client {
     }
 
     /// Escreve com o mesmo escopo resolvido usado pelo proxy MCP da aba.
-    pub(super) fn write_scoped_page(
+    pub(crate) fn write_scoped_page(
         &self,
         write: &PageWrite<'_>,
         body: Vec<u8>,

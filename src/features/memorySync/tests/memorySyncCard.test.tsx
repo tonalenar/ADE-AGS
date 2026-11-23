@@ -12,6 +12,8 @@ const ipcMock = vi.hoisted(() => ({
   memorySyncSetEnabled: vi.fn(),
   memorySyncSetAuto: vi.fn(),
   memorySyncNow: vi.fn(),
+  memorySyncRestoreNow: vi.fn(),
+  memorySyncResolveConflict: vi.fn(),
 }));
 
 import type { GitAccount } from "@/features/forge/types";
@@ -142,7 +144,7 @@ describe("MemorySyncCard", () => {
       connectBtn!.click();
     });
 
-    expect(ipcMock.memorySyncSetup).toHaveBeenCalledWith("acc-gh", "ade-memoria");
+    expect(ipcMock.memorySyncSetup).toHaveBeenCalledWith("acc-gh", "ade-memoria", "/repo/projeto");
     expect(host.textContent).toContain("tonalencar/ade-memoria");
   });
 
@@ -157,6 +159,7 @@ describe("MemorySyncCard", () => {
       intervalHours: 12,
       last: {
         at: 1_700_000_000,
+        restored: false,
         pushed: true,
         commit: "abcdef123456",
         aiMemoryPages: 4,
@@ -171,6 +174,7 @@ describe("MemorySyncCard", () => {
           },
         ],
         aiMemoryNote: null,
+        restore: { imported: 0, unchanged: 0, conflicts: [], skippedSecrets: 0 },
       },
       lastError: "Repositório público recusado",
     });
@@ -199,6 +203,45 @@ describe("MemorySyncCard", () => {
     expect(ipcMock.memorySyncNow).toHaveBeenCalledWith("w1", "/repo/projeto");
   });
 
+  it("mostra contagens da restauração e deixa escolher uma versão para o conflito", async () => {
+    const initial = baseStatus({
+      enabled: true,
+      configured: true,
+      accountId: "acc-gh",
+      repo: "tonalencar/ade-memoria",
+      last: {
+        at: 1_700_000_000,
+        restored: false,
+        pushed: false,
+        commit: null,
+        aiMemoryPages: 0,
+        sqliteEntries: 0,
+        sqliteRevisions: 0,
+        skippedPages: [],
+        aiMemoryNote: null,
+        restore: {
+          imported: 2,
+          unchanged: 3,
+          skippedSecrets: 1,
+          conflicts: [{ path: "notas/decisao.md", title: "Decisão", localBody: "local", remoteBody: "GitHub" }],
+        },
+      },
+    });
+    ipcMock.memorySyncStatus.mockResolvedValue(initial);
+    ipcMock.memorySyncResolveConflict.mockResolvedValue({
+      status: { ...initial, lastError: null },
+      report: initial.last!,
+    });
+    await render();
+
+    expect(host.textContent).toContain('"imported":2');
+    expect(host.textContent).toContain("local");
+    expect(host.textContent).toContain("GitHub");
+    const keepLocal = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes("memorySync.keepLocal"));
+    await act(async () => keepLocal!.click());
+    expect(ipcMock.memorySyncResolveConflict).toHaveBeenCalledWith("w1", "/repo/projeto", "notas/decisao.md", false);
+  });
+
   it("desligar chama memorySyncSetEnabled(false) e impede envio manual", async () => {
     const connected = baseStatus({
       enabled: true,
@@ -218,7 +261,7 @@ describe("MemorySyncCard", () => {
       switches[0].click();
     });
 
-    expect(ipcMock.memorySyncSetEnabled).toHaveBeenCalledWith(false);
+    expect(ipcMock.memorySyncSetEnabled).toHaveBeenCalledWith(false, "/repo/projeto");
     expect(host.textContent).toContain("memorySync.pausedNote");
     const sendBtn = [...host.querySelectorAll("button")].find((b) =>
       b.textContent?.includes("memorySync.sendNow"),
