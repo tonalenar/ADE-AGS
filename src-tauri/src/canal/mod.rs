@@ -152,7 +152,9 @@ fn codex_rollout_cache() -> &'static Mutex<HashMap<(PathBuf, String), PathBuf>> 
 /// varrer `~/.codex/sessions` inteira a cada 15 s. Se o arquivo sumir, o cache invalida e varre.
 pub fn codex_rollout_by_id(root: &Path, session_id: &str) -> Option<PathBuf> {
     let key = (root.to_path_buf(), session_id.to_string());
-    if let Some(cached) = codex_rollout_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key).cloned() {
+    // A trava é solta antes de checar o arquivo: reabrir o cache com ela na mão travava (deadlock).
+    let cached = codex_rollout_cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key).cloned();
+    if let Some(cached) = cached {
         if cached.is_file() {
             return Some(cached);
         }
