@@ -2,6 +2,8 @@
 // `src-tauri/src/real_browser/mod.rs`. O flag `realChrome` da vista continua com esse nome por ser o estado salvo.
 import { invoke } from "@tauri-apps/api/core";
 
+import type { DeviceHint } from "./deviceCatalog";
+
 /** Sites externos e servidores locais abrem diretamente no Chromium/WebView2. */
 export function shouldOpenInRealChrome(url: string, realChrome: boolean | undefined): boolean {
   if (realChrome !== undefined) return realChrome;
@@ -130,8 +132,9 @@ export const realBrowserDeleteProfile = (profileId: string) =>
 
 /** Faz a página se passar por um iPhone, um Android ou o navegador de mesa (`null`) e recarrega. */
 /** `chrome`: os rótulos da moldura desenhada dentro da página; sem ele (modo Completo) a página fica limpa. */
-export const realBrowserEmulate = (id: string, platform: "ios" | "android" | null, chrome: Record<string, string> | null = null) =>
-  invoke<void>("real_browser_emulate", { id, platform, chrome });
+/** `device`: o modelo (densidade, `model` do user agent e área segura em pé e deitado); a rotação o reaproveita sozinha. */
+export const realBrowserEmulate = (id: string, platform: "ios" | "android" | null, chrome: Record<string, string> | null = null, device: DeviceHint | null = null) =>
+  invoke<void>("real_browser_emulate", { id, platform, chrome, device });
 
 export const realBrowserFocus = (id: string) => invoke<void>("real_browser_focus", { id });
 

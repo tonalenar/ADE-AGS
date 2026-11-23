@@ -558,7 +558,7 @@ export function toggleChatBrowserFloating(): void {
     return;
   }
   const view = useViewTabsStore.getState().views.find((v) => v.id === state.browser?.viewId);
-  const aspectRatio = floatAspectRatioOf(view?.kind === "browser" ? view.viewport : null);
+  const aspectRatio = floatAspectRatioOf(view?.kind === "browser" ? view.viewport : null, view?.kind === "browser" ? view.mobile ?? null : null);
   const bounds = typeof document !== "undefined" ? chatFloatBounds(document) : null;
   const browserFloatRect = bounds
     ? defaultFloatRect(bounds, { sourceRect: state.browser.rect, aspectRatio })

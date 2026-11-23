@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { BrowserFloatGrip } from "@/features/browser/BrowserFloatGrip";
 import { BrowserMiniDock } from "@/features/browser/BrowserMiniControls";
 import { floatAspectRatioOf, isFramedViewport } from "@/features/browser/deviceMode";
+import { isPhoneViewport } from "@/features/browser/viewport";
 import { FLOATING_PREVIEW_CORNER_RADIUS } from "@/features/browser/nativeCorner";
 import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
 import { comparablePath, type ViewTab } from "@/features/tabs/viewTabs";
@@ -66,8 +67,10 @@ export function ViewTabsHost() {
   const floatRect = useChatStore((s) => s.browserFloatRect);
   const floatView = floatingBrowserId ? views.find((v) => v.id === floatingBrowserId) : undefined;
   const floatViewport = floatView?.kind === "browser" ? floatView.viewport : null;
-  const floatAspectRatio = floatAspectRatioOf(floatViewport);
+  const floatAspectRatio = floatAspectRatioOf(floatViewport, floatView?.kind === "browser" ? floatView.mobile ?? null : null);
   const framedFloat = isFramedViewport(floatViewport);
+  // O celular emoldurado traz chassi próprio (aro, botões, sombra): sem cartão, sem recorte retangular em volta.
+  const phoneFloat = framedFloat && isPhoneViewport(floatViewport);
   const bodyDrag = useFloatBodyDrag(floatAspectRatio);
   const [floatDomHover, setFloatDomHover] = useState(false);
   useEffect(() => {
@@ -123,11 +126,13 @@ export function ViewTabsHost() {
             data-view-key={key}
             style={{
               ...placeStyle(rectToPlace),
-              ...(floatingPreview ? { zIndex: 35, borderRadius: FLOATING_PREVIEW_CORNER_RADIUS } : {}),
+              ...(floatingPreview ? { zIndex: 35, ...(phoneFloat ? {} : { borderRadius: FLOATING_PREVIEW_CORNER_RADIUS }) } : {}),
               visibility: shown ? undefined : "hidden",
               pointerEvents: shown ? "auto" : "none",
             }}
-            className={floatingPreview ? `flex flex-col overflow-hidden rounded-2xl ${framedFloat ? "bg-transparent" : "bg-white dark:bg-surface"}` : undefined}
+            className={floatingPreview
+              ? `flex flex-col ${phoneFloat ? "overflow-visible bg-transparent" : framedFloat ? "overflow-hidden rounded-2xl bg-transparent" : "overflow-hidden rounded-2xl bg-white dark:bg-surface"}`
+              : undefined}
             onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
             {...(floatingPreview ? {
               ...bodyDrag,
@@ -146,7 +151,7 @@ export function ViewTabsHost() {
         );
       })}
       {floatView && floatRect && placementOf(floatView) !== undefined && (
-        <BrowserFloatFrame rect={floatRect} viewId={floatView.id} aspectRatio={floatAspectRatio} hover={floatDomHover} />
+        <BrowserFloatFrame rect={floatRect} viewId={floatView.id} aspectRatio={floatAspectRatio} hover={floatDomHover} framed={phoneFloat} />
       )}
     </div>
   );
@@ -220,17 +225,20 @@ export function BrowserFloatFrame({
   viewId,
   aspectRatio: explicitAspectRatio,
   hover = false,
+  framed = false,
 }: {
   rect: Rect;
   viewId?: string;
   aspectRatio?: number | null;
   hover?: boolean;
+  /** Com a moldura do celular o chassi já traz borda, aro e sombra: nada de cartão claro em volta. */
+  framed?: boolean;
 }) {
   const { t } = useTranslation();
   const view = useViewTabsStore((state) => (viewId ? state.views.find((v) => v.id === viewId) : undefined));
   const aspectRatio = explicitAspectRatio !== undefined
     ? explicitAspectRatio
-    : floatAspectRatioOf(view?.kind === "browser" ? view.viewport : null);
+    : floatAspectRatioOf(view?.kind === "browser" ? view.viewport : null, view?.kind === "browser" ? view.mobile ?? null : null);
   const { begin, move, end } = useFloatDrag(aspectRatio);
   const miniHover = useChatStore((state) => state.browserMiniHover[viewId ?? ""] ?? false);
   const [frameHover, setFrameHover] = useState(false);
@@ -249,15 +257,17 @@ export function BrowserFloatFrame({
       className="absolute z-30 pointer-events-none"
       style={{ left: rect.left - r, top: rect.top - r, width: rect.width + 2 * r, height: rect.height + 2 * r }}
     >
-      <div data-browser-float-surface
-        className="absolute pointer-events-none border border-gray-200 dark:border-white/12 shadow-md shadow-gray-950/20"
-        style={{
-          left: r - 1,
-          top: r - 1,
-          width: rect.width + 2,
-          height: rect.height + 2,
-          borderRadius: FLOATING_PREVIEW_CORNER_RADIUS + 1,
-        }} />
+      {!framed && (
+        <div data-browser-float-surface
+          className="absolute pointer-events-none border border-gray-200 dark:border-white/12 shadow-md shadow-gray-950/20"
+          style={{
+            left: r - 1,
+            top: r - 1,
+            width: rect.width + 2,
+            height: rect.height + 2,
+            borderRadius: FLOATING_PREVIEW_CORNER_RADIUS + 1,
+          }} />
+      )}
       {RING_PARTS.map((part) => (
         <div key={part.key} data-float-ring={part.key} role="separator"
           aria-label={t(part.key === "top" ? "browser.mini.move" : "browser.mini.resize")}

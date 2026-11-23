@@ -24,9 +24,9 @@ export interface ViewportPreset extends Viewport {
 
 /** Los tamaños más comunes de cada clase. Los ids se usan también desde el MCP. */
 export const VIEWPORT_PRESETS: ViewportPreset[] = [
-  { id: "phone-small", kind: "phone", width: 360, height: 640 },
-  { id: "phone", kind: "phone", width: 390, height: 844 },
-  { id: "phone-large", kind: "phone", width: 430, height: 932 },
+  { id: "phone-small", kind: "phone", width: 360, height: 780 },
+  { id: "phone", kind: "phone", width: 402, height: 874 },
+  { id: "phone-large", kind: "phone", width: 440, height: 956 },
   { id: "tablet", kind: "tablet", width: 768, height: 1024 },
   { id: "tablet-large", kind: "tablet", width: 1024, height: 1366 },
   { id: "laptop", kind: "laptop", width: 1280, height: 800 },

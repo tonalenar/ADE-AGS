@@ -1,3 +1,5 @@
+import { PHONE_MODELS } from "./deviceCatalog";
+
 /**
  * Os aparelhos do "celular solto": o navegador do canvas sem a janela, só o aparelho, com a página na resolução
  * dele. `width`×`height` é o viewport CSS que a página mede (o mesmo do DevTools); `radius` é o canto da tela em
@@ -15,7 +17,13 @@ export interface DeviceSpec {
   cutout: "island" | "punch";
 }
 
-export const DEVICES: readonly DeviceSpec[] = [
+/** Os aparelhos do seletor: os modelos do catálogo único (`deviceCatalog.ts`). */
+export const DEVICES: readonly DeviceSpec[] = PHONE_MODELS.map((m) => ({
+  id: m.id, label: m.label, brand: m.brand, width: m.width, height: m.height, radius: m.radius, cutout: m.cutout.kind,
+}));
+
+/** Os ids de antes do catálogo único: celulares soltos já salvos no canvas continuam abrindo com a medida de então. */
+const LEGACY_DEVICES: readonly DeviceSpec[] = [
   { id: "iphone-15-pro", label: "iPhone 15 Pro", brand: "Apple", width: 393, height: 852, radius: 55, cutout: "island" },
   { id: "iphone-15-pro-max", label: "iPhone 15 Pro Max", brand: "Apple", width: 430, height: 932, radius: 55, cutout: "island" },
   { id: "iphone-15", label: "iPhone 15", brand: "Apple", width: 393, height: 852, radius: 47, cutout: "island" },
@@ -30,11 +38,11 @@ export const DEFAULT_DEVICE = DEVICES[0];
 
 /** O aparelho de um id; um id que não existe (salvo por outra versão) vira o padrão. Pura. */
 export function deviceById(id: string | null | undefined): DeviceSpec {
-  return DEVICES.find((device) => device.id === id) ?? DEFAULT_DEVICE;
+  return DEVICES.find((device) => device.id === id) ?? LEGACY_DEVICES.find((device) => device.id === id) ?? DEFAULT_DEVICE;
 }
 
 /** A moldura do aparelho, em pixels de tela. */
-export const DEVICE_BEZEL = 11;
+export const DEVICE_BEZEL = 12;
 /** A altura da barra flutuante acima do aparelho, em pixels do canvas. */
 export const DEVICE_BAR_H = 44;
 

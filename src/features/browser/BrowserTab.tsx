@@ -54,6 +54,7 @@ import { miniBrowserZoom, shouldOpenInRealChrome, pickerDisabled, realBrowserEmu
 import { listen } from "@tauri-apps/api/event";
 import { MenuDivider, MenuRow, ToolButton } from "./toolbarButtons";
 import { isFillViewport, isPhoneViewport, type Viewport } from "./viewport";
+import { deviceHintOf, modelFor } from "./deviceCatalog";
 import { ZoomControl } from "./ZoomControl";
 import { cropForJev, resizeCanvas, visualSize } from "./visualSize";
 import { clampZoom, stepZoom } from "./zoom";
@@ -323,17 +324,19 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
   /** A vista nativa já existe (avisou a primeira URL): só então dá para mandar a emulação por CDP. */
   const [realReady, setRealReady] = useState(false);
   /** O que já foi aplicado na vista nativa; começa como mesa sem moldura, que é o padrão dela. */
-  const emulated = useRef<string>("null|false");
+  const emulated = useRef<string>("null|false|");
   /** Com o mockup de celular, a moldura (barra de status, vidro do Safari) vai dentro da página; no Completo, não. */
   const framedPhone = !!mobile && !!viewport && !isFillViewport(viewport) && isPhoneViewport(viewport) && !device;
   useEffect(() => {
-    const key = `${mobile}|${framedPhone}`;
+    // O modelo entra na chave (outro tamanho = outra densidade); a rotação não: o backend a acompanha pelo tamanho.
+    const model = mobile ? modelFor(mobile, viewportRef.current) : null;
+    const key = `${mobile}|${framedPhone}|${model?.id ?? ""}`;
     if (!real || !realReady || emulated.current === key) return;
     emulated.current = key;
     const labels = framedPhone
       ? Object.fromEntries(["back", "reload", "menu", "tabs", "address", "share", "desktop"].map((k) => [k, t(`browser.device.${k}`)]))
       : null;
-    realBrowserEmulate(view.id, mobile, labels).catch((e) => setError(String(e)));
+    realBrowserEmulate(view.id, mobile, labels, model ? deviceHintOf(model) : null).catch((e) => setError(String(e)));
   }, [real, realReady, mobile, framedPhone, view.id, t]);
 
   /** Escolhe o aparelho emulado. Celular é toque; mesa é mouse. */

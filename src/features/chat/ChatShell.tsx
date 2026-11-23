@@ -273,7 +273,12 @@ function BrowserFloatHost({ hidden }: { hidden: boolean }) {
     const view = s.views.find((v) => v.id === viewId);
     return view?.kind === "browser" ? (view.viewport ?? null) : null;
   });
-  const aspectRatio = floatAspectRatioOf(viewport);
+  const mobile = useViewTabsStore((s) => {
+    if (!viewId) return null;
+    const view = s.views.find((v) => v.id === viewId);
+    return view?.kind === "browser" ? (view.mobile ?? null) : null;
+  });
+  const aspectRatio = floatAspectRatioOf(viewport, mobile);
   const prevRatioRef = useRef<{ viewId: string | null; ratio: number | null }>({ viewId: null, ratio: null });
 
   const measure = useCallback(() => {

@@ -11,6 +11,8 @@ describe("aparelhos do celular solto", () => {
     for (const d of DEVICES) expect(isPhoneViewport(d)).toBe(true);
     expect(deviceById("iphone-15-pro-max")).toMatchObject({ width: 430, height: 932 });
     expect(deviceById("não-existe")).toBe(DEFAULT_DEVICE);
+    expect(DEFAULT_DEVICE).toMatchObject({ id: "iphone-17-pro", width: 402, height: 874, radius: 62 });
+    expect(deviceById("pixel-9")).toMatchObject({ width: 412, height: 924, radius: 46, cutout: "punch" });
   });
 
   it("o nó tem o tamanho do aparelho na escala, e a escala sai de volta do tamanho do nó", () => {
