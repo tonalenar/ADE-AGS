@@ -2577,7 +2577,7 @@ fn chat_schemas() -> Vec<Value> {
         }),
         json!({
             "name": "chat_compact",
-            "description": "Compact the context of an idle structured chat conversation using the provider's native mechanism. Currently supported for Codex and Claude Code; no turn or pending approval may be active. Custom instructions are supported by Claude Code only.",
+            "description": "Compact the context of YOUR OWN idle structured chat conversation using the provider's native mechanism. Refused for any other conversation (only the person compacts those, from the app) and when the person has switched ADE autocompact off. Currently supported for Codex and Claude Code; no turn or pending approval may be active. Custom instructions are supported by Claude Code only.",
             "inputSchema": { "type": "object", "properties": {
                 "thread": thread.clone(),
                 "instructions": { "type": "string", "maxLength": 10000, "description": "Optional compaction instructions (Claude Code only)." }

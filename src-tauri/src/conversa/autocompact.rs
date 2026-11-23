@@ -101,6 +101,15 @@ impl Config {
     }
 }
 
+/// Um agente que pede a compactação da própria conversa só pode se a pessoa deixou o autocompact ligado para ele. Pura.
+pub fn agent_compact_error(cfg: &Config, agent_id: &str) -> Option<String> {
+    (!cfg.enabled_for(agent_id)).then(|| {
+        "O autocompact de contexto está desligado para este agente: só a pessoa o liga (Configurações → Chat → Autocompact de contexto), \
+e só com ele ligado um agente pode pedir a compactação da própria conversa."
+            .to_string()
+    })
+}
+
 pub fn config(db: &DbConnection) -> Config {
     parse_config(crate::database::get_setting(db, SETTING).ok().flatten().as_deref())
 }
