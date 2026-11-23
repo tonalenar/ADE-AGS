@@ -14,6 +14,7 @@ import { dispatchSkillMentions } from "../skillMentions";
 import { useAgentSkillsStore } from "@/features/skills/agentSkillsStore";
 import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, forgetGoneAnswerErrors, isLocalAcpAgent, threadKey, type ThreadEvent, type ThreadLive } from "./model";
 import { addLogFailure, dismissLogFailure, parseLogFailure, type LogFailure } from "./logFailureModel";
+import { onThreadEvent } from "../threadEvents";
 
 /** O sinal da janela quando uma gravação do log de execução falha de vez (ver `runs/execution_log.rs`). */
 const LOG_FAILED_EVENT = "cc-harness-log-failed";
@@ -163,8 +164,7 @@ export function startStructured(): void {
   started = true;
   void reloadThreads();
   void listen<unknown>(LOG_FAILED_EVENT, (e) => recordLogFailure(e.payload));
-  void listen<ThreadEvent | { type: "created"; threadId: string; thread: ThreadRow }>("cc-chat-thread", (e) => {
-    const event = e.payload;
+  onThreadEvent<ThreadEvent | { type: "created"; threadId: string; thread: ThreadRow }>((event) => {
     if (event.type === "delta") {
       deltas.push(event);
       return;
@@ -194,7 +194,7 @@ export function startStructured(): void {
     if (event.type === "item") {
       useStructured.setState((s) => ({ threads: s.threads.map((t) => (t.id === event.threadId ? { ...t, updatedAt: Date.now() } : t)) }));
     }
-  });
+  }, { deltas: true });
 }
 
 /** Quantas vezes a leitura de uma conversa por protocolo é tentada antes de desistir. */
