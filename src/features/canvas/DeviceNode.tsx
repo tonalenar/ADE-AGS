@@ -1,7 +1,6 @@
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { NodeResizer, Position } from "@xyflow/react";
 import { CordPort } from "./cords";
 import { Button, CloseIcon } from "neogestify-ui-components";
@@ -12,24 +11,7 @@ import { NOTE_HEADER_H } from "./geometry";
 import { androidFrameShouldPoll } from "./androidPoll";
 
 import { canvasActions, useActiveBoardKey, useCanvasActive } from "./store";
-
-interface AndroidDevice {
-  serial: string;
-  state: string;
-  model: string;
-}
-
-interface AndroidList {
-  devices: AndroidDevice[];
-  avds: string[];
-  adb: boolean;
-}
-
-interface Frame {
-  png: string;
-  width: number;
-  height: number;
-}
+import { androidFrame, androidKey, androidList, androidStartAvd, androidSwipe, androidTap, androidText, type AndroidFrame as Frame, type AndroidList } from "@/features/android/ipc";
 
 /** Timer do aviso "iniciando" o AVD: o caller limpa no unmount. */
 export function armStartingTimeout(onDone: () => void, ms = 20_000): () => void {
@@ -114,7 +96,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
   useEffect(() => {
     if (!surfaceOpen) return;
     let alive = true;
-    const load = () => invoke<AndroidList>("android_list").then((l) => alive && setList(l)).catch(() => undefined);
+    const load = () => androidList().then((l) => alive && setList(l)).catch(() => undefined);
     void load();
     const timer = window.setInterval(load, LIST_EVERY_MS);
     return () => {
@@ -141,7 +123,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
     const tick = async () => {
       if (androidFrameShouldPoll({ hidden: document.hidden, surfaceOpen, onScreen })) {
         try {
-          const f = await invoke<Frame>("android_frame", { serial: chosen });
+          const f = await androidFrame(chosen);
           if (alive) {
             setFrame(f);
             setProblem(null);
@@ -165,7 +147,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
     setStarting(true);
     canvasActions.updatePortal(key ?? "", id, { avd });
     try {
-      await invoke("android_start_avd", { name: avd });
+      await androidStartAvd(avd);
     } catch (e) {
       fail(e);
     } finally {
@@ -199,14 +181,14 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
     const to = point(e);
     if (!chosen || !from || !to) return;
     if (Math.hypot(to.x - from.x, to.y - from.y) > SWIPE_PX * (frame ? frame.width / 360 : 1)) {
-      invoke("android_swipe", { serial: chosen, x1: from.x, y1: from.y, x2: to.x, y2: to.y }).catch(fail);
+      androidSwipe(chosen, from.x, from.y, to.x, to.y).catch(fail);
     } else {
-      invoke("android_tap", { serial: chosen, x: to.x, y: to.y }).catch(fail);
+      androidTap(chosen, to.x, to.y).catch(fail);
     }
   };
 
   const press = useCallback(
-    (keyName: string) => chosen && invoke("android_key", { serial: chosen, keyName }).catch(fail),
+    (keyName: string) => chosen && androidKey(chosen, keyName).catch(fail),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [chosen],
   );
@@ -215,7 +197,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
     const text = typing;
     if (!text || !chosen) return;
     setTyping("");
-    invoke("android_text", { serial: chosen, text }).catch((e) => {
+    androidText(chosen, text).catch((e) => {
       setTyping(text);
       fail(e);
     });

@@ -7,7 +7,6 @@ import {
   Position, ReactFlow, ReactFlowProvider, useReactFlow,
   type Edge, type EdgeChange, type Node, type NodeChange, type NodeProps, type Connection,
 } from "@xyflow/react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Button, CloseIcon, useTheme } from "neogestify-ui-components";
 import { DEFAULT_DEVICE, DEVICE_SCALE, deviceById, deviceNodeSize, deviceScaleOf, stepDeviceScale, type DeviceSpec } from "@/features/browser/devices";
@@ -93,6 +92,7 @@ import {
   type EphemeralSubagentCard,
 } from "./subagentsModel";
 import { useBoardHarnessTasks } from "./useBoardHarnessTasks";
+import { canvasAssetSave } from "./ipc";
 
 const EMPTY_LIVE: Record<string, ThreadLive> = {};
 const EMPTY_TURNS: Record<string, TabTurn> = {};
@@ -1080,7 +1080,7 @@ function CanvasInner() {
         img.onerror = () => reject(new Error(t("canvas.image.invalid")));
         img.src = data;
       });
-      const asset = await invoke<string>("canvas_asset_save", { data });
+      const asset = await canvasAssetSave(data);
       setSelectedNote(canvasActions.addImage(key, { name: file.name, asset, ...dims, at: viewCenter() }));
     } catch (e) {
       AlertaToast(t("canvas.tool.image"), String(e instanceof Error ? e.message : e), "error", 6000);
@@ -1378,7 +1378,7 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
         >
           <NodeStatus tabId={tab.id} active={canvasActive} />
           <span className="flex min-w-0 flex-1 flex-col">
-            <span title={tab.title.split(" — ")[0]} className="truncate text-[15px] leading-5 font-semibold tracking-[-0.1px] text-gray-900 dark:text-[#f5f5f7]">{tab.title.split(" — ")[0]}</span>
+            <span title={tab.title.split(" — ")[0]} className="truncate text-[15px] leading-5 font-semibold tracking-[-0.1px] text-gray-900 dark:text-ink">{tab.title.split(" — ")[0]}</span>
             <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-[14px] text-gray-500 dark:text-white/60" title={tab.title}>
               <span aria-hidden className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: agentTile(tab.agentId) }} />
               <span className="shrink-0">{tab.agentLabel}</span>
@@ -1771,7 +1771,7 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
               aria-label={t("canvas.portalName")}
               spellCheck={false}
               className="nodrag min-w-0 w-full bg-transparent outline-none truncate text-[15px] leading-5 font-semibold tracking-[-0.1px]
-                text-gray-900 dark:text-[#f5f5f7] focus:bg-black/[0.04] dark:focus:bg-white/5 rounded px-1 -mx-1"
+                text-gray-900 dark:text-ink focus:bg-black/[0.04] dark:focus:bg-white/5 rounded px-1 -mx-1"
             />
             <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-[14px] text-gray-500 dark:text-white/60" title={shown || undefined}>
               <span aria-hidden className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: PORTAL_ACCENT }} />

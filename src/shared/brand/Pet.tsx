@@ -1,5 +1,4 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 
@@ -14,6 +13,7 @@ import { useMascotState } from "./useMascotState";
 import { useReducedMotion } from "./useReducedMotion";
 import { useAgentActivity } from "@/features/terminal/activity";
 import { openBotPanel } from "@/features/bot/botPanelStore";
+import { petStatus } from "./ipc";
 
 /** Lo que el backend sabe del pet (ver `pet.rs`). */
 export interface PetStatus {
@@ -297,7 +297,7 @@ export function usePetStatus(): PetStatus {
   const [pet, setPet] = useState<PetStatus>(EMPTY_PET);
   useEffect(() => {
     let alive = true;
-    invoke<PetStatus>("pet_status").then((s) => alive && setPet(s)).catch(() => undefined);
+    petStatus().then((s) => alive && setPet(s)).catch(() => undefined);
     const off = listen<PetStatus>("cc-pet-changed", (e) => setPet(e.payload));
     return () => {
       alive = false;

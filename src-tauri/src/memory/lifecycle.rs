@@ -605,27 +605,3 @@ pub async fn memory_verify_source(
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-pub async fn memory_set_verification(
-    entry_id: String,
-    last_verified: Option<i64>,
-    ttl_days: Option<i64>,
-    db: tauri::State<'_, crate::database::DbConnection>,
-) -> Result<(), String> {
-    if ttl_days.is_some_and(|v| v <= 0) || last_verified.is_some_and(|v| v < 0 || v > super::now())
-    {
-        return Err("invalid verification metadata".into());
-    }
-    let db = db.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let c = db.lock().map_err(|e| e.to_string())?;
-        c.execute(
-            "UPDATE memory_entries SET last_verified=?2,ttl_days=?3 WHERE id=?1",
-            params![entry_id, last_verified, ttl_days],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}

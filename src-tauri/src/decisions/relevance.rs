@@ -33,7 +33,7 @@ pub const BODY_CHARS: usize = 160;
 const LOCAL_TOP: usize = 8;
 /// Teto de memórias escolhidas: o mesmo de entradas do briefing.
 pub const MAX_CHOSEN: usize = 10;
-/// Orçamento de caracteres do bloco do briefing (o mesmo de `missions::memory_context_text`).
+/// Orçamento de caracteres do bloco do briefing (o mesmo corte do briefing da missão).
 const BRIEFING_CHARS: usize = 2_600;
 
 /// Uma memória aprovada como o Jev a vê. `kind` é o tipo (`note`, `constraint`…).

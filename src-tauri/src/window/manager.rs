@@ -491,7 +491,6 @@ pub fn restore_deferred_windows(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 /// Abre una nueva ventana nativa de Tauri.
-#[tauri::command]
 pub async fn open_new_window(app: tauri::AppHandle, label: String) -> Result<(), String> {
     tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App("/".into()))
         .title(&label)

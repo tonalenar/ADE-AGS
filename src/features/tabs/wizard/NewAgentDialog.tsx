@@ -201,7 +201,7 @@ export function NewAgentDialog({
           <span className="text-[11.5px] text-gray-500 dark:text-white/60">{t("newAgent.folder")}</span>
           <div className="flex items-center gap-2 h-[30px] px-2.5 rounded-[7px] bg-black/[0.05] dark:bg-surface-raised">
             <FolderIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/30" />
-            <span className="truncate font-mono text-[12px] text-gray-900 dark:text-[#f5f5f7]" dir="rtl" title={cwd}>
+            <span className="truncate font-mono text-[12px] text-gray-900 dark:text-ink" dir="rtl" title={cwd}>
               {cwd}
             </span>
           </div>

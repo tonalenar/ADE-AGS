@@ -1,23 +1,16 @@
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 
 import { getSetting, setSetting } from "@/shared/ipc/settings";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { uiErrorText } from "@/shared/uiErrorText";
+import { sandboxStatus, type SandboxStatus } from "./ipc";
 
 /** La clave que lee `runs/sandbox.rs`. Sin valor es "auto". */
 const SANDBOX_KEY = "runs.sandbox";
 
 type Mode = "off" | "auto" | "strict";
-
-interface SandboxStatus {
-  mode: Mode;
-  backend: "none" | "bubblewrap" | "seatbelt" | "job-object";
-  fsIsolation: boolean;
-  reason: "disabled" | "missing-bwrap" | "missing-sandbox-exec" | "windows" | null;
-}
 
 /**
  * Aislamiento de los agentes de la flota: con el sandbox, escriben solo en su carpeta, su
@@ -28,7 +21,7 @@ export function SandboxSetting() {
   const [mode, setMode] = useState<Mode>("auto");
   const [status, setStatus] = useState<SandboxStatus | null>(null);
 
-  const refresh = () => invoke<SandboxStatus>("sandbox_status").then(setStatus).catch(() => {});
+  const refresh = () => sandboxStatus().then(setStatus).catch(() => {});
 
   useEffect(() => {
     getSetting(SANDBOX_KEY)
