@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -139,7 +139,26 @@ const REMARK = [remarkGfm];
 const REMARK_MATH = [remarkGfm, ...MATH_REMARK_PLUGINS];
 const REHYPE_MATH = MATH_REHYPE_PLUGINS;
 
-export function Markdown({ content, loadImage, onImageClick, tone = "compact", renderCodeBlock, streaming = false }: { content: string; loadImage?: ImageLoader; onImageClick?: (src: string) => void; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer; /** Marca blocos recém-inseridos durante streaming com `data-streaming` para fade em `@starting-style`. */ streaming?: boolean }) {
+export interface MarkdownProps {
+  content: string;
+  loadImage?: ImageLoader;
+  onImageClick?: (src: string) => void;
+  tone?: MarkdownTone;
+  renderCodeBlock?: CodeBlockRenderer;
+  /** Marca blocos recém-inseridos durante streaming com `data-streaming` para fade em `@starting-style`. */
+  streaming?: boolean;
+}
+
+function sameMarkdownProps(prev: MarkdownProps, next: MarkdownProps): boolean {
+  return prev.content === next.content
+    && (prev.tone ?? "compact") === (next.tone ?? "compact")
+    && (prev.streaming ?? false) === (next.streaming ?? false)
+    && prev.renderCodeBlock === next.renderCodeBlock
+    && prev.loadImage === next.loadImage
+    && prev.onImageClick === next.onImageClick;
+}
+
+export const Markdown = memo(function Markdown({ content, loadImage, onImageClick, tone = "compact", renderCodeBlock, streaming = false }: MarkdownProps) {
   const size = TONE[tone];
   // A matemática é uma preferência do aparelho (Aparência → Texto). Desligada, o `$` é só texto.
   const { renderMath } = useDisplayPrefs();
@@ -234,7 +253,7 @@ export function Markdown({ content, loadImage, onImageClick, tone = "compact", r
       </ReactMarkdown>
     </div>
   );
-}
+}, sameMarkdownProps);
 
 /** Saca el bloque `---` inicial de un SKILL.md. Si no hay, devuelve el texto igual. */
 export function stripFrontmatter(content: string): string {

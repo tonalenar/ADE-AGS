@@ -67,13 +67,24 @@ export function appendDeltas(drafts: Draft[], inputs: DeltaInput[]): Draft[] {
   return next;
 }
 
+const itemIdsCache = new WeakMap<readonly TimelineItem[], ReadonlySet<string>>();
+
+function idsOfItems(items: readonly TimelineItem[]): ReadonlySet<string> {
+  const cached = itemIdsCache.get(items);
+  if (cached) return cached;
+  const ids = new Set<string>();
+  for (const item of items) ids.add(item.id);
+  itemIdsCache.set(items, ids);
+  return ids;
+}
+
 /**
  * Os itens com os rascunhos que ainda não têm item completo no fim, como itens comuns (resposta
  * ou raciocínio). Um rascunho cujo item já chegou some: vale o item.
  */
 export function withDrafts(items: TimelineItem[], drafts: Draft[]): TimelineItem[] {
   if (drafts.length === 0) return items;
-  const known = new Set(items.map((i) => i.id));
+  const known = idsOfItems(items);
   const extra = drafts.filter((d) => !known.has(d.itemId)).map((d): TimelineItem => ({ kind: d.kind, id: d.itemId, text: d.text }));
   return extra.length === 0 ? items : [...items, ...extra];
 }
