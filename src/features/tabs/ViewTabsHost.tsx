@@ -36,8 +36,16 @@ export function ViewTabsHost() {
   const activeViewId = useViewTabsStore((s) => s.activeViewId);
   const mode = useWorkMode();
   const boardKey = useActiveBoardKey();
-  const portals = useCanvasStore((s) => boardKey ? s.boards[boardKey]?.portals : undefined);
-  const desktopRects = useCanvasStore((s) => s.desktopRects);
+  const desktopPortalId = useCanvasStore((s) => {
+    if (mode !== "canvas" || !boardKey) return null;
+    const portals = s.boards[boardKey]?.portals;
+    if (!portals) return null;
+    for (const id in portals) {
+      if (portals[id]?.kind === "gemini") return id;
+    }
+    return null;
+  });
+  const desktopRect = useCanvasStore((s) => (desktopPortalId ? s.desktopRects[desktopPortalId] : undefined));
   const desktop = views.find((v) => v.kind === "desktop");
   useEffect(() => {
     if (mode !== "canvas" || !boardKey || !desktop || activeViewId !== desktop.id) return;
@@ -55,10 +63,8 @@ export function ViewTabsHost() {
   const chatOn = useChatShell();
   const onWorkspace = pathname.startsWith("/workspace") || (chatOn && !isPageRoute(pathname));
   // Solo las del workspace activo tienen lugar: una de otro nunca se muestra.
-  const { visible, focusedItem } = usePlacements();
+  const { visible, focusedItem } = usePlacements({ trackCanvasAgents: false });
   const lastRect = useRef(new Map<string, Rect | null>());
-  const desktopNode = mode === "canvas" && portals ? Object.entries(portals).find(([, p]) => p.kind === "gemini") : undefined;
-  const desktopRect = desktopNode && desktopRects[desktopNode[0]];
   const boardCwd = boardKey?.split("|").slice(1).join("|").split(/#(?:m|c|cmp|s):/)[0];
   // No chat só aparece o navegador do painel direito (nunca o Gemini Desktop do canvas).
   const chat = chatOn;
