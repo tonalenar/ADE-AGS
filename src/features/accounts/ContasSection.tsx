@@ -209,8 +209,9 @@ function AccountLimitsDialog({ account, onClose }: { account: AgentAccount; onCl
 }
 
 /** Diálogo de remoção de conta com escolha rádio (Manter arquivos / Apagar pasta do perfil). */
-function RemoveAccountDialog({ account, onClose, onConfirm }: {
+function RemoveAccountDialog({ account, affectedPools, onClose, onConfirm }: {
   account: AgentAccount;
+  affectedPools: string[];
   onClose: () => void;
   onConfirm: (deleteFiles: boolean) => Promise<void>;
 }) {
@@ -237,6 +238,11 @@ function RemoveAccountDialog({ account, onClose, onConfirm }: {
       }
     >
       <div className="flex flex-col gap-3">
+        {affectedPools.length > 0 && (
+          <p role="alert" className="m-0 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-300">
+            {t("settings.accounts.delete.inPools", { pools: affectedPools.join(", ") })}
+          </p>
+        )}
         <p className="m-0 text-[12.5px] text-gray-600 dark:text-white/65">{t("settings.accounts.delete.body")}</p>
         <div role="radiogroup" className="flex flex-col gap-1.5">
           {[
@@ -567,6 +573,7 @@ export function ContasSection({ initialProvider = null, onOpenPools }: ContasSec
       {removingFor && (
         <RemoveAccountDialog
           account={removingFor}
+          affectedPools={pools.filter((p) => p.members.includes(removingFor.id)).map((p) => p.name)}
           onClose={() => setRemovingFor(null)}
           onConfirm={async (deleteFiles) => {
             try {

@@ -135,12 +135,15 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
   }, [keys, turnEnds, usedKey]); // eslint-disable-line react-hooks/exhaustive-deps -- `entries` muda com `keys`; `loaded` só vale na primeira vez
 
   const threadId = threadIdOf(conversation.tabId);
+  const threadAccountId = useStructured((s) => (threadId ? s.threads.find((t) => t.id === threadId)?.accountId ?? null : null));
   useEffect(() => {
     if (!threadId) return;
     let alive = true;
     chatPoolState(threadId).then((s) => alive && setPoolState(s), () => undefined);
     return () => { alive = false; };
-  }, [threadId, turnEnds]);
+  }, [threadId, turnEnds, threadAccountId]);
+
+  const existingAccountIds = useMemo(() => new Set(accounts.map((a) => a.id)), [accounts]);
 
   const poolNote = (u: { agentId: string; accountId?: string | null }): string | null => {
     if (!threadId) return null;
@@ -149,7 +152,11 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
         ? t("chat.summary.limits.poolSwitched", { pool: poolState.poolName, origin: poolState.originLabel })
         : t("chat.summary.limits.pool", { pool: poolState.poolName });
     }
-    const offered = pools.find((p) => p.agentId === u.agentId && p.members.length > 1 && p.members.includes(u.accountId ?? null));
+    const offered = pools.find((p) => {
+      if (p.agentId !== u.agentId) return false;
+      const liveMembers = p.members.filter((m) => m === null || existingAccountIds.has(m));
+      return liveMembers.length > 1 && liveMembers.includes(u.accountId ?? null);
+    });
     return offered ? t("chat.summary.limits.poolAvailable", { pool: offered.name }) : null;
   };
 

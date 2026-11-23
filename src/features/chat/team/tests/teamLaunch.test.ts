@@ -21,8 +21,8 @@ vi.mock("../teamStore", () => ({
   dissolveTeam: (id: string) => { calls.log.push(`dissolve ${id}`); return Promise.resolve(); },
   linkExisting: (_t: string, conv: { key: string }) => { calls.log.push(`liga ${conv.key}`); return Promise.resolve(); },
   unlinkMember: (_t: string, ref: string) => { calls.log.push(`desliga ${ref}`); return Promise.resolve(); },
-  spawnMember: (input: { role: string }) => {
-    calls.log.push(`abre integrante ${input.role}`);
+  spawnMember: (input: { role: string; account?: string | null }) => {
+    calls.log.push(`abre integrante ${input.role}${input.account ? ` conta=${input.account}` : ""}`);
     return Promise.resolve({ ref: "tab-m", label: "x", place: { cwd: "/wt", branch: "team/tests", root: "/wt" }, close: () => calls.log.push("fecha tab-m") });
   },
   linkSpawned: () => (calls.failLink ? Promise.reject(new Error("link falhou")) : Promise.resolve()),
@@ -99,5 +99,12 @@ describe("o TeamPort de verdade", () => {
     calls.team = null;
     expect(() => appTeamPort(spec(), "oi", "team").deliver({ ref: "tab-lead", undo: async () => undefined }, "t1")).toThrow();
     expect(calls.log.some((l) => l.startsWith("envia"))).toBe(false);
+  });
+
+  it("repassa a conta (ou pool) do integrante do rascunho ao abrir", async () => {
+    const port = appTeamPort(spec(), "oi", "team");
+    const withAccount = { ...member, account: "pool:Trabalho" } as DraftMember;
+    await port.linkMember("t1", withAccount);
+    expect(calls.log).toEqual(["abre integrante qa conta=pool:Trabalho"]);
   });
 });

@@ -412,3 +412,53 @@ fn a_permissao_e_o_workspace_do_projeto_nao_entram_na_heranca() {
         (Some("codex"), Some("m1"))
     );
 }
+
+#[test]
+fn pool_so_aciona_fallback_de_projeto_quando_todas_as_contas_vivas_estao_esgotadas() {
+    let db: DbConnection = Arc::new(Mutex::new(crate::database::test_db()));
+    let now = crate::util::now_ts();
+    {
+        let conn = db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at) VALUES ('acc-1','codex','Trabalho','/d/1',1)",
+            [],
+        )
+        .unwrap();
+        write(&conn, com_reserva()).unwrap();
+    }
+    let pool = crate::accounts::pools::Pool {
+        id: "p1".into(),
+        name: "CodexPool".into(),
+        agent_id: "codex".into(),
+        members: vec![None, Some("acc-1".into()), Some("apagada".into())],
+        strategy: crate::accounts::pools::Strategy::LeastUsed,
+        failover: true,
+        paused: false,
+    };
+    crate::accounts::pools::save(&db, &[pool]).unwrap();
+
+    // Só a principal esgotou; acc-1 segue livre -> não usa modelo reserva.
+    crate::runs::quota::record(
+        &db,
+        &crate::runs::quota::account_key("codex", None),
+        crate::runs::quota::Quota { rejected: true, rejected_until: Some(now + 3_600), observed_at: now, ..Default::default() },
+        now,
+    );
+    let partial = chat_project_defaults_effective_now(&db, "/p/app".into(), Some("pool:CodexPool".into())).unwrap();
+    let sel_partial = partial.selection.unwrap();
+    assert!(!sel_partial.used_fallback, "com uma conta livre no pool, não troca para reserva");
+    assert_eq!(sel_partial.agent_id, "codex");
+
+    // Agora acc-1 também esgotou (com renovação mais cedo) -> todas as contas vivas esgotadas, aciona reserva com o menor resets_at.
+    crate::runs::quota::record(
+        &db,
+        &crate::runs::quota::account_key("codex", Some("acc-1")),
+        crate::runs::quota::Quota { rejected: true, rejected_until: Some(now + 1_200), observed_at: now, ..Default::default() },
+        now,
+    );
+    let full = chat_project_defaults_effective_now(&db, "/p/app".into(), Some("pool:CodexPool".into())).unwrap();
+    let sel_full = full.selection.unwrap();
+    assert!(sel_full.used_fallback, "todas as contas existentes do pool esgotadas -> usa reserva");
+    assert_eq!(sel_full.agent_id, "claude-code");
+    assert_eq!(sel_full.limited_until, Some(now + 1_200));
+}

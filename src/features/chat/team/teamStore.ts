@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 import i18n from "i18next";
 
+import { resolveAccountChoice } from "@/features/accounts/pools";
 import type { Board } from "@/features/canvas/board";
 import { boardKey, boardKeyOfTab, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
@@ -515,7 +516,8 @@ export async function spawnMember(input: NewMemberInput): Promise<SpawnedMember>
     const tabs = useTabsStore.getState();
     const before = tabs.activeTabId;
     const command = chatCommand(agent.id, agent.command, { model: input.model, effort: input.effort ?? null, access, plan });
-    const ref = tabs.addTab({ cwd, agent: { ...agent, command }, title: label, titleIsCustom: true });
+    const accountId = await resolveAccountChoice(agent.id, input.account ?? undefined);
+    const ref = tabs.addTab({ cwd, agent: { ...agent, command }, title: label, titleIsCustom: true, accountId });
     registerPendingSkillSetup(ref, attachSkillsToTab(ref, tabs.workspaceId, []));
     // A tela segue na conversa do orquestrador (a aba nova não rouba a vez).
     if (before && !useChatStore.getState().thread) useTabsStore.getState().activateTab(before);

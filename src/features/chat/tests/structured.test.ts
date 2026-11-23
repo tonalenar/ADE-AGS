@@ -87,11 +87,13 @@ describe("conversa por protocolo: Claude Code e o Plano", () => {
     expect(STRUCTURED_AGENTS.has("gemini-cli")).toBe(false);
   });
 
-  it("o evento da conversa muda só o que veio (título ou acesso)", () => {
-    const base = row({ agentId: "claude-code", access: "plan" });
-    expect(applyThreadMeta(base, { access: "edits" })).toMatchObject({ access: "edits", title: "Arrumar login" });
-    expect(applyThreadMeta(base, { title: "Novo" })).toMatchObject({ access: "plan", title: "Novo" });
-    expect(applyThreadMeta(base, { memory: "on" })).toMatchObject({ memory: "on", title: "Arrumar login" });
+  it("o evento da conversa muda só o que veio (título, acesso, memória ou conta)", () => {
+    const base = row({ agentId: "claude-code", access: "plan", accountId: "acc-1" });
+    expect(applyThreadMeta(base, { access: "edits" })).toMatchObject({ access: "edits", title: "Arrumar login", accountId: "acc-1" });
+    expect(applyThreadMeta(base, { title: "Novo" })).toMatchObject({ access: "plan", title: "Novo", accountId: "acc-1" });
+    expect(applyThreadMeta(base, { memory: "on" })).toMatchObject({ memory: "on", title: "Arrumar login", accountId: "acc-1" });
+    expect(applyThreadMeta(base, { accountId: "acc-2" })).toMatchObject({ accountId: "acc-2", title: "Arrumar login" });
+    expect(applyThreadMeta(base, { accountId: null })).toMatchObject({ accountId: null, title: "Arrumar login" });
   });
 
   it("a saída do Plano se reconhece pela ferramenta; a aprovação comum e a do Codex não", () => {

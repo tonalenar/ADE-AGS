@@ -324,5 +324,11 @@ describe("todas as contas conectadas, não só as da conversa", () => {
       await mount({ ...asThread(), tabId: "thread:t1" });
       expect(text()).toContain('chat.summary.limits.poolAvailable{"pool":"Pool Teste"}');
     });
+    it("não oferece pool cuja única outra conta foi apagada", async () => {
+      useUsageStore.setState({ claude: { ton: live(10, 10) } });
+      backend.pools = [{ id: "p1", name: "Pool Quebrado", agentId: "claude-code", members: ["ton", "apagada"], strategy: "least_used", failover: false }];
+      await mount({ ...asThread(), tabId: "thread:t1" });
+      expect(text()).not.toContain("chat.summary.limits.poolAvailable");
+    });
   });
 });

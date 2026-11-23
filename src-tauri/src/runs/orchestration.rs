@@ -769,7 +769,7 @@ fn plan_tasks_watched(
                 return Err(error);
             }
         }
-        match routing::resolve_pool(db, &request).and_then(|r| routing::route(&roster, &tiers, &r, now)) {
+        match routing::route_with_pool_cursor(db, &roster, &tiers, &request, now) {
             Ok(a) => {
                 if let Some(schema) = &t.result_schema
                     && let Err(error) = plan::validate_result_schema(&a.agent_id, schema)

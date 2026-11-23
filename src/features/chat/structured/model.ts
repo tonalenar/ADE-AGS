@@ -112,8 +112,8 @@ export type ThreadEvent =
   | { type: "phase"; threadId: string; phase: "working" | "idle" }
   | { type: "request"; threadId: string; request: RequestRow }
   | { type: "requestResolved"; threadId: string; id: string }
-  /** O título mudou, ou o acesso (o Claude saiu do Plano, aceitou edições na sessão). */
-  | { type: "thread"; threadId: string; title?: string; access?: ThreadAccess }
+  /** O título mudou, o acesso, a memória ou a conta (troca de pool/manual). */
+  | { type: "thread"; threadId: string; title?: string; access?: ThreadAccess; memory?: string; accountId?: string | null }
   | { type: "goal"; threadId: string; goal: ThreadGoal | null }
   | { type: "commands"; threadId: string; commands: ProviderSlashCommand[] }
   | { type: "providerConfig"; threadId: string; config: ProviderRuntimeConfig }
@@ -160,8 +160,17 @@ export function applyDeltas(live: ThreadLive, deltas: DeltaInput[]): ThreadLive 
 }
 
 /** A conversa depois de um evento `thread`: só o que veio muda. Pura. */
-export function applyThreadMeta(row: ThreadRow, event: { title?: string; access?: ThreadAccess; memory?: string }): ThreadRow {
-  return { ...row, ...(event.title ? { title: event.title } : {}), ...(event.access ? { access: event.access } : {}), ...(event.memory ? { memory: event.memory } : {}) };
+export function applyThreadMeta(
+  row: ThreadRow,
+  event: { title?: string; access?: ThreadAccess; memory?: string; accountId?: string | null },
+): ThreadRow {
+  return {
+    ...row,
+    ...(event.title ? { title: event.title } : {}),
+    ...(event.access ? { access: event.access } : {}),
+    ...(event.memory ? { memory: event.memory } : {}),
+    ...("accountId" in event && event.accountId !== undefined ? { accountId: event.accountId } : {}),
+  };
 }
 
 /** A pergunta de um pedido (a primeira), ou `null` se o pedido não é pergunta. Pura. */
