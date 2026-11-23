@@ -6867,7 +6867,7 @@
   "chat.summary.limits.othersHighUsage_one": "{{count}} cuenta por encima del 80%",
   "chat.summary.limits.othersHighUsage_other": "{{count}} cuentas por encima del 80%",
   "memorySync.title": "Respaldo privado de memorias (GitHub)",
-  "memorySync.description": "Envía una copia filtrada de las memorias de este proyecto y del historial legado a un repositorio privado conectado.",
+  "memorySync.description": "Envía una copia filtrada de las memorias de todos los proyectos de ai-memory y del historial legado a un repositorio privado conectado a ADE.",
   "memorySync.toggle.label": "Enviar memorias a un repositorio privado",
   "memorySync.toggle.desc": "Desactivado por defecto. Desactivarlo detiene envíos futuros sin borrar memorias locales ni el repositorio remoto.",
   "memorySync.needAccount": "Conecta una cuenta de GitHub, GitLab o Gitea antes de activar el respaldo.",
@@ -6906,6 +6906,8 @@
   "memorySync.lastRestore": "Última restauración: {{time}}",
   "memorySync.pushed": "(enviado)",
   "memorySync.upToDate": "(sin cambios nuevos)",
+  "memorySync.warnUnavailable": "ai-memory no respondió: no se envió ninguna memoria de proyecto. Comprueba que está instalado y en ejecución e inténtalo de nuevo.",
+  "memorySync.warnEmpty": "ai-memory no tiene páginas de proyecto y no hay historial legado: no había nada que enviar.",
   "memorySync.counts": "{{pages}} páginas de ai-memory · {{entries}} memorias legadas · {{revisions}} revisiones",
   "memorySync.skippedTitle_one": "{{count}} página omitida por posible secreto (revisa manualmente):",
   "memorySync.skippedTitle_other": "{{count}} páginas omitidas por posible secreto (revisa manualmente):"

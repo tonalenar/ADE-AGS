@@ -6867,7 +6867,7 @@
   "chat.summary.limits.othersHighUsage_one": "{{count}} account above 80%",
   "chat.summary.limits.othersHighUsage_other": "{{count}} accounts above 80%",
   "memorySync.title": "Private memory backup (GitHub)",
-  "memorySync.description": "Pushes a filtered copy of this project's memories and legacy history to a connected private repository.",
+  "memorySync.description": "Sends a filtered copy of the memories from every ai-memory project and the legacy history to a private repository connected to ADE.",
   "memorySync.toggle.label": "Push memories to private repository",
   "memorySync.toggle.desc": "Off by default. Turning it off stops future pushes without deleting local memories or the remote repository.",
   "memorySync.needAccount": "Connect a GitHub, GitLab, or Gitea account before enabling memory backup.",
@@ -6906,6 +6906,8 @@
   "memorySync.lastRestore": "Last restore: {{time}}",
   "memorySync.pushed": "(pushed)",
   "memorySync.upToDate": "(no new changes)",
+  "memorySync.warnUnavailable": "ai-memory did not respond: no project memories were sent. Check that it is installed and running, then try again.",
+  "memorySync.warnEmpty": "ai-memory has no project pages and there is no legacy history: there was nothing to send.",
   "memorySync.counts": "{{pages}} ai-memory pages · {{entries}} legacy entries · {{revisions}} revisions",
   "memorySync.skippedTitle_one": "{{count}} page skipped for suspected secret (review manually):",
   "memorySync.skippedTitle_other": "{{count}} pages skipped for suspected secrets (review manually):"
