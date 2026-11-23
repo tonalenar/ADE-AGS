@@ -603,6 +603,18 @@ pub fn chat_team_states(db: State<'_, DbConnection>) -> Result<Vec<super::watch_
     super::watch_db::states(&*lock(&db)?, crate::util::now_ts_ms())
 }
 
+/// A fila de tarefas do time com o motivo de cada espera (`parent`: `thread:<id>` ou o id da aba do orquestrador).
+#[tauri::command]
+pub fn chat_team_queue(app: AppHandle, parent: Option<String>, all: Option<bool>) -> Result<serde_json::Value, String> {
+    crate::ipc::commands::consciencia::queue_for_ui(&app, parent, all.unwrap_or(false))
+}
+
+/// A pessoa cancela uma tarefa que ainda espera na fila.
+#[tauri::command]
+pub fn chat_team_queue_cancel(app: AppHandle, id: String) -> Result<bool, String> {
+    crate::ipc::commands::consciencia::cancel_for_ui(&app, &id)
+}
+
 /// Acorda o vigia para ele reler os interruptores (o barramento das conversas é o que ele escuta).
 fn wake_watch(app: &AppHandle) {
     crate::bus::publish(Some(app), crate::bus::Publish::new(crate::ipc::commands::conversas::BUS_TOPIC).data(serde_json::json!({ "type": "watch" })));

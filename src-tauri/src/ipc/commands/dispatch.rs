@@ -212,6 +212,8 @@ pub(crate) fn dispatch_with_principal(
         "peer.disconnect" => peer_disconnect(app, args),
         "peer.role" => peer_role(app, args),
         "team.delegate" => super::delegate::delegate_session(app, args),
+        "team.queue" => super::consciencia::team_queue(app, args),
+        "system.load" => super::consciencia::system_load(app, args),
         "team.list" => super::team::team_list(app, args),
         "team.candidates" => super::team::team_candidates(app, args),
         "team.create" => super::team::team_create(app, args),

@@ -72,3 +72,48 @@ export function formatElapsed(ms: number): string {
 export function stateLabelKey(state: RealState): string {
   return `chat.lineage.state.${state}`;
 }
+
+/** O resumo "Aguardando N subagentes · nomes" quando mais de um roda. Pura. */
+export function waitingSummary(running: readonly LineageEntry[]): { count: number; names: string } {
+  return { count: running.length, names: running.map((e) => e.title).join(" · ") };
+}
+
+/** Uma tarefa da fila do time (`chat_team::awareness::queue::Item` + o motivo de agora). */
+export interface QueueRow {
+  id: string;
+  title: string;
+  /** Por que ainda espera, na ordem; vazio = pronta (a ADE a lança no próximo passo). */
+  waitingOn: string[];
+  areas: string[];
+  createdAt: number;
+}
+
+/** O que `chat_team_queue` devolve: `{items, maxAgents}`. Tolera qualquer outra forma (backend antigo, erro). Pura. */
+export function parseQueue(raw: unknown): { rows: QueueRow[]; maxAgents: number | null } {
+  const value = raw as { items?: unknown; maxAgents?: unknown } | null;
+  const items = Array.isArray(value?.items) ? value.items : [];
+  const rows: QueueRow[] = [];
+  for (const item of items as Record<string, unknown>[]) {
+    if (!item || item.status !== "pending" || typeof item.id !== "string") continue;
+    rows.push({
+      id: item.id,
+      title: typeof item.title === "string" && item.title ? item.title : item.id,
+      waitingOn: Array.isArray(item.waitingOn) ? item.waitingOn.filter((r): r is string => typeof r === "string") : [],
+      areas: Array.isArray(item.areas) ? item.areas.filter((r): r is string => typeof r === "string") : [],
+      createdAt: typeof item.createdAt === "number" ? item.createdAt : 0,
+    });
+  }
+  return { rows, maxAgents: typeof value?.maxAgents === "number" ? value.maxAgents : null };
+}
+
+/** O limite de agentes simultâneos pela configuração (`team.max_agents`): padrão 3, faixa 1–12. Pura. */
+export function parseMaxAgents(raw: string | null | undefined): number {
+  const n = Number.parseInt((raw ?? "").trim(), 10);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_AGENTS;
+  return Math.min(MAX_MAX_AGENTS, Math.max(MIN_MAX_AGENTS, n));
+}
+
+export const MAX_AGENTS_SETTING = "team.max_agents";
+export const DEFAULT_MAX_AGENTS = 3;
+export const MIN_MAX_AGENTS = 1;
+export const MAX_MAX_AGENTS = 12;

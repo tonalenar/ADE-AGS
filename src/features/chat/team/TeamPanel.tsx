@@ -10,6 +10,7 @@ import { LinkAgentForm, conversationRefOf } from "./LinkAgentForm";
 import { AgentMono, PanelHeader, StateDot, useRoleLabel } from "./TeamParts";
 import { CONVERSATION_DRAG_MIME, defaultPolicy, placeOf, rosterRows, takenRefs, type RosterRow } from "./teamModel";
 import { dissolveTeam, linkExisting, loadFeed, makeOrchestrator, setAdding, setAllowTools, setAutoDecide, setWatch, setWatchStall, startTeams, unlinkMember, useTeamStore } from "./teamStore";
+import { MaxAgentsSetting } from "./MaxAgentsSetting";
 import { useTeamLive } from "./useTeamLive";
 import { ChatTeamScopeOverlaps } from "@/features/missions/ScopeOverlapNotice";
 
@@ -115,6 +116,7 @@ export function TeamPanel({ conversation, cards }: { conversation: ConversationC
         <input type="checkbox" checked={team.watchStall === true} onChange={(e) => setWatchStall(team.id, e.target.checked)} />
         {t("chat.team.watchStall.on")}
       </label>
+      <MaxAgentsSetting />
       <div className="px-3.5 pb-1 flex items-center justify-end gap-2">
         {confirming && <span className="text-chat-caption text-gray-500 dark:text-white/45">{t("chat.team.dissolveConfirm")}</span>}
         <button type="button" onClick={() => { if (confirming) dissolveTeam(team.id).catch((e) => setError(t("chat.team.dissolveFailed", { error: String(e) }))); setConfirming(!confirming); }}

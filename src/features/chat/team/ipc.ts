@@ -212,3 +212,9 @@ export const chatTeamOverlaps = (teamId: string) =>
 
 /** O estado real de cada integrante e filho ativo (`chat_team::watch::real_state`), calculado no backend. */
 export const chatTeamStates = () => invoke<import("./lineageModel").MemberStateRow[]>("chat_team_states");
+
+/** A fila de tarefas do time com o motivo de cada espera (`chat_team::chat_team_queue`); `parent` = `thread:<id>` do orquestrador. */
+export const chatTeamQueue = (parent: string | null, all = false) => invoke<unknown>("chat_team_queue", { parent, all });
+
+/** Cancela uma tarefa que ainda espera na fila (a pessoa, pela tela). */
+export const chatTeamQueueCancel = (id: string) => invoke<boolean>("chat_team_queue_cancel", { id });

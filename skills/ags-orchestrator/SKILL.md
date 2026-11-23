@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.98.0
+version: 1.99.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -1367,6 +1367,42 @@ arrived, and `stopped` gives the reason when the turn ended with no reply (error
 process gone). Repeating the same `ask` while it still waits **joins the same wait** (`joined: true`):
 the member is not asked twice, and a timeout alone does not close it.
 
+## Orchestrator awareness: load, agent limit and the team queue
+
+Do what a good orchestrator does, on your own: know the state of your agents, know whether the
+machine can take one more, avoid two agents editing the same files, and keep an explicit queue.
+
+1. **Before launching an agent, look.** `ags system load` (MCP `system_load`, read-only) returns the
+   load average, CPU, free memory, the number of running `cargo`/`rustc` builds, the limit of
+   simultaneous agents (`maxAgents`, default 3, setting `team.max_agents`), your working agents
+   (`activeAgents`) and `canLaunch` with `why`. Your agents' real state (working, waiting for input,
+   ended without delivering, failed) comes from `ags team list` and from the notices the ADE sends you
+   when one finishes, fails, idles or stalls: you never need to ask.
+2. **The ADE refuses what the machine cannot take.** `chat_new`/`delegate_agent target=provider_chat`
+   come back as `{refused: true, reason, message}` with nothing created when the limit is full
+   (`agent_limit`), the load is above cores × 2 (`machine_overloaded`) or you declared `areas` that
+   another active task of yours also touches (`area_overlap`). Do not retry in a loop, do not look
+   for a workaround: queue the task.
+3. **Declare the areas.** When you delegate code changes, pass `areas` (files or folders, globs ok,
+   e.g. `["src/features/chat/**"]`) to `delegate_agent`/`chat_new`. Overlapping tasks must be
+   serialized: wait for the other agent and start from its branch. Only pass `allow_overlap: true`
+   when you are sure they cannot conflict (it is advice, never a hard lock).
+4. **Queue with a condition.** `ags team queue add --task "..." [--after Ana[,Bia]] [--when-load-low]
+   [--after-branch feat/x] [--area src/a,src/b] [--agent ...] [--model ...] [--effort ...] [--title ...]`
+   (MCP `team_queue_add`). The task is stored (it survives a restart) and the ADE starts it by
+   itself, like `chat_new`, as soon as every condition holds **and** the limit, load and area
+   allow; then you get a notice. `ags team queue list` / `team_queue_list` shows each waiting task
+   with the reason; `ags team queue cancel <id>` removes one. Up to 20 waiting per orchestrator.
+5. **Never poll.** Do not loop on `system load`, `team list` or `queue list`. Hand the task over, say
+   what you are waiting for, end your turn, and act on the notice (`[Fila do time] Lancei…`, the
+   agent's delivery, a Vigia warning).
+6. **Tell the person why you are waiting**, in one line: "waiting for Ana, who is on the same
+   timeline" or "the load is 53, waiting for it to drop". The team panel shows "Waiting on N
+   subagents · names · Details · Stop" and the queue with the reasons.
+
+The ADE never types into a working terminal for any of this; notices go through the durable
+message queue and arrive when your turn is free.
+
 ## Dynamic delegation from protocol chats
 
 Structured Codex, Claude Code and OpenCode conversations receive the ADE MCP scoped to their
@@ -1722,7 +1758,7 @@ flags of each command.
 | TESTES LOCAIS | `test affected`, `test run`, `test status`, `test smoke` |
 | TABS | `tab list`, `tab state`, `tab create`, `tab close`, `tab output`, `tab send` |
 | AGENTES CONECTADOS | `peers`, `peer ask`, `peer tell`, `peer check`, `peer deliver`, `peer handoff`, `peer queue`, `peer receipt`, `peer pending`, `peer answer`, `ci watch`, `notify`, `peer recruit`, `peer connect`, `peer disconnect`, `peer role` |
-| TIME DO MODO CHAT | `team list`, `team candidates`, `team create`, `team link`, `team unlink`, `team role`, `team delegate` |
+| TIME DO MODO CHAT | `team list`, `team candidates`, `team create`, `team link`, `team unlink`, `team role`, `team queue`, `system load`, `team delegate` |
 | CORREÇÕES | `fix list`, `fix decide` |
 | POOLS DE CONTAS | `pools`, `pool create`, `pool update`, `pool delete` |
 | DISPOSITIVOS DO CANVAS | `devices`, `device create`, `device start`, `device tap`, `device swipe`, `device type`, `device apps`, `device launch`, `device close`, `device`, `device open`, `device button`, `device rotate`, `device clipboard`, `device say` |
@@ -1761,7 +1797,7 @@ flags of each command.
 | Fleet memory | fleet tasks only (`--task`) | `memory_workspace_history`, `memory_list`, `memory_get`, `memory_search`, `memory_open`, `memory_propose`, `memory_update`, `memory_delete`, `memory_promote_fact` |
 | Git account | every session | `git_account`, `git_repos`, `git_pr_list`, `git_pr_view`, `git_checks`, `git_pr_files`, `git_issue_list`, `git_issue_view`, `git_fetch`, `git_pull`, `git_push`, `git_pr_create`, `git_issue_create`, `git_tag`, `git_release_list`, `git_release_create`, `git_comment` |
 | Peers and team | interactive tabs (`--tab`) | `peer_ask`, `peer_tell`, `peer_deliver`, `peer_handoff`, `peer_receipt`, `team_list`, `team_candidates`, `team_create`, `team_link`, `team_unlink`, `team_role` |
-| Chat-mode conversations | interactive sessions (`--cwd`) | `chat_list`, `chat_providers`, `harness_graph`, `chat_compact`, `chat_goal`, `chat_new`, `delegate_agent`, `chat_send`, `chat_wait`, `chat_show`, `chat_stop`, `chat_pending` |
+| Chat-mode conversations | interactive sessions (`--cwd`) | `chat_list`, `chat_providers`, `harness_graph`, `chat_compact`, `chat_goal`, `chat_new`, `delegate_agent`, `chat_send`, `chat_wait`, `chat_show`, `chat_stop`, `chat_pending`, `system_load`, `team_queue_add`, `team_queue_list`, `team_queue_cancel` |
 | Account pools | interactive sessions (`--cwd`) | `pool_update` |
 | Designs | interactive sessions (`--cwd`) | `design_list`, `design_get`, `design_view`, `design_create`, `design_open`, `design_page_add`, `design_page_rename`, `design_page_delete`, `design_artboard_add`, `design_artboard_update`, `design_artboard_duplicate`, `design_artboard_delete`, `design_comment_add`, `design_comment_resolve`, `design_note_add` |
 | HTML pages | interactive tabs (`--tab`) | `render_publish`, `render_list` |
