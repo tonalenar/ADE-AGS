@@ -5153,6 +5153,40 @@ fn un_pool_sin_cuentas_usables_dice_por_que_y_uno_de_otra_tui_se_rechaza() {
 }
 
 #[test]
+fn pool_vazio_retorna_erro_estruturado_no_ruteio_e_chave_dedicada_no_precheck() {
+    let mut roster = claude_con_tres();
+    let mut vazio = pool_spec(Strategy::LeastUsed, &[], 0);
+    vazio.name = "SemContas".into();
+    let err = elegida(&mut roster, &vazio).unwrap_err();
+    let parsed: serde_json::Value = serde_json::from_str(&err).expect("erro de pool vazio deve ser JSON estruturado");
+    assert_eq!(parsed["code"], crate::accounts::pools::EMPTY_POOL_CODE);
+    assert_eq!(parsed["pool"], "SemContas");
+
+    let empty_pool = crate::accounts::pools::Pool {
+        id: "p-empty".into(),
+        name: "SemContas".into(),
+        agent_id: "claude-code".into(),
+        members: vec![],
+        strategy: Strategy::LeastUsed,
+        failover: true,
+        paused: false,
+    };
+    let assign = routing::Assignment {
+        agent_id: "claude-code".into(),
+        model: None,
+        account_id: Some("pool:SemContas".into()),
+        routed_by: routing::RoutedBy::Manual,
+        notes: vec![],
+        auto_account: false,
+        pool_origin: None,
+    };
+    assert_eq!(
+        crate::missions::precheck::validate_launch_with_pools(&roster, &assign, &[empty_pool], AHORA).unwrap_err(),
+        "missions.error.poolEmpty"
+    );
+}
+
+#[test]
 fn un_pedido_con_pool_se_rutea_y_queda_fijado_a_la_cuenta_elegida() {
     let roster = claude_con_tres();
     let pedido = RouteRequest {

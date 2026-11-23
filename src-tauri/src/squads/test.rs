@@ -730,3 +730,28 @@ fn squads_aceitam_pool_valido_e_verificam_disponibilidade_de_pool() {
     assert_eq!(reloaded.lead.availability, AssignmentAvailability::AccountMissing);
     assert_eq!(reloaded.members[0].availability, AssignmentAvailability::AccountMissing);
 }
+
+#[test]
+fn squad_com_pool_vazio_retorna_erro_estruturado() {
+    let conn = test_db();
+    let pools_json = serde_json::json!([
+        {"id":"p-zero","name":"Zerado","agentId":"codex","members":[],"strategy":"sticky","failover":true,"paused":false}
+    ])
+    .to_string();
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('accounts.pools', ?1)",
+        [pools_json],
+    )
+    .unwrap();
+
+    let mut draft = input("Squad Pool Vazio");
+    draft.members[0].auto_account = false;
+    draft.members[0].account_id = Some("pool:Zerado".into());
+
+    let err = store::validate(&conn, &draft).unwrap_err();
+    // O squad prefixa o papel (`role 'backend': {...}`); a UI extrai o JSON do mesmo jeito (`formatPoolError`).
+    let json = &err[err.find('{').unwrap_or_else(|| panic!("sem JSON estruturado: {err}"))..];
+    let parsed: serde_json::Value = serde_json::from_str(json).unwrap_or_else(|_| panic!("erro de pool vazio no squad deve ser JSON estruturado: {err}"));
+    assert_eq!(parsed["code"], crate::accounts::pools::EMPTY_POOL_CODE);
+    assert_eq!(parsed["pool"], "Zerado");
+}

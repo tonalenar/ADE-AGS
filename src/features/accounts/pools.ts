@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 
-import { isPoolValue, poolNameOf } from "@/features/accounts/poolRef";
+import { formatPoolError, isPoolValue, poolNameOf } from "@/features/accounts/poolRef";
 
 export type PoolStrategy = "least_used" | "round_robin" | "sticky";
 
@@ -31,8 +31,16 @@ export interface PoolPickPreview {
   swapsToday: number;
 }
 
-// O valor serializado de um pool vive em `poolRef.ts` (sem Tauri); reexportado aqui por quem já importa daqui.
-export { POOL_PREFIX, isPoolValue, poolNameOf, poolValue } from "@/features/accounts/poolRef";
+// O valor serializado e helpers puros de pool vivem em `poolRef.ts` (sem Tauri); reexportados aqui.
+export {
+  POOL_PREFIX,
+  affectedPoolsOnAccountDelete,
+  formatPoolError,
+  isPoolEmpty,
+  isPoolValue,
+  poolNameOf,
+  poolValue,
+} from "@/features/accounts/poolRef";
 
 interface PoolsState {
   pools: Pool[];
@@ -96,5 +104,14 @@ export const poolPick = (agentId: string, pool: string) => invoke<string | null>
 /** Lo que se pasa a `addTab` como cuenta: si es un pool, el pool decide ahora; si no, el id tal cual. */
 export async function resolveAccountChoice(agentId: string, value: string | undefined): Promise<string | undefined> {
   if (!isPoolValue(value)) return value;
-  return (await poolPick(agentId, poolNameOf(value))) ?? undefined;
+  try {
+    return (await poolPick(agentId, poolNameOf(value))) ?? undefined;
+  } catch (e) {
+    const raw = e instanceof Error ? e.message : String(e);
+    // i18n sob demanda: importar no topo inicializa o catálogo (localStorage) em quem só usa o store.
+    const { default: i18n } = await import("@/i18n");
+    const formatted = formatPoolError(raw, (key, vars) => i18n.t(key, vars));
+    if (formatted !== raw) throw new Error(formatted);
+    throw e;
+  }
 }

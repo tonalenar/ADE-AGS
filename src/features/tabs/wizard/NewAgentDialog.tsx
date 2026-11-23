@@ -4,6 +4,7 @@ import { Button, FolderIcon } from "neogestify-ui-components";
 import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useAccountsStore } from "@/features/accounts/store";
+import { formatPoolError } from "@/features/accounts/poolRef";
 import { resolveAccountChoice } from "@/features/accounts/pools";
 import { useSkillsStore } from "@/features/skills/store";
 import { AgentPickerStep } from "@/features/tabs/wizard/AgentPickerStep";
@@ -156,7 +157,7 @@ export function NewAgentDialog({
       },
       (e) => {
         confirming.current = false;
-        AlertaToast(t("accounts.pools.title"), String(e), "error", 6000);
+        AlertaToast(t("accounts.pools.title"), formatPoolError(e, t), "error", 6000);
       },
     );
   };

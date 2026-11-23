@@ -431,6 +431,9 @@ pub(crate) fn pick_in_pool(
     if spec.agent_id != agent.agent_id {
         return Err(format!("o pool '{}' é de '{}', não de {}", spec.name, spec.agent_id, agent.label));
     }
+    if spec.members.is_empty() {
+        return Err(crate::accounts::pools::empty_pool_error(&spec.name));
+    }
     // Las del pool que existen, en el orden del pool.
     let members: Vec<&RosterAccount> = spec
         .members

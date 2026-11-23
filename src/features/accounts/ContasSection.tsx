@@ -17,6 +17,7 @@ import { accountBadgeStyle, accountDisplayLabel, accountInitials } from "./accou
 import { accountLimitsGet, accountLimitsSet, antigravityCliUsage, codexAccountUsage, type AgyGroup, type AgyWindow } from "./ipc";
 import { loadLimitsFor, parseLimitsForm, type LimitsLoad } from "./limits";
 import { meterTone } from "./meter";
+import { affectedPoolsOnAccountDelete, isPoolEmpty } from "./poolRef";
 import { usePools } from "./pools";
 import { isPrimaryAccount, loadPrimaryAccount, savePrimaryAccount, sortWithPrimaryFirst } from "./primary";
 import { useAccountsStore } from "./store";
@@ -209,9 +210,10 @@ function AccountLimitsDialog({ account, onClose }: { account: AgentAccount; onCl
 }
 
 /** Diálogo de remoção de conta com escolha rádio (Manter arquivos / Apagar pasta do perfil). */
-function RemoveAccountDialog({ account, affectedPools, onClose, onConfirm }: {
+function RemoveAccountDialog({ account, affectedPools, emptiedPools, onClose, onConfirm }: {
   account: AgentAccount;
   affectedPools: string[];
+  emptiedPools: string[];
   onClose: () => void;
   onConfirm: (deleteFiles: boolean) => Promise<void>;
 }) {
@@ -238,10 +240,20 @@ function RemoveAccountDialog({ account, affectedPools, onClose, onConfirm }: {
       }
     >
       <div className="flex flex-col gap-3">
-        {affectedPools.length > 0 && (
-          <p role="alert" className="m-0 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-300">
-            {t("settings.accounts.delete.inPools", { pools: affectedPools.join(", ") })}
-          </p>
+        {(affectedPools.length > 0 || emptiedPools.length > 0) && (
+          <div role="alert" className="flex flex-col gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-300">
+            {affectedPools.length > 0 && (
+              <p className="m-0">{t("settings.accounts.delete.inPools", { pools: affectedPools.join(", ") })}</p>
+            )}
+            {emptiedPools.length > 0 && (
+              <p className="m-0">
+                {t("settings.accounts.delete.emptiesPools", {
+                  count: emptiedPools.length,
+                  pools: emptiedPools.join(", "),
+                })}
+              </p>
+            )}
+          </div>
         )}
         <p className="m-0 text-[12.5px] text-gray-600 dark:text-white/65">{t("settings.accounts.delete.body")}</p>
         <div role="radiogroup" className="flex flex-col gap-1.5">
@@ -518,10 +530,12 @@ export function ContasSection({ initialProvider = null, onOpenPools }: ContasSec
               {agentPools.map((pool, i) => (
                 <span key={pool.id}>
                   {i > 0 ? " · " : ""}
-                  {t("settings.accounts.poolLine", {
-                    name: pool.name,
-                    members: pool.members.map(accountNameById).join(", "),
-                  })}
+                  {isPoolEmpty(pool)
+                    ? t("settings.accounts.poolLineEmpty", { name: pool.name })
+                    : t("settings.accounts.poolLine", {
+                      name: pool.name,
+                      members: pool.members.map(accountNameById).join(", "),
+                    })}
                 </span>
               ))}
               {" · "}
@@ -570,23 +584,27 @@ export function ContasSection({ initialProvider = null, onOpenPools }: ContasSec
         <AccountLimitsDialog account={limitsFor} onClose={() => setLimitsFor(null)} />
       )}
 
-      {removingFor && (
-        <RemoveAccountDialog
-          account={removingFor}
-          affectedPools={pools.filter((p) => p.members.includes(removingFor.id)).map((p) => p.name)}
-          onClose={() => setRemovingFor(null)}
-          onConfirm={async (deleteFiles) => {
-            try {
-              await removeAccount(removingFor.id, deleteFiles);
-              AlertaToast(t("settings.accounts"), t("settings.accounts.removed", { name: removingFor.name }), "success", 3500);
-            } catch (e) {
-              AlertaToast(t("settings.accounts"), String(e), "error", 6000);
-            } finally {
-              setRemovingFor(null);
-            }
-          }}
-        />
-      )}
+      {removingFor && (() => {
+        const { kept, emptied } = affectedPoolsOnAccountDelete(pools, removingFor.id);
+        return (
+          <RemoveAccountDialog
+            account={removingFor}
+            affectedPools={kept}
+            emptiedPools={emptied}
+            onClose={() => setRemovingFor(null)}
+            onConfirm={async (deleteFiles) => {
+              try {
+                await removeAccount(removingFor.id, deleteFiles);
+                AlertaToast(t("settings.accounts"), t("settings.accounts.removed", { name: removingFor.name }), "success", 3500);
+              } catch (e) {
+                AlertaToast(t("settings.accounts"), String(e), "error", 6000);
+              } finally {
+                setRemovingFor(null);
+              }
+            }}
+          />
+        );
+      })()}
 
       {addingGit && (
         <AddGitAccountDialog

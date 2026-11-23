@@ -8,6 +8,7 @@ import { PanelBoundary } from "@/app/PanelBoundary";
 import { AccountBadge } from "@/features/accounts/AccountBadge";
 import { AddAccountDialog } from "@/features/accounts/AddAccountDialog";
 import { accountRefFromWire, accountRefToWire, sameAccountRef, selectedAccountId, type AccountRef } from "@/features/accounts/accountRef";
+import { isPoolEmpty } from "@/features/accounts/poolRef";
 import { poolValue, usePools } from "@/features/accounts/pools";
 import { useAccountsStore } from "@/features/accounts/store";
 import { AGY_KEY, useUsageStore } from "@/features/canvas/usageStore";
@@ -722,7 +723,14 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                       {extraOptions.map((a) => (
                         <option key={a.accountId!} value={a.accountId!}>{identities.find((i) => i.id === a.accountId)?.displayName?.trim() || a.label || a.name}</option>
                       ))}
-                      {pools.map((p) => <option key={p.id} value={poolValue(p.name)}>{t("chat.picker.pool", { name: p.name })}</option>)}
+                      {pools.map((p) => {
+                        const empty = isPoolEmpty(p);
+                        return (
+                          <option key={p.id} value={poolValue(p.name)} disabled={empty}>
+                            {empty ? t("chat.picker.poolEmpty", { name: p.name }) : t("chat.picker.pool", { name: p.name })}
+                          </option>
+                        );
+                      })}
                     </PopupSelect>
                   );
                 })()}
