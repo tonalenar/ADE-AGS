@@ -5148,8 +5148,13 @@ fn un_pool_sin_cuentas_usables_dice_por_que_y_uno_de_otra_tui_se_rechaza() {
     ajeno.agent_id = "codex".into();
     assert!(elegida(&mut roster, &ajeno).unwrap_err().contains("não de Claude Code"));
 
-    let fantasma = pool_spec(Strategy::Sticky, &[Some("borrada"), Some("tampoco")], 0);
-    assert!(elegida(&mut roster, &fantasma).unwrap_err().contains("ainda exista"));
+    let mut fantasma = pool_spec(Strategy::Sticky, &[Some("borrada"), Some("tampoco")], 0);
+    fantasma.name = "Fantasma".into();
+    let fantasma_err = elegida(&mut roster, &fantasma).unwrap_err();
+    let fantasma_parsed: serde_json::Value = serde_json::from_str(&fantasma_err)
+        .unwrap_or_else(|_| panic!("pool órfão deve retornar JSON estruturado: {fantasma_err}"));
+    assert_eq!(fantasma_parsed["code"], crate::accounts::pools::EMPTY_POOL_CODE);
+    assert_eq!(fantasma_parsed["pool"], "Fantasma");
 }
 
 #[test]
@@ -5171,6 +5176,15 @@ fn pool_vazio_retorna_erro_estruturado_no_ruteio_e_chave_dedicada_no_precheck() 
         failover: true,
         paused: false,
     };
+    let orphan_pool = crate::accounts::pools::Pool {
+        id: "p-orphan".into(),
+        name: "Orfao".into(),
+        agent_id: "claude-code".into(),
+        members: vec![Some("apagada-1".into()), Some("apagada-2".into())],
+        strategy: Strategy::Sticky,
+        failover: true,
+        paused: false,
+    };
     let assign = routing::Assignment {
         agent_id: "claude-code".into(),
         model: None,
@@ -5182,6 +5196,14 @@ fn pool_vazio_retorna_erro_estruturado_no_ruteio_e_chave_dedicada_no_precheck() 
     };
     assert_eq!(
         crate::missions::precheck::validate_launch_with_pools(&roster, &assign, &[empty_pool], AHORA).unwrap_err(),
+        "missions.error.poolEmpty"
+    );
+    let assign_orphan = routing::Assignment {
+        account_id: Some("pool:Orfao".into()),
+        ..assign
+    };
+    assert_eq!(
+        crate::missions::precheck::validate_launch_with_pools(&roster, &assign_orphan, &[orphan_pool], AHORA).unwrap_err(),
         "missions.error.poolEmpty"
     );
 }

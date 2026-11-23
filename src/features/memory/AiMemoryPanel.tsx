@@ -220,6 +220,12 @@ export function AiMemoryPanel({ cwd, workspaceId }: { cwd: string; workspaceId?:
     };
   }, [load]);
 
+  useEffect(() => {
+    const onChanged = () => { void load(); };
+    window.addEventListener("ade-ai-memory-changed", onChanged);
+    return () => window.removeEventListener("ade-ai-memory-changed", onChanged);
+  }, [load]);
+
   const openPage = (path: string) => {
     const reqId = ++pageSeqRef.current;
     aiMemoryReadPage(cwd, path)

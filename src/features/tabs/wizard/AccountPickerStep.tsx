@@ -78,6 +78,7 @@ export function useAgentAccounts(agentId: string | null, preload = false): Agent
 export function AccountPickerStep({ agentId, value, onChange, showLabel = true, allowAuto = false, preserveUnavailableValue = false }: AccountPickerStepProps) {
   const { t } = useTranslation();
   const forAgent = useAgentAccounts(agentId);
+  const accountsLoaded = useAccountsStore((s) => s.loaded);
   const pools = usePools(agentId);
 
   // Una cuenta elegida antes puede haber desaparecido (se borró desde Cuentas mientras el
@@ -107,7 +108,7 @@ export function AccountPickerStep({ agentId, value, onChange, showLabel = true, 
       ? [{ id: unavailableSavedId as string | undefined, name: t("accounts.unavailable"), hint: unavailableSavedId, warn: true, disabled: false }]
       : []),
     ...pools.map((p) => {
-      const empty = isPoolEmpty(p);
+      const empty = isPoolEmpty(p, accountsLoaded ? forAgent : undefined);
       return {
         id: poolValue(p.name) as string | undefined,
         name: `⟳ ${p.name}`,

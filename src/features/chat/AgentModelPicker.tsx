@@ -724,7 +724,12 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                         <option key={a.accountId!} value={a.accountId!}>{identities.find((i) => i.id === a.accountId)?.displayName?.trim() || a.label || a.name}</option>
                       ))}
                       {pools.map((p) => {
-                        const empty = isPoolEmpty(p);
+                        const liveAccounts = accountsLoaded
+                          ? createdAccounts
+                          : roster
+                            ? extraOptions.map((a) => a.accountId!)
+                            : undefined;
+                        const empty = isPoolEmpty(p, liveAccounts);
                         return (
                           <option key={p.id} value={poolValue(p.name)} disabled={empty}>
                             {empty ? t("chat.picker.poolEmpty", { name: p.name }) : t("chat.picker.pool", { name: p.name })}

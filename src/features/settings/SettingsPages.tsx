@@ -351,7 +351,7 @@ function MemoryPage() {
       <SettingsAnchor id="memory-sync"><MemorySyncCard activeCwd={activeCwd} workspaceId={workspaceId} /></SettingsAnchor>
       <AiMemoryPanel cwd={activeCwd} workspaceId={workspaceId} />
       {workspaceId
-        ? <SharedMemoryPanel key={workspaceId} workspaceId={workspaceId} initialTab="workspace" />
+        ? <SharedMemoryPanel key={workspaceId} workspaceId={workspaceId} cwd={activeCwd} initialTab="workspace" />
         : <p className="text-[12.5px] text-gray-400 dark:text-white/35">{t("settings.memory.noWorkspace")}</p>}
     </>
   );

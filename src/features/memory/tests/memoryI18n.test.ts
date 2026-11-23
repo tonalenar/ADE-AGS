@@ -3,10 +3,10 @@ import en from "../../../i18n/locales/en.json";
 import es from "../../../i18n/locales/es.json";
 import pt from "../../../i18n/locales/pt-BR.json";
 
-const keys = (m: Record<string, string>) => Object.keys(m).filter((k) => /^(memory(Inbox|Purge|Dream|Context)|memoryReview|memoryDrafts|memorySearch|memoryBlock|workspaceDelete)./.test(k)).sort();
+const keys = (m: Record<string, string>) => Object.keys(m).filter((k) => /^(memory(Inbox|Purge|Dream|Context)|memoryReview|memoryDrafts|memorySearch|memoryBlock|sharedMemory|workspaceDelete)\./.test(k)).sort();
 const placeholders = (s: string) => (s.match(/{{\w+}}/g) ?? []).sort().join(",");
 
-describe("i18n da memoria (inbox, purge, sonho)", () => {
+describe("i18n da memoria (inbox, purge, sonho, painel legado)", () => {
   const locales = { en: en as Record<string, string>, es: es as Record<string, string>, pt: pt as Record<string, string> };
   it("os 3 idiomas tem as mesmas chaves", () => {
     expect(keys(locales.es)).toEqual(keys(locales.en));
@@ -20,7 +20,11 @@ describe("i18n da memoria (inbox, purge, sonho)", () => {
       }
     }
   });
-  it("as chaves novas existem", () => {
-    for (const k of ["memoryPurge.buttonLabel", "memoryDream.group", "memoryInbox.skippedDuplicates", "memoryInbox.highPriority"]) expect(keys(locales.en)).toContain(k);
+  it("as chaves novas existem e settings.page.memory reflete o ai-memory sem contradizer", () => {
+    for (const k of ["memoryPurge.buttonLabel", "memoryDream.group", "memoryInbox.skippedDuplicates", "memoryInbox.highPriority", "sharedMemory.legacyHint", "sharedMemory.aiMemory.disabled"]) expect(keys(locales.en)).toContain(k);
+    for (const loc of [locales.pt, locales.en, locales.es]) {
+      expect(loc["settings.page.memory"]).toContain("ai-memory");
+      expect(loc["settings.page.memory"]).not.toMatch(/Só você aprova|Only you approve|Solo tú apruebas/i);
+    }
   });
 });

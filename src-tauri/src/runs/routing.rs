@@ -441,7 +441,7 @@ pub(crate) fn pick_in_pool(
         .filter_map(|m| agent.accounts.iter().find(|a| &a.account_id == m))
         .collect();
     if members.is_empty() {
-        return Err(format!("o pool '{}' não tem nenhuma conta de {} que ainda exista", spec.name, agent.label));
+        return Err(crate::accounts::pools::empty_pool_error(&spec.name));
     }
 
     let mut notes = Vec::new();

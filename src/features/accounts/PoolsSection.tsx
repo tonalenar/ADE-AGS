@@ -613,7 +613,7 @@ export function PoolsTabPage() {
           pools.map((pool) => {
             const agentLabel = capable.find((c) => c.agentId === pool.agentId)?.label ?? pool.agentId;
             const Icon = agentIcon(pool.agentId, agentLabel);
-            const empty = isPoolEmpty(pool);
+            const empty = isPoolEmpty(pool, accountsLoaded ? accounts : undefined);
             const paused = Boolean(pool.paused);
             const preview = previews[pool.id];
             const pickedLabel = preview?.available ? memberName(pool.agentId, preview.accountId) : null;

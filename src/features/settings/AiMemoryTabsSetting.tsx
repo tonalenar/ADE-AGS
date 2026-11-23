@@ -15,7 +15,15 @@ export function AiMemoryTabsSetting() {
     <SettingsToggleRow
       checked={enabled}
       onChange={(value) => {
-        void persistToggle(value, setEnabled, () => setSetting("ai_memory_tabs_enabled", value ? "true" : "false"), (e) => toastToggleError(t("settings.aiMemoryTabs.label"), e));
+        void persistToggle(
+          value,
+          setEnabled,
+          async () => {
+            await setSetting("ai_memory_tabs_enabled", value ? "true" : "false");
+            window.dispatchEvent(new CustomEvent("ade-ai-memory-setting-changed", { detail: value }));
+          },
+          (e) => toastToggleError(t("settings.aiMemoryTabs.label"), e),
+        );
       }}
       label={t("settings.aiMemoryTabs.label")}
       description={t("settings.aiMemoryTabs.desc")}
