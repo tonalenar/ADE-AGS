@@ -372,6 +372,7 @@ pub fn run() {
             crate::ipc::commands::peer_queue::peer_queue_send_now,
             crate::ipc::commands::canal::structured_state_all,
             crate::ipc::commands::canal::conversation_timeline,
+            crate::ipc::commands::canal::conversation_timeline_since,
             crate::ipc::commands::routine::routine_list_all,
             crate::ipc::commands::routine::routine_set_enabled,
             crate::ipc::commands::routine::routine_set_catch_up,
