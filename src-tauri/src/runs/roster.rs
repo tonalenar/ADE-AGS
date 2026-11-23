@@ -141,6 +141,8 @@ pub struct OpencodeModel {
     pub cost_in: Option<f64>,
     pub cost_out: Option<f64>,
     pub context: Option<u64>,
+    /// Os `variants` do modelo (o «esforço» do OpenCode: low, medium, high…), do menor ao maior; vazio se não tem.
+    pub variants: Vec<String>,
 }
 
 /// Traduce la salida de `opencode models --verbose`.
@@ -197,7 +199,17 @@ fn opencode_model(id: &str, body: &str) -> OpencodeModel {
         cost_in: get("/cost/input").and_then(|c| c.as_f64()),
         cost_out: get("/cost/output").and_then(|c| c.as_f64()),
         context,
+        variants: opencode_variants(get("/variants")),
     }
+}
+
+/// Os níveis de esforço que a CLI aceita (os mesmos do resto do app), do menor ao maior.
+const EFFORT_ORDER: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+/// As chaves de `variants` que são níveis conhecidos, ordenadas; qualquer outra variante fica de fora.
+fn opencode_variants(variants: Option<&serde_json::Value>) -> Vec<String> {
+    let Some(map) = variants.and_then(|v| v.as_object()) else { return Vec::new() };
+    EFFORT_ORDER.iter().filter(|level| map.contains_key(**level)).map(|level| level.to_string()).collect()
 }
 
 /// Los nombres de la tabla de `ollama list` (`NAME  ID  SIZE  MODIFIED`).
@@ -256,7 +268,7 @@ pub fn opencode_roster_models(
                 } else {
                     ModelAvailability::Unknown
                 },
-                reasoning_levels: None,
+                reasoning_levels: (!m.variants.is_empty()).then(|| m.variants.clone()),
                 default_reasoning: None,
         fast_supported: None,
                 aliases: Vec::new(),

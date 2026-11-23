@@ -6271,6 +6271,7 @@
   "automation.paused.fixRounds_other": "{{count}} rondas de corrección se interrumpieron por el cierre y no vuelven ni con el botón: reabre las tareas desde la Flota.",
   "automation.resume": "Reanudar automatización",
   "chat.team.provision.closed": "la conversación se cerró antes de entrar al equipo",
+  "chat.team.provision.dismiss": "Descartar",
   "chat.team.mirror.refusedTitle": "Cambio en el lienzo rechazado",
   "chat.team.mirror.refused": "El equipo no aceptó el cambio en el lienzo: {{error}}. El lienzo volvió a lo que tiene el equipo.",
   "chat.team.provision.entering": "entrando al equipo…",

@@ -294,6 +294,7 @@ CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code
   chat new \"...\" [--cwd <pasta>]              Abre uma conversa e manda a mensagem (pasta: a atual)
            [--agent codex|claude-code|opencode|antigravity|cursor] [--model ...] [--effort ...] [--title ...] [--account <id>]
                                               sem --agent/--model, herda o agente e o modelo do projeto (Configurações → Projetos)
+                                              filha de uma conversa do chat (subagente): esforço baixo, salvo --effort
            [--client-request-id <id>]          Permite repetir a criação sem duplicar a conversa ou o primeiro envio
            [--access ask|edits|safe|full|plan] · ask (padrão): a pessoa aprova o que o agente roda;
                                               plan: todos menos o Codex (planeja antes de editar);
