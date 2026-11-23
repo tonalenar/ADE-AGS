@@ -706,6 +706,43 @@ fn o_teste_de_conexao_diz_o_que_falta_e_conecta_quando_ha_servidor() {
     assert!(result.error.is_none());
 }
 
+#[test]
+fn teste_de_conexao_com_rascunho_usa_o_que_esta_na_tela_e_valida_url_e_chave() {
+    let url = serve(200, SUCCESS, Duration::ZERO);
+    let draft = commands::ConnectionTestDraft {
+        provider: "laya_local".into(),
+        base_url: url,
+        model: "multilingual".into(),
+        timeout_ms: 1_500,
+        api_key: Some("sk-rascunho-123456".into()),
+    };
+    let (target, key) = commands::target_from_draft(&draft).expect("rascunho válido");
+    assert_eq!(target.provider, ProviderKind::LayaLocal);
+    assert_eq!(key.as_deref(), Some("sk-rascunho-123456"));
+    let result = commands::ping(&target, key);
+    assert!(result.ok, "{:?}", result.error);
+
+    // HTTP fora de localhost é recusado antes de chamar a rede.
+    let insecure = commands::ConnectionTestDraft {
+        provider: "jev".into(),
+        base_url: "http://api.typesafe.ai".into(),
+        model: "jev-latest".into(),
+        timeout_ms: 800,
+        api_key: Some("sk-rascunho-123456".into()),
+    };
+    assert!(commands::target_from_draft(&insecure).is_err());
+
+    // Chave curta demais no rascunho é recusada sem ir à rede.
+    let short_key = commands::ConnectionTestDraft {
+        provider: "jev".into(),
+        base_url: "https://api.typesafe.ai".into(),
+        model: "jev-latest".into(),
+        timeout_ms: 800,
+        api_key: Some("curta".into()),
+    };
+    assert!(commands::target_from_draft(&short_key).is_err());
+}
+
 // ── 3. O relatório separa as perguntas e o que só o provedor diz ────────
 
 fn insert(conn: &Connection, index: i64, point: &str, heuristic: &str, provider: &str) {

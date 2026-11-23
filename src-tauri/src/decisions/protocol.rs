@@ -136,6 +136,11 @@ pub struct DecisionResponse {
 pub enum DecisionError {
     Timeout,
     Unauthorized,
+    /// Saldo/cota/crédito esgotado (HTTP 402 ou HTTP 429 de cota/crédito). Não se repete.
+    QuotaExhausted {
+        code: u16,
+        message: String,
+    },
     Unprocessable(String),
     Malformed(String),
     /// `message` é a frase do corpo, já truncada e sem a chave. Vazio, fica só o código.
@@ -147,11 +152,60 @@ pub enum DecisionError {
     Unavailable(String),
 }
 
+/// Indica se um erro HTTP 402 ou 429 representa saldo/cota/crédito esgotado (não é rate limit passageiro). Pura.
+pub fn is_quota_exhausted(code: u16, message: &str, raw_body: &str) -> bool {
+    if code == 402 {
+        return true;
+    }
+    if code != 429 {
+        return false;
+    }
+    let combined = format!("{message}\n{raw_body}").to_lowercase();
+    const QUOTA_MARKERS: &[&str] = &[
+        "insufficient_quota",
+        "insufficient quota",
+        "insufficient_credits",
+        "insufficient credits",
+        "insufficient credit",
+        "insufficient_balance",
+        "insufficient balance",
+        "insufficient_funds",
+        "insufficient funds",
+        "quota_exceeded",
+        "quota exceeded",
+        "exceeded your current quota",
+        "quota_exhausted",
+        "quota exhausted",
+        "credit_limit",
+        "credits_exhausted",
+        "credits exhausted",
+        "credit exhausted",
+        "out_of_credits",
+        "out of credits",
+        "no_credits",
+        "no credits",
+        "billing_hard_limit",
+        "payment_required",
+        "payment required",
+        "add credits",
+        "top up",
+        "monthly quota",
+        "plan limit",
+        "sem saldo",
+        "cota esgotada",
+        "créditos esgotados",
+        "creditos esgotados",
+    ];
+    QUOTA_MARKERS.iter().any(|marker| combined.contains(marker))
+}
+
 impl DecisionError {
     pub fn code(&self) -> String {
         match self {
             Self::Timeout => "timeout".into(),
             Self::Unauthorized => "401".into(),
+            Self::QuotaExhausted { code, message } if message.is_empty() => format!("sem saldo (http {code})"),
+            Self::QuotaExhausted { code, message } => format!("sem saldo (http {code}): {message}"),
             Self::Unprocessable(message) => format!("422: {message}"),
             Self::Malformed(message) => format!("malformed: {message}"),
             Self::Status { code, message } if message.is_empty() => format!("http {code}"),
@@ -169,7 +223,7 @@ pub enum Fault {
     Network,
     /// O provedor recebeu e não deu uma resposta útil: lento, sobrecarregado, erro dele ou resposta quebrada.
     Provider,
-    /// Aqui: chave recusada, pedido recusado como inválido, provedor desligado.
+    /// Aqui: chave recusada, sem saldo/cota, pedido recusado como inválido, provedor desligado.
     Local,
 }
 
@@ -179,7 +233,11 @@ impl DecisionError {
             Self::Transport(_) => Fault::Network,
             Self::Timeout | Self::Malformed(_) => Fault::Provider,
             Self::Status { code, .. } if *code >= 500 || *code == 429 => Fault::Provider,
-            Self::Status { .. } | Self::Unauthorized | Self::Unprocessable(_) | Self::Unavailable(_) => Fault::Local,
+            Self::QuotaExhausted { .. }
+            | Self::Status { .. }
+            | Self::Unauthorized
+            | Self::Unprocessable(_)
+            | Self::Unavailable(_) => Fault::Local,
         }
     }
 
@@ -190,6 +248,7 @@ impl DecisionError {
         let what = match self {
             Self::Transport(_) => format!("falha de REDE ao falar com o Jev{tried}: a conexão não abriu ou caiu; confira a internet e tente de novo"),
             Self::Timeout => format!("o PROVEDOR do Jev não respondeu em {timeout_ms} ms{tried}: a conexão abriu, mas a resposta demorou"),
+            Self::QuotaExhausted { code, .. } => format!("o Jev está sem saldo ou com a cota esgotada (http {code}): recarregue o saldo ou confira em Ajustes → Decisões"),
             Self::Status { code: 429, .. } => format!("o PROVEDOR do Jev limitou as consultas (http 429){tried}: espere um pouco"),
             Self::Status { code, .. } if *code >= 500 => format!("o PROVEDOR do Jev está com problema (http {code}){tried}: tente de novo daqui a pouco"),
             Self::Status { code, .. } => format!("o Jev recusou o pedido (http {code}): veja Ajustes → Decisões"),
