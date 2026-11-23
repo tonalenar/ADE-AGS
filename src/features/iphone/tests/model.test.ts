@@ -78,7 +78,7 @@ describe("aparelho físico", () => {
 
 });
 
-import { frameLayout, fitScale, stepZoom, ZOOM } from "../model";
+import { frameLayout, fitScale, placeFrameButton, stepZoom, ZOOM } from "../model";
 
 describe("moldura e zoom do aparelho físico", () => {
   it("o 15 Pro Max tem o botão de ação, o volume à esquerda e o lateral à direita", () => {
@@ -102,8 +102,27 @@ describe("moldura e zoom do aparelho físico", () => {
     const screen = { width: 430, height: 932 };
     expect(fitScale(screen, { w: 500, h: 1000 }, 0.05)).toBeCloseTo(1000 / (932 + 430 * 0.1), 5);
     expect(fitScale(screen, { w: 0, h: 0 }, 0.05)).toBe(ZOOM.min);
+    // Deitado: a moldura continua do lado menor, e o aparelho cabe na caixa girada com a mesma escala.
+    const land = { width: screen.height, height: screen.width };
+    expect(fitScale(land, { w: 1000, h: 500 }, 0.05)).toBeCloseTo(fitScale(screen, { w: 500, h: 1000 }, 0.05), 5);
     expect(stepZoom(1, 1)).toBeCloseTo(1.1, 5);
     expect(stepZoom(ZOOM.max, 1)).toBe(ZOOM.max);
     expect(stepZoom(ZOOM.min, -1)).toBe(ZOOM.min);
+  });
+});
+
+describe("botões do aparelho deitado", () => {
+  const outer = { width: 500, height: 1000 };
+  const right = { button: "lock" as const, side: "right" as const, top: 0.3, height: 0.1, kind: "button" as const };
+  const left = { button: "volumeUp" as const, side: "left" as const, top: 0.2, height: 0.05, kind: "button" as const };
+
+  it("em pé fica onde está", () => {
+    expect(placeFrameButton(right, false, outer)).toEqual({ side: "right", start: 300, along: 100 });
+  });
+
+  it("deitado (ilha à esquerda): a borda esquerda vai para baixo e a direita para cima, na mesma posição ao longo do lado maior", () => {
+    const land = { width: 1000, height: 500 };
+    expect(placeFrameButton(left, true, land)).toEqual({ side: "bottom", start: 200, along: 50 });
+    expect(placeFrameButton(right, true, land)).toEqual({ side: "top", start: 300, along: 100 });
   });
 });
