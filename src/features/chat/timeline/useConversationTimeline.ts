@@ -3,7 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 
 import { structuredOf, type StructuredPhase } from "@/features/terminal/structuredState";
 
-import { conversationTimeline } from "../ipc";
+import { conversationTimelineSince } from "../ipc";
+import { applyTimelineDelta, type TimelineKnown } from "./delta";
 import type { Timeline } from "./types";
 
 interface State {
@@ -14,7 +15,8 @@ interface State {
 }
 
 /**
- * A timeline de uma aba, ao vivo: lê uma vez e relê quando o backend avisa que o transcript cresceu
+ * A timeline de uma aba, ao vivo: lê uma vez e relê (só o que mudou: a cauda desde a última revisão, com os
+ * itens iguais reaproveitados) quando o backend avisa que o transcript cresceu
  * (`cc-conversation-grew`) ou que o canal da aba mudou (`cc-structured-state`, que também diz se o
  * agente está trabalhando). Nunca dois pedidos ao mesmo tempo: um aviso no meio de uma leitura
  * pede mais uma, no fim.
@@ -23,8 +25,12 @@ export function useConversationTimeline(tabId: string): State {
   const [state, setState] = useState<State>(() => ({ timeline: null, loaded: false, phase: structuredOf(tabId)?.phase ?? null }));
   const inFlight = useRef(false);
   const again = useRef(false);
+  const known = useRef<TimelineKnown | null>(null);
+  const current = useRef<Timeline | null>(null);
 
   useEffect(() => {
+    known.current = null;
+    current.current = null;
     if (!tabId) {
       setState({ timeline: null, loaded: true, phase: null });
       return;
@@ -36,8 +42,27 @@ export function useConversationTimeline(tabId: string): State {
         return;
       }
       inFlight.current = true;
-      conversationTimeline(tabId)
-        .then((timeline) => { if (alive) setState((s) => ({ ...s, timeline, loaded: true })); })
+      conversationTimelineSince(tabId, known.current)
+        .then((delta) => {
+          if (!alive) return;
+          if (!delta) {
+            known.current = null;
+            current.current = null;
+            setState((s) => ({ ...s, timeline: null, loaded: true }));
+            return;
+          }
+          const next = applyTimelineDelta(current.current, delta);
+          if (!next) {
+            // A cauda não encaixa no que se tem: recomeça do zero.
+            known.current = null;
+            current.current = null;
+            again.current = true;
+            return;
+          }
+          known.current = { rev: delta.rev, count: delta.total };
+          current.current = next;
+          setState((s) => (s.timeline === next && s.loaded ? s : { ...s, timeline: next, loaded: true }));
+        })
         .catch(() => { if (alive) setState((s) => ({ ...s, loaded: true })); })
         .finally(() => {
           inFlight.current = false;

@@ -29,6 +29,7 @@ pub mod codex;
 pub mod codex_map;
 pub mod codex_parar;
 pub mod envio;
+pub mod deltas;
 pub mod events;
 pub mod fork;
 pub mod fork_portatil;
@@ -57,6 +58,8 @@ pub mod worktree;
 mod attach_test;
 #[cfg(test)]
 mod autocompact_test;
+#[cfg(test)]
+mod deltas_test;
 #[cfg(test)]
 mod bancada;
 #[cfg(test)]

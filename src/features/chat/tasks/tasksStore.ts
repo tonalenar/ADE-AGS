@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { listen } from "@tauri-apps/api/event";
 
 import { getSetting, setSetting } from "@/shared/ipc/settings";
 
@@ -11,6 +10,7 @@ import {
   applyTaskEvent, applyTaskItem, clearFinished, EMPTY_TASKS, markLost, parsePersisted, serializePersisted, stopRoute,
   type BgTask, type TaskEvent, type ThreadTasks,
 } from "./tasksModel";
+import { onThreadEvent } from "../threadEvents";
 
 /**
  * As tarefas em segundo plano de cada conversa, pela chave dela (`thread:<id>`, a mesma do modelo unificado). Chegam
@@ -135,13 +135,12 @@ export function startTasks(): void {
     | { type: "taskItem"; threadId: string; parentToolUseId: string; item: TimelineItem }
     | { type: "closed"; threadId: string }
     | { type: string; threadId: string };
-  void listen<Payload>("cc-chat-thread", (e) => {
-    const p = e.payload;
+  onThreadEvent<Payload>((p) => {
     if (p.type === "task" && "task" in p) receiveTask(p.threadId, p.task);
     else if (p.type === "taskItem" && "item" in p) receiveTaskItem(p.threadId, p.parentToolUseId, p.item);
     // O processo fechou: o que rodava nele parou junto.
     else if (p.type === "closed") patch(threadKey(p.threadId), (s) => markLost(s, Date.now()));
-  }).catch(() => undefined);
+  });
 }
 
 /** Só para os testes: volta ao começo. */

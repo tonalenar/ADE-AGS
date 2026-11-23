@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import type { TimelineDelta, TimelineKnown } from "./timeline/delta";
 import type { Timeline } from "./timeline/types";
 import type { ChatWorktreeSubmodules } from "./chatWorkspacePrefs";
 
@@ -18,6 +19,13 @@ export const harnessCapabilityMatrix = () => invoke<HarnessCapabilityMatrixRow[]
  * arquivo ainda).
  */
 export const conversationTimeline = (tabId: string) => invoke<Timeline | null>("conversation_timeline", { tabId });
+
+/**
+ * Como `conversationTimeline`, mas só a cauda que mudou desde `known` (`conversation_timeline_since`). Sem
+ * `known`, vem tudo. Use `applyTimelineDelta` para juntar ao que já se tem.
+ */
+export const conversationTimelineSince = (tabId: string, known: TimelineKnown | null) =>
+  invoke<TimelineDelta | null>("conversation_timeline_since", { tabId, known });
 
 export interface WorkingDiff {
   root: string;
