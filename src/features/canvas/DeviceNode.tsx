@@ -1,35 +1,20 @@
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { NodeResizer, Position } from "@xyflow/react";
 import { CordPort } from "./cords";
 import { Button, CloseIcon } from "neogestify-ui-components";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
+import {
+  androidFrame, androidKey, androidStartAvd, androidSwipe, androidTap, androidText, useAndroidList, type AndroidFrame,
+} from "@/features/android/ipc";
 
 import { PHONE_MIN, type CanvasPortal } from "./board";
 import { NOTE_HEADER_H } from "./geometry";
 import { androidFrameShouldPoll } from "./androidPoll";
 
 import { canvasActions, useActiveBoardKey, useCanvasActive } from "./store";
-
-interface AndroidDevice {
-  serial: string;
-  state: string;
-  model: string;
-}
-
-interface AndroidList {
-  devices: AndroidDevice[];
-  avds: string[];
-  adb: boolean;
-}
-
-interface Frame {
-  png: string;
-  width: number;
-  height: number;
-}
 
 /** Timer do aviso "iniciando" o AVD: o caller limpa no unmount. */
 export function armStartingTimeout(onDone: () => void, ms = 20_000): () => void {
@@ -39,8 +24,6 @@ export function armStartingTimeout(onDone: () => void, ms = 20_000): () => void 
 
 /** Cada cuánto se vuelve a pedir la pantalla: `screencap` tarda, no tiene sentido pedir más rápido. */
 const FRAME_EVERY_MS = 700;
-/** Cada cuánto se vuelve a mirar qué dispositivos hay. */
-const LIST_EVERY_MS = 4000;
 /** Lo que hay que moverse para que un gesto sea un deslizamiento y no un toque. */
 const SWIPE_PX = 12;
 
@@ -84,9 +67,10 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
   const { t } = useTranslation();
   const key = useActiveBoardKey();
   const surfaceOpen = useCanvasActive();
+  const documentVisible = useDocumentVisible();
   const [armed, setArmed] = useState(false);
-  const [list, setList] = useState<AndroidList | null>(null);
-  const [frame, setFrame] = useState<Frame | null>(null);
+  const list = useAndroidList(surfaceOpen && documentVisible);
+  const [frame, setFrame] = useState<AndroidFrame | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [typing, setTyping] = useState("");
   const [starting, setStarting] = useState(false);
@@ -110,19 +94,6 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
     return () => window.clearTimeout(timer);
   }, [armed]);
 
-  // A lista e os quadros esperam o canvas na tela. Com o chat por cima, o nó continua montado e não consulta o adb.
-  useEffect(() => {
-    if (!surfaceOpen) return;
-    let alive = true;
-    const load = () => invoke<AndroidList>("android_list").then((l) => alive && setList(l)).catch(() => undefined);
-    void load();
-    const timer = window.setInterval(load, LIST_EVERY_MS);
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-    };
-  }, [surfaceOpen]);
-
   // El dispositivo que se ve: el elegido si está listo, o el único que haya.
   const ready = (list?.devices ?? []).filter((d) => d.state === "device");
   const chosen = portal.serial && ready.some((d) => d.serial === portal.serial)
@@ -135,13 +106,13 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
       setFrame(null);
       return;
     }
-    if (!androidFrameShouldPoll({ hidden: document.hidden, surfaceOpen, onScreen })) return;
+    if (!androidFrameShouldPoll({ hidden: !documentVisible, surfaceOpen, onScreen })) return;
     let alive = true;
     let timer: number | undefined;
     const tick = async () => {
       if (androidFrameShouldPoll({ hidden: document.hidden, surfaceOpen, onScreen })) {
         try {
-          const f = await invoke<Frame>("android_frame", { serial: chosen });
+          const f = await androidFrame(chosen);
           if (alive) {
             setFrame(f);
             setProblem(null);
@@ -157,7 +128,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [chosen, surfaceOpen, onScreen]);
+  }, [chosen, surfaceOpen, onScreen, documentVisible]);
 
   const fail = (e: unknown) => AlertaToast(portal.name, String(e), "error", 5000);
 
@@ -165,7 +136,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
     setStarting(true);
     canvasActions.updatePortal(key ?? "", id, { avd });
     try {
-      await invoke("android_start_avd", { name: avd });
+      await androidStartAvd(avd);
     } catch (e) {
       fail(e);
     } finally {
@@ -199,14 +170,14 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
     const to = point(e);
     if (!chosen || !from || !to) return;
     if (Math.hypot(to.x - from.x, to.y - from.y) > SWIPE_PX * (frame ? frame.width / 360 : 1)) {
-      invoke("android_swipe", { serial: chosen, x1: from.x, y1: from.y, x2: to.x, y2: to.y }).catch(fail);
+      androidSwipe(chosen, from.x, from.y, to.x, to.y).catch(fail);
     } else {
-      invoke("android_tap", { serial: chosen, x: to.x, y: to.y }).catch(fail);
+      androidTap(chosen, to.x, to.y).catch(fail);
     }
   };
 
   const press = useCallback(
-    (keyName: string) => chosen && invoke("android_key", { serial: chosen, keyName }).catch(fail),
+    (keyName: string) => chosen && androidKey(chosen, keyName).catch(fail),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [chosen],
   );
@@ -215,7 +186,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
     const text = typing;
     if (!text || !chosen) return;
     setTyping("");
-    invoke("android_text", { serial: chosen, text }).catch((e) => {
+    androidText(chosen, text).catch((e) => {
       setTyping(text);
       fail(e);
     });

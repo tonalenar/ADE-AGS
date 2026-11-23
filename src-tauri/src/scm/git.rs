@@ -54,6 +54,12 @@ pub(crate) fn classify_failure(stderr: &str) -> ScmError {
 }
 
 fn base(root: &str, args: &[&str]) -> Command {
+    base_command(root, args, false)
+}
+
+/// Monta o comando git. Quando `read_only` é verdadeiro, define `GIT_OPTIONAL_LOCKS=0`
+/// para que leituras (`status`, `diff`, `log`...) não disputem `.git/index.lock` com os agentes.
+pub(crate) fn base_command(root: &str, args: &[&str], read_only: bool) -> Command {
     let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(root);
     // fsmonitor off: um hook de monitor no `.git/config` compartilhado não deve pausar o painel.
@@ -65,6 +71,9 @@ fn base(root: &str, args: &[&str]) -> Command {
     // colgada.
     cmd.env("GIT_TERMINAL_PROMPT", "0");
     cmd.env("GCM_INTERACTIVE", "never");
+    if read_only {
+        cmd.env("GIT_OPTIONAL_LOCKS", "0");
+    }
 
     // Y sin terminal de control: con la app lanzada desde una consola (`tauri dev`), ssh
     // abre `/dev/tty` directamente para pedir la passphrase — y se queda esperando en esa
@@ -80,9 +89,8 @@ fn base(root: &str, args: &[&str]) -> Command {
     cmd
 }
 
-/// Corre git y devuelve su stdout, o el error ya clasificado.
-pub(crate) fn run(root: &str, args: &[&str], limit: Duration) -> Result<Vec<u8>, ScmError> {
-    let out = output_with_timeout(&mut base(root, args), limit)
+fn execute(mut cmd: Command, args: &[&str], limit: Duration) -> Result<Vec<u8>, ScmError> {
+    let out = output_with_timeout(&mut cmd, limit)
         .map_err(|e| ScmError::Git(format!("git {}: {e}", args.first().unwrap_or(&""))))?;
     if out.status.success() {
         return Ok(out.stdout);
@@ -94,8 +102,22 @@ pub(crate) fn run(root: &str, args: &[&str], limit: Duration) -> Result<Vec<u8>,
     Err(classify_failure(&message))
 }
 
+/// Corre git y devuelve su stdout, o el error ya clasificado.
+pub(crate) fn run(root: &str, args: &[&str], limit: Duration) -> Result<Vec<u8>, ScmError> {
+    execute(base_command(root, args, false), args, limit)
+}
+
 pub(crate) fn run_text(root: &str, args: &[&str], limit: Duration) -> Result<String, ScmError> {
     run(root, args, limit).map(|out| String::from_utf8_lossy(&out).into_owned())
+}
+
+/// Corre git de leitura com `GIT_OPTIONAL_LOCKS=0` para não disputar `index.lock` com os agentes.
+pub(crate) fn run_readonly(root: &str, args: &[&str], limit: Duration) -> Result<Vec<u8>, ScmError> {
+    execute(base_command(root, args, true), args, limit)
+}
+
+pub(crate) fn run_readonly_text(root: &str, args: &[&str], limit: Duration) -> Result<String, ScmError> {
+    run_readonly(root, args, limit).map(|out| String::from_utf8_lossy(&out).into_owned())
 }
 
 /// Las operaciones que salen a la red, con las variables con las que git se autentica con
@@ -164,7 +186,7 @@ pub(super) fn credentialed_overrides() -> Result<Vec<String>, ScmError> {
 
 /// El root del repo que contiene `cwd`, o `None` si no hay repo.
 pub(super) fn repo_root(cwd: &str) -> Option<String> {
-    run_text(cwd, &["rev-parse", "--show-toplevel"], LOCAL)
+    run_readonly_text(cwd, &["rev-parse", "--show-toplevel"], LOCAL)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())

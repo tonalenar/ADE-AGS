@@ -3,9 +3,11 @@ import { presentDeviceTool, shouldProbeDevices, type DeviceKind, type DeviceTool
 import { observeForegroundApp } from "./foregroundApp";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import {
+  androidFrame, androidKey, androidStartAvd, androidSwipe, androidTap, useAndroidList, type AndroidFrame,
+} from "@/features/android/ipc";
 import { toDevicePoint } from "@/features/canvas/DeviceNode";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { DEFAULT_SCREEN } from "@/features/simulator/geometry";
@@ -518,35 +520,22 @@ function IosMore({ device, booted, onBoot, onDone, onError }: { device: SimDevic
 // Android (prancheta 10)
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-interface AndroidList { devices: { serial: string; state: string; model: string }[]; avds: string[]; adb: boolean }
-interface Frame { png: string; width: number; height: number }
-
 /** Os mesmos ritmos do nó do canvas: `screencap` demora, e um emulador demora a aparecer. */
 const FRAME_EVERY_MS = 700;
-const LIST_EVERY_MS = 4000;
 const SWIPE_PX = 12;
 const LOGCAT_LINES = 200;
 
 export function AndroidPane({ composerTarget }: { composerTarget?: string | null }) {
   const { t } = useTranslation();
-  const [list, setList] = useState<AndroidList | null>(null);
   const [infos, setInfos] = useState<Record<string, AndroidInfo>>({});
   const picked = useChatStore((s) => s.devices.android);
-  const [frame, setFrame] = useState<Frame | null>(null);
+  const [frame, setFrame] = useState<AndroidFrame | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const img = useRef<HTMLImageElement>(null);
   const down = useRef<{ x: number; y: number } | null>(null);
   const { ref, size } = useBoxSize();
   const documentVisible = useDocumentVisible();
-
-  useEffect(() => {
-    if (!documentVisible) return;
-    let alive = true;
-    const load = () => invoke<AndroidList>("android_list").then((l) => alive && setList(l)).catch(() => undefined);
-    void load();
-    const timer = window.setInterval(load, LIST_EVERY_MS);
-    return () => { alive = false; window.clearInterval(timer); };
-  }, [documentVisible]);
+  const list = useAndroidList(documentVisible);
 
   const ready = useMemo(() => (list?.devices ?? []).filter((d) => d.state === "device"), [list]);
   const chosen = picked && ready.some((d) => d.serial === picked) ? picked : ready[0]?.serial ?? null;
@@ -574,7 +563,7 @@ export function AndroidPane({ composerTarget }: { composerTarget?: string | null
     const tick = async () => {
       if (!document.hidden) {
         try {
-          const f = await invoke<Frame>("android_frame", { serial: chosen });
+          const f = await androidFrame(chosen);
           if (alive) { setFrame(f); setProblem(null); }
         } catch (e) {
           if (alive) setProblem(String(e));
@@ -599,13 +588,13 @@ export function AndroidPane({ composerTarget }: { composerTarget?: string | null
     const to = point(e);
     if (!chosen || !from || !to) return;
     if (Math.hypot(to.x - from.x, to.y - from.y) > SWIPE_PX * (frame ? frame.width / 360 : 1)) {
-      invoke("android_swipe", { serial: chosen, x1: from.x, y1: from.y, x2: to.x, y2: to.y }).catch(fail);
+      androidSwipe(chosen, from.x, from.y, to.x, to.y).catch(fail);
     } else {
-      invoke("android_tap", { serial: chosen, x: to.x, y: to.y }).catch(fail);
+      androidTap(chosen, to.x, to.y).catch(fail);
     }
   };
-  const press = (keyName: string) => { if (chosen) invoke("android_key", { serial: chosen, keyName }).catch(fail); };
-  const startAvd = (name: string) => { invoke("android_start_avd", { name }).catch(fail); };
+  const press = (keyName: string) => { if (chosen) androidKey(chosen, keyName).catch(fail); };
+  const startAvd = (name: string) => { androidStartAvd(name).catch(fail); };
   const words = { emulator: t("chat.devices.emulator"), usb: t("chat.devices.usb") };
   const avds = list?.avds ?? [];
 
