@@ -655,6 +655,17 @@ pub async fn real_browser_screenshot(app: AppHandle, id: String) -> Result<Value
     Ok(json!({ "data": shot["data"], "width": viewport["clientWidth"], "height": viewport["clientHeight"] }))
 }
 
+/// A foto da página direto para o disco: o PNG do CDP é decodificado uma vez e gravado como captura, sem base64 de ida e volta
+/// pelo IPC nem recodificação no webview. Devolve o caminho. Quem precisa dos pixels (recorte, marcas) usa `real_browser_screenshot`.
+#[tauri::command]
+pub async fn real_browser_screenshot_save(app: AppHandle, id: String, tag: Option<String>) -> Result<String, String> {
+    use base64::Engine as _;
+    let shot = native::cdp(&app, &id, "Page.captureScreenshot", json!({ "format": "png" })).await?;
+    let data = shot["data"].as_str().ok_or("O navegador não devolveu a foto.")?;
+    let png = base64::engine::general_purpose::STANDARD.decode(data).map_err(|_| "A foto do navegador veio inválida.".to_string())?;
+    crate::preview::capture::guardar_png_con_tag(png, tag.as_deref()).await
+}
+
 /// Identidade de aparelho para testes de web mobile: user agent, densidade, `mobile` e toque.
 /// `platform` `None` volta ao navegador de mesa. O tamanho da página continua sendo o da vista
 /// (o quadro que a interface desenha); aqui só muda quem a página acha que é.

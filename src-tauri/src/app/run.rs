@@ -243,6 +243,7 @@ pub fn run() {
             crate::real_browser::real_browser_focus,
             crate::real_browser::real_browser_post,
             crate::real_browser::real_browser_screenshot,
+            crate::real_browser::real_browser_screenshot_save,
             crate::real_browser::real_browser_emulate,
             crate::design::design_create,
             crate::design::design_delete,
