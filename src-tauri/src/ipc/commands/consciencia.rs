@@ -357,11 +357,27 @@ fn title_of(task: &str) -> String {
 
 fn queue_list(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let all = args.get("all").and_then(Value::as_bool).unwrap_or(false);
-    let (items, snapshot) = with_conn(app, |conn| {
-        let parent = parent_of(conn, args)?;
-        Ok((queue::list(conn, parent.as_deref(), all)?, Snapshot::read(conn, crate::util::now_ts_ms())?))
-    })?;
+    let parent = with_conn(app, |conn| parent_of(conn, args))?;
+    list_view(app, parent.as_deref(), all)
+}
+
+fn list_view(app: &AppHandle, parent: Option<&str>, all: bool) -> Result<Value, String> {
+    let (items, snapshot) = with_conn(app, |conn| Ok((queue::list(conn, parent, all)?, Snapshot::read(conn, crate::util::now_ts_ms())?)))?;
     Ok(json!({ "items": view(&items, &snapshot), "maxAgents": snapshot.limit }))
+}
+
+/// A fila para a tela do time: `parent` é a conversa do orquestrador (`thread:<id>` ou o id da aba); sem ele, todas.
+pub fn queue_for_ui(app: &AppHandle, parent: Option<String>, all: bool) -> Result<Value, String> {
+    list_view(app, parent.as_deref(), all)
+}
+
+/// Cancelar pela tela: é a pessoa, então vale para qualquer orquestrador.
+pub fn cancel_for_ui(app: &AppHandle, id: &str) -> Result<bool, String> {
+    let cancelled = with_conn(app, |conn| queue::cancel(conn, id, None, crate::util::now_ts_ms()))?;
+    if cancelled {
+        wake(app);
+    }
+    Ok(cancelled)
 }
 
 /// Cada item com o motivo de espera de agora (a carga e os branches se leem fora do lock do banco).
@@ -448,7 +464,9 @@ pub(crate) fn tick(app: &AppHandle) -> Result<Option<i64>, String> {
         if !reasons.is_empty() {
             let text = reasons.join("; ");
             if text != item.reason {
+                // A tela do time mostra o motivo: ela relê quando ele muda.
                 let _ = with_conn(app, |conn| queue::set_reason(conn, &item.id, &text, crate::util::now_ts_ms()));
+                changed_any = true;
             }
             continue;
         }

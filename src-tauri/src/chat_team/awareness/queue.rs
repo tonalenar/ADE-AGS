@@ -23,8 +23,6 @@ pub const PENDING: &str = "pending";
 pub const LAUNCHED: &str = "launched";
 #[cfg(test)]
 pub const CANCELLED: &str = "cancelled";
-#[cfg(test)]
-pub const FAILED: &str = "failed";
 
 /// Uma condição de espera. `target` é a conversa (`thread:<id>`) ou o branch; `label` é como o orquestrador a chamou.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
