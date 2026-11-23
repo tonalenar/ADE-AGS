@@ -874,7 +874,7 @@ pub(crate) fn account_limits_get_now(
     Ok(ledger::load_limits(&conn, &account_key))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn account_limits_set(
     app: AppHandle,
     account_key: String,
@@ -928,12 +928,12 @@ pub async fn run_preview_route(
     .await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn run_get_tiers(db: tauri::State<DbConnection>) -> routing::Tiers {
     routing::load_tiers(&db)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn run_set_tiers(
     tiers: routing::Tiers,
     db: tauri::State<DbConnection>,
@@ -1386,7 +1386,7 @@ pub fn run_pending_approvals() -> Vec<broker::PendingApproval> {
 ///
 /// F-01: este comando Tauri (a tela) é o ÚNICO caminho que decide. O IPC (`ags`, MCP) recusa
 /// `approval.decide`/`approval.list` sempre, porque não prova que quem chama não é um agente.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn run_decide_approval(
     app: AppHandle,
     approval_id: String,

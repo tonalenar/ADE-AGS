@@ -43,7 +43,7 @@ pub struct SkillDraft {
 const COPY_SUFFIX: &str = "-local";
 
 /// Crea una skill propia, de origen local, desde el constructor.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_skill(
     draft: SkillDraft,
     db: tauri::State<DbConnection>,

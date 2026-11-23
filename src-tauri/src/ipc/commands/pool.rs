@@ -149,12 +149,12 @@ pub(super) fn pool_delete(app: &AppHandle, args: &Value) -> Result<Value, String
 
 // ── Para la pantalla ────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pool_list_all(app: AppHandle) -> Result<Vec<Pool>, String> {
     Ok(pools::load(&db(&app)?))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pool_save_new(
     app: AppHandle,
     name: String,
@@ -187,7 +187,7 @@ pub fn pool_save_new(
 }
 
 /// Atualiza nome, membros, ordem e estratégia de um pool existente, preservando o `pool.id`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pool_update(
     app: AppHandle,
     id: String,
@@ -244,7 +244,7 @@ pub fn pool_preview_picks(app: AppHandle) -> Result<Vec<PoolPickPreview>, String
     Ok(out)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pool_remove(app: AppHandle, id: String) -> Result<(), String> {
     let db = db(&app)?;
     let mut all = pools::load(&db);
@@ -255,7 +255,7 @@ pub fn pool_remove(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pool_set_failover(app: AppHandle, id: String, enabled: bool) -> Result<Pool, String> {
     let db = db(&app)?;
     let updated = pools::set_paused(&db, &id, !enabled)?;
@@ -263,7 +263,7 @@ pub fn pool_set_failover(app: AppHandle, id: String, enabled: bool) -> Result<Po
     Ok(updated)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pool_set_paused(app: AppHandle, id: String, paused: bool) -> Result<Pool, String> {
     let db = db(&app)?;
     let updated = pools::set_paused(&db, &id, paused)?;

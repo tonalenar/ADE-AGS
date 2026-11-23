@@ -208,7 +208,7 @@ pub async fn chat_project_agent_policy_check(
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_project_agent_policy_save(
     db: State<'_, DbConnection>,
     cwd: String,

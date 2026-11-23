@@ -458,7 +458,7 @@ pub fn after_turn(app: &AppHandle, db: &DbConnection, thread_id: &str, result: &
 
 // ── Comandos Tauri ──────────────────────────────────────────────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_limit_resume_pref_get(db: State<'_, DbConnection>) -> bool {
     resume_enabled(&db)
 }
@@ -497,7 +497,7 @@ pub async fn chat_limit_resume_get(
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_limit_resume_cancel(db: State<'_, DbConnection>, thread_id: String) {
     cancel_resume(&db, &thread_id);
 }
