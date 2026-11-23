@@ -1,7 +1,7 @@
 //! O Cursor (`cursor-agent`) de cada conversa, sem TUI: um processo `cursor-agent -p --output-format stream-json
 //! --stream-partial-output` POR TURNO (ver `cursor_map` para o protocolo e o que não foi conferido). A conversa continua
-//! com `--resume <session_id>`; o id vem do `system/init` e fica em `chat_thread.remote_id`. Ao contrário do Antigravity
-//! (`agy.rs`), o processo fecha ao fim de cada turno e volta com `--resume` na próxima mensagem.
+//! com `--resume <session_id>`; o id vem do `system/init` e fica em `chat_thread.remote_id`. O processo fecha ao fim de
+//! cada turno e volta com `--resume` na próxima mensagem.
 //!
 //! No modo `-p` o Cursor não pergunta nada: sem `--force`, o que precisaria de aprovação não é aplicado (e vem como
 //! ação recusada), então esta conversa nunca gera pedidos de aprovação. Não há conta por conversa (o login é o do
@@ -20,12 +20,20 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::database::DbConnection;
 
-use super::agy::pick_duration;
 use super::cursor_map::{self as map, Mapper, Out};
 use super::claude_map::TurnResult;
 use super::events::emit;
 use super::resume::{run_turn_resuming, Observed, TurnAttempt};
 use super::{store, turn};
+
+/// A duração do turno: a que o agente informa só vale se couber no relógio do app (mais a folga do relógio dele).
+/// Pura.
+pub fn pick_duration(reported_ms: Option<i64>, elapsed_ms: i64) -> i64 {
+    match reported_ms {
+        Some(d) if d >= 0 && d <= elapsed_ms + 5_000 => d,
+        _ => elapsed_ms,
+    }
+}
 
 /// Linhas finais do stderr guardadas para explicar um processo que fechou sem `result`.
 const STDERR_TAIL: usize = 20;

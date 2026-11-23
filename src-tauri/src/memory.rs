@@ -1,7 +1,6 @@
 //! Histórico legado de memória do ADE, mantido para migração, leitura e manutenção do usuário.
 //! A memória durável atual fica no ai-memory; Run Facts seguem como canal de colaboração por execução.
 
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -32,10 +31,7 @@ pub const RELEVANT_LIMIT: usize = 10;
 const KINDS: &[&str] = &["decision", "finding", "file", "constraint", "note"];
 
 fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
+    crate::util::now_ts()
 }
 
 fn hash(kind: &str, body: &str) -> String {
@@ -1546,6 +1542,7 @@ pub fn task_tool(
 }
 
 /// MCP de memória com `repo_key` resolvida antes de adquirir o mutex do banco.
+#[cfg(test)]
 pub fn task_tool_with_repo(
     conn: &Connection,
     task_id: &str,

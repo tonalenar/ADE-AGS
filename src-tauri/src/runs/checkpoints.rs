@@ -40,7 +40,7 @@ use rusqlite::{Connection, params};
 use serde::Serialize;
 
 use super::types::{Task, status};
-use crate::util::{external_path, now_ts, output_with_timeout};
+use crate::util::now_ts;
 
 const GIT_FAST: Duration = Duration::from_secs(20);
 const GIT_SLOW: Duration = Duration::from_secs(120);
@@ -83,30 +83,16 @@ fn git(
     envs: &[(&str, &str)],
     limit: Duration,
 ) -> Result<String, String> {
-    let mut cmd = crate::util::spawn::hidden_command("git");
-    cmd.arg("-C").arg(external_path(dir)).args(args);
     // Identidad propia: un commit "por fuera" no puede fallar porque la máquina no tenga `user.name`.
-    cmd.env("GIT_AUTHOR_NAME", "ADE AGS")
-        .env("GIT_AUTHOR_EMAIL", "checkpoint@ags.local")
-        .env("GIT_COMMITTER_NAME", "ADE AGS")
-        .env("GIT_COMMITTER_EMAIL", "checkpoint@ags.local");
-    for (k, v) in envs {
-        cmd.env(k, v);
-    }
-    let out = output_with_timeout(&mut cmd, limit)
-        .map_err(|e| format!("não foi possível rodar o git: {e}"))?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout)
-            .trim_end_matches(['\n', '\r'])
-            .to_string())
-    } else {
-        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        Err(if err.is_empty() {
-            format!("git {} falló", args.join(" "))
-        } else {
-            err
-        })
-    }
+    let mut all_envs = Vec::with_capacity(4 + envs.len());
+    all_envs.extend_from_slice(&[
+        ("GIT_AUTHOR_NAME", "ADE AGS"),
+        ("GIT_AUTHOR_EMAIL", "checkpoint@ags.local"),
+        ("GIT_COMMITTER_NAME", "ADE AGS"),
+        ("GIT_COMMITTER_EMAIL", "checkpoint@ags.local"),
+    ]);
+    all_envs.extend_from_slice(envs);
+    crate::util::git::run_with_env(dir, args, &all_envs, limit)
 }
 
 /// La raíz del repo (o worktree) que contiene `dir`.
@@ -518,12 +504,7 @@ fn live_task(conn: &Connection, run_id: &str) -> Result<Option<String>, String> 
 }
 
 fn db_of(app: &tauri::AppHandle) -> Result<crate::database::DbConnection, String> {
-    use tauri::Manager;
-    Ok(app
-        .try_state::<crate::database::DbConnection>()
-        .ok_or("o banco de dados não está disponível")?
-        .inner()
-        .clone())
+    crate::database::db_of(app)
 }
 
 #[tauri::command]

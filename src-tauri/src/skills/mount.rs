@@ -16,7 +16,9 @@
 //! la skill global.
 
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(any(windows, test))]
+use std::path::PathBuf;
 
 use crate::util::external_path;
 

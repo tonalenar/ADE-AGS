@@ -16,7 +16,7 @@ use crate::database::DbConnection;
 use super::codex::RequestFailure;
 use super::envio::{SendError, SendMode};
 use super::store::{self, MessageSearchHit, RequestRow, ThreadRow, Tuning};
-use super::{agy, claude, codex, codex_map, cursor, opencode};
+use super::{claude, codex, codex_map, cursor, opencode};
 
 /// Quem fala com o agente de uma conversa por protocolo.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,7 +211,6 @@ fn live_turn(thread_id: &str) -> Option<Option<String>> {
         .map(|s| s.turn())
         .or_else(|| claude::get(thread_id).map(|s| s.turn()))
         .or_else(|| opencode::get(thread_id).map(|s| s.turn()))
-        .or_else(|| agy::get(thread_id).map(|s| s.turn()))
         .or_else(|| cursor::get(thread_id).map(|s| s.turn()))
 }
 
@@ -221,7 +220,6 @@ fn close(thread_id: &str) {
     codex::close(thread_id);
     claude::close(thread_id);
     opencode::close(thread_id);
-    agy::close(thread_id);
     cursor::close(thread_id);
 }
 
@@ -231,7 +229,6 @@ pub(super) fn has_live_session(thread_id: &str) -> bool {
     codex::get(thread_id).is_some()
         || claude::get(thread_id).is_some()
         || opencode::get(thread_id).is_some()
-        || agy::get(thread_id).is_some()
         || cursor::get(thread_id).is_some()
 }
 
@@ -1456,10 +1453,6 @@ pub async fn interrupt(thread_id: &str) -> Result<Interrupted, String> {
     }
     if let Some(session) = opencode::get(thread_id) {
         return opencode::interrupt(&session).await.map(interrupted_of);
-    }
-    if agy::get(thread_id).is_some() {
-        agy::interrupt(thread_id);
-        return Ok(Interrupted::Sent);
     }
     if cursor::get(thread_id).is_some() {
         cursor::interrupt(thread_id);

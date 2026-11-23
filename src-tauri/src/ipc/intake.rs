@@ -65,6 +65,7 @@ impl Drop for InFlightBytes {
     }
 }
 
+#[cfg(test)]
 pub(super) fn try_reserve_inflight_bytes(n: usize) -> Option<InFlightBytes> {
     let mut hold = InFlightBytes::empty();
     hold.add(n)?;

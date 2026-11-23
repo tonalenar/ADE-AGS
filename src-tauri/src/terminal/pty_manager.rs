@@ -1830,6 +1830,7 @@ pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {
 
 /// A fila de escrita de uma sessão. Soltá-la fecha o lado mestre (o cancelamento acorda a escrita presa) e mata o
 /// processo. Uma queda de escrita avisa por `avisar`.
+#[cfg(test)]
 pub(crate) fn fila_de_escrita(
     mestre: &dyn MasterPty,
     matador: Box<dyn portable_pty::ChildKiller + Send + Sync>,
@@ -2105,10 +2106,7 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
 
 const POST_KILL_REAP: std::time::Duration = std::time::Duration::from_millis(150);
 
-async fn stop_replaced_sessions(sessions: Vec<PtySession>) {
-    stop_replaced_sessions_with(move || stop_sessions(sessions, std::time::Duration::from_secs(2))).await;
-}
-
+#[cfg(test)]
 async fn stop_replaced_sessions_with<F>(cleanup: F)
 where
     F: FnOnce() -> Result<(), String> + Send + 'static,

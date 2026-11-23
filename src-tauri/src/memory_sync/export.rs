@@ -10,7 +10,6 @@ use crate::ai_memory::scoped_bridge::reserved_project;
 use crate::ai_memory::types::{Page, Project, RecentPage};
 use crate::memory::agent::looks_like_user_secret;
 
-pub const DEFAULT_REPO_NAME: &str = "ade-memoria";
 pub const DEFAULT_INTERVAL_HOURS: u32 = 6;
 const RECENT_EXPORT_LIMIT: u32 = 500;
 
@@ -71,7 +70,6 @@ pub(crate) struct LegacyEntry {
 pub(crate) struct LegacyRevision {
     pub entry_id: String,
     pub scope: String,
-    pub mission_id: Option<String>,
     pub key: String,
     pub revision: i64,
     pub operation: String,
@@ -204,7 +202,7 @@ pub(crate) fn load_legacy_snapshot(
 
     let mut rev_stmt = conn
         .prepare(
-            "SELECT r.entry_id, e.scope, e.mission_id, e.key, r.revision, r.operation, r.kind, r.priority, r.body, r.actor_kind, r.reason, r.created_at, r.decided_at
+            "SELECT r.entry_id, e.scope, e.key, r.revision, r.operation, r.kind, r.priority, r.body, r.actor_kind, r.reason, r.created_at, r.decided_at
              FROM memory_revisions r
              JOIN memory_entries e ON e.id = r.entry_id
              WHERE e.workspace_id = ?1
@@ -218,17 +216,16 @@ pub(crate) fn load_legacy_snapshot(
             Ok(LegacyRevision {
                 entry_id: r.get(0)?,
                 scope: r.get(1)?,
-                mission_id: r.get(2)?,
-                key: r.get(3)?,
-                revision: r.get(4)?,
-                operation: r.get(5)?,
-                kind: r.get(6)?,
-                priority: r.get(7)?,
-                body: r.get(8)?,
-                actor_kind: r.get(9)?,
-                reason: r.get(10)?,
-                created_at: r.get(11)?,
-                decided_at: r.get(12)?,
+                key: r.get(2)?,
+                revision: r.get(3)?,
+                operation: r.get(4)?,
+                kind: r.get(5)?,
+                priority: r.get(6)?,
+                body: r.get(7)?,
+                actor_kind: r.get(8)?,
+                reason: r.get(9)?,
+                created_at: r.get(10)?,
+                decided_at: r.get(11)?,
             })
         })
         .map_err(|e| e.to_string())?

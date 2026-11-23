@@ -21,16 +21,7 @@ pub struct IntegrationConflicts {
     pub files: Vec<ConflictFile>,
 }
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
-    let mut c = crate::util::spawn::hidden_command("git");
-    c.arg("-C").arg(crate::util::external_path(root)).args(args);
-    let o = crate::util::output_with_timeout(&mut c, std::time::Duration::from_secs(30))
-        .map_err(|e| e.to_string())?;
-    if !o.status.success() {
-        return Err(String::from_utf8_lossy(&o.stderr).trim().into());
-    }
-    Ok(String::from_utf8_lossy(&o.stdout)
-        .trim_end_matches(['\r', '\n'])
-        .into())
+    crate::util::git::run(root, args, std::time::Duration::from_secs(30))
 }
 fn integration_refs(c: &rusqlite::Connection, mission: &str) -> Result<(String, PathBuf), String> {
     let (branch, path) =

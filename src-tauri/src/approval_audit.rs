@@ -16,7 +16,9 @@
 //! que só lê a primeira resposta. Gravar aqui é best-effort: uma falha do registro nunca muda a
 //! resposta ao agente.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
+#[cfg(test)]
+use rusqlite::OptionalExtension;
 use uuid::Uuid;
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
@@ -84,6 +86,7 @@ impl Outcome {
         }
     }
 
+    #[cfg(test)]
     pub fn parse(value: &str) -> Option<Outcome> {
         [Outcome::AllowedOnce, Outcome::Rejected, Outcome::Cancelled, Outcome::Unavailable]
             .into_iter()
@@ -91,6 +94,7 @@ impl Outcome {
     }
 
     /// Se a ferramenta pode rodar. É a única pergunta que importa para o agente.
+    #[cfg(test)]
     pub fn releases(self) -> bool {
         self == Outcome::AllowedOnce
     }
@@ -145,6 +149,7 @@ pub fn decided(
 }
 
 /// Um evento lido de volta (para a tela e os testes).
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
@@ -161,6 +166,7 @@ pub struct Event {
 }
 
 /// O par de um pedido: `(asked, decided)`.
+#[cfg(test)]
 pub fn pair(conn: &Connection, source: Source, call_id: &str) -> rusqlite::Result<(Option<Event>, Option<Event>)> {
     let read = |phase: &str| {
         conn.query_row(

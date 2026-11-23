@@ -111,6 +111,10 @@ impl NodeModulesLinkStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WorktreeShell {
+    #[cfg_attr(
+        all(not(windows), not(test)),
+        expect(dead_code, reason = "selecionado pelo shell padrão no Windows")
+    )]
     PowerShell,
     #[cfg_attr(
         all(windows, not(test)),

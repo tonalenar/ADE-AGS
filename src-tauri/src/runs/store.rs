@@ -344,6 +344,7 @@ pub struct DelegationReceipt {
     pub task_keys: Vec<String>,
 }
 
+#[cfg(test)]
 pub fn delegation_receipt(
     conn: &Connection,
     caller_key: &str,
@@ -855,6 +856,7 @@ pub(crate) fn reserve_next_attempt(conn: &Connection, task_id: &str) -> Result<R
 /// status, resultado, erro e `events_path` ficam onde foram gravados. A linha da tarefa
 /// volta para `pending` porque é o estado corrente que o scheduler lê; o histórico é
 /// `run_attempts`.
+#[cfg(test)]
 pub fn resume_task(conn: &Connection, task_id: &str, explicit: bool) -> Result<ResumedAttempt, String> {
     let task = task_by_id(conn, task_id)?.ok_or_else(|| "a tarefa não existe".to_string())?;
     if matches!(task.status.as_str(), status::READY | status::RUNNING) || open_attempt_is_running(conn, task_id)? {
