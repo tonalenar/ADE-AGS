@@ -116,4 +116,37 @@ describe("ScmPanel: erro do git passa por uiErrorText", () => {
       vi.useRealTimers();
     }
   });
+
+  it("não empilha scm_status enquanto a leitura anterior está em voo e aplica backoff após falha", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolvePending!: (v: typeof repo) => void;
+      mocks.scmStatus
+        .mockResolvedValueOnce(repo)
+        .mockImplementationOnce(() => new Promise((res) => { resolvePending = res; }))
+        .mockRejectedValueOnce({ message: "git lento" })
+        .mockResolvedValue(repo);
+
+      mount();
+      await act(async () => { hosts[0].root.render(<ScmPanel cwd="/a" />); });
+      await flush();
+      expect(mocks.scmStatus).toHaveBeenCalledTimes(1);
+
+      // Dispara o 1º poll aos 4 s e deixa pendente (simulando git lento sob carga).
+      await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+      expect(mocks.scmStatus).toHaveBeenCalledTimes(2);
+
+      // Mais 12 s se passam com o git ainda em voo: nenhum outro scm_status é lançado em paralelo.
+      await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+      expect(mocks.scmStatus).toHaveBeenCalledTimes(2);
+
+      // Quando termina (demorou 12 s >= 1,5 s), aplica backoff: não relança em 4 s.
+      await act(async () => { resolvePending(repo); });
+      await flush();
+      await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+      expect(mocks.scmStatus).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

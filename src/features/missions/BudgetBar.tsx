@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 
+import { startVisiblePolling } from "@/shared/visiblePolling";
+
 import { missionBudget } from "./budgetIpc";
 import type { BudgetLevel, BudgetStatus } from "./budgetTypes";
 
@@ -69,13 +71,19 @@ export function useBudgetStatus(missionId: string): BudgetStatus | null {
   const [status, setStatus] = useState<BudgetStatus | null>(null);
   useEffect(() => {
     let stale = false;
-    const load = () => missionBudget(missionId).then((s) => { if (!stale) setStatus(s); }).catch(() => { if (!stale) setStatus(null); });
-    load();
-    const timer = setInterval(load, 60_000);
-    const off = listen<{ missionId: string }>("cc-budget-changed", (e) => { if (e.payload?.missionId === missionId) load(); });
+    const poll = startVisiblePolling(
+      () =>
+        missionBudget(missionId)
+          .then((s) => { if (!stale) setStatus(s); })
+          .catch(() => { if (!stale) setStatus(null); }),
+      60_000,
+    );
+    const off = listen<{ missionId: string }>("cc-budget-changed", (e) => {
+      if (e.payload?.missionId === missionId) poll.trigger();
+    });
     return () => {
       stale = true;
-      clearInterval(timer);
+      poll.stop();
       off.then((f) => f()).catch(() => {});
     };
   }, [missionId]);
