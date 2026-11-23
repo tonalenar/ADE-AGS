@@ -63,3 +63,21 @@ export const aiMemoryMigrate = (workspaceId: string, cwd: string) =>
 
 export const aiMemoryMigrationReport = (workspaceId: string) =>
   invoke<AiMemoryMigrationRow[]>("ai_memory_migration_report", { workspaceId });
+
+/** Grava uma memória do usuário diretamente no ai-memory do projeto da pasta atual (sem workspace/projeto do front). */
+export const aiMemoryWriteUser = (
+  cwd: string,
+  missionId: string | null,
+  key: string,
+  kind: string,
+  body: string,
+  reason?: string | null,
+) =>
+  invoke<string>("ai_memory_write_user", {
+    cwd,
+    missionId: missionId ?? null,
+    key,
+    kind,
+    body,
+    reason: reason ?? null,
+  });

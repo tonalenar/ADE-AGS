@@ -136,6 +136,7 @@ pub fn run() {
             crate::ai_memory::ai_memory_disable_forget_sweep,
             crate::ai_memory::ai_memory_projects,
             crate::ai_memory::ai_memory_sessions,
+            crate::ai_memory::ai_memory_write_user,
             crate::desktop_apps::gemini_desktop_status,
             crate::desktop_apps::gemini_desktop_attach,
             crate::desktop_apps::gemini_desktop_layout,

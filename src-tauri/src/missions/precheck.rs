@@ -494,7 +494,7 @@ pub(crate) fn validate_launch_with_pools(
             .filter_map(|m| agent.accounts.iter().find(|a| &a.account_id == m))
             .collect();
         if members.is_empty() {
-            return Err("missions.error.accountMissing".into());
+            return Err("missions.error.poolEmpty".into());
         }
         let logged: Vec<&crate::runs::roster::RosterAccount> =
             members.into_iter().filter(|a| a.logged_in).collect();

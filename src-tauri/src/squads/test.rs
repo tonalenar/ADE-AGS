@@ -719,10 +719,35 @@ fn squads_aceitam_pool_valido_e_verificam_disponibilidade_de_pool() {
     missing.lead.account_id = Some("pool:Inexistente".into());
     assert!(store::validate(&conn, &missing).unwrap_err().contains("Inexistente"));
 
-    // Pool sem membros vivos falha na validação.
+    // Pool sem membros vivos (órfão) falha na validação com empty_pool_error estruturado.
     let mut empty = draft.clone();
     empty.members[0].account_id = Some("pool:Orfao".into());
-    assert!(store::validate(&conn, &empty).unwrap_err().contains("no available accounts"));
+    let orphan_err = store::validate(&conn, &empty).unwrap_err();
+    let orphan_json = &orphan_err[orphan_err.find('{').unwrap_or_else(|| panic!("sem JSON estruturado: {orphan_err}"))..];
+    let orphan_parsed: serde_json::Value = serde_json::from_str(orphan_json)
+        .unwrap_or_else(|_| panic!("erro de pool órfão no squad deve ser JSON estruturado: {orphan_err}"));
+    assert_eq!(orphan_parsed["code"], crate::accounts::pools::EMPTY_POOL_CODE);
+    assert_eq!(orphan_parsed["pool"], "Orfao");
+
+    // Se todas as contas de um pool deixam de existir sem reescrever o pool salvo, assignment_status reporta empty_pool_error.
+    let solo_pool = serde_json::json!([
+        {"id":"p-claude","name":"Trabalho","agentId":"claude-code","members":[null,"acc-c1"],"strategy":"least_used","failover":true,"paused":false},
+        {"id":"p-codex","name":"CodexPool","agentId":"codex","members":["acc-apagada"],"strategy":"sticky","failover":true,"paused":false}
+    ])
+    .to_string();
+    conn.execute("UPDATE settings SET value = ?1 WHERE key = 'accounts.pools'", [&solo_pool]).unwrap();
+    let with_orphan = store::get(&conn, &saved.id).unwrap().unwrap();
+    assert_eq!(with_orphan.members[0].availability, AssignmentAvailability::AccountMissing);
+    let reason = with_orphan.members[0].unavailable_reason.as_deref().unwrap_or("");
+    let reason_parsed: serde_json::Value = serde_json::from_str(reason)
+        .unwrap_or_else(|_| panic!("availability_reason de pool órfão deve ser JSON estruturado: {reason}"));
+    assert_eq!(reason_parsed["code"], crate::accounts::pools::EMPTY_POOL_CODE);
+    assert_eq!(reason_parsed["pool"], "CodexPool");
+    // O pool salvo em settings não é reescrito nem limpo.
+    let stored_after: String = conn
+        .query_row("SELECT value FROM settings WHERE key = 'accounts.pools'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(stored_after, solo_pool);
 
     // Se o pool for removido depois de salvo, assignment_status reporta AccountMissing.
     conn.execute("UPDATE settings SET value = '[]' WHERE key = 'accounts.pools'", []).unwrap();

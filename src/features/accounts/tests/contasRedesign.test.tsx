@@ -309,4 +309,24 @@ describe("Redesenho de Configurações → Provedores e contas", () => {
     await click(deleteBtn);
     expect(document.body.textContent).toContain('accounts.pools.deleteDialog.title {"name":"Vazio"}');
   });
+
+  it("na aba Pools e na aba Contas, um pool órfão (só contas apagadas) aparece como Pool vazio", async () => {
+    currentPools = [
+      { id: "p-orphan", name: "Orfao", agentId: "antigravity", members: ["conta-apagada-1", "conta-apagada-2"], strategy: "sticky", failover: true, paused: false },
+    ];
+    usePoolsStore.setState({ pools: currentPools, loaded: true });
+
+    await mount();
+    await click(tabs()[1]); // Contas
+    const agyTab = [...host.querySelectorAll('[role="tab"]')].find((b) => b.textContent?.includes("Antigravity"));
+    await click(agyTab ?? null);
+    expect(host.textContent).toContain('settings.accounts.poolLineEmpty {"name":"Orfao"}');
+
+    await click(tabs()[2]); // Pools
+    const row = host.querySelector('[data-pool-row="p-orphan"]')!;
+    expect(row.textContent).toContain("accounts.pools.emptyState");
+    expect(row.textContent).toContain("accounts.pools.emptyStateHint");
+    expect(row.textContent).not.toContain("accounts.unavailable");
+    expect(row.textContent).not.toContain("accounts.pools.noneAvailable");
+  });
 });

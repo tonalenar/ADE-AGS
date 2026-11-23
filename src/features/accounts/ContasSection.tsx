@@ -530,7 +530,7 @@ export function ContasSection({ initialProvider = null, onOpenPools }: ContasSec
               {agentPools.map((pool, i) => (
                 <span key={pool.id}>
                   {i > 0 ? " · " : ""}
-                  {isPoolEmpty(pool)
+                  {isPoolEmpty(pool, accountsLoaded ? accounts : undefined)
                     ? t("settings.accounts.poolLineEmpty", { name: pool.name })
                     : t("settings.accounts.poolLine", {
                       name: pool.name,
@@ -585,7 +585,7 @@ export function ContasSection({ initialProvider = null, onOpenPools }: ContasSec
       )}
 
       {removingFor && (() => {
-        const { kept, emptied } = affectedPoolsOnAccountDelete(pools, removingFor.id);
+        const { kept, emptied } = affectedPoolsOnAccountDelete(pools, removingFor.id, accountsLoaded ? accounts : undefined);
         return (
           <RemoveAccountDialog
             account={removingFor}

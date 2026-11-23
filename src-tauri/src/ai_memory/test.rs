@@ -666,6 +666,112 @@ while :; do :; done
     }
 
     #[test]
+    fn escrita_do_usuario_grava_no_ai_memory_com_escopo_e_tags_de_usuario_e_missao() {
+        let db = std::sync::Arc::new(std::sync::Mutex::new(crate::database::test_db()));
+        let fake = Fake::new("ai-memory 3.3.0", "cat > \"$ROOT/body\"");
+
+        let path = super::super::commands::write_user_memory_with_scope(
+            &db,
+            &fake.client(),
+            "team",
+            "ADE-AGS",
+            None,
+            "padrao-testes",
+            "decision",
+            "usar bun run test",
+            Some("decisao do time"),
+        )
+        .unwrap();
+
+        assert!(path.starts_with("ade-ags/padrao-testes-"), "{path}");
+        let argv = fs::read_to_string(fake.root.join("argv")).unwrap();
+        assert!(argv.contains("write-page"));
+        assert!(argv.contains("--title=padrao-testes"));
+        assert!(argv.contains("--kind=decision"));
+        assert!(argv.contains("--tag=ade-ags"));
+        assert!(argv.contains("--tag=user"));
+        assert!(argv.contains("--workspace=team"));
+        assert!(argv.contains("--project=ADE-AGS"));
+        assert_eq!(
+            fs::read_to_string(fake.root.join("body")).unwrap(),
+            "usar bun run test\n\nMotivo: decisao do time"
+        );
+
+        let mission_path = super::super::commands::write_user_memory_with_scope(
+            &db,
+            &fake.client(),
+            "team",
+            "ADE-AGS",
+            Some("mission-42"),
+            "regra-missao",
+            "constraint",
+            "nao quebrar api",
+            None,
+        )
+        .unwrap();
+        assert!(mission_path.starts_with("ade-ags/mission-mission-42-"), "{mission_path}");
+        let argv_mission = fs::read_to_string(fake.root.join("argv")).unwrap();
+        assert!(argv_mission.contains("--kind=rule"));
+        assert!(argv_mission.contains("--tag=mission-mission-42"));
+    }
+
+    #[test]
+    fn escrita_do_usuario_falha_quando_ai_memory_esta_desligado_ou_com_segredo_ou_projeto_reservado() {
+        let db = std::sync::Arc::new(std::sync::Mutex::new(crate::database::test_db()));
+        let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+
+        // Com ai-memory desligado, recusa antes de chamar o binário.
+        crate::database::set_setting(&db, super::super::tabs::TABS_SETTING, "false").unwrap();
+        let disabled = super::super::commands::write_user_memory_with_scope(
+            &db,
+            &fake.client(),
+            "team",
+            "ADE-AGS",
+            None,
+            "nota",
+            "note",
+            "conteudo seguro",
+            None,
+        )
+        .unwrap_err();
+        assert!(disabled.to_lowercase().contains("desativado"), "{disabled}");
+        assert!(!fake.root.join("argv").exists());
+
+        // Religa o ai-memory para validar filtro de segredo e projeto reservado.
+        crate::database::set_setting(&db, super::super::tabs::TABS_SETTING, "true").unwrap();
+        let secret = super::super::commands::write_user_memory_with_scope(
+            &db,
+            &fake.client(),
+            "team",
+            "ADE-AGS",
+            None,
+            "nota-segredo",
+            "note",
+            "password: super-secret-value",
+            None,
+        )
+        .unwrap_err();
+        assert!(secret.contains(crate::memory::agent::SECRET_CONFIRMATION_CODE), "{secret}");
+        assert!(!secret.contains("super-secret-value"));
+        assert!(!fake.root.join("argv").exists());
+
+        let reserved = super::super::commands::write_user_memory_with_scope(
+            &db,
+            &fake.client(),
+            "team",
+            "_global",
+            None,
+            "nota",
+            "note",
+            "conteudo seguro",
+            None,
+        )
+        .unwrap_err();
+        assert!(reserved.to_lowercase().contains("reservado"), "{reserved}");
+        assert!(!fake.root.join("argv").exists());
+    }
+
+    #[test]
     fn bridges_estaticos_nao_recebem_mcp_automatico_sem_escopo_imposto() {
         let fake = Fake::new("ai-memory 3.3.0", "cat \"$(dirname \"$0\")/result.json\"");
         fs::write(fake.root.join("result.json"), "[]").unwrap();

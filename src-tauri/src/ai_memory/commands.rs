@@ -50,6 +50,39 @@ pub(crate) fn write_agent_memory_for_scope(
     write_prepared_agent_memory(&client, &workspace, &project, prepared)
 }
 
+fn user_write_tags(mission_id: Option<&str>) -> Vec<String> {
+    let mut tags = vec!["ade-ags".to_string(), "user".to_string()];
+    if let Some(id) = mission_id.map(str::trim).filter(|id| !id.is_empty()) {
+        tags.push(format!("mission-{}", id.chars().take(32).collect::<String>()));
+    }
+    tags
+}
+
+/// Grava memória do usuário no ai-memory resolvendo o projeto pela pasta atual (nunca pelo front).
+pub(super) fn write_user_memory_in_db(
+    db: &DbConnection,
+    cwd: &str,
+    mission_id: Option<&str>,
+    key: &str,
+    kind: &str,
+    body: &str,
+    reason: Option<&str>,
+) -> Result<String, String> {
+    if !memory_enabled(db) {
+        return Err("O ai-memory está desativado nas configurações.".into());
+    }
+    if cwd.trim().is_empty() {
+        return Err("Nenhuma pasta aberta para resolver o projeto no ai-memory.".into());
+    }
+    let mission_id = mission_id.map(str::trim).filter(|id| !id.is_empty());
+    let tags = user_write_tags(mission_id);
+    let prepared = prepare_agent_write(key, mission_id, kind, body, &tags, reason)?;
+    let path = prepared.path.clone();
+    let (client, workspace, project) = scoped_client(cwd)?;
+    write_prepared_agent_memory(&client, &workspace, &project, prepared)?;
+    Ok(path)
+}
+
 /// Busca páginas no projeto resolvido pela pasta da aba. Nunca aceita projeto vindo do chamador.
 pub(crate) fn search_project_pages(cwd: &str, query: &str) -> Result<Vec<SearchHit>, String> {
     let (client, workspace, project) = scoped_client(cwd)?;
@@ -171,6 +204,34 @@ pub(super) fn write_agent_memory_with_scope(
     write_prepared_agent_memory(client, workspace, project, prepared)
 }
 
+/// Entrada de teste para a escrita do usuário no ai-memory, preservando validação, preferência e escopo.
+#[cfg(test)]
+pub(super) fn write_user_memory_with_scope(
+    db: &DbConnection,
+    client: &Client,
+    workspace: &str,
+    project: &str,
+    mission_id: Option<&str>,
+    key: &str,
+    kind: &str,
+    body: &str,
+    reason: Option<&str>,
+) -> Result<String, String> {
+    if !memory_enabled(db) {
+        return Err("O ai-memory está desativado nas configurações.".into());
+    }
+    super::sessions::validate_scope(workspace, project)?;
+    if super::scoped_bridge::reserved_project(project) {
+        return Err("Projeto reservado não permitido.".into());
+    }
+    let mission_id = mission_id.map(str::trim).filter(|id| !id.is_empty());
+    let tags = user_write_tags(mission_id);
+    let prepared = prepare_agent_write(key, mission_id, kind, body, &tags, reason)?;
+    let path = prepared.path.clone();
+    write_prepared_agent_memory(client, workspace, project, prepared)?;
+    Ok(path)
+}
+
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
@@ -281,4 +342,31 @@ pub fn ai_memory_migration_report(
     db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<MigrationRow>, String> {
     migracao::report(&db, &workspace_id)
+}
+
+/// Grava uma memória do usuário diretamente no ai-memory do projeto resolvido pela pasta atual.
+/// Nunca aceita workspace ou projeto vindos do frontend; aplica filtro de segredos.
+#[tauri::command]
+pub async fn ai_memory_write_user(
+    cwd: String,
+    mission_id: Option<String>,
+    key: String,
+    kind: String,
+    body: String,
+    reason: Option<String>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<String, String> {
+    let db = db.inner().clone();
+    blocking(move || {
+        write_user_memory_in_db(
+            &db,
+            &cwd,
+            mission_id.as_deref(),
+            &key,
+            &kind,
+            &body,
+            reason.as_deref(),
+        )
+    })
+    .await
 }

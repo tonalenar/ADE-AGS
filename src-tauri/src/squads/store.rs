@@ -106,11 +106,10 @@ fn validate_provider(
                     pool.name, pool.agent_id
                 ));
             }
-            if pool.members.is_empty() {
+            if pool.members.is_empty()
+                || !pool_has_live_member(conn, pool).map_err(|error| error.to_string())?
+            {
                 return Err(crate::accounts::pools::empty_pool_error(&pool.name));
-            }
-            if !pool_has_live_member(conn, pool).map_err(|error| error.to_string())? {
-                return Err(format!("pool '{}' has no available accounts", pool.name));
             }
             return Ok(());
         }
@@ -343,16 +342,10 @@ fn assignment_status(
                         )),
                     ));
                 }
-                Ok(pool) if pool.members.is_empty() => {
+                Ok(pool) if pool.members.is_empty() || !pool_has_live_member(conn, pool)? => {
                     return Ok((
                         AssignmentAvailability::AccountMissing,
                         Some(crate::accounts::pools::empty_pool_error(&pool.name)),
-                    ));
-                }
-                Ok(pool) if !pool_has_live_member(conn, pool)? => {
-                    return Ok((
-                        AssignmentAvailability::AccountMissing,
-                        Some(format!("pool '{}' has no available accounts", pool.name)),
                     ));
                 }
                 Ok(_) => {}

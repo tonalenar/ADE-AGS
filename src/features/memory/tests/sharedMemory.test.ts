@@ -23,6 +23,9 @@ const mock = vi.hoisted(() => ({
   listen: vi.fn(),
   sync: vi.fn(),
   retrySync: vi.fn(),
+  aiProbe: vi.fn(),
+  aiWrite: vi.fn(),
+  getSetting: vi.fn(),
 }));
 vi.mock("../ipc", () => ({
   listMemory: mock.list,
@@ -35,6 +38,13 @@ vi.mock("../ipc", () => ({
   listMemorySnapshot: mock.snapshot,
   getRepoSyncStatus: mock.sync,
   retryRepoSync: mock.retrySync,
+}));
+vi.mock("../aiMemoryIpc", () => ({
+  aiMemoryProbe: mock.aiProbe,
+  aiMemoryWriteUser: mock.aiWrite,
+}));
+vi.mock("@/shared/ipc/settings", () => ({
+  getSetting: mock.getSetting,
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mock.listen }));
 vi.mock("react-i18next", () => ({
@@ -52,8 +62,8 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 vi.mock("neogestify-ui-components", () => ({
-  Button: ({ children, onClick, disabled }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean }) =>
-    createElement("button", { onClick, disabled }, children),
+  Button: ({ children, onClick, disabled, title }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean; title?: string }) =>
+    createElement("button", { onClick, disabled, title }, children),
 }));
 
 const entry: MemoryEntry = {
@@ -127,7 +137,7 @@ const run = { id: "r1", missionId: "m1", status: "done" } as Run;
 let root: Root, container: HTMLDivElement;
 const render = async (props: Partial<Parameters<typeof SharedMemoryPanel>[0]> = {}) => {
   await act(async () => {
-    root.render(createElement(SharedMemoryPanel, { workspaceId: "w1", ...props }));
+    root.render(createElement(SharedMemoryPanel, { workspaceId: "w1", cwd: "/repo/projeto", ...props }));
   });
 };
 const click = async (text: string) => {
@@ -158,6 +168,9 @@ beforeEach(() => {
   mock.listen.mockResolvedValue(() => {});
   mock.sync.mockResolvedValue({ workspaceId: "w1", phase: "synced", error: null, commit: "abc", pending: 0 });
   mock.retrySync.mockResolvedValue({ workspaceId: "w1", phase: "queued", error: null, commit: null, pending: 1 });
+  mock.getSetting.mockResolvedValue("true");
+  mock.aiProbe.mockResolvedValue({ source: "ai-memory", trust: "UNTRUSTED", data: { state: "ok", version: "3.3.0", installation_instruction: null, status: null, sessions_supported: true } });
+  mock.aiWrite.mockResolvedValue("ade-ags/padrao-12345678.md");
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -178,20 +191,81 @@ describe("Shared Memory interface",()=>{
  it("shows tombstone and history without enabling edit",async()=>{mock.list.mockResolvedValue({items:[{...entry,status:"deleted",currentRevision:null,body:null}],hasMore:false});await render();expect(container.textContent).toContain("Excluída");expect(container.textContent).not.toContain("Propor edição");await click("Ver revisões");expect(container.textContent).toContain("Histórico: architecture");expect(container.textContent).toContain("Aprovada");expect(container.textContent).toContain("Task t1");});
  it("shows the immutable snapshot separately from Run Facts",async()=>{await render({missionId:"m1",runs:[run],activeRunId:"r1"});await click("Snapshot do Run");expect(container.textContent).toContain("Snapshot usado neste Run");expect(container.textContent).toContain("Snapshot vazio");await click("Run Facts");expect(container.textContent).toContain("Run discovery");expect(container.textContent).not.toContain("Snapshot vazio");});
  it("promotes a fact as a pending mission proposal",async()=>{await render({missionId:"m1",runs:[run],activeRunId:"r1"});await click("Run Facts");await click("Propor promoção");await change(container.querySelector('input:not([type="range"])')!,"discovery");await click("Enviar proposta");expect(mock.promote).toHaveBeenCalledWith("r1","f1","mission","discovery",0,undefined);expect(mock.decide).not.toHaveBeenCalled();});
- it("does not offer mission scope without a mission",async()=>{await render();await click("Propor memória");expect(container.querySelector('option[value="mission"]')).toBeNull();});
- it("asks for a conscious confirmation and resubmits the proposal", async () => {
-  mock.propose.mockRejectedValueOnce("CONFIRMACAO_DE_CREDENCIAL: parece uma credencial");
-  await render();
-  await click("Propor memória");
-  const dialog = container.querySelector("[role='dialog']")!;
-  await change(dialog.querySelector("input:not([type='range'])")!, "segredo");
-  await change(dialog.querySelector("textarea")!, "password: hunter2");
-  await click("Enviar proposta");
-  expect(container.textContent).toContain("confirme conscientemente");
-  expect(mock.propose).toHaveBeenCalledWith("w1", null, expect.not.objectContaining({ acknowledgeSecret: true }));
-  await click("Guardar mesmo assim");
-  expect(mock.propose).toHaveBeenLastCalledWith("w1", null, expect.objectContaining({ acknowledgeSecret: true, body: "password: hunter2", key: "segredo" }));
- });
+  it("mostra título de histórico legado (SQLite) e explica que memórias novas vão para o ai-memory", async () => {
+    await render();
+    expect(container.textContent).toContain("Histórico antigo (SQLite)");
+    expect(container.textContent).toContain("ai-memory");
+  });
+  it("does not offer mission scope without a mission", async () => {
+    await render();
+    await click("Nova memória (ai-memory)");
+    expect(container.querySelector('option[value="mission"]')).toBeNull();
+  });
+  it("cria memória nova gravando direto no ai-memory do projeto da pasta atual, sem chamar SQLite legado", async () => {
+    await render({ cwd: "/repo/projeto" });
+    await click("Nova memória (ai-memory)");
+    const dialog = container.querySelector("[role='dialog']")!;
+    expect(dialog.querySelector('input[type="range"]')).toBeNull();
+    await change(dialog.querySelector("input")!, "padrao-testes");
+    const textareas = dialog.querySelectorAll("textarea");
+    await change(textareas[0]!, "Rodar bun run test antes do PR");
+    await change(textareas[1]!, "Decisão do time");
+    await click("Salvar no ai-memory");
+    expect(mock.aiWrite).toHaveBeenCalledWith(
+      "/repo/projeto",
+      null,
+      "padrao-testes",
+      "note",
+      "Rodar bun run test antes do PR",
+      "Decisão do time",
+    );
+    expect(mock.propose).not.toHaveBeenCalled();
+  });
+  it("desabilita botão de criar com motivo quando ai-memory está desligado, ausente ou sem pasta", async () => {
+    mock.getSetting.mockResolvedValue("false");
+    await render({ cwd: "/repo/projeto" });
+    const btnOff = [...container.querySelectorAll("button")].find((b) => b.textContent === "Nova memória (ai-memory)");
+    expect(btnOff?.disabled).toBe(true);
+    expect(container.textContent).toContain("desativado");
+
+    // Reativando a configuração em tempo real e com binário ausente, mostra o motivo de ausência.
+    mock.getSetting.mockResolvedValue("true");
+    mock.aiProbe.mockResolvedValue({ source: "ai-memory", trust: "UNTRUSTED", data: { state: "missing", version: null, installation_instruction: "Instale", status: null, sessions_supported: false } });
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("ade-ai-memory-setting-changed", { detail: true }));
+    });
+    const btnMissing = [...container.querySelectorAll("button")].find((b) => b.textContent === "Nova memória (ai-memory)");
+    expect(btnMissing?.disabled).toBe(true);
+    expect(container.textContent).toContain("não está instalado");
+
+    await render({ cwd: "" });
+    const btnNoCwd = [...container.querySelectorAll("button")].find((b) => b.textContent === "Nova memória (ai-memory)");
+    expect(btnNoCwd?.disabled).toBe(true);
+    expect(container.textContent).toContain("pasta");
+  });
+  it("na criação no ai-memory, recusa segredo sem oferecer guardar mesmo assim", async () => {
+    mock.aiWrite.mockRejectedValueOnce("CONFIRMACAO_DE_CREDENCIAL: parece uma credencial");
+    await render({ cwd: "/repo/projeto" });
+    await click("Nova memória (ai-memory)");
+    const dialog = container.querySelector("[role='dialog']")!;
+    await change(dialog.querySelector("input")!, "segredo");
+    await change(dialog.querySelector("textarea")!, "password: hunter2");
+    await click("Salvar no ai-memory");
+    expect(container.textContent).not.toContain("Guardar mesmo assim");
+    expect(container.textContent).toContain("credencial");
+  });
+  it("asks for a conscious confirmation and resubmits when editing a legacy item", async () => {
+    mock.propose.mockRejectedValueOnce("CONFIRMACAO_DE_CREDENCIAL: parece uma credencial");
+    await render();
+    await click("Propor edição");
+    const dialog = container.querySelector("[role='dialog']")!;
+    await change(dialog.querySelector("textarea")!, "password: hunter2");
+    await click("Enviar proposta");
+    expect(container.textContent).toContain("confirme conscientemente");
+    expect(mock.propose).toHaveBeenCalledWith("w1", null, expect.not.objectContaining({ acknowledgeSecret: true }));
+    await click("Guardar mesmo assim");
+    expect(mock.propose).toHaveBeenLastCalledWith("w1", null, expect.objectContaining({ acknowledgeSecret: true, body: "password: hunter2", key: "architecture", operation: "update" }));
+  });
  it("asks before approving a credential and shows export warnings", async () => {
   mock.list.mockResolvedValue({ items: [pending], hasMore: false, nextCursor: null, truncated: false });
   mock.decide.mockRejectedValueOnce("CONFIRMACAO_DE_CREDENCIAL: parece uma credencial");

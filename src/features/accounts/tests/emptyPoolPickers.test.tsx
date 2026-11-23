@@ -50,7 +50,9 @@ beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   state.pools = [
     { id: "p-ok", name: "Ativo", agentId: "claude-code", members: [null, "acc-1"], strategy: "least_used", failover: true },
+    { id: "p-main-and-ghost", name: "PrincipalEGhost", agentId: "claude-code", members: [null, "acc-apagada"], strategy: "sticky", failover: true },
     { id: "p-zero", name: "Vazio", agentId: "claude-code", members: [], strategy: "sticky", failover: true },
+    { id: "p-orphan", name: "Orfao", agentId: "claude-code", members: ["acc-apagada-1", "acc-apagada-2"], strategy: "sticky", failover: true },
   ];
   usePoolsStore.setState({ pools: state.pools, loaded: true });
   useAccountsStore.setState({
@@ -81,22 +83,29 @@ describe("seletores de conta/pool com pool vazio", () => {
 
     const buttons = [...host.querySelectorAll("button")];
     const okBtn = buttons.find((b) => b.textContent?.includes("Ativo"));
+    const mainGhostBtn = buttons.find((b) => b.textContent?.includes("PrincipalEGhost"));
     const emptyBtn = buttons.find((b) => b.textContent?.includes("Vazio"));
+    const orphanBtn = buttons.find((b) => b.textContent?.includes("Orfao"));
 
     expect(okBtn).toBeTruthy();
     expect(okBtn?.disabled).toBe(false);
+    expect(mainGhostBtn).toBeTruthy();
+    expect(mainGhostBtn?.disabled).toBe(false);
     expect(emptyBtn).toBeTruthy();
     expect(emptyBtn?.disabled).toBe(true);
     expect(emptyBtn?.textContent).toContain("accounts.pools.emptyOptionReason");
+    expect(orphanBtn).toBeTruthy();
+    expect(orphanBtn?.disabled).toBe(true);
+    expect(orphanBtn?.textContent).toContain("accounts.pools.emptyOptionReason");
 
-    await act(async () => { emptyBtn?.click(); });
+    await act(async () => { emptyBtn?.click(); orphanBtn?.click(); });
     expect(onChange).not.toHaveBeenCalled();
 
     await act(async () => { okBtn?.click(); });
     expect(onChange).toHaveBeenCalledWith("pool:Ativo");
   });
 
-  it("AgentModelPicker (chat) mostra pool vazio desabilitado com motivo no seletor de contas", async () => {
+  it("AgentModelPicker (chat) mostra pool vazio e órfão desabilitados com motivo no seletor de contas", async () => {
     const agents = [{ id: "claude-code", label: "Claude Code", command: "claude", available: true } as never];
     await act(async () => {
       root.render(
@@ -113,14 +122,24 @@ describe("seletores de conta/pool com pool vazio", () => {
 
     const options = [...document.body.querySelectorAll("select[aria-label='chat.picker.account'] option")] as HTMLOptionElement[];
     const okOpt = options.find((o) => o.value === "pool:Ativo");
+    const mainGhostOpt = options.find((o) => o.value === "pool:PrincipalEGhost");
     const emptyOpt = options.find((o) => o.value === "pool:Vazio");
+    const orphanOpt = options.find((o) => o.value === "pool:Orfao");
 
     expect(okOpt).toBeTruthy();
     expect(okOpt?.disabled).toBe(false);
     expect(okOpt?.textContent).toBe("chat.picker.pool:Ativo");
 
+    expect(mainGhostOpt).toBeTruthy();
+    expect(mainGhostOpt?.disabled).toBe(false);
+    expect(mainGhostOpt?.textContent).toBe("chat.picker.pool:PrincipalEGhost");
+
     expect(emptyOpt).toBeTruthy();
     expect(emptyOpt?.disabled).toBe(true);
     expect(emptyOpt?.textContent).toBe("chat.picker.poolEmpty:Vazio");
+
+    expect(orphanOpt).toBeTruthy();
+    expect(orphanOpt?.disabled).toBe(true);
+    expect(orphanOpt?.textContent).toBe("chat.picker.poolEmpty:Orfao");
   });
 });

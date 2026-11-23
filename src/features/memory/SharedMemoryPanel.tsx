@@ -6,6 +6,8 @@ import i18next from "i18next";
 import { Button } from "neogestify-ui-components";
 
 import type { Fact, Run } from "@/features/runs/types";
+import { getSetting } from "@/shared/ipc/settings";
+import { aiMemoryProbe, aiMemoryWriteUser } from "./aiMemoryIpc";
 import { MemorySearchBar } from "./MemorySearchBar";
 import { EMPTY_SEARCH, isEmptySearch, toFilter, verificationOf, type SearchState } from "./memorySearch";
 import { PurgeButton } from "./PurgeButton";
@@ -46,8 +48,11 @@ const BODY = "whitespace-pre-wrap break-words rounded-lg bg-gray-200/50 p-2.5 te
 const CARD = "rounded-xl bg-gray-100/70 p-3 dark:bg-surface-raised/60";
 const SUBPANEL = "rounded-xl bg-violet-500/8 p-3 dark:bg-violet-300/5";
 
-export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], activeRunId = null, initialTab }: {
+type AiMemoryWriteState = "checking" | "ok" | "disabled" | "noFolder" | "missing" | "outdated" | "unavailable";
+
+export function SharedMemoryPanel({ workspaceId, cwd = "", missionId = null, runs = [], activeRunId = null, initialTab }: {
   workspaceId: string;
+  cwd?: string;
   missionId?: string | null;
   runs?: Run[];
   activeRunId?: string | null;
@@ -73,8 +78,67 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
   const [applied, setApplied] = useState<SearchState>(EMPTY_SEARCH);
   const [loadFailed, setLoadFailed] = useState(false);
   const [stats, setStats] = useState<MemoryWorkspaceStats | null>(null);
+  const [aiMemoryEnabled, setAiMemoryEnabled] = useState<boolean | null>(null);
+  const [aiMemoryState, setAiMemoryState] = useState<AiMemoryWriteState>(() => (cwd.trim() ? "checking" : "noFolder"));
   const appliedKey = JSON.stringify(applied);
   const lastKey = useRef(appliedKey);
+
+  // Acompanha se o ai-memory está ligado nas configurações (sem quebrar testes sem mock de settings).
+  useEffect(() => {
+    let current = true;
+    try {
+      getSetting("ai_memory_tabs_enabled")
+        .then((value) => { if (current) setAiMemoryEnabled(value !== "false"); })
+        .catch(() => { if (current) setAiMemoryEnabled(true); });
+    } catch {
+      setAiMemoryEnabled(true);
+    }
+    const onSettingChanged = (event: Event) => {
+      const detail = (event as CustomEvent<boolean>).detail;
+      if (typeof detail === "boolean") setAiMemoryEnabled(detail);
+    };
+    window.addEventListener("ade-ai-memory-setting-changed", onSettingChanged);
+    return () => {
+      current = false;
+      window.removeEventListener("ade-ai-memory-setting-changed", onSettingChanged);
+    };
+  }, []);
+
+  // Verifica se o ai-memory está disponível para a pasta atual antes de habilitar a criação.
+  useEffect(() => {
+    const trimmed = cwd.trim();
+    if (!trimmed) {
+      setAiMemoryState("noFolder");
+      return;
+    }
+    if (aiMemoryEnabled === false) {
+      setAiMemoryState("disabled");
+      return;
+    }
+    if (aiMemoryEnabled === null) {
+      setAiMemoryState("checking");
+      return;
+    }
+    let current = true;
+    setAiMemoryState("checking");
+    try {
+      aiMemoryProbe(trimmed)
+        .then((res) => {
+          if (!current) return;
+          const st = res?.data?.state;
+          if (st === "ok") setAiMemoryState("ok");
+          else if (st === "missing") setAiMemoryState("missing");
+          else if (st === "outdated") setAiMemoryState("outdated");
+          else setAiMemoryState("unavailable");
+        })
+        .catch(() => {
+          if (current) setAiMemoryState("unavailable");
+        });
+    } catch {
+      setAiMemoryState("unavailable");
+    }
+    return () => { current = false; };
+  }, [cwd, aiMemoryEnabled]);
   const fetchPage = useCallback((mission: string | null, cursor?: string | null) =>
     isEmptySearch(applied)
       ? (cursor ? memoryIpc.listMemory(workspaceId, mission, cursor) : memoryIpc.listMemory(workspaceId, mission))
@@ -171,6 +235,21 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
     setBusy(true);
     setError("");
     try {
+      if (form.mode === "create") {
+        await aiMemoryWriteUser(
+          cwd,
+          form.scope === "mission" ? missionId : null,
+          form.key,
+          form.kind,
+          form.body,
+          form.reason || null,
+        );
+        setForm(null);
+        setSecretPrompt(false);
+        setNotice(t("sharedMemory.aiMemory.saved"));
+        window.dispatchEvent(new CustomEvent("ade-ai-memory-changed"));
+        return;
+      }
       if (form.mode === "promote") {
         if (!selectedRunId || !form.factId) throw new Error(tr("sharedMemory.invalidFact"));
         await memoryIpc.promoteFact(selectedRunId, form.factId, form.scope, form.key, form.priority, form.reason || undefined);
@@ -193,6 +272,10 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
       setDetail(null);
       reload();
     } catch (cause) {
+      if (form.mode === "create") {
+        setError(needsSecretConfirmation(cause) ? t("sharedMemory.aiMemory.secretRejected") : errorText(cause));
+        return;
+      }
       if (needsSecretConfirmation(cause)) {
         setSecretPrompt(true);
         return;
@@ -297,6 +380,10 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
     ...(selectedRunId ? [{ id: "facts" as const, label: t("sharedMemory.tab.facts") }, { id: "snapshot" as const, label: t("sharedMemory.tab.snapshot") }] : []),
   ];
 
+  const createDisabledReason = aiMemoryState === "ok"
+    ? null
+    : t(`sharedMemory.aiMemory.${aiMemoryState}`);
+
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-gray-200 p-4 dark:border-white/[0.08]">
       <div className="flex flex-wrap items-center gap-2">
@@ -313,10 +400,15 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
           </label>
         )}
         {(tab === "workspace" || tab === "mission") && (
-          <Button variant="primary" size="sm" disabled={busy || tab === "mission" && !missionId}
+          <Button variant="primary" size="sm" disabled={busy || (tab === "mission" && !missionId) || aiMemoryState !== "ok"}
+            title={createDisabledReason ?? undefined}
             onClick={() => openCreate(tab === "mission" ? "mission" : "workspace")}>{t("sharedMemory.propose")}</Button>
         )}
       </div>
+      <p className="text-[11.5px] leading-4 text-gray-500 dark:text-white/45">{t("sharedMemory.legacyHint")}</p>
+      {(tab === "workspace" || tab === "mission") && createDisabledReason && (
+        <p className="text-[11px] leading-4 text-amber-700 dark:text-amber-300">{createDisabledReason}</p>
+      )}
       <RepoSyncNotice workspaceId={workspaceId} />
       {missionId === null && <MemoryUsageCard workspaceId={workspaceId} />}
 
@@ -469,16 +561,24 @@ function MemoryProposalForm({ form, busy, secretPrompt, fact, allowMission, onCh
     return () => { document.removeEventListener("keydown", handle); previous?.focus(); };
   }, [busy, onClose]);
   const set = <K extends keyof ProposalForm>(key: K, value: ProposalForm[K]) => onChange({ ...form, [key]: value });
+  const creating = form.mode === "create";
   const deleting = form.mode === "delete";
   const promoting = form.mode === "promote";
   const { t } = useTranslation();
-  const title = promoting ? t("sharedMemory.promoteTitle") : deleting ? t("sharedMemory.proposeDelete") : form.mode === "update" ? t("sharedMemory.proposeEdit") : t("sharedMemory.propose");
+  const title = promoting
+    ? t("sharedMemory.promoteTitle")
+    : deleting
+      ? t("sharedMemory.proposeDelete")
+      : form.mode === "update"
+        ? t("sharedMemory.proposeEdit")
+        : t("sharedMemory.createAiMemoryTitle");
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[4px]" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section ref={ref} role="dialog" aria-modal="true" aria-labelledby="memory-proposal-title"
         className="flex max-h-[90vh] w-full max-w-lg flex-col gap-3.5 overflow-y-auto rounded-2xl bg-gray-50 p-5 text-gray-900 shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)] dark:bg-surface dark:text-white">
         <h4 id="memory-proposal-title" className="text-[15px] font-semibold tracking-[-0.01em]">{title}</h4>
-        {secretPrompt && <p role="alert" className="rounded-lg bg-amber-500/10 p-2.5 text-xs leading-4 text-amber-900 dark:text-amber-200">{t("sharedMemory.secretWarn")}</p>}
+        {creating && <p className="text-xs leading-4 text-gray-600 dark:text-white/55">{t("sharedMemory.createAiMemoryNote")}</p>}
+        {secretPrompt && !creating && <p role="alert" className="rounded-lg bg-amber-500/10 p-2.5 text-xs leading-4 text-amber-900 dark:text-amber-200">{t("sharedMemory.secretWarn")}</p>}
         {deleting && <p className="text-xs leading-4 text-gray-600 dark:text-white/55">{t("sharedMemory.deleteNote")}</p>}
         {promoting && <p className="text-xs leading-4 text-gray-600 dark:text-white/55">{t("sharedMemory.promoteNote")}</p>}
         {!deleting && (
@@ -504,9 +604,11 @@ function MemoryProposalForm({ form, busy, secretPrompt, fact, allowMission, onCh
             <label className={LABEL}>{t("sharedMemory.content")}
               <textarea value={promoting ? fact?.body ?? form.body : form.body} readOnly={promoting} maxLength={4096} rows={5} onChange={(event) => set("body", event.target.value)} className={`resize-y py-2 leading-4 ${FIELD}`} />
             </label>
-            <label className={LABEL}>{t("sharedMemory.priorityField", { n: form.priority })}
-              <input type="range" className="w-full accent-accent-500" min={-10} max={10} value={form.priority} onChange={(event) => set("priority", Number(event.target.value))} />
-            </label>
+            {!creating && (
+              <label className={LABEL}>{t("sharedMemory.priorityField", { n: form.priority })}
+                <input type="range" className="w-full accent-accent-500" min={-10} max={10} value={form.priority} onChange={(event) => set("priority", Number(event.target.value))} />
+              </label>
+            )}
           </>
         )}
         <label className={LABEL}>{t("sharedMemory.reasonOptional")}
@@ -514,7 +616,9 @@ function MemoryProposalForm({ form, busy, secretPrompt, fact, allowMission, onCh
         </label>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>{t("sharedMemory.cancel")}</Button>
-          <Button variant="primary" size="sm" disabled={busy || !form.key.trim() || !deleting && !form.body.trim()} onClick={onSubmit}>{secretPrompt ? t("sharedMemory.saveAnyway") : t("sharedMemory.send")}</Button>
+          <Button variant="primary" size="sm" disabled={busy || !form.key.trim() || !deleting && !form.body.trim()} onClick={onSubmit}>
+            {creating ? t("sharedMemory.saveToAiMemory") : secretPrompt ? t("sharedMemory.saveAnyway") : t("sharedMemory.send")}
+          </Button>
         </div>
       </section>
     </div>

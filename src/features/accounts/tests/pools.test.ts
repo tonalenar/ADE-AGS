@@ -179,19 +179,32 @@ describe("pools de cuentas (lado de la pantalla)", () => {
     expect(previews[0]?.accountId).toBe("acc-1");
   });
 
-  it("identifica pools vazios, separa pools que ficam vazios ao apagar conta e traduz erro estruturado", async () => {
+  it("identifica pools vazios, órfãos, separa pools que ficam vazios ao apagar conta e traduz erro estruturado", async () => {
+    const liveAccounts = [
+      { id: "a1", agentId: "codex" },
+      { id: "a2", agentId: "codex" },
+      { id: "c1", agentId: "claude-code" },
+    ];
     expect(isPoolEmpty({ members: [] })).toBe(true);
     expect(isPoolEmpty({ members: [null] })).toBe(false);
     expect(isPoolEmpty({ members: ["a1"] })).toBe(false);
+    // Pool órfão (só contas apagadas): vazio quando há contas conhecidas; principal (null) sempre conta como viva.
+    expect(isPoolEmpty({ agentId: "codex", members: ["ghost-1", "ghost-2"] }, liveAccounts)).toBe(true);
+    expect(isPoolEmpty({ agentId: "codex", members: ["ghost-1", null] }, liveAccounts)).toBe(false);
+    expect(isPoolEmpty({ agentId: "codex", members: ["ghost-1", "a1"] }, liveAccounts)).toBe(false);
+    expect(isPoolEmpty({ agentId: "codex", members: ["c1"] }, liveAccounts)).toBe(true);
+    expect(isPoolEmpty({ agentId: "codex", members: ["ghost-1"] }, new Set(["a1"]))).toBe(true);
+    expect(isPoolEmpty({ agentId: "codex", members: ["ghost-1"] })).toBe(false);
 
     const pools = [
       { id: "p1", name: "Dupla", agentId: "codex", members: [null, "a1"], strategy: "least_used" as const, failover: true },
       { id: "p2", name: "Ultimo", agentId: "codex", members: ["a1"], strategy: "sticky" as const, failover: true },
       { id: "p3", name: "Outro", agentId: "codex", members: ["a2", "a3"], strategy: "round_robin" as const, failover: true },
+      { id: "p4", name: "ComOrfa", agentId: "codex", members: ["a1", "ghost-1"], strategy: "sticky" as const, failover: true },
     ];
-    expect(affectedPoolsOnAccountDelete(pools, "a1")).toEqual({
+    expect(affectedPoolsOnAccountDelete(pools, "a1", liveAccounts)).toEqual({
       kept: ["Dupla"],
-      emptied: ["Ultimo"],
+      emptied: ["Ultimo", "ComOrfa"],
     });
 
     const t = (key: string, vars?: Record<string, unknown>) => `${key}:${JSON.stringify(vars ?? {})}`;

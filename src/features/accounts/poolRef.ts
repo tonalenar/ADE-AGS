@@ -5,24 +5,48 @@ export const poolValue = (name: string) => `${POOL_PREFIX}${name}`;
 export const isPoolValue = (value: string | undefined): value is string => !!value && value.toLowerCase().startsWith(POOL_PREFIX);
 export const poolNameOf = (value: string) => value.slice(POOL_PREFIX.length).trim();
 
-/** Um pool sem nenhuma conta restante (ex.: após todas as contas dele terem sido removidas). */
-export const isPoolEmpty = (pool: { members: readonly (string | null)[] }): boolean => pool.members.length === 0;
+export type LiveAccountRef = string | { id: string; agentId?: string };
+
+/**
+ * Um pool sem nenhum membro vivo: lista vazia ou só referências a contas que não existem mais.
+ * - `null` representa a conta principal do sistema e sempre conta como membro vivo.
+ * - Quando `liveAccounts` é omitido (ex.: contas ainda não carregadas), verifica apenas `members.length === 0`.
+ */
+export function isPoolEmpty(
+  pool: { agentId?: string; members: readonly (string | null)[] },
+  liveAccounts?: readonly LiveAccountRef[] | ReadonlySet<string>,
+): boolean {
+  if (pool.members.length === 0) return true;
+  if (!liveAccounts) return false;
+  if (!Array.isArray(liveAccounts)) {
+    const ids = liveAccounts as ReadonlySet<string>;
+    return !pool.members.some((m) => m === null || ids.has(m));
+  }
+  const hasLive = (id: string) =>
+    liveAccounts.some((acc) => {
+      if (typeof acc === "string") return acc === id;
+      if (acc.id !== id) return false;
+      return !pool.agentId || !acc.agentId || acc.agentId === pool.agentId;
+    });
+  return !pool.members.some((m) => m === null || hasLive(m));
+}
 
 /**
  * Classifica os pools afetados ao apagar uma conta:
- * - `kept`: pools que perdem a conta mas continuam com outras;
- * - `emptied`: pools que ficarão com 0 membros (vazios) após a remoção.
+ * - `kept`: pools que perdem a conta mas continuam com outras vivas;
+ * - `emptied`: pools que ficarão sem nenhum membro vivo (vazios) após a remoção.
  */
 export function affectedPoolsOnAccountDelete(
-  pools: readonly { name: string; members: readonly (string | null)[] }[],
+  pools: readonly { name: string; agentId?: string; members: readonly (string | null)[] }[],
   accountId: string,
+  liveAccounts?: readonly LiveAccountRef[] | ReadonlySet<string>,
 ): { kept: string[]; emptied: string[] } {
   const kept: string[] = [];
   const emptied: string[] = [];
   for (const pool of pools) {
     if (!pool.members.includes(accountId)) continue;
     const remaining = pool.members.filter((m) => m !== accountId);
-    if (remaining.length === 0) emptied.push(pool.name);
+    if (isPoolEmpty({ agentId: pool.agentId, members: remaining }, liveAccounts)) emptied.push(pool.name);
     else kept.push(pool.name);
   }
   return { kept, emptied };
