@@ -1318,6 +1318,7 @@ struct TaskFactPromotion {
 
 /// Conteúdo validado de uma tool legada, pronto para gravar no ai-memory.
 pub struct AiMemoryAgentWrite {
+    pub scope: String,
     pub key: String,
     pub kind: String,
     pub body: String,
@@ -1433,7 +1434,7 @@ pub fn task_memory_write_with_repo(
         let mission = mission_id.ok_or("this Run is not attached to a Mission")?;
         tags.push(format!("mission-{}", mission.chars().take(32).collect::<String>()));
     }
-    Ok(AiMemoryAgentWrite { key, kind, body, reason, tags })
+    Ok(AiMemoryAgentWrite { scope, key, kind, body, reason, tags })
 }
 
 fn validate_agent_priority(priority: i64) -> Result<(), String> {

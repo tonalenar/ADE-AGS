@@ -96,6 +96,19 @@ Desligar a integração impede novas gravações; não reativa escrita SQLite. I
 continuam visíveis e podem ser mantidos pelo usuário. A cópia `ai_memory/migracao.rs` segue sem
 apagar os registros de origem.
 
+`ags memory search` consulta primeiro o projeto ai-memory resolvido pela pasta da aba autenticada e
+anexa resultados aprovados do histórico SQLite legado (`source: "legacy"`). Páginas atuais usam
+`path` e `source: "ai-memory"`; a resposta inteira permanece em `{"text": envelope UNTRUSTED DATA}`.
+Se a integração estiver desligada, o binário não estiver disponível ou o projeto não puder ser
+resolvido, a busca devolve apenas o histórico legado. `--at` também consulta somente esse histórico
+e declara a limitação no envelope.
+`ags memory open <path.md>` lê a página apenas dentro do projeto resolvido para a mesma aba; o
+chamador não escolhe workspace nem projeto.
+
+Páginas gravadas no escopo `workspace` mantêm `ade-ags/<slug>-<hash>.md` para preservar as páginas
+existentes. O escopo `mission` usa `ade-ags/mission-<id>-<hash>/<slug>-<hash>.md`, isolando chaves
+iguais entre missões e workspace sem mover nem apagar páginas antigas.
+
 ## Prova
 
 Fixtures reais normalizadas em `src-tauri/src/ai_memory/fixtures/`, com proveniência e checksum do pacote na pasta. Testes de parse são multiplataforma; os testes de subprocesso usam scripts fake em diretório temporário no Unix. Não chamam o ai-memory instalado, rede, modelo ou dados reais. Timeout usa prazo zero, sem espera real no teste. Windows e uso manual da UI não verificados nesta entrega. Desempenho de produto não medido.

@@ -194,7 +194,7 @@ export function memoryEnvelope(memory: string, missionId?: string): string {
     MEMORY_BEGIN,
     JSON.stringify(entries),
     MEMORY_END,
-    `Para ler páginas atuais: use as tools MCP do ai-memory \`memory_query\` e \`memory_read_page\`. Para consultar o histórico SQLite antigo: \`ags memory search "<assunto>"${missionId ? ` --mission ${missionId}` : ""}\`, \`ags memory index\` e \`ags memory open <chave>\`.`,
+    `Para buscar memória: \`ags memory search "<assunto>"${missionId ? ` --mission ${missionId}` : ""}\` consulta o projeto ai-memory e anexa o histórico SQLite legado; \`--at\` consulta só o histórico. Abra páginas do resultado com \`ags memory open <path.md>\` e registros antigos com entryId/chave. O índice \`ags memory index\` é histórico.`,
   ].join("\n");
 }
 
@@ -364,7 +364,7 @@ export function memberBriefing(
     ...singleBranchRule("member", undefined, workspace?.branch),
     "",
     ...(mission.id ? [
-      `Memória atual do projeto: use as tools MCP do ai-memory (memory_query e memory_read_page). O histórico antigo do ADE continua disponível em \`ags memory index\`, \`ags memory open <chave>\` e \`ags memory search "<assunto>" --mission ${mission.id}\`; essas leituras são somente históricas. Consulte antes de perguntar algo que talvez já esteja registrado.`,
+      `Memória do projeto: use \`ags memory search "<assunto>" --mission ${mission.id}\` para buscar primeiro páginas atuais do ai-memory e anexar o histórico SQLite legado. \`--at\` busca só o histórico; use \`ags memory open <path.md>\` para abrir uma página e entryId/chave para uma entrada antiga. \`ags memory index\` continua histórico. Consulte antes de perguntar algo que talvez já esteja registrado.`,
       "",
     ] : []),
     "TESTES (rápido e sem repetir):",
