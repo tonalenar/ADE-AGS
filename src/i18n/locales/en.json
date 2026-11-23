@@ -5740,6 +5740,8 @@
   "chat.team.feed.delegations_other": "{{count}} delegations",
   "chat.team.feed.deliveries_one": "{{count}} delivery",
   "chat.team.feed.deliveries_other": "{{count}} deliveries",
+  "chat.team.feed.messages_one": "{{count}} message",
+  "chat.team.feed.messages_other": "{{count}} messages",
   "chat.team.feed.busy_one": "{{count}} in progress",
   "chat.team.feed.busy_other": "{{count}} in progress",
   "chat.team.node.title": "State and permission in the team",

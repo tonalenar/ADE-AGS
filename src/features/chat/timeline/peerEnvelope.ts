@@ -80,3 +80,42 @@ export function typedRequestBody(body: string): string {
 export function senderAgent(sender: string): string {
   return sender.split(" · ")[0]!.trim();
 }
+
+/**
+ * As mensagens entre agentes que o fio de um orquestrador recebeu (envelopes `[Mensagem de X via ADE AGS]` na fala da
+ * "pessoa"), na ordem em que chegaram. O time as mostra dentro do resumo; o corpo do chat principal não. Pura.
+ */
+export interface PeerFeedMessage extends PeerMessage {
+  /** O id do item da timeline. */
+  itemId: string;
+  at: number | null;
+}
+
+export function peerMessagesOf(items: readonly { kind: string; id: string; text?: string; at?: number }[]): PeerFeedMessage[] {
+  const out: PeerFeedMessage[] = [];
+  for (const item of items) {
+    if (item.kind !== "user" || !item.text) continue;
+    const peer = parsePeerEnvelope(item.text);
+    if (peer) out.push({ ...peer, itemId: item.id, at: item.at ?? null });
+  }
+  return out;
+}
+
+const FENCE = /^\s*(```|~~~)/;
+
+/**
+ * O corpo de uma mensagem de agente pronto para o Markdown: o agente escreve as quebras de linha pensando em texto
+ * puro (`ags peer tell "…\n…"`) e o Markdown as juntaria num parágrafo só. Uma quebra simples entre duas linhas de
+ * texto vira quebra forçada; blocos de código, linhas em branco e tabelas ficam como estão. Pura.
+ */
+export function peerMarkdown(body: string): string {
+  const lines = body.replace(/\r\n?/g, "\n").split("\n");
+  let fenced = false;
+  return lines.map((line, i) => {
+    if (FENCE.test(line)) { fenced = !fenced; return line; }
+    const next = lines[i + 1];
+    if (fenced || next === undefined || !line.trim() || !next.trim() || FENCE.test(next)) return line;
+    if (/^\s*\|/.test(line) || /(?: {2}|\\)$/.test(line)) return line;
+    return `${line}  `;
+  }).join("\n");
+}

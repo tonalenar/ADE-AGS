@@ -20,6 +20,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 import type { ConversationCard } from "../../chatModel";
+import type { TimelineItem } from "../../timeline/types";
 import type { TeamFeedItem, TeamView } from "../ipc";
 import { TeamThreadFeed } from "../TeamThreadFeed";
 import { useTeamStore } from "../teamStore";
@@ -73,5 +74,30 @@ describe("o fio do time", () => {
     expect(host.textContent).toContain("Resumo longo da entrega do integrante");
     const summary = [...host.querySelectorAll("span")].find((s) => s.textContent === "Resumo longo da entrega do integrante")!;
     expect(summary.className).toContain("truncate");
+  });
+
+  const peer = (id: string, body: string): TimelineItem => ({
+    kind: "user", id,
+    text: `[Mensagem #9 de OpenCode · Revisor 2 via ADE AGS] aviso\n<untrusted_data source="peer:OpenCode · Revisor 2">\n${body}\n</untrusted_data>\n(Para responder, use: ags peer tell "x" "<mensagem>")`,
+  });
+
+  it("mensagem de subagente entra no resumo (contada) e só aparece, em Markdown, ao abrir", async () => {
+    const items = [peer("u1", "Fase 4B:\nlinha dois\n\n```ts\nconst a = 1;\n```")];
+    await act(async () => { root!.render(<TeamThreadFeed conversation={lead} cards={[lead]} items={items} />); });
+    const toggle = host.querySelector("button[aria-expanded]") as HTMLButtonElement;
+    expect(toggle.textContent).toContain("chat.team.feed.messages:1");
+    expect(host.textContent).not.toContain("Fase 4B");
+    await act(async () => { toggle.click(); });
+    const row = [...host.querySelectorAll("button[aria-expanded]")].find((b) => b.textContent?.includes("OpenCode · Revisor 2")) as HTMLButtonElement;
+    expect(row).toBeTruthy();
+    await act(async () => { row.click(); });
+    expect(host.querySelector("br")).not.toBeNull();
+    expect(host.querySelector("pre code")?.textContent).toContain("const a = 1;");
+  });
+
+  it("a entrega que já tem linha própria não se repete como mensagem", async () => {
+    const items = [peer("u1", "ENTREGA #7: pronto · 0 arquivo(s)")];
+    await act(async () => { root!.render(<TeamThreadFeed conversation={lead} cards={[lead]} items={items} />); });
+    expect((host.querySelector("button[aria-expanded]") as HTMLElement).textContent).not.toContain("chat.team.feed.messages");
   });
 });

@@ -3,6 +3,10 @@ import { useTranslation } from "react-i18next";
 
 import type { ConversationCard } from "../chatModel";
 import { ChevronRightIcon, UsersIcon } from "../chatIcons";
+import { ChatMessageMarkdown } from "../attachments/ChatMessageMarkdown";
+import { renderChatCodeBlock } from "../timeline/CodeBlockFrame";
+import { peerMarkdown, peerMessagesOf, type PeerFeedMessage } from "../timeline/peerEnvelope";
+import type { TimelineItem } from "../timeline/types";
 import { chatTeamHandoff, type TeamHandoff } from "./ipc";
 import { openMember } from "./TeamPanel";
 import { AgentMono, StateDot, useRoleLabel } from "./TeamParts";
@@ -10,12 +14,15 @@ import { deliveries, delegationCards, memberState, placeOf, stateTone, teamLedBy
 import { loadFeed, startTeams, useTeamStore } from "./teamStore";
 import { useTeamLive } from "./useTeamLive";
 
+const NO_ITEMS: TimelineItem[] = [];
+const DELIVERY_NUMBER = /^\s*ENTREGA #(\d+)/;
+
 /**
  * No fio do orquestrador: as delegações e entregas do time numa linha só, recolhida ("Time · 3
  * delegações · 2 entregas"). Abre ao clicar; recolhida não lê nada do backend nem ocupa o chat.
  * Vai depois da timeline da conversa.
  */
-export function TeamThreadFeed({ conversation, cards }: { conversation: ConversationCard; cards: ConversationCard[] }) {
+export function TeamThreadFeed({ conversation, cards, items: timeline = NO_ITEMS }: { conversation: ConversationCard; cards: ConversationCard[]; /** A timeline do orquestrador: dela saem as mensagens entre agentes, que o corpo do chat não mostra. */ items?: TimelineItem[] }) {
   const { t } = useTranslation();
   useEffect(() => startTeams(), []);
   const team = useTeamStore((s) => teamLedBy(s.teams, conversation.tabId));
@@ -25,8 +32,16 @@ export function TeamThreadFeed({ conversation, cards }: { conversation: Conversa
   const items = useMemo(() => feed ?? [], [feed]);
   const delegations = useMemo(() => delegationCards(items, (ref) => memberState(live.liveOf(ref), items, ref)), [items, live]);
   const delivered = useMemo(() => deliveries(items).filter((d) => d.handoff !== null), [items]);
+  // As entregas já têm a linha própria (o Handoff inteiro); o resto das mensagens entre agentes vem da timeline.
+  const messages = useMemo(() => {
+    const handoffs = new Set(delivered.map((d) => d.handoff));
+    return peerMessagesOf(timeline).filter((m) => {
+      const n = DELIVERY_NUMBER.exec(m.body);
+      return !(n && handoffs.has(Number(n[1])));
+    });
+  }, [timeline, delivered]);
   const [open, setOpen] = useState(false);
-  if (!team || (delegations.length === 0 && delivered.length === 0)) return null;
+  if (!team || (delegations.length === 0 && delivered.length === 0 && messages.length === 0)) return null;
   // O que ainda pede atenção aparece já na linha recolhida; o resto fica dentro.
   const busy = delegations.filter((d) => d.state === "working" || d.state === "approval" || d.state === "question").length;
   return (
@@ -38,6 +53,7 @@ export function TeamThreadFeed({ conversation, cards }: { conversation: Conversa
           {t("chat.team.feed.title")}
           {delegations.length > 0 && <> · {t("chat.team.feed.delegations", { count: delegations.length })}</>}
           {delivered.length > 0 && <> · {t("chat.team.feed.deliveries", { count: delivered.length })}</>}
+          {messages.length > 0 && <> · {t("chat.team.feed.messages", { count: messages.length })}</>}
         </span>
         {busy > 0 && <span className={`shrink-0 ${stateTone("working")}`}>● {t("chat.team.feed.busy", { count: busy })}</span>}
         <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />
@@ -46,6 +62,7 @@ export function TeamThreadFeed({ conversation, cards }: { conversation: Conversa
         <div className="ml-[26px] mt-1 flex flex-col gap-1">
           {delegations.map((card) => <DelegationRow key={card.id} card={card} teamId={team.id} />)}
           {delivered.map((d) => <DeliveryRow key={d.id} teamId={team.id} id={d.handoff!} name={live.nameOf(d.member) ?? d.memberName} />)}
+          {messages.map((m) => <PeerMessageRow key={m.itemId} message={m} />)}
           <p className="m-0 mt-1 text-chat-caption text-gray-400 dark:text-white/35">{t("chat.team.feed.footer")}</p>
         </div>
       )}
@@ -74,6 +91,28 @@ function DelegationRow({ card, teamId }: { card: DelegationCard; teamId: string 
         </button>
       </div>
       <span className="ml-6 min-w-0 truncate text-gray-600 dark:text-white/60" title={card.task}>{card.task}</span>
+    </div>
+  );
+}
+
+/** Uma mensagem de um agente do time ao orquestrador: uma linha com o remetente e o começo; aberta, o Markdown inteiro. */
+function PeerMessageRow({ message }: { message: PeerFeedMessage }) {
+  const [open, setOpen] = useState(false);
+  const gist = message.body.replace(/\s+/g, " ").trim();
+  return (
+    <div className="flex flex-col">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+        className="flex items-center gap-2 min-h-[26px] text-left text-chat-note hover:bg-gray-50 dark:hover:bg-white/[0.04] rounded-md">
+        <span className="shrink-0 font-medium text-gray-900 dark:text-white">{message.sender}</span>
+        {!open && <span className="min-w-0 flex-1 truncate text-gray-600 dark:text-white/60">{gist}</span>}
+        {open && <span className="flex-1" />}
+        <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="ml-1 mb-1 rounded-lg border border-gray-200 dark:border-white/[0.08] bg-gray-50 dark:bg-white/[0.03] px-3 py-2 text-chat-note">
+          <ChatMessageMarkdown content={peerMarkdown(message.body)} renderCodeBlock={renderChatCodeBlock} />
+        </div>
+      )}
     </div>
   );
 }

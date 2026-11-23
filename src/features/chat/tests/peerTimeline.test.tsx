@@ -76,3 +76,18 @@ describe("o chat mostra só o conteúdo das mensagens entre agentes", () => {
     expect(host.textContent).toContain("Time montado.");
   });
 });
+
+describe("orquestrador de um time: as mensagens entre agentes saem do corpo", () => {
+  it("hidePeerMessages esconde o balão do subagente e mantém a pessoa e o orquestrador", async () => {
+    await act(async () => {
+      root.render(<TimelineView items={items} loaded working={false} approval={null} agentLabel="Claude Code" agentId="claude-code" hidePeerMessages />);
+    });
+    const text = host.textContent ?? "";
+    expect(text).toContain("oi, monte o time");
+    expect(text).toContain("Time montado.");
+    expect(text).not.toContain("Rotas criadas em team/backend");
+    expect(text).not.toContain("revisar o diff do PR 12");
+    expect(host.querySelector("[role=img][aria-label='Codex · Backend']")).toBeNull();
+  });
+});
+

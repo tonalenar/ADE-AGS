@@ -18,7 +18,7 @@ import { appResourceOf, mcpAppServerOf } from "../mcpApps/mcpAppResource";
 import { clearTimelineFind, setRightPanel, useChatStore } from "../store";
 import { AgentBubble, PersonBubble } from "./Bubbles";
 import { renderChatCodeBlock } from "./CodeBlockFrame";
-import { parsePeerEnvelope, senderAgent } from "./peerEnvelope";
+import { parsePeerEnvelope, peerMarkdown, senderAgent } from "./peerEnvelope";
 import { speakerHeaders } from "./speakers";
 import type { PendingSend } from "./pending";
 import { displayUserText } from "./userMessage";
@@ -105,7 +105,7 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export const TimelineView = memo(function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, approvalDocked = false, live: _live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied, loadError = null, onRetryLoad }: {
+export const TimelineView = memo(function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, approvalDocked = false, live: _live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, hidePeerMessages = false, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied, loadError = null, onRetryLoad }: {
   /** A conversa por protocolo (os avisos do pool de contas pedem a resposta dela). */
   threadId?: string;
   /** Identidade local usada para abrir a busca apenas na timeline visível. */
@@ -142,6 +142,8 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   onResend?: (text: string) => void;
   /** Depois dos turnos, no fim do fio: as delegações e entregas do time (`team/TeamThreadFeed`). */
   after?: React.ReactNode;
+  /** Orquestrador de um time: as mensagens de outros agentes saem do corpo e ficam no resumo do time (`after`). */
+  hidePeerMessages?: boolean;
   /** Resultado da busca que deve ser levado à vista e realçado uma vez. */
   searchTargetId?: string | null;
   searchTargetToken?: number | null;
@@ -157,10 +159,10 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   // A conta dos turnos reaproveita o que já estava pronto: o pedaço que chega no fim não refaz os turnos anteriores.
   const turnsCache = useRef<TurnsCache | null>(null);
   const allTurns = useMemo(() => {
-    const next = timelineTurnsCached(turnsCache.current, items);
+    const next = timelineTurnsCached(turnsCache.current, items, { hidePeerMessages });
     turnsCache.current = next;
     return next.turns;
-  }, [items]);
+  }, [items, hidePeerMessages]);
   const turns = useMemo(() => applyToolCallVisibility(allTurns, toolVisibility), [allTurns, toolVisibility]);
   const compacting = useMemo(() => isCompacting(items, Date.now()), [items]);
   // O «Pensando…» com brilho: só enquanto o agente trabalha, fora de compactação e sem pedido de aprovação esperando.
@@ -750,7 +752,7 @@ function UserMessage({ item, searchHit = false, composerTarget }: { item: Timeli
   if (!peer) return <PersonBubble text={text} at={item.at} itemId={item.id} searchHit={searchHit} composerTarget={composerTarget} />;
   return (
     <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} receipt={peer.id} header={reveal.headers.has(item.id)} entering={entering} at={item.at} copyText={peer.body} itemId={item.id} searchHit={searchHit}>
-      <ChatMessageMarkdown content={peer.body} renderCodeBlock={renderChatCodeBlock} />
+      <ChatMessageMarkdown content={peerMarkdown(peer.body)} renderCodeBlock={renderChatCodeBlock} />
     </AgentBubble>
   );
 }
