@@ -582,7 +582,9 @@ fn scope_actor(
                     "`{command}` declara uma tarefa da Frota, mas quem chamou é `{me}`: o `taskId` só vale para o processo da tarefa."
                 ));
             }
-            if is_remote {
+            // `forge.run` age com a conta Git da pessoa: o despachante confere a pasta pedida com a da aba,
+            // então a aba provada sempre viaja, mesmo que o chamador omita o `tabId`.
+            if is_remote || command == "forge.run" {
                 Ok(with_key(args, "tabId", me))
             } else {
                 Ok(args.clone())

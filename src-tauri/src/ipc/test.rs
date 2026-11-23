@@ -4775,6 +4775,15 @@ mod autorizacao {
     }
 
     #[test]
+    fn forge_run_de_aba_sempre_leva_a_aba_provada_para_o_despachante_conferir_a_pasta() {
+        let sem_aba = passa("forge.run", json!({ "cwd": "/outro/repo", "tool": "git_push" }), aba("m1"));
+        assert_eq!(sem_aba["tabId"], "m1", "omitir o tabId não pode contornar a conferência da pasta");
+        assert!(recusa("forge.run", json!({ "cwd": "/x", "tabId": "lead" }), aba("m1")).contains("m1"));
+        let pessoa = passa("forge.run", json!({ "cwd": "/repo", "tool": "git_pr_list" }), fora());
+        assert!(pessoa.get("tabId").is_none(), "a pessoa continua sem aba");
+    }
+
+    #[test]
     fn as_ferramentas_de_memoria_da_tarefa_so_servem_a_propria_tarefa() {
         for metodo in [
             "memory.list",
