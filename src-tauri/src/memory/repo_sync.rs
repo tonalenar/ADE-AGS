@@ -2106,30 +2106,26 @@ mod tests {
 
     #[test]
     fn para_de_reagendar_apos_seis_falhas_consecutivas() {
-        let db = fixture();
-        let calls = Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let calls_ref = Arc::clone(&calls);
-        let git: GitRunner = Arc::new(move |_, _| {
-            calls_ref.fetch_add(1, Ordering::SeqCst);
-            Err("simulated permanent outage".into())
-        });
+        // Sem thread nem relógio: aplica as falhas direto no estado e confere o agendamento.
+        let git: GitRunner = Arc::new(|_, _| Err("simulated permanent outage".into()));
         let root = std::env::temp_dir().join(format!("ade-sync-max-{}", uuid::Uuid::new_v4()));
-        let sync = RepoSync::with_runner(db, root, git, Arc::new(|_| Duration::from_millis(1)));
-        sync.spawn().unwrap();
-        sync.enqueue("w", None);
+        let sync = RepoSync::with_runner(fixture(), root, git, Arc::new(|_| Duration::from_millis(1)));
+        let mut state = SyncState { slots: BTreeMap::new() };
+        state.slots.insert("w".into(), Slot { generation: 1, ..Slot::default() });
+        let job = Job { workspace: "w".into(), generation: 1, approval: None, pending_approvals: 0 };
+        let later = Instant::now() + Duration::from_secs(3600);
+        let fail = || Attempt::Failed { error: "simulated permanent outage".into(), warnings: Vec::new() };
 
-        // Espera até atingir 6 falhas consecutivas.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while calls.load(Ordering::SeqCst) < 6 && Instant::now() < deadline {
-            std::thread::yield_now();
+        for attempt in 1..MAX_ATTEMPTS {
+            apply_result(&sync.inner, &mut state, &job, fail());
+            assert!(state.slots["w"].retry_at.is_some(), "falha {attempt} ainda reagenda");
+            assert!(next_job(&state, later).is_some(), "falha {attempt} ainda tenta de novo");
         }
-        assert!(calls.load(Ordering::SeqCst) >= 6, "não tentou 6 vezes");
-
-        // Após 6 falhas, o slot não pode ter retry_at agendado (next_delay == None).
-        let state = sync.lock_state();
-        assert!(
-            next_delay(&state, Instant::now()).is_none(),
-            "RepoSync continuou reagendando após 6 falhas consecutivas"
-        );
+        apply_result(&sync.inner, &mut state, &job, fail());
+        assert_eq!(state.slots["w"].attempts, MAX_ATTEMPTS);
+        assert!(state.slots["w"].retry_at.is_none());
+        assert!(next_job(&state, later).is_none(), "não tenta de novo após 6 falhas");
+        assert!(next_delay(&state, later).is_none(), "RepoSync continuou reagendando após 6 falhas consecutivas");
+        assert!(snapshot(&state, "w").exhausted, "a UI recebe o estado esgotado");
     }
 }
