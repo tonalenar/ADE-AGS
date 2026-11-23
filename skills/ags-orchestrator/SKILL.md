@@ -1731,7 +1731,7 @@ flags of each command.
 | PÁGINAS HTML | `render publish`, `render list` |
 | NOTAS DO CANVAS | `design create`, `design list`, `design delete`, `design page`, `design artboard`, `design update`, `design comment`, `design`, `design revert`, `design view`, `design open`, `design note`, `notes`, `note create`, `note read`, `note write`, `note edit` |
 | OBSERVAR TABS | `watch add`, `watch remove`, `watch list`, `watch wait` |
-| CONVERSAS DO MODO CHAT | `chat list`, `chat new`, `chat send`, `chat wait`, `chat show`, `chat stop`, `chat pending`, `chat open`, `chat settle` |
+| CONVERSAS DO MODO CHAT | `chat list`, `chat new`, `chat send`, `chat wait`, `chat show`, `chat stop`, `chat pending`, `chat compact`, `chat open`, `chat settle` |
 | EVENTOS | `events since`, `events wait` |
 | MISSÕES | `mission run`, `mission create`, `mission`, `mission review`, `mission timings`, `mission efficiency`, `mission cleanup`, `worktrees list`, `worktrees prune`, `mission precheck`, `mission startcheck`, `memory search`, `memory history`, `memory suggest`, `mission accept`, `mission apply`, `mission redeliver` |
 | JANELAS | `window list`, `window create` |
