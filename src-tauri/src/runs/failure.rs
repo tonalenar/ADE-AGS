@@ -44,6 +44,9 @@ const RATE_LIMIT: &[&str] = &[
     "too many requests",
     "quota exceeded",
     "exceeded your current quota",
+    "resource_exhausted",
+    "exhausted your capacity",
+    "capacity exhausted",
 ];
 
 /// Frases de credencial. Claude Code ("Invalid API key · Please run /login", "OAuth token has

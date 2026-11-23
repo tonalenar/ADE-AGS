@@ -788,10 +788,11 @@ pub(crate) fn route_lead_now(
     roster
         .agents
         .retain(|agent| agent.capabilities.orchestration);
-    let assignment = routing::route(
+    let assignment = routing::route_with_pool_cursor(
+        db,
         &roster,
         &routing::load_tiers(db),
-        &routing::resolve_pool(db, request)?,
+        request,
         crate::util::now_ts(),
     )?;
     crate::missions::precheck::validate_launch(&roster, &assignment, crate::util::now_ts())?;
@@ -836,10 +837,11 @@ pub(crate) fn route_now(
 ) -> Result<routing::Assignment, String> {
     let roster = roster::snapshot(db, false)?;
     let tiers = routing::load_tiers(db);
-    routing::route(
+    routing::route_with_pool_cursor(
+        db,
         &roster,
         &tiers,
-        &routing::resolve_pool(db, request)?,
+        request,
         crate::util::now_ts(),
     )
 }
@@ -1306,10 +1308,7 @@ pub async fn run_reroute_task(
         agent_id,
         model: model.filter(|m| !m.trim().is_empty()),
         complexity,
-        account: match account_id {
-            Some(id) => routing::AccountChoice::Fixed(Some(id)),
-            None => routing::AccountChoice::Auto,
-        },
+        account: routing::resolve_account_choice(&db, account_id)?,
     };
     let reason = reason.unwrap_or_else(|| "o usuário pediu pelo console".into());
     reroute(&app, &task_id, request, &reason)

@@ -2236,6 +2236,40 @@ fn a_conversa_nova_pelo_mcp_abre_na_pasta_de_quem_pede() {
         |_, _| Ok(json!({})),
     );
     assert_eq!(sent[0].1["cwd"], "/outra");
+
+    let (listed, _) = mcp_session(
+        &ctx,
+        &[json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {} })],
+        |_, _| Ok(json!({})),
+    );
+    let tools = listed[0]["result"]["tools"].as_array().unwrap();
+    let chat_new_tool = tools.iter().find(|t| t["name"] == "chat_new").unwrap();
+    assert!(
+        chat_new_tool["inputSchema"]["properties"].get("account").is_some(),
+        "chat_new no MCP precisa expor o parâmetro account"
+    );
+
+    let (_, sent) = mcp_session(
+        &ctx,
+        &[call(json!({ "text": "oi", "account": "pool:Trabalho" }))],
+        |_, _| Ok(json!({ "thread": { "id": "t" } })),
+    );
+    assert_eq!(sent[0].1["account"], "pool:Trabalho");
+}
+
+#[test]
+fn delegate_agent_provider_chat_repassa_conta_ou_pool() {
+    let ctx = delegate_ctx(Some("thread:pai"));
+    let args = json!({
+        "target": "provider_chat",
+        "task": "investigue",
+        "client_request_id": "req-acc-1",
+        "agent": "claude-code",
+        "account_id": "pool:Trabalho"
+    });
+    let (_, sent) = mcp_session(&ctx, &[delegate_call(args)], delegate_reply);
+    assert_eq!(sent[0].0, "chat.new");
+    assert_eq!(sent[0].1["account"], "pool:Trabalho");
 }
 
 // ── `delegate_agent`: os três destinos (Fase 4, contrato §12) ───────────────────

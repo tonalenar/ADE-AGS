@@ -93,7 +93,7 @@ export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, ti
   });
   // O modelo e o esforço do agente novo (`null` = o padrão dele); trocar de agente zera os dois.
   const [tune, setTune] = useState<{ model: string | null; effort: string | null; account: string | null }>(
-    () => (initial?.kind === "new" ? { model: initial.model, effort: initial.effort, account: null } : { model: null, effort: null, account: null }));
+    () => (initial?.kind === "new" ? { model: initial.model, effort: initial.effort, account: initial.account ?? null } : { model: null, effort: null, account: null }));
   const choose = (next: LinkPick) => {
     if (!(pick?.kind === "new" && next.kind === "new" && pick.agent.id === next.agent.id)) setTune({ model: null, effort: null, account: null });
     setPick(next);

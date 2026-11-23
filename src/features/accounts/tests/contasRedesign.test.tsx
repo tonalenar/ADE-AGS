@@ -243,4 +243,19 @@ describe("Redesenho de Configurações → Provedores e contas", () => {
       strategy: "sticky",
     });
   });
+
+  it("ao remover uma conta que está em um pool, o diálogo avisa quais pools a usam", async () => {
+    await mount();
+    await click(tabs()[1]); // Contas
+    const agyTab = [...host.querySelectorAll('[role="tab"]')].find((b) => b.textContent?.includes("Antigravity"));
+    await click(agyTab ?? null);
+
+    const cardA2 = host.querySelector('[data-account-card="a2"]')!;
+    await click(cardA2.querySelector('button[aria-haspopup="menu"]'));
+    const removeBtn = [...cardA2.querySelectorAll('[role="menuitem"]')].find((m) => m.textContent?.includes("settings.accounts.menu.remove"));
+    await click(removeBtn);
+
+    const alert = document.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('settings.accounts.delete.inPools {"pools":"Diário"}');
+  });
 });

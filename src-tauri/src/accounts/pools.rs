@@ -273,6 +273,16 @@ pub fn parse_pools_migrated(raw: &str) -> Vec<Pool> {
     out
 }
 
+/// Lê os pools diretamente de uma conexão já aberta (evita re-travar `DbConnection`).
+pub(crate) fn load_with_conn(conn: &rusqlite::Connection) -> Vec<Pool> {
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [POOLS_KEY], |r| {
+        r.get::<_, String>(0)
+    })
+    .ok()
+    .map(|raw| parse_pools_migrated(&raw))
+    .unwrap_or_default()
+}
+
 pub fn load(db: &DbConnection) -> Vec<Pool> {
     crate::database::get_setting(db, POOLS_KEY)
         .ok()
@@ -284,6 +294,29 @@ pub fn load(db: &DbConnection) -> Vec<Pool> {
 pub fn save(db: &DbConnection, pools: &[Pool]) -> Result<(), String> {
     let raw = serde_json::to_string(pools).map_err(|e| e.to_string())?;
     crate::database::set_setting(db, POOLS_KEY, &raw)
+}
+
+/// Remove referências a uma conta apagada de todos os pools em memória e devolve os nomes dos pools afetados.
+pub fn remove_account_refs(pools: &mut [Pool], account_id: &str) -> Vec<String> {
+    let mut affected = Vec::new();
+    for pool in pools.iter_mut() {
+        let before = pool.members.len();
+        pool.members.retain(|m| m.as_deref() != Some(account_id));
+        if pool.members.len() != before {
+            affected.push(pool.name.clone());
+        }
+    }
+    affected
+}
+
+/// Remove a referência de uma conta apagada dos pools salvos e devolve os nomes dos pools alterados (M-1).
+pub fn remove_account_from_pools(db: &DbConnection, account_id: &str) -> Result<Vec<String>, String> {
+    let mut all = load(db);
+    let affected = remove_account_refs(&mut all, account_id);
+    if !affected.is_empty() {
+        save(db, &all)?;
+    }
+    Ok(affected)
 }
 
 /// Atualiza nome, membros, ordem e estratégia de um pool, preservando `pool.id` e `agent_id`.
@@ -326,6 +359,37 @@ fn cursors(db: &DbConnection) -> std::collections::HashMap<String, usize> {
         .unwrap_or_default()
 }
 
+/// Serializa leitura + escolha + avanço do cursor de `round_robin`, evitando que duas chamadas
+/// paralelas leiam o mesmo `start` ou sofram corrida de ler e gravar (M-6).
+static ROUND_ROBIN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Avança atomicamente o cursor monotônico de um pool em `settings` (sem módulo prematuro:
+/// o módulo `% members.len()` é calculado apenas em `routing::pick_in_pool`).
+pub fn advance_cursor(db: &DbConnection, pool_id: &str) -> Result<usize, String> {
+    let mut conn = db.lock().map_err(|e| e.to_string())?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let mut turns: std::collections::HashMap<String, usize> = tx
+        .query_row("SELECT value FROM settings WHERE key = ?1", [CURSORS_KEY], |r| {
+            r.get::<_, String>(0)
+        })
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default();
+    let current = turns.get(pool_id).copied().unwrap_or(0);
+    let next = current.wrapping_add(1);
+    turns.insert(pool_id.to_string(), next);
+    let raw = serde_json::to_string(&turns).map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![CURSORS_KEY, raw],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(next)
+}
+
 /// Igual a `spec_for`, mas somente leitura: não avança o cursor de `round_robin`.
 /// Usado pela tela de Pools para mostrar "Agora escolheria X" usando `routing::pick_in_pool`.
 pub fn spec_preview(db: &DbConnection, wanted: &str) -> Result<PoolSpec, String> {
@@ -345,29 +409,27 @@ pub fn spec_preview(db: &DbConnection, wanted: &str) -> Result<PoolSpec, String>
     })
 }
 
+/// Executa a escolha em memória (`pick`) com o cursor atual e só avança o cursor de `round_robin`
+/// quando `pick` retorna `Ok`, tudo serializado sob trava (M-6). `pick` deve ser puro (o roster
+/// já foi obtido antes, fora da trava).
+pub fn with_pool_pick<T, F>(db: &DbConnection, wanted: &str, pick: F) -> Result<T, String>
+where
+    F: FnOnce(&PoolSpec) -> Result<T, String>,
+{
+    let _guard = ROUND_ROBIN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let spec = spec_preview(db, wanted)?;
+    let chosen = pick(&spec)?;
+    if spec.strategy == Strategy::RoundRobin {
+        let _ = advance_cursor(db, &spec.id);
+    }
+    Ok(chosen)
+}
+
 /// El pool listo para elegir, y avanza su turno: cada pedido de `round_robin` arranca un
 /// lugar más allá que el anterior (el ruteo salta las que no se pueden usar).
+/// Prefira [`with_pool_pick`] para só avançar quando a escolha suceder.
 pub fn spec_for(db: &DbConnection, wanted: &str) -> Result<PoolSpec, String> {
-    let pools = load(db);
-    let pool = find(&pools, wanted)?;
-    let mut turns = cursors(db);
-    let start = turns.get(&pool.id).copied().unwrap_or(0);
-    if pool.strategy == Strategy::RoundRobin {
-        turns.insert(pool.id.clone(), start.wrapping_add(1) % pool.members.len().max(1));
-        if let Ok(raw) = serde_json::to_string(&turns) {
-            let _ = crate::database::set_setting(db, CURSORS_KEY, &raw);
-        }
-    }
-    Ok(PoolSpec {
-        id: pool.id.clone(),
-        name: pool.name.clone(),
-        agent_id: pool.agent_id.clone(),
-        members: pool.members.clone(),
-        strategy: pool.strategy,
-        start,
-        failover: pool.failover,
-        paused: pool.paused,
-    })
+    with_pool_pick(db, wanted, |spec| Ok(spec.clone()))
 }
 
 #[cfg(test)]

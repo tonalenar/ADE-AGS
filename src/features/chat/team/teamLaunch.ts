@@ -81,7 +81,7 @@ export function appTeamPort(spec: LeadSpec, prompt: string, target: ComposerTarg
     }
     const input = {
       teamId, agent: member.agent, role: member.role, policy: member.policy as TeamPolicy, cwd: spec.cwd, worktree: member.worktree,
-      model: member.model, effort: member.effort, structured: loadChatPrefs().structured, subagent: member.subagent,
+      model: member.model, effort: member.effort, account: member.account ?? null, structured: loadChatPrefs().structured, subagent: member.subagent,
     };
     const spawned = await spawnMember(input);
     const keeps = spawned.place ? `worktree ${spawned.place.branch} (${spawned.place.root})` : undefined;
