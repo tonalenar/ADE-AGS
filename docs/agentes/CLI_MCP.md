@@ -95,6 +95,8 @@ Flags globais: `--version` e `--json-args '{…}'`. Uma URL `http…` solta vira
 ### Tools (região gerada)
 A tabela abaixo sai de `ipc/mcp.rs` e `forge/tools.rs`; o mesmo vale para a ajuda de `ags` e para a skill. Mudou uma tool ou um comando? Rode `bun run gen:catalogs`; o CI roda `bun run check:catalogs`.
 
+`forge.run` (tools `git_*`) age com a conta Git da pessoa: chamada vinda de **aba** só opera no repositório da pasta registrada da própria aba (ou num worktree dele); o despachante injeta a aba provada e recusa o `cwd` de outro repositório. Tarefas usam a pasta da própria tarefa; a pessoa pela UI/CLI fora do app não muda. Conversas (`thread:`) não têm pasta registrada e seguem como antes.
+
 <!-- BEGIN GENERATED: mcp-tools -->
 <!-- Gerado por `bun run gen:catalogs` a partir do código; não edite à mão. -->
 | Family | Who sees it | Tools |
