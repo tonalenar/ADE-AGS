@@ -1,4 +1,5 @@
 import type { PlanStep, TimelineItem } from "./types";
+import { parsePeerEnvelope } from "./peerEnvelope";
 import { displayUserText } from "./userMessage";
 
 /**
@@ -130,13 +131,14 @@ export interface TurnsCache {
   items: TimelineItem[];
   turns: Turn[];
   cuts: TurnCut[];
+  hidePeer: boolean;
 }
 
 /**
  * Conta os turnos a partir de `start`, acrescentando em `turns` e registrando em `cuts` os pontos limpos (depois de cada
  * fim de turno a conta não carrega nada: recomeçar dali dá o mesmo resultado). Pura sobre os itens.
  */
-function runTurns(items: TimelineItem[], start: number, turns: Turn[], cuts: TurnCut[]): void {
+function runTurns(items: TimelineItem[], start: number, turns: Turn[], cuts: TurnCut[], hidePeer: boolean): void {
   let turn: Turn | null = null;
   let tools: TimelineItem[] = [];
   const open = (user: TimelineItem | null, key: string): Turn => {
@@ -167,7 +169,8 @@ function runTurns(items: TimelineItem[], start: number, turns: Turn[], cuts: Tur
     }
     if (item.kind === "user") {
       // Injeção do ADE e prefixos técnicos ficam fora da tela; o turno existe, sem a bolha.
-      const shown = displayUserText(item.text ?? "");
+      // No fio do orquestrador de um time, as mensagens entre agentes saem do corpo: ficam no resumo do time.
+      const shown = hidePeer && parsePeerEnvelope(item.text ?? "") ? null : displayUserText(item.text ?? "");
       // Uma injeção no meio de um turno é parte dele: não abre outro.
       if (shown === null && turn !== null) continue;
       // Outra mensagem da pessoa com o turno aberto (steer do Codex/Claude, fila): o anterior não fica
@@ -210,9 +213,14 @@ function runTurns(items: TimelineItem[], start: number, turns: Turn[], cuts: Tur
   }
 }
 
-export function timelineTurns(items: TimelineItem[]): Turn[] {
+export interface TurnsOptions {
+  /** Esconde as mensagens de outros agentes (`ags peer`): o orquestrador de um time as mostra só no resumo do time. */
+  hidePeerMessages?: boolean;
+}
+
+export function timelineTurns(items: TimelineItem[], options: TurnsOptions = {}): Turn[] {
   const turns: Turn[] = [];
-  runTurns(items, 0, turns, []);
+  runTurns(items, 0, turns, [], !!options.hidePeerMessages);
   return turns;
 }
 
@@ -221,7 +229,9 @@ export function timelineTurns(items: TimelineItem[]): Turn[] {
  * ainda é igual (os mesmos itens, pela identidade) são os mesmos objetos, e só o resto é contado de novo. Assim, quando
  * chega um pedaço no fim da conversa, os turnos anteriores não são refeitos nem re-renderizados. Pura.
  */
-export function timelineTurnsCached(prev: TurnsCache | null, items: TimelineItem[]): TurnsCache {
+export function timelineTurnsCached(prev: TurnsCache | null, items: TimelineItem[], options: TurnsOptions = {}): TurnsCache {
+  const hidePeer = !!options.hidePeerMessages;
+  if (prev && prev.hidePeer !== hidePeer) prev = null;
   const turns: Turn[] = [];
   const cuts: TurnCut[] = [];
   let start = 0;
@@ -239,8 +249,8 @@ export function timelineTurnsCached(prev: TurnsCache | null, items: TimelineItem
       start = last.next;
     }
   }
-  runTurns(items, start, turns, cuts);
-  return { items, turns, cuts };
+  runTurns(items, start, turns, cuts, hidePeer);
+  return { items, turns, cuts, hidePeer };
 }
 
 /**

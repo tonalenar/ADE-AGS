@@ -33,4 +33,14 @@ describe("a conta dos turnos reaproveita o que já fechou", () => {
       expect(cache.turns).toEqual(timelineTurns(items));
     }
   });
+
+  it("mudar hidePeerMessages invalida o cache e o turno some só com a opção", () => {
+    const peer: TimelineItem = { kind: "user", id: "p1", text: '[Mensagem #1 de Codex via ADE AGS] x\n<untrusted_data source="peer:Codex">\nentrega parcial\n</untrusted_data>', at: 1 };
+    const items = [user("u1"), say("a1", "oi"), end("e1"), peer, say("a2", "ok")];
+    const shown = timelineTurnsCached(null, items);
+    expect(shown.turns.some((t) => t.user?.id === "p1")).toBe(true);
+    const hidden = timelineTurnsCached(shown, items, { hidePeerMessages: true });
+    expect(hidden.turns.some((t) => t.user?.id === "p1")).toBe(false);
+    expect(hidden.turns[hidden.turns.length - 1]?.body.length).toBeGreaterThan(0);
+  });
 });
