@@ -361,7 +361,6 @@ pub async fn real_browser_open(
         let args = app.config().app.windows.first().and_then(|w| w.additional_browser_args.clone()).unwrap_or_default();
         let scale = window.scale_factor().unwrap_or(1.0);
         native::create(&app, parent, &id, profile.clone(), args, native_rect(place.rect, scale)).await?;
-        lock(portals()).insert(id.clone(), requested_profile);
         // O piloto antes da primeira página: o canal (binding) e o script em todo documento novo.
         if let Some(script) = script {
             native::cdp(&app, &id, "Runtime.addBinding", json!({ "name": BINDING })).await?;
@@ -370,7 +369,13 @@ pub async fn real_browser_open(
         }
         let white = json!({ "color": { "r": 255, "g": 255, "b": 255, "a": 1 } });
         let _ = native::cdp(&app, &id, "Emulation.setDefaultBackgroundColorOverride", white).await;
-        let url = lock(pending()).remove(&id).unwrap_or(url);
+        // Só registra em `portals()` após o setup e ao consumir `pending()`, garantindo que um `real_browser_navigate`
+        // concorrente durante a abertura substitua a URL inicial em vez de disparar uma segunda navegação.
+        let url = {
+            let pending_url = lock(pending()).remove(&id);
+            lock(portals()).insert(id.clone(), requested_profile);
+            pending_url.unwrap_or(url)
+        };
         if navigable(&url).is_some() {
             import_saved_cookies(&app, &id, &profile_id, &profile, &url).await?;
             native::navigate(&app, &id, url).await?;

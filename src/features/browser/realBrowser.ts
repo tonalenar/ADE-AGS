@@ -103,8 +103,32 @@ export function placeOf(rect: Box, layoutWidth: number, pageZoom: number, clips:
   };
 }
 
+function sameBox(a: Box | null, b: Box | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
+function sameBoxes(a: Box[] | undefined, b: Box[] | undefined): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    if (!sameBox(left[i]!, right[i]!)) return false;
+  }
+  return true;
+}
+
 export function samePlace(a: Place | null, b: Place): boolean {
-  return !!a && JSON.stringify(a) === JSON.stringify(b);
+  if (!a) return false;
+  return a.visible === b.visible
+    && a.zoom === b.zoom
+    && (a.clickToExpand ?? false) === (b.clickToExpand ?? false)
+    && (a.cornerRadius ?? 0) === (b.cornerRadius ?? 0)
+    && sameBox(a.rect, b.rect)
+    && sameBox(a.visibleRect, b.visibleRect)
+    && sameBoxes(a.holes, b.holes)
+    && sameBoxes(a.hitHoles, b.hitHoles);
 }
 
 /** `script`: o piloto dos agentes, que o navegador roda em todo documento (o mesmo que o proxy injeta no outro). */

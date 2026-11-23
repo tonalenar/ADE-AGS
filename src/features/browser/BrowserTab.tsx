@@ -50,7 +50,7 @@ import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, t
 import { ResponsiveStage } from "./ResponsiveStage";
 import { deviceAction, runDeviceAction, type PhoneActions } from "./deviceActions";
 import { RealBrowserView } from "./RealBrowserView";
-import { miniBrowserZoom, shouldOpenInRealChrome, pickerDisabled, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserReloadNoCache, realBrowserShot } from "./realBrowser";
+import { shouldOpenInRealChrome, pickerDisabled, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserReloadNoCache, realBrowserShot } from "./realBrowser";
 import { listen } from "@tauri-apps/api/event";
 import { MenuDivider, MenuRow, ToolButton } from "./toolbarButtons";
 import { isFillViewport, isPhoneViewport, type Viewport } from "./viewport";
@@ -123,8 +123,10 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
   const updateView = useViewTabsStore((s) => s.updateView);
   const chatBrowser = useChatStore((s) => s.browser);
   const browserFloating = useChatStore((s) => s.browserFloating);
-  const browserFloatRect = useChatStore((s) => s.browserFloatRect);
   const inChatPanel = chatBrowser?.viewId === view.id;
+  const watched = surfaceActive && (active || inChatPanel || floatingPreview);
+  const watchedRef = useRef(watched);
+  watchedRef.current = watched;
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const activateTab = useTabsStore((s) => s.activateTab);
@@ -207,6 +209,8 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
   const initialNavigation = useRef(false);
   const lastProfileId = useRef(browserProfileId);
   const requestedUrl = useRef("");
+  /** Sequência monotônica de navegações/URLs recebidas: impede que um `await` antigo sobrescreva redirects mais novos. */
+  const navSeq = useRef(0);
   const viewportRef = useRef(viewport);
   const mobileRef = useRef(mobile);
   const touchRef = useRef(touch);
@@ -376,6 +380,7 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
       setError(t("browser.invalidUrl"));
       return t("browser.invalidUrl");
     }
+    const seq = ++navSeq.current;
     requestedUrl.current = url;
     if ((DESKTOP_OS === "windows" || DESKTOP_OS === "macos")
       && (realRef.current || shouldOpenInRealChrome(url, viewRealRef.current))) {
@@ -387,9 +392,11 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
         try {
           await realBrowserNavigate(view.id, url);
         } catch (e) {
-          setError(String(e));
+          if (navSeq.current === seq) setError(String(e));
           return String(e);
         }
+        // Se durante o `await` a página redirecionou ou outra navegação começou, não regredir para a URL antiga.
+        if (navSeq.current !== seq) return null;
         shownUrl.current = url;
         updateView(view.id, { url, title: new URL(url).host });
       } else {
@@ -399,6 +406,7 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
     }
     try {
       const resolved = await previewResolve(url, INJECTED, browserProfileId);
+      if (navSeq.current !== seq) return null;
       // La misma dirección otra vez es "recargá": el `src` no cambia y el iframe no se
       // enteraría.
       if (iframe.current && iframe.current.src === resolved.proxiedUrl) iframe.current.src = resolved.proxiedUrl;
@@ -413,7 +421,7 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
       updateView(view.id, { url, title: new URL(url).host });
       return null;
     } catch (e) {
-      setError(String(e));
+      if (navSeq.current === seq) setError(String(e));
       return String(e);
     }
   }, [browserProfileId, t, updateView, view.id]);
@@ -687,21 +695,47 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
   useEffect(() => {
     if (!initialNavigation.current) {
       initialNavigation.current = true;
-      if (view.url && !isBlankUrl(view.url)) void go(view.url);
-      else {
+      if (view.url && !isBlankUrl(view.url)) {
+        if (realRef.current) {
+          // No motor nativo, `RealBrowserView` já abre a URL inicial em `realBrowserOpen`: evitar segunda navegação.
+          const resolved = resolveBrowserAddress(view.url);
+          if (!resolved) {
+            setError(t("browser.invalidUrl"));
+          } else {
+            requestedUrl.current = resolved;
+            shownUrl.current = resolved;
+            setAddress(resolved);
+            setError(null);
+          }
+        } else {
+          void go(view.url);
+        }
+      } else {
         previewDetectServers().then(setServers).catch(() => setServers([]));
         addressRef.current?.focus();
       }
     } else if (lastProfileId.current !== browserProfileId) {
       lastProfileId.current = browserProfileId;
-      if (view.url && !isBlankUrl(view.url)) void go(view.url);
+      if (view.url && !isBlankUrl(view.url)) {
+        if (realRef.current) {
+          // `RealBrowserView` reabre a partição nova já com `view.url` no efeito `[viewId, profileId]`.
+          const resolved = resolveBrowserAddress(view.url);
+          if (resolved) {
+            requestedUrl.current = resolved;
+            shownUrl.current = resolved;
+            setAddress(resolved);
+          }
+        } else {
+          void go(view.url);
+        }
+      }
     } else if (view.url && !isBlankUrl(view.url)
       && view.url !== shownUrl.current && view.url !== requestedUrl.current) {
       // Links abertos pela ADE atualizam a URL da vista; só navegamos quando ela diverge
       // da página que já está na tela. A navegação feita dentro do site atualiza ambas.
       void go(view.url);
     }
-  }, [browserProfileId, go, view.url]);
+  }, [browserProfileId, go, t, view.url]);
 
   // O que a página manda (o piloto e o selector), venha do iframe ou do Chrome real: `sendBack` responde pelo mesmo caminho.
   const onPageMessage = useRef<(msg: PageMessage, sendBack: (message: AppMessage) => void, display: (url: string) => string) => void>(() => undefined);
@@ -710,6 +744,7 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
       for (const wake of [...loadWaiters.current]) wake();
     };
     if (msg.type === "nav") {
+      navSeq.current += 1;
       pageUrl.current = msg.payload.url;
       const shown = display(msg.payload.url);
       shownUrl.current = shown;
@@ -733,6 +768,8 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
       useDebugStore.getState().apply(view.id, (log) => startDocument(log, msg.payload.doc, url, Date.now()));
       // Con esto la página aprende a quién mandarle lo que capturó durante la carga.
       sendBack({ source: "ade-ags", type: "connect" });
+      // Sincroniza a visibilidade real logo no carregamento do documento para não deixar o cursor preso em `watched = true`.
+      sendBack({ source: "ade-ags", type: watchedRef.current ? "view:shown" : "view:hidden" });
       // Cada documento arranca sin anotar la red: si el panel está abierto, se le avisa.
       if (debugOpenRef.current) {
         sendBack({ source: "ade-ags", type: "net:on" });
@@ -801,9 +838,10 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
   // La página necesita saber si alguien la está mirando: con la tab en segundo plano, el
   // puntero del agente no se anima (nadie lo vería) y cada acción sale más rápido.
   useEffect(() => {
-    if (!target) return;
-    postToPage(active ? "view:shown" : "view:hidden");
-  }, [active, target, postToPage]);
+    if (!target && !real) return;
+    if (real && !realReady) return;
+    postToPage(watched ? "view:shown" : "view:hidden");
+  }, [watched, target, real, realReady, postToPage]);
 
   // Esc también cancela con el foco afuera de la página (en la barra, por ejemplo).
   useEffect(() => {
@@ -1239,8 +1277,9 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
     />
   );
 
-  const stageViewport = floatingPreview && isFillViewport(viewport) ? null : viewport;
+  const stageViewport = viewport;
   const stageFramed = isFramedViewport(stageViewport);
+  const initialRealUrl = isBlankUrl(view.url) ? "about:blank" : (resolveBrowserAddress(view.url) ?? view.url);
 
   return (
     <div ref={root} className={`flex flex-col ${floatingPreview ? "flex-1" : "h-full"} min-h-0 ${floatingPreview ? "" : "transition-colors duration-300"} ${(device || (floatingPreview && stageFramed)) ? "bg-transparent" : "bg-gray-50 dark:bg-surface"}`}>
@@ -1278,43 +1317,38 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
                 o palco quando há quadro (ele já entra na escala medida pela vista). */}
             {/* Na página vazia a vista nativa fica invisível (a opacidade a esconde) e a página inicial aparece. */}
             {(() => {
-              const stageViewport = floatingPreview && isFillViewport(viewport) ? null : viewport;
-              const stageFramed = isFramedViewport(stageViewport);
-              // Celular na miniatura: o palco já escala o aparelho e a vista usa o zoom dele (1), sem compensar.
-              // Outro quadro na miniatura: a vista aplica o zoom da miniatura, então o palco é compensado.
-              const phoneMini = floatingPreview && stageFramed && !!stageViewport && isPhoneViewport(stageViewport);
-              const miniScale = floatingPreview && stageFramed && !phoneMini && chatBrowser?.viewId === view.id && browserFloatRect
-                ? miniBrowserZoom(
-                  1,
-                  { x: chatBrowser.rect.left, y: chatBrowser.rect.top, width: chatBrowser.rect.width, height: chatBrowser.rect.height },
-                  { x: browserFloatRect.left, y: browserFloatRect.top, width: browserFloatRect.width, height: browserFloatRect.height },
-                )
-                : 1;
-              const realZoom = phoneMini ? 1
-                : floatingPreview && stageFramed ? (miniScale > 0 ? 1 / miniScale : 1)
-                : (stageViewport && !floatingPreview ? 1 : zoom);
+              // Mantém o mesmo `stageViewport` entre painel e PiP (sem alternar FILL_VIEWPORT ↔ null) para evitar
+              // troca brusca de escala/layout. Quando o palco escala (`stageViewport !== null`), o zoom da vista nativa é 1.
+              const realZoom = stageViewport ? 1 : zoom;
               return (
                 <>
             <div className={`flex flex-1 min-h-0 ${isBlankUrl(view.url) ? "opacity-0" : ""}`}>
             <ResponsiveStage viewport={stageViewport} onResize={setViewport}
               zoom={stageViewport && !floatingPreview ? zoom : 1} device={floatingPreview ? null : device}
               platform={mobile} url={address} actions={phoneActions.current} floatingPreview={floatingPreview}>
-            <RealBrowserView viewId={view.id} url={view.url} zoom={realZoom} script={INJECTED}
-              profileId={browserProfileId} projectPath={view.cwd} floatingPreview={floatingPreview} surfaceActive={surfaceActive} onError={setError}
+            <RealBrowserView viewId={view.id} url={initialRealUrl} zoom={realZoom} script={INJECTED}
+              profileId={browserProfileId} projectPath={view.cwd} floatingPreview={floatingPreview} stageScaled={Boolean(stageViewport)} surfaceActive={surfaceActive} onError={setError}
               onUrl={(u) => {
                 setRealReady(true);
                 if (/^chrome-error:\/\//i.test(u)) return;
                 if (isBlankUrl(u) && requestedUrl.current && !isBlankUrl(requestedUrl.current)) return;
+                navSeq.current += 1;
                 shownUrl.current = u;
                 requestedUrl.current = u;
                 setAddress(u);
                 try {
-                  const title = new URL(u).host || u;
-                  updateView(view.id, { url: u, title });
-                  rememberPage(u, title);
+                  const store = useViewTabsStore.getState();
+                  const current = store.views.find((v) => v.id === view.id) ?? store.portalViews.find((v) => v.id === view.id);
+                  const host = new URL(u).host || u;
+                  const nextTitle = current && current.kind === "browser" && current.url === u && current.title ? current.title : host;
+                  updateView(view.id, { url: u, title: nextTitle });
+                  rememberPage(u, nextTitle);
                 } catch { /* about:blank */ }
               }}
               onTitle={(title) => {
+                const store = useViewTabsStore.getState();
+                const current = store.views.find((v) => v.id === view.id) ?? store.portalViews.find((v) => v.id === view.id);
+                if (current?.title === title) return;
                 updateView(view.id, { title });
                 if (!isBlankUrl(view.url)) rememberPage(view.url, title);
               }}
