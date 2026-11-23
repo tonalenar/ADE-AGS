@@ -158,6 +158,7 @@ export function captchaHandoffOf(viewId: string): CaptchaHandoff | null {
 export function clearCaptchaState(): void {
   lastCaptchaIframes.clear();
   lastCaptchaMeta.clear();
+  inspectedDoc.clear();
   resetCaptchaStore();
 }
 
@@ -173,6 +174,8 @@ function originOfHost(host: BrowserHost): string | null {
 }
 
 async function readProxyWafAction(host: BrowserHost): Promise<string | null> {
+  // O desafio WAF só é visto pelo proxy; no motor nativo (CEF/WebView2) não há proxy e a ida ao Rust seria à toa.
+  if (!host.proxyOrigin()) return null;
   const origin = originOfHost(host);
   if (!origin) return null;
   try {
@@ -226,8 +229,34 @@ function applyCaptchaDetection(
   return handoff;
 }
 
+/** O documento (contagem de cargas) cuja inspeção já foi feita ou está em curso: o evento `nav` a dispara, a ação não a repete. */
+const inspectedDoc = new Map<string, { count: number; done: Promise<CaptchaHandoff | null> }>();
+
+/**
+ * O captcha depois de uma ação, sem repetir a ida à página: com documento novo, o evento `nav` já inspecionou (ou está
+ * inspecionando) esse documento e a ação reaproveita o resultado; sem ele, olha agora.
+ */
+async function inspectCaptchaAfter(
+  host: BrowserHost,
+  owner: ViewOwner | null,
+  portalId: string | undefined,
+  newDocument: boolean,
+): Promise<CaptchaHandoff | null> {
+  if (newDocument) {
+    const memo = inspectedDoc.get(host.viewId);
+    if (memo && memo.count === host.loadCount()) return memo.done;
+  }
+  return inspectCaptcha(host, owner, portalId);
+}
+
 /** Inspeciona o documento atual + WAF do proxy e atualiza o estado de captcha da vista. */
-async function inspectCaptcha(
+function inspectCaptcha(host: BrowserHost, owner: ViewOwner | null, portalId?: string): Promise<CaptchaHandoff | null> {
+  const done = inspectCaptchaNow(host, owner, portalId);
+  inspectedDoc.set(host.viewId, { count: host.loadCount(), done });
+  return done;
+}
+
+async function inspectCaptchaNow(
   host: BrowserHost,
   owner: ViewOwner | null,
   portalId?: string,
@@ -338,6 +367,7 @@ export function registerBrowserHost(host: BrowserHost): () => void {
       tainted.delete(host.viewId);
       lastCaptchaIframes.delete(host.viewId);
       lastCaptchaMeta.delete(host.viewId);
+      inspectedDoc.delete(host.viewId);
     }
   };
 }
@@ -538,6 +568,8 @@ function required(r: BrowserRequest, key: string): string {
 
 const asText = (value: unknown): string => (typeof value === "string" ? value : JSON.stringify(value, null, 2));
 
+const viewportChanged = (a: Viewport | null, b: Viewport | null): boolean => a?.width !== b?.width || a?.height !== b?.height;
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -547,11 +579,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function sideEffects(host: BrowserHost, firstId: number, startedAt: number): Promise<string> {
   // Em aba blindada pelo cofre, nunca expor console nem rede como efeito colateral de uma ação.
   if (activeShield(host)) return "";
-  // El runtime manda la tanda enseguida después de contestar; se le da un momento para
-  // que llegue, y al proxy para anotar lo que la acción disparó.
-  await sleep(150);
+  // El runtime manda la tanda ANTES de contestar (canal ordenado): el console ya está en el registro. Solo el proxy
+  // (motor de iframe) necesita un momento para anotar lo que la acción disparó; en el CEF no hay proxy y no se espera.
   const origin = host.proxyOrigin();
-  if (origin) await refreshProxyLog(host.viewId, origin).catch(() => undefined);
+  if (origin) {
+    await sleep(150);
+    await refreshProxyLog(host.viewId, origin).catch(() => undefined);
+  }
   const log = debugLogOf(host.viewId);
   const logged = log.console
     .filter((e) => e.id >= firstId && (e.level === "error" || e.level === "warn"))
@@ -632,7 +666,13 @@ function inServerTerms(host: BrowserHost, text: string): string {
   return proxy && target ? text.split(proxy).join(target) : text;
 }
 
+/** Quantas ações que mudam a página cada vista recebeu: o que diz se uma leitura inteira de antes ainda vale. */
+const actionSeq = new Map<string, number>();
+const READ_ONLY_OPS = new Set<PageCommand["op"]>(["snapshot", "wait", "settle", "layout", "performance", "captcha", "peek", "describe"]);
+const bumpActionSeq = (viewId: string): void => { actionSeq.set(viewId, (actionSeq.get(viewId) ?? 0) + 1); };
+
 async function inPage(host: BrowserHost, command: PageCommand, withEffects: boolean): Promise<string> {
+  if (!READ_ONLY_OPS.has(command.op)) bumpActionSeq(host.viewId);
   const firstId = debugLogOf(host.viewId).nextId;
   const startedAt = Date.now();
   const result = await host.channel.run(command, timeoutFor(command));
@@ -743,6 +783,9 @@ async function execute(
       }
       const firstId = debugLogOf(host.viewId).nextId;
       const startedAt = Date.now();
+      // O `nav` do documento novo reinspeciona o captcha com ESTE dono; tem de estar gravado antes de a página carregar.
+      lastCaptchaMeta.set(host.viewId, { owner, portalId });
+      bumpActionSeq(host.viewId);
       // Recién abierta, la tab ya está cargando esta misma URL: pedirla otra vez sería
       // cargarla dos veces.
       const mark = opened ? 0 : host.loadCount();
@@ -755,7 +798,8 @@ async function execute(
         ? `Loaded ${host.currentUrl()}`
         : `The page did not report finishing the load within 20 s (${host.currentUrl()}). It may still be loading, or it may not be going through the ADE AGS proxy.`;
       const effects = await sideEffects(host, firstId, startedAt);
-      const detected = await inspectCaptcha(host, owner, portalId);
+      // Não terminou de carregar (teto, âncora da mesma página): sem inspeção do `nav` para reaproveitar, olha agora.
+      const detected = loaded ? await inspectCaptchaAfter(host, owner, portalId, true) : await inspectCaptcha(host, owner, portalId);
       const captchaNote = detected
         ? `\n\n${captchaBlockedJson(detected.id)}`
         : "";
@@ -766,17 +810,21 @@ async function execute(
       if (action !== "back" && action !== "forward" && action !== "reload") throw new Error("action es back, forward o reload.");
       const mark = host.loadCount();
       const before = host.currentUrl();
+      lastCaptchaMeta.set(host.viewId, { owner, portalId });
+      bumpActionSeq(host.viewId);
       host.history(action);
       // Atrás en una SPA no recarga el documento: se espera un poco y se informa dónde quedó.
       const loaded = await host.waitForLoad(mark, action === "reload" ? 20_000 : 1500);
       if (action === "reload" || loaded) tainted.delete(host.viewId);
       activeShield(host);
       const url = host.currentUrl();
-      const detected = await inspectCaptcha(host, owner, portalId);
+      const detected = await inspectCaptchaAfter(host, owner, portalId, loaded);
       const captchaNote = detected ? `\n\n${captchaBlockedJson(detected.id)}` : "";
       return (loaded || url !== before ? `Ahora en ${url}` : `Sigue en ${url} (no había a dónde ir, o la página no cambió).`) + captchaNote;
     }
     case "resize": {
+      const viewportBefore = host.viewport();
+      const resizeAskedAt = Date.now();
       // El táctil se decide antes de medir: prenderlo cambia qué reglas aplican, y un
       // layout medido con las de escritorio no sería el del teléfono.
       let touch = host.touch();
@@ -807,13 +855,15 @@ async function execute(
       }
 
       let touchNote = "";
-      if (touch !== host.touch()) {
+      const touchChanged = touch !== host.touch();
+      if (touchChanged) {
         const applied = await host.setTouch(touch) as { note?: string } | null;
         touchNote = applied?.note ? `\n${applied.note}` : "";
       }
-      // Que la página reciba el `resize` y reacomode antes de medirla.
-      await sleep(400);
-      return await inPage(host, { op: "layout" }, false) + touchNote;
+      // Que la página reciba el `resize` y reacomode antes de medirla: o runtime espera o EVENTO `resize` (teto de 400 ms),
+      // e só se o tamanho mudou de fato (sem mudança não há evento a esperar).
+      const resized = viewportChanged(viewportBefore, host.viewport()) || touchChanged;
+      return await inPage(host, resized ? { op: "layout", afterResize: { since: resizeAskedAt, capMs: 400 } } : { op: "layout" }, false) + touchNote;
     }
     case "console": {
       const level = str(request, "level");
@@ -995,8 +1045,10 @@ async function execute(
     case "layout": return inPage(host, { op: "layout" }, false);
     case "performance": return inPage(host, { op: "performance" }, false);
     case "click": {
+      lastCaptchaMeta.set(host.viewId, { owner, portalId });
+      const docsBefore = host.loadCount();
       const out = await inPage(host, { op: "click", target: required(request, "target") }, true);
-      const detected = await inspectCaptcha(host, owner, portalId);
+      const detected = await inspectCaptchaAfter(host, owner, portalId, host.loadCount() !== docsBefore);
       return detected ? `${out}\n\n${captchaBlockedJson(detected.id)}` : out;
     }
     case "hover": return inPage(host, { op: "hover", target: required(request, "target") }, true);
@@ -1151,8 +1203,16 @@ async function execute(
       ledger.beginAct(goal);
       const parsedExpects = parseExpectations(expects).expects;
       // Os `--expect` conferidos pelo piloto durante o `act` (J3/J5), na página INTEIRA como na conferência final.
+      // A última leitura inteira que o próprio `act` fez e em que ação da página estava: a conferência final a reaproveita se nada mudou depois.
+      const fullRead = { text: null as string | null, seq: -1 };
       const expectsMet = parsedExpects.length === 0 ? undefined : async (seen?: ParsedPage): Promise<boolean> => {
-        const page = seen ?? parseSnapshot(String(await inPage(host, { op: "snapshot", all: true, inView: false }, false)));
+        let page = seen;
+        if (!page) {
+          const text = String(await inPage(host, { op: "snapshot", all: true, inView: false }, false));
+          fullRead.text = text;
+          fullRead.seq = actionSeq.get(host.viewId) ?? 0;
+          page = parseSnapshot(text);
+        }
         return parsedExpects.every((e) => checkExpectation(e, page).ok);
       };
       const deps = { ...pilotDeps(host, waits, ledger), expectsMet };
@@ -1166,7 +1226,8 @@ async function execute(
       }
       // O resumo final traz o objetivo e a região principal antes do menu (O4), em vez do começo da página.
       const text = formatResult(goal, { ...result, window: await endMeasure(), finalSnapshot: summarizeSnapshot(result.finalSnapshot, goal) });
-      return verifyAct(host, waitsReport(text, waits), goal, result.outcome, expects);
+      const reusable = fullRead.seq === (actionSeq.get(host.viewId) ?? 0) ? fullRead.text : null;
+      return verifyAct(host, waitsReport(text, waits), goal, result.outcome, expects, reusable);
     }
     default:
       throw new Error(`O navegador não sabe fazer '${op}'.`);
@@ -1231,8 +1292,12 @@ export const PORTAL_OPS = new Set([
 ]);
 
 /** Confere o `act` contra a página como ficou (um snapshot completo, não só o que está à vista). Nunca lança: sem leitura, o relatório sai como estava. */
-async function verifyAct(host: BrowserHost, report: string, goal: string, outcome: PilotResult["outcome"], expects: string[]): Promise<string> {
+export async function verifyAct(
+  host: BrowserHost, report: string, goal: string, outcome: PilotResult["outcome"], expects: string[], fullRead: string | null = null,
+): Promise<string> {
   if (outcome === "off" || outcome === "error" || (outcome !== "done" && expects.length === 0)) return report;
+  // O `act` acabou de ler a página inteira e nenhuma ação mexeu nela desde então: repetir a espera e a leitura só gasta tempo.
+  if (fullRead !== null) return verifyReport(report, goal, outcome, expects, fullRead);
   try {
     // Uma página com XHR em voo (filtro, quantidade) ainda não mostra o resultado: espera a rede ociosa antes de conferir.
     try { await inPage(host, { op: "wait", idle: true, timeoutMs: 1_500 }, false); } catch { /* confere com o que há */ }

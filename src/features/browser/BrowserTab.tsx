@@ -50,7 +50,7 @@ import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, t
 import { ResponsiveStage } from "./ResponsiveStage";
 import { deviceAction, runDeviceAction, type PhoneActions } from "./deviceActions";
 import { RealBrowserView } from "./RealBrowserView";
-import { miniBrowserZoom, shouldOpenInRealChrome, pickerDisabled, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserReloadNoCache, realBrowserShot } from "./realBrowser";
+import { miniBrowserZoom, shouldOpenInRealChrome, pickerDisabled, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserReloadNoCache, realBrowserShot, realBrowserShotSave } from "./realBrowser";
 import { listen } from "@tauri-apps/api/event";
 import { MenuDivider, MenuRow, ToolButton } from "./toolbarButtons";
 import { isFillViewport, isPhoneViewport, type Viewport } from "./viewport";
@@ -69,6 +69,8 @@ const PANEL_HEIGHT_KEY = "cc-browser-debug-height";
  * dividida — un navegador al lado de una terminal ya no tiene 700 px.
  */
 const COMPACT_BELOW = 760;
+/** Quanto se espera o runtime avisar a carga depois de o CEF terminá-la, antes de dar a carga por feita sem ele. */
+const LOAD_GRACE_MS = 400;
 
 function savedPanelHeight(): number {
   try {
@@ -212,7 +214,9 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
   const touchRef = useRef(touch);
   /** Cada documento que cargó con el runtime, y si ya llegó a DOMContentLoaded. */
   const doc = useRef<{ id: string | null; count: number; ready: boolean }>({ id: null, count: 0, ready: false });
-  const loadWaiters = useRef(new Set<() => void>());
+  const loadWaiters = useRef(new Set<(force?: boolean) => void>());
+  /** O que o CEF diz da carga (`real-browser-load`), independente de a página ter o runtime: destrava `waitForLoad` em páginas de erro ou sem script. */
+  const cefLoad = useRef<{ starts: number; loading: boolean; atNavigate: number; grace: ReturnType<typeof setTimeout> | null }>({ starts: 0, loading: false, atNavigate: 0, grace: null });
   /** Lo señalado, para que un agente lo lea sin esperar a un render. */
   const marksRef = useRef<{ picks: PickedElement[]; captures: PendingCapture[]; note: string }>({ picks: [], captures: [], note: "" });
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -241,6 +245,7 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
   ), loadState), [loadState, view.id]);
 
   useEffect(() => () => {
+    if (cefLoad.current.grace) clearTimeout(cefLoad.current.grace);
     channel.dispose();
     useDebugStore.getState().drop(view.id);
   }, [channel, view.id]);
@@ -384,6 +389,7 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
       setAddress(url);
       setError(null);
       if (realRef.current) {
+        cefLoad.current.atNavigate = cefLoad.current.starts;
         try {
           await realBrowserNavigate(view.id, url);
         } catch (e) {
@@ -475,6 +481,7 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
     },
     history: (action) => {
       if (realRef.current) {
+        cefLoad.current.atNavigate = cefLoad.current.starts;
         realBrowserHistory(view.id, action === "reload" ? 0 : action === "back" ? -1 : 1).catch(() => undefined);
         return;
       }
@@ -496,8 +503,8 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
         resolve(true);
         return;
       }
-      const wake = () => {
-        if (!check()) return;
+      const wake = (force?: boolean) => {
+        if (!force && !check()) return;
         finish(true);
       };
       const timer = setTimeout(() => finish(false), timeoutMs);
@@ -523,7 +530,7 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
     },
     screenshot: async (tag) => {
       // No Chrome real a foto vem do próprio Chrome: não depende de a página estar à vista na tela.
-      if (realRef.current) return previewSaveCapture(await canvasToPng((await realBrowserShot(view.id)).canvas), tag);
+      if (realRef.current) return realBrowserShotSave(view.id, tag);
       const page = iframe.current;
       const frame = column.current;
       if (!page || !frame) throw new Error("La página todavía no está cargada.");
@@ -733,6 +740,8 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
       useDebugStore.getState().apply(view.id, (log) => startDocument(log, msg.payload.doc, url, Date.now()));
       // Con esto la página aprende a quién mandarle lo que capturó durante la carga.
       sendBack({ source: "ade-ags", type: "connect" });
+      // O documento novo nasce "à vista": quem está escondido avisa de novo.
+      if (!watchedRef.current) sendBack({ source: "ade-ags", type: "view:hidden" });
       // Cada documento arranca sin anotar la red: si el panel está abierto, se le avisa.
       if (debugOpenRef.current) {
         sendBack({ source: "ade-ags", type: "net:on" });
@@ -800,10 +809,14 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
 
   // La página necesita saber si alguien la está mirando: con la tab en segundo plano, el
   // puntero del agente no se anima (nadie lo vería) y cada acción sale más rápido.
+  // No motor nativo (CEF/WebView2) não há `target`: o aviso também vale, senão o cursor do agente anima (330 ms) para ninguém ver.
+  const watched = active || inChatPanel || floatingPreview;
+  const watchedRef = useRef(watched);
+  watchedRef.current = watched;
   useEffect(() => {
-    if (!target) return;
-    postToPage(active ? "view:shown" : "view:hidden");
-  }, [active, target, postToPage]);
+    if (!target && !real) return;
+    postToPage(watched ? "view:shown" : "view:hidden");
+  }, [watched, target, real, postToPage]);
 
   // Esc también cancela con el foco afuera de la página (en la barra, por ejemplo).
   useEffect(() => {
@@ -1321,7 +1334,20 @@ export function BrowserTab({ view, active, surfaceActive = true, device = null, 
               onPopup={(popup) => {
                 useViewTabsStore.getState().openBrowser(view.cwd, popup.url, { id: popup.id, browserProfileId, owner: view.owner });
               }}
-              onClosedByPage={() => useViewTabsStore.getState().closeView(view.id)} />
+              onClosedByPage={() => useViewTabsStore.getState().closeView(view.id)}
+              onLoading={(loading) => {
+                const cef = cefLoad.current;
+                if (cef.grace) { clearTimeout(cef.grace); cef.grace = null; }
+                cef.loading = loading;
+                if (loading) { cef.starts += 1; return; }
+                // O CEF terminou uma carga que começou depois do pedido. O runtime costuma avisar logo em seguida (`nav`); se não
+                // avisar (página de erro, PDF, sem HTML), quem espera a carga não fica preso até o teto de 15–20 s.
+                if (cef.starts <= cef.atNavigate) return;
+                cef.grace = setTimeout(() => {
+                  cef.grace = null;
+                  if (!cef.loading) for (const wake of [...loadWaiters.current]) wake(true);
+                }, LOAD_GRACE_MS);
+              }} />
             </ResponsiveStage>
             </div>
             {isBlankUrl(view.url) && (

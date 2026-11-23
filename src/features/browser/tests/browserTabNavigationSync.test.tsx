@@ -26,6 +26,19 @@ const emulateSpy = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.re
 const openSpy = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve());
 const placeSpy = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve());
 const closeSpy = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve());
+const postSpy = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve());
+let capturedHost: import("../agentBridge").BrowserHost | null = null;
+
+vi.mock("../agentBridge", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../agentBridge")>();
+  return {
+    ...actual,
+    registerBrowserHost: (h: import("../agentBridge").BrowserHost) => {
+      capturedHost = h;
+      return actual.registerBrowserHost(h);
+    },
+  };
+});
 
 vi.mock("../realBrowser", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../realBrowser")>()),
@@ -34,6 +47,7 @@ vi.mock("../realBrowser", async (importOriginal) => ({
   realBrowserClose: (...args: unknown[]) => closeSpy(...args),
   realBrowserNavigate: (...args: unknown[]) => navigateSpy(...args),
   realBrowserEmulate: (...args: unknown[]) => emulateSpy(...args),
+  realBrowserPost: (...args: unknown[]) => postSpy(...args),
 }));
 
 import { BrowserTab } from "../BrowserTab";
@@ -72,6 +86,8 @@ beforeEach(() => {
   openSpy.mockClear();
   placeSpy.mockClear();
   closeSpy.mockClear();
+  postSpy.mockClear();
+  capturedHost = null;
   useViewTabsStore.setState({ views: [], activeViewId: null, keepMountedIds: [], portalViews: [] });
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -84,11 +100,11 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-function renderView(viewId: string) {
+function renderView(viewId: string, active = true) {
   function Wrapper() {
     const current = useViewTabsStore((s) => s.views.find((v): v is BrowserView => v.id === viewId && v.kind === "browser"));
     if (!current) return null;
-    return <BrowserTab view={current} active={true} />;
+    return <BrowserTab view={current} active={active} />;
   }
   act(() => root.render(<Wrapper />));
 }
@@ -142,5 +158,75 @@ describe("BrowserTab: sincronia de URL nativa e emulação inicial", () => {
     await act(async () => undefined);
     expect(emulateSpy).toHaveBeenCalledTimes(1);
     expect(emulateSpy.mock.calls[0]?.[1]).toBe("ios");
+  });
+});
+
+const types = () => postSpy.mock.calls.map((c) => (c[1] as { type: string }).type);
+
+describe("BrowserTab: o motor nativo também avisa se a aba está à vista", () => {
+  it("aba escondida manda view:hidden ao CEF (sem isso o cursor do agente anima 330 ms para ninguém)", async () => {
+    const id = useViewTabsStore.getState().openBrowser("/projeto", "https://example.com/", { activate: false });
+    renderView(id, false);
+    await act(async () => undefined);
+    expect(types()).toContain("view:hidden");
+    expect(types()).not.toContain("view:shown");
+  });
+
+  it("aba ativa manda view:shown", async () => {
+    const id = useViewTabsStore.getState().openBrowser("/projeto", "https://example.com/", { activate: true });
+    renderView(id, true);
+    await act(async () => undefined);
+    expect(types()).toContain("view:shown");
+  });
+
+  it("documento novo de uma aba escondida avisa view:hidden de novo (o runtime nasce «à vista»)", async () => {
+    const id = useViewTabsStore.getState().openBrowser("/projeto", "https://example.com/", { activate: false });
+    renderView(id, false);
+    await act(async () => undefined);
+    postSpy.mockClear();
+    emit("real-browser-page", { id, message: { source: "ags-preview", type: "page:ready", payload: { url: "https://example.com/", doc: "d1" } } });
+    await act(async () => undefined);
+    expect(types()).toContain("view:hidden");
+  });
+});
+
+describe("BrowserTab: waitForLoad também acaba com o load do CEF (página de erro ou sem runtime)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("o CEF termina a carga e o runtime nunca avisa: a espera resolve logo depois da tolerância, não no teto", async () => {
+    vi.useFakeTimers();
+    const id = useViewTabsStore.getState().openBrowser("/projeto", "https://example.com/", { activate: true });
+    renderView(id);
+    await act(async () => undefined);
+    const mark = capturedHost!.loadCount();
+    await act(async () => { await capturedHost!.navigate("https://example.com/erro"); });
+    const waiting = capturedHost!.waitForLoad(mark, 20_000);
+    let result: boolean | null = null;
+    void waiting.then((r) => { result = r; });
+
+    emit("real-browser-load", { id, loading: true });
+    emit("real-browser-load", { id, loading: false });
+    await act(async () => { await vi.advanceTimersByTimeAsync(399); });
+    expect(result).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2); });
+    expect(result).toBe(true);
+  });
+
+  it("uma carga do CEF que começou ANTES do pedido não destrava a espera da navegação nova", async () => {
+    vi.useFakeTimers();
+    const id = useViewTabsStore.getState().openBrowser("/projeto", "https://example.com/", { activate: true });
+    renderView(id);
+    await act(async () => undefined);
+    emit("real-browser-load", { id, loading: true });
+    const mark = capturedHost!.loadCount();
+    await act(async () => { await capturedHost!.navigate("https://example.com/b"); });
+    const waiting = capturedHost!.waitForLoad(mark, 5_000);
+    let result: boolean | null = null;
+    void waiting.then((r) => { result = r; });
+    emit("real-browser-load", { id, loading: false });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(result).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_100); });
+    expect(result).toBe(false);
   });
 });

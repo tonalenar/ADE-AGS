@@ -1698,6 +1698,26 @@ declare global {
     return toTransferable(await fn.call(window));
   }
 
+  let lastResizeAt = 0;
+  window.addEventListener("resize", () => { lastResizeAt = Date.now(); });
+
+  /** Mede o layout depois de a página receber o `resize` (por evento, com teto) e assentar: no lugar de um sleep fixo de 400 ms. */
+  async function layoutAfterResize(since: number, capMs: number): Promise<unknown> {
+    if (lastResizeAt < since) {
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          clearTimeout(timer);
+          window.removeEventListener("resize", finish);
+          resolve();
+        };
+        const timer = setTimeout(finish, Math.min(Math.max(capMs, 0), 2_000));
+        window.addEventListener("resize", finish);
+      });
+    }
+    await activity.settle({ maxMs: 300, quietMs: 60, netIdleMs: 0, pendingMaxMs: 300, minMs: 0 });
+    return layout();
+  }
+
   function layout(): unknown {
     const root = document.documentElement;
     const vw = root.clientWidth;
@@ -2016,7 +2036,7 @@ declare global {
       case "wait": return wait(command);
       case "settle": return settleOp(command);
       case "eval": return evaluate(command.code);
-      case "layout": return layout();
+      case "layout": return command.afterResize ? layoutAfterResize(command.afterResize.since, command.afterResize.capMs) : layout();
       case "storage": return storage(command);
       case "cookies": return cookies(command);
       case "performance": return performanceReport();
@@ -2052,6 +2072,9 @@ declare global {
     } catch (e) {
       payload = { id, ok: false, error: e instanceof Error ? e.message : formatValue(e) };
     }
+    // Lo que la acción haya logueado viaja ANTES de la respuesta (el canal es ordenado): cuando la app recibe el `page:reply`,
+    // el console ya está en el registro y no hace falta esperar a la tanda.
+    flush();
     if (!post({ type: "page:reply", payload })) {
       post({ type: "page:reply", payload: { id, ok: false, error: "O resultado não pode ser transferido para o app." } });
     }
@@ -2060,8 +2083,6 @@ declare global {
     if (fast) fastCommands--;
     cursor.setFast(fastCommands > 0);
     if (activeCommands === 0) commandBaseline = undefined;
-    // Lo que la acción haya logueado viaja enseguida: la app lo junta con la respuesta.
-    flush();
   }
 
   let captchaObserver: MutationObserver | null = null;

@@ -121,7 +121,8 @@ export type PageCommand =
   | { op: "eval"; code: string }
   /** Emular (o dejar de emular) una pantalla táctil: `(hover)`, `(pointer)` y los eventos. */
   | { op: "touch"; on: boolean }
-  | { op: "layout" }
+  /** `afterResize`: espera o evento `resize` da página (teto `capMs`) se ele ainda não veio desde `since`, e a página assentar. */
+  | { op: "layout"; afterResize?: { since: number; capMs: number } }
   /** Sin `values`, solo las claves y el tamaño: así se pide en un sitio real. */
   | { op: "storage"; action: "list"; values?: boolean }
   | { op: "storage"; action: "set"; area: StorageArea; key: string; value: string }
