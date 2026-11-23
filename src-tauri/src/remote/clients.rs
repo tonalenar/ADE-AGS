@@ -21,6 +21,23 @@ const MAX_CLIENTS: usize = 64;
 
 static STORE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
+/// Último uso de cada cliente, só em memória: gravar no keyring a cada requisição reescrevia o índice inteiro sob o
+/// lock global (a até 20/s por cliente). Some com o processo, como o resto do estado volátil do servidor.
+static LAST_SEEN: LazyLock<Mutex<std::collections::HashMap<String, i64>>> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+fn note_seen(client_id: &str, now: i64) {
+    let mut map = LAST_SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    let seen = map.entry(client_id.to_string()).or_insert(now);
+    *seen = (*seen).max(now);
+}
+
+fn seen_of(client: &mut RemoteClient) {
+    let seen = LAST_SEEN.lock().unwrap_or_else(|e| e.into_inner()).get(&client.id).copied();
+    if let Some(seen) = seen {
+        client.last_seen_at = Some(client.last_seen_at.map_or(seen, |stored| stored.max(seen)));
+    }
+}
+
 #[cfg(test)]
 static TEST_DEFAULT_MEM: LazyLock<Arc<Mutex<HashMap<String, String>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
@@ -239,7 +256,7 @@ impl ClientStore {
         let candidate_hash = hash_token(bearer);
 
         let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut index = self.load_index().ok()?;
+        let index = self.load_index().ok()?;
 
         // Percorre todas as entradas sem sair cedo para manter a comparação em tempo constante.
         let mut matched_idx: Option<usize> = None;
@@ -249,16 +266,16 @@ impl ClientStore {
             }
         }
         let idx = matched_idx?;
-        let entry = &mut index[idx];
+        let entry = &index[idx];
         if entry.client.revoked {
             return None;
         }
         if entry.client.expires_at.is_some_and(|exp| exp <= now) {
             return None;
         }
-        entry.client.last_seen_at = Some(now);
-        let authenticated = entry.client.clone();
-        let _ = self.save_index(&index);
+        note_seen(&entry.client.id, now);
+        let mut authenticated = entry.client.clone();
+        seen_of(&mut authenticated);
         Some(authenticated)
     }
 
@@ -280,6 +297,10 @@ impl ClientStore {
             .into_iter()
             .map(|entry| entry.client)
             .filter(|client| !client.revoked)
+            .map(|mut client| {
+                seen_of(&mut client);
+                client
+            })
             .collect()
     }
 

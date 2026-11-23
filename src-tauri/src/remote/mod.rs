@@ -174,6 +174,7 @@ pub async fn start_server(app: AppHandle, port: u16) -> Result<Vec<SocketAddr>, 
         }),
         audit: http::default_audit_sink(),
         now_fn: Arc::new(crate::util::now_ts),
+        limits: http::Limits::default(),
     };
     let running = http::start_on(&addrs, config).await?;
     let bound = running.addrs().to_vec();

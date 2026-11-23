@@ -90,6 +90,7 @@ Flags globais: `--version` e `--json-args '{…}'`. Uma URL `http…` solta vira
     bearer_token_env_var = "ADE_MCP_TOKEN"
     ```
   - **T3 Code:** URL `http://<ip>:47820/mcp` e cabeçalho `Authorization: Bearer <token>`.
+- **Limites do listener** (`remote/http.rs`): no máximo 64 conexões simultâneas por endereço (as de além do teto são fechadas), 10 s para os cabeçalhos (vale também para keep-alive parada), 30 s para o corpo (408) e 100 req/s por IP de origem **antes** da autenticação (token errado também gasta), além dos 20 req/s por cliente depois dela. Desligar o acesso remoto fecha também as conexões keep-alive abertas (uma requisição em curso tem até 5 s). O `last_seen_at` do cliente fica só em memória: autenticar não grava no keyring.
 - **Identidade, presets e canvas:** cada cliente autentica como `Principal::Remote { client, preset }` (nunca vira `Principal::Outside` e nunca passa em `Target::Outside`), recebe só as tools do preset (`read`, `browser`, `agents`, `all`) e só aceita `project` dentro das pastas liberadas no pareamento. Ações perigosas (`git push`, merge, apagar arquivos/andares, digitar em terminal não aberto pelo cliente, `secret_run`, `vault_run`, `browser_fill_login` no primeiro uso, gasto acima do teto) pedem confirmação da pessoa. Cada cliente pareado vira um nó **Agente remoto** (`remote:<id>`) no canvas da pasta padrão; cordas ligam e desligam o alcance dele com abas, conversas e portais.
 
 ### Tools (região gerada)
