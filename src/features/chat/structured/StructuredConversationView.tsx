@@ -29,6 +29,7 @@ import { ContextMeter } from "../autocompact/ContextMeter";
 import { contextUsageOf, isCompacting } from "../autocompact/model";
 import { clearThreadSearchJump, requestTimelineFollow, unqueueMessage, updateQueuedMessage, useChatStore } from "../store";
 import { useTeamComposer } from "../team/TeamComposer";
+import { LineagePanel, SubagentStatusLines } from "../team/SubagentLineage";
 import { TeamThreadFeed } from "../team/TeamThreadFeed";
 import { HarnessRunFeed } from "./HarnessRunFeed";
 import { TimelineView, type ApprovalNote } from "../timeline/ConversationTimeline";
@@ -147,7 +148,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   }, [items, key, thread.id]);
   // Responde o pedido aberto. Resolve `true` só quando o backend aceita (a caixa usa isso para limpar ou manter o texto).
   const answer = useCallback((choice: string): Promise<boolean> => (request ? answerRequest(thread.id, request.id, choice) : Promise.resolve(false)), [request, thread.id]);
-  const timelineAfter = useMemo(() => side ? null : <><TeamThreadFeed conversation={card} cards={cards} /><HarnessRunFeed threadId={thread.id} /></>, [side, card, cards, thread.id]);
+  const timelineAfter = useMemo(() => side ? null : <><TeamThreadFeed conversation={card} cards={cards} /><HarnessRunFeed threadId={thread.id} /><SubagentStatusLines threadId={thread.id} /><LineagePanel threadId={thread.id} /></>, [side, card, cards, thread.id]);
   const handleGoalAction = (action: "show" | "set" | "pause" | "resume" | "clear", objective?: string) => {
     void runThreadGoalAction(thread.id, action, objective);
   };
