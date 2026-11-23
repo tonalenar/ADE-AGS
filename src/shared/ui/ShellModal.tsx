@@ -57,7 +57,7 @@ export function ShellModal({ title, icon, onClose, children }: {
         border-b border-gray-200 dark:border-[rgba(84,84,88,0.55)]">
         {icon}
         <h2 className="min-w-0 truncate text-center text-[13.5px] font-semibold tracking-[-0.01em]
-          text-gray-900 dark:text-[#f5f5f7]">
+          text-gray-900 dark:text-ink">
           {title}
         </h2>
         <Button variant="icon"

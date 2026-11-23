@@ -359,7 +359,7 @@ ${text}` : text)); setPicking(false); }} />}
             <button type="button" role="tab" onClick={() => setTabId(TEAM)} title={t("canvas.team.title")} aria-selected={teamView}
               className={`cc-t flex h-[26px] min-w-0 max-w-44 flex-1 items-center justify-center rounded-[7px] px-3 text-[12.5px] font-medium
                 ${teamView
-                  ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-[#f5f5f7] dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+                  ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-ink dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
                   : "text-gray-500 hover:text-gray-900 dark:text-white/55 dark:hover:text-white"}`}>
               <span className="truncate">{t("canvas.team.tab")}</span>
               {!teamView && teamApprovals.length + terminalPrompts.length > 0 && <Badge n={teamApprovals.length + terminalPrompts.length} />}
@@ -369,7 +369,7 @@ ${text}` : text)); setPicking(false); }} />}
             <button key={a.id} type="button" role="tab" onClick={() => setTabId(a.id)} title={a.title} aria-selected={!teamView && a.id === currentId}
               className={`cc-t flex h-[26px] min-w-0 max-w-44 flex-1 items-center justify-center rounded-[7px] px-3 text-[12.5px] font-medium
                 ${!teamView && a.id === currentId
-                  ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-[#f5f5f7] dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+                  ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-ink dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
                   : "text-gray-500 hover:text-gray-900 dark:text-white/55 dark:hover:text-white"}`}>
               <span title={a.title.split(" — ")[0]} className="truncate">{a.title.split(" — ")[0]}</span>
               {a.id !== currentId && unreadOf(unread[a.id]) > 0 && <Badge n={unreadOf(unread[a.id])} />}
@@ -419,7 +419,7 @@ ${text}` : text)); setPicking(false); }} />}
         </button>
         <button type="button" title={current.title} aria-haspopup="menu"
           onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ kind: "agent", x: r.left, y: r.top - 8 - 30 * Math.max(1, agents.length) }); }}
-          className="ml-1 flex h-[26px] min-w-0 items-center gap-1.5 rounded-md bg-black/[0.05] pl-2 pr-1.5 text-[12.5px] text-gray-800 hover:bg-black/[0.08] dark:bg-surface-raised dark:text-[#f5f5f7] dark:hover:brightness-110">
+          className="ml-1 flex h-[26px] min-w-0 items-center gap-1.5 rounded-md bg-black/[0.05] pl-2 pr-1.5 text-[12.5px] text-gray-800 hover:bg-black/[0.08] dark:bg-surface-raised dark:text-ink dark:hover:brightness-110">
           <span aria-hidden className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: agentTile(current.agentId) }} />
           <span className="truncate">{current.agentLabel}</span>
           <svg viewBox="0 0 18 18" aria-hidden className="h-3 w-3 shrink-0 text-gray-400 dark:text-white/40" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m5.5 7.5 3.5-3.5 3.5 3.5M5.5 10.5 9 14l3.5-3.5" /></svg>
@@ -478,7 +478,7 @@ ${text}` : text)); setPicking(false); }} />}
                   {m.kind !== "user" && current && (
                     <div className="mb-1 flex items-center gap-1.5 text-[11.5px] leading-4">
                       <span aria-hidden className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: agentTile(current.agentId) }} />
-                      <span className="font-semibold text-gray-900 dark:text-[#f5f5f7]">{current.title.split(" — ")[0]}</span>
+                      <span className="font-semibold text-gray-900 dark:text-ink">{current.title.split(" — ")[0]}</span>
                       <span className="text-gray-500 dark:text-white/50">{current.agentLabel}</span>
                       <span className="ml-auto font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35">{clock(m.at)}</span>
                     </div>
@@ -488,7 +488,7 @@ ${text}` : text)); setPicking(false); }} />}
                       ? "max-w-[85%] whitespace-pre-wrap rounded-2xl bg-accent-500 text-white"
                       : m.kind === "progress"
                         ? "rounded-xl border border-black/[0.1] text-[12px] text-gray-600 dark:border-[rgba(84,84,88,0.55)] dark:text-white/60"
-                        : "rounded-[14px] bg-gray-100 text-gray-900 dark:bg-surface-raised dark:text-[#f5f5f7]"}`}
+                        : "rounded-[14px] bg-gray-100 text-gray-900 dark:bg-surface-raised dark:text-ink"}`}
                   >
                     {m.kind === "user" ? m.text : <ChatMarkdown text={m.text} />}
                   </div>

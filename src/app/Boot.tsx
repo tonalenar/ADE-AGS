@@ -82,7 +82,7 @@ export function Boot({ appReady }: { appReady: Promise<void> }) {
 function UpdatingSplash() {
   const { t } = useTranslation();
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center gap-3 bg-[#1c1c1e] px-8 text-white">
+    <div className="flex h-screen w-screen flex-col items-center justify-center gap-3 bg-surface px-8 text-white">
       <p className="text-[17px] font-medium">{t("boot.updating.title")}</p>
       <p className="max-w-md text-center text-[13px] leading-relaxed text-white/70">
         {t("boot.updating.body")}
