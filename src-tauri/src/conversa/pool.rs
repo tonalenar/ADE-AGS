@@ -60,10 +60,28 @@ pub enum Decision {
     Switch { to: Option<String> },
 }
 
-/// O pool que a conversa poderia usar: o primeiro do agente que tem a conta atual como membro e mais alguém.
-/// Sem membro, não oferece (outro pool não é da pessoa para esta conta).
-pub fn offer_pool<'a>(pools: &'a [crate::accounts::pools::Pool], agent_id: &str, account: &Option<String>) -> Option<&'a crate::accounts::pools::Pool> {
-    pools.iter().find(|p| p.agent_id == agent_id && p.members.len() > 1 && p.members.contains(account))
+/// O pool que a conversa poderia usar: o primeiro do agente que tem a conta atual e pelo menos
+/// outra conta ainda existente como membros (M-1: contas apagadas não contam).
+pub fn offer_pool<'a>(
+    pools: &'a [crate::accounts::pools::Pool],
+    agent_id: &str,
+    account: &Option<String>,
+    existing_accounts: &std::collections::HashSet<String>,
+) -> Option<&'a crate::accounts::pools::Pool> {
+    let is_live = |m: &Option<String>| match m {
+        None => true,
+        Some(id) => existing_accounts.contains(id),
+    };
+    if !is_live(account) {
+        return None;
+    }
+    pools.iter().find(|p| {
+        if p.agent_id != agent_id {
+            return false;
+        }
+        let live_count = p.members.iter().filter(|m| is_live(m)).count();
+        live_count > 1 && p.members.contains(account)
+    })
 }
 
 pub fn decide(input: Input) -> Decision {
@@ -134,7 +152,7 @@ pub fn can_return(origin_resets_at: Option<i64>, now: i64) -> bool {
     origin_resets_at.is_some_and(|at| at <= now)
 }
 
-/// O registro de uma conversa que trocou de conta (em `settings`, sem migração).
+/// O registro de uma conversa que trocou de conta (em `settings`, migração aditiva).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Switched {
@@ -143,6 +161,10 @@ pub struct Switched {
     pub origin_resets_at: Option<i64>,
     /// As trocas desta conversa (s).
     pub history: Vec<i64>,
+    /// Verdadeiro enquanto o turno iniciado por uma troca ainda não concluiu nem houve nova
+    /// mensagem explícita da pessoa (substitui a heurística de relógio `CHAIN_SECS` — M-4).
+    #[serde(default)]
+    pub switched_turn_pending: bool,
 }
 
 /// As trocas que ainda contam na última hora.
@@ -194,8 +216,6 @@ use crate::database::DbConnection;
 use super::{api, store, turn};
 
 const MODE_KEY: &str = "chat.pool.mode";
-/// Uma troca nos últimos minutos: o turno que acabou de falhar é o da conta nova, não encadeia.
-const CHAIN_SECS: i64 = 300;
 
 /// Trava por conversa serializando `on_failure`, `accept`, `before_send` e `switch_manual` (A-2).
 /// Sempre adquirida ANTES de `api::send_gate(thread_id)` para evitar inversão de ordem e deadlock.
@@ -273,6 +293,9 @@ pub struct Pending {
     pub agent_id: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// Hora real de renovação (epoch s) extraída do erro, preservada até a pessoa aceitar (M-3).
+    #[serde(default)]
+    pub resets_at: Option<i64>,
 }
 
 /// O que o cartão «Limites de uso» mostra: o pool a que a conversa está ligada e a conta de origem se já trocou.
@@ -311,24 +334,60 @@ pub(super) fn local_offset() -> i64 {
     chrono::Local::now().offset().fix().local_minus_utc() as i64
 }
 
-/// Escolhe a próxima conta do pool, reaproveitando o ruteio da frota (login, limite, orçamento, cooldown). A
-/// conta atual vai para o cooldown ANTES, para nunca ser a escolhida.
-fn pick_next(db: &DbConnection, agent_id: &str, pool_id: &str, current: &Option<String>, now: i64) -> Result<Option<String>, String> {
-    let spec = crate::accounts::pools::spec_for(db, pool_id)?;
-    if spec.agent_id != agent_id {
-        return Err("o pool é de outro agente".into());
+fn emit_account_changed(app: Option<&AppHandle>, thread_id: &str, to: &Option<String>) {
+    if let Some(app) = app {
+        super::events::emit(app, thread_id, "thread", serde_json::json!({ "accountId": to }));
     }
+}
+
+fn existing_account_ids(db: &DbConnection, agent_id: &str) -> std::collections::HashSet<String> {
+    db.lock()
+        .ok()
+        .and_then(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT id FROM agent_accounts WHERE agent_id = ?1")
+                .ok()?;
+            let ids = stmt
+                .query_map([agent_id], |r| r.get::<_, String>(0))
+                .ok()?
+                .filter_map(Result::ok)
+                .collect();
+            Some(ids)
+        })
+        .unwrap_or_default()
+}
+
+/// Escolhe a próxima conta do pool, reaproveitando o ruteio da frota (login, limite, orçamento, cooldown). A
+/// conta atual vai para o cooldown ANTES, para nunca ser a escolhida. Só avança o cursor de `round_robin`
+/// quando a escolha dá certo (M-6).
+fn pick_next(db: &DbConnection, agent_id: &str, pool_id: &str, current: &Option<String>, now: i64) -> Result<Option<String>, String> {
     crate::runs::pool_failover::cool_down_account(&crate::runs::quota::account_key(agent_id, current.as_deref()), now);
     let roster = crate::runs::roster::snapshot(db, false)?;
     let agent = roster.agent(agent_id).ok_or("agente fora do roster")?;
-    let (to, _) = crate::runs::routing::pick_in_pool(agent, &spec, now)?;
-    if &to == current {
-        return Err("não restou outra conta do pool com limite livre".into());
+    crate::accounts::pools::with_pool_pick(db, pool_id, |spec| {
+        if spec.agent_id != agent_id {
+            return Err("o pool é de outro agente".into());
+        }
+        let (to, _) = crate::runs::routing::pick_in_pool(agent, spec, now)?;
+        if &to == current {
+            return Err("não restou outra conta do pool com limite livre".into());
+        }
+        if let Some(id) = to.as_deref() {
+            crate::accounts::ensure_supported_outside_pty(db, id)?;
+        }
+        Ok(to)
+    })
+}
+
+/// Limpa a flag de turno encadeado (`switched_turn_pending`) após um turno terminar sem erro de
+/// limite ou após uma nova mensagem explícita da pessoa (M-4).
+pub(super) fn clear_switched_turn_pending(db: &DbConnection, thread_id: &str) {
+    if let Some(mut switched) = load::<Switched>(db, &switched_key(thread_id)) {
+        if switched.switched_turn_pending {
+            switched.switched_turn_pending = false;
+            save(db, &switched_key(thread_id), Some(&switched));
+        }
     }
-    if let Some(id) = to.as_deref() {
-        crate::accounts::ensure_supported_outside_pty(db, id)?;
-    }
-    Ok(to)
 }
 
 /// Anota a conta como esgotada até a hora de renovação (o ruteio da frota e o cartão passam a vê-la assim).
@@ -341,10 +400,15 @@ pub(super) fn mark_exhausted(db: &DbConnection, key: &str, resets_at: i64, now: 
 
 /// Chamado no fim de cada turno (`turn::after_turn_hooks`), depois de emitir `phase: "idle"`.
 /// Coordena `pool` e `limite` sequencialmente sob `pool_gate(thread_id)` para evitar corrida entre
-/// failover de pool, `ResumePlan` e `offer_fallback` (A-2). Turnos sem erro de limite retornam na hora.
+/// failover de pool, `ResumePlan` e `offer_fallback` (A-2). Turnos sem erro de limite limpam
+/// `switched_turn_pending` (M-4) e retornam na hora.
 pub fn after_turn_with_limit(app: &AppHandle, db: &DbConnection, thread_id: &str, result: &super::claude_map::TurnResult) {
-    let Some(error) = result.error.clone().filter(|_| !result.interrupted) else { return };
+    let Some(error) = result.error.clone().filter(|_| !result.interrupted) else {
+        clear_switched_turn_pending(db, thread_id);
+        return;
+    };
     if crate::runs::failure::classify(&error) != FailureKind::RateLimited {
+        clear_switched_turn_pending(db, thread_id);
         return;
     }
     let result = super::claude_map::TurnResult {
@@ -395,13 +459,59 @@ fn offer_join(app: &AppHandle, db: &DbConnection, thread_id: &str, error: &str) 
         return PoolTurnOutcome::Unhandled;
     }
     let Ok(row) = api::thread(db, thread_id) else { return PoolTurnOutcome::Unhandled };
-    mark_exhausted(db, &crate::runs::quota::account_key(&row.agent_id, row.account_id.as_deref()), reset_at(error, now, local_offset()), now);
+    let resets_at = reset_at(error, now, local_offset());
+    mark_exhausted(db, &crate::runs::quota::account_key(&row.agent_id, row.account_id.as_deref()), resets_at, now);
     let pools = crate::accounts::pools::load(db);
-    let Some(pool) = offer_pool(&pools, &row.agent_id, &row.account_id) else { return PoolTurnOutcome::Unhandled };
+    let existing = existing_account_ids(db, &row.agent_id);
+    let Some(pool) = offer_pool(&pools, &row.agent_id, &row.account_id, &existing) else { return PoolTurnOutcome::Unhandled };
     let from = account_label(db, row.account_id.as_deref());
-    save(db, &pending_key(thread_id), Some(&Pending { kind: "join".into(), to: None, to_label: pool.name.clone(), request: last_request(db, thread_id), pool_id: Some(pool.id.clone()), agent_id: None, model: None }));
-    turn::save_notice(app, db, thread_id, "poolOffer", &format!("A conta {from} esgotou o limite e esta conversa não está num pool. Usar o pool «{}» e continuar em outra conta dele?", pool.name));
+    save(db, &pending_key(thread_id), Some(&Pending {
+        kind: "join".into(),
+        to: None,
+        to_label: pool.name.clone(),
+        request: last_request(db, thread_id),
+        pool_id: Some(pool.id.clone()),
+        agent_id: None,
+        model: None,
+        resets_at: Some(resets_at),
+    }));
+    turn::save_notice(app, db, thread_id, "poolOffer", &notice_pool_offer(&from, &pool.name));
     PoolTurnOutcome::Handled
+}
+
+pub(super) fn notice_pool_offer(from: &str, pool_name: &str) -> String {
+    serde_json::json!({ "from": from, "pool": pool_name }).to_string()
+}
+
+pub(super) fn notice_pool_blocked(from: &str, reason: &str, reason_code: Option<&str>) -> String {
+    let mut obj = serde_json::json!({ "from": from, "reason": reason });
+    if let Some(code) = reason_code {
+        obj["reasonCode"] = serde_json::json!(code);
+        if code == "hourlyLimit" {
+            obj["max"] = serde_json::json!(MAX_SWITCHES_PER_HOUR);
+        }
+    }
+    obj.to_string()
+}
+
+pub(super) fn notice_pool_failed(reason: &str) -> String {
+    serde_json::json!({ "kind": "failed", "reason": reason }).to_string()
+}
+
+pub(super) fn notice_pool_ask(from: &str, to: &str, resets_at: &str) -> String {
+    serde_json::json!({ "from": from, "to": to, "resetsAt": resets_at }).to_string()
+}
+
+pub(super) fn notice_pool_switch(from: &str, to: &str, resets_at: &str) -> String {
+    serde_json::json!({ "from": from, "to": to, "resetsAt": resets_at }).to_string()
+}
+
+pub(super) fn notice_pool_return(to: &str) -> String {
+    serde_json::json!({ "to": to }).to_string()
+}
+
+pub(super) fn notice_account_switch(to: &str) -> String {
+    serde_json::json!({ "to": to }).to_string()
 }
 
 async fn on_failure(app: &AppHandle, db: &DbConnection, thread_id: &str, error: &str) -> PoolTurnOutcome {
@@ -410,12 +520,13 @@ async fn on_failure(app: &AppHandle, db: &DbConnection, thread_id: &str, error: 
     let (Some(pool_id), Ok(row)) = (bound(db, thread_id), api::thread(db, thread_id)) else {
         return PoolTurnOutcome::Unhandled;
     };
-    let mut switched: Switched = load(db, &switched_key(thread_id)).unwrap_or_default();
+    let switched: Switched = load(db, &switched_key(thread_id)).unwrap_or_default();
     let resets_at = reset_at(error, now, local_offset());
     if kind == FailureKind::RateLimited {
         mark_exhausted(db, &crate::runs::quota::account_key(&row.agent_id, row.account_id.as_deref()), resets_at, now);
     }
-    let chained = recent(&switched.history, now).last().is_some_and(|at| now - at < CHAIN_SECS);
+    let chained = switched.switched_turn_pending;
+    let hourly_exceeded = recent(&switched.history, now).len() >= MAX_SWITCHES_PER_HOUR;
     let decision = decide(Input {
         mode: mode(db),
         kind,
@@ -423,28 +534,45 @@ async fn on_failure(app: &AppHandle, db: &DbConnection, thread_id: &str, error: 
         switched_this_turn: chained,
         history: &switched.history,
         now,
-        next: if kind == FailureKind::RateLimited { pick_next(db, &row.agent_id, &pool_id, &row.account_id, now) } else { Ok(None) },
+        next: if kind == FailureKind::RateLimited && !chained && !hourly_exceeded {
+            pick_next(db, &row.agent_id, &pool_id, &row.account_id, now)
+        } else {
+            Ok(None)
+        },
     });
     let request = last_request(db, thread_id);
     let from = account_label(db, row.account_id.as_deref());
     match decision {
         Decision::Skip => PoolTurnOutcome::Unhandled,
         Decision::Blocked(why) => {
-            if switched.origin_resets_at.is_none() && switched.origin.is_none() {
-                switched.origin_resets_at = Some(resets_at);
-            }
-            turn::save_notice(app, db, thread_id, "poolBlocked", &format!("A conta {from} esgotou o limite e a conversa não trocou de conta: {why}."));
+            let reason_code = if chained {
+                Some("chained")
+            } else if hourly_exceeded {
+                Some("hourlyLimit")
+            } else {
+                None
+            };
+            turn::save_notice(app, db, thread_id, "poolBlocked", &notice_pool_blocked(&from, &why, reason_code));
             PoolTurnOutcome::Unhandled
         }
         Decision::Ask { to } => {
             let to_label = account_label(db, to.as_deref());
-            save(db, &pending_key(thread_id), Some(&Pending { kind: "switch".into(), to, to_label: to_label.clone(), request, pool_id: None, agent_id: None, model: None }));
-            turn::save_notice(app, db, thread_id, "poolAsk", &format!("A conta {from} esgotou o limite (renova {}). Continuar na conta {to_label}?", clock(resets_at)));
+            save(db, &pending_key(thread_id), Some(&Pending {
+                kind: "switch".into(),
+                to,
+                to_label: to_label.clone(),
+                request,
+                pool_id: None,
+                agent_id: None,
+                model: None,
+                resets_at: Some(resets_at),
+            }));
+            turn::save_notice(app, db, thread_id, "poolAsk", &notice_pool_ask(&from, &to_label, &clock(resets_at)));
             PoolTurnOutcome::Handled
         }
         Decision::Switch { to } => {
             if let Err(e) = switch_to(app, db, thread_id, &pool_id, to, request, resets_at, now).await {
-                turn::save_notice(app, db, thread_id, "poolBlocked", &format!("A troca de conta falhou: {e}."));
+                turn::save_notice(app, db, thread_id, "poolBlocked", &notice_pool_failed(&e));
                 PoolTurnOutcome::Unhandled
             } else {
                 PoolTurnOutcome::Handled
@@ -467,22 +595,27 @@ async fn switch_to(app: &AppHandle, db: &DbConnection, thread_id: &str, _pool_id
     let items = api::items(db, thread_id).unwrap_or_default();
     let (from, to_label) = (account_label(db, row.account_id.as_deref()), account_label(db, to.as_deref()));
     let handoff = handoff_text_for(&items, thread_id, &from, &to_label, request.as_deref());
-    move_account(db, thread_id, &row.account_id, &to, resets_at, now)?;
+    move_account_inner(Some(app), db, thread_id, &row.account_id, &to, resets_at, now)?;
     api::send_without_pool_before_send(app, db, thread_id, &handoff).await?;
     commit_switch_sent(db, thread_id);
-    turn::save_notice(app, db, thread_id, "poolSwitch", &format!("A conta {from} esgotou o limite (renova {}). Seguindo na conta {to_label}.", clock(resets_at)));
+    turn::save_notice(app, db, thread_id, "poolSwitch", &notice_pool_switch(&from, &to_label, &clock(resets_at)));
     Ok(())
 }
 
 /// A parte de banco da troca: sem janela, para testar.
 /// Preserva `pending` e grava `handoff_key` até que o envio da mensagem de handoff confirme `Ok` (`commit_switch_sent`).
 pub(super) fn move_account(db: &DbConnection, thread_id: &str, from: &Option<String>, to: &Option<String>, resets_at: i64, now: i64) -> Result<(), String> {
+    move_account_inner(None, db, thread_id, from, to, resets_at, now)
+}
+
+fn move_account_inner(app: Option<&AppHandle>, db: &DbConnection, thread_id: &str, from: &Option<String>, to: &Option<String>, resets_at: i64, now: i64) -> Result<(), String> {
     api::close_process(thread_id);
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::set_account(&conn, thread_id, to.as_deref()).map_err(|e| e.to_string())?;
         store::clear_remote_id(&conn, thread_id).map_err(|e| e.to_string())?;
     }
+    emit_account_changed(app, thread_id, to);
     let mut switched: Switched = load(db, &switched_key(thread_id)).unwrap_or_default();
     if switched.origin.is_none() && switched.origin_resets_at.is_none() {
         switched.origin = from.clone();
@@ -490,6 +623,7 @@ pub(super) fn move_account(db: &DbConnection, thread_id: &str, from: &Option<Str
     }
     switched.history = recent(&switched.history, now);
     switched.history.push(now);
+    switched.switched_turn_pending = true;
     save(db, &switched_key(thread_id), Some(&switched));
     save(db, &handoff_key(thread_id), Some(&now));
     Ok(())
@@ -509,12 +643,22 @@ pub fn check_accept(working: bool, pending: Option<Pending>) -> Result<Pending, 
     pending.ok_or_else(|| "Não há nada esperando resposta nesta conversa.".into())
 }
 
+/// Parte de banco de `accept` para `"return"` (M-3): volta à conta original, emite `"thread"` com
+/// `accountId`, limpa só `pending_key` e mantém `handoff_key` gravado para o resumo seguir com a
+/// próxima mensagem da pessoa (em vez de gastar um turno pago só com contexto).
+pub(super) fn accept_return_db(app: Option<&AppHandle>, db: &DbConnection, thread_id: &str, now: i64) -> Result<(), String> {
+    let _ = return_to_origin_inner(app, db, thread_id, now)?;
+    dismiss(db, thread_id);
+    Ok(())
+}
+
 /// A pessoa aceitou o que foi perguntado («Continuar na conta B» ou «Voltar à conta A»).
 pub async fn accept(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<(), String> {
     let gate = pool_gate(thread_id);
     let _held = gate.lock().await;
     let pending = check_accept(api::status(thread_id).working, pending(db, thread_id))?;
     let now = crate::util::now_ts();
+    let resets_at = pending.resets_at.unwrap_or(now + WINDOW_SECS);
     if pending.kind == "fallback" {
         return super::limite::accept_fallback(app, db, thread_id, pending).await;
     }
@@ -523,20 +667,18 @@ pub async fn accept(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Resu
         let row = api::thread(db, thread_id)?;
         let to = pick_next(db, &row.agent_id, &pool_id, &row.account_id, now)?;
         bind(db, thread_id, Some(&pool_id))?;
-        return switch_to(app, db, thread_id, &pool_id, to, pending.request, now + WINDOW_SECS, now).await;
+        return switch_to(app, db, thread_id, &pool_id, to, pending.request, resets_at, now).await;
     }
     if pending.kind == "return" {
-        let context = return_to_origin(db, thread_id, now)?;
-        api::send_without_pool_before_send(app, db, thread_id, &context).await?;
-        commit_switch_sent(db, thread_id);
-        turn::save_notice(app, db, thread_id, "poolReturn", &format!("A conta original renovou. Voltando para a conta {}.", pending.to_label));
+        accept_return_db(Some(app), db, thread_id, now)?;
+        turn::save_notice(app, db, thread_id, "poolReturn", &notice_pool_return(&pending.to_label));
         return Ok(());
     }
     let pool_id = bound(db, thread_id).ok_or("A conversa não está ligada a um pool.")?;
     let row = api::thread(db, thread_id)?;
     // A escolha pode ter envelhecido desde a pergunta: escolhe de novo, e só segue se ainda houver conta.
     let to = pick_next(db, &row.agent_id, &pool_id, &row.account_id, now)?;
-    switch_to(app, db, thread_id, &pool_id, to, pending.request, now + WINDOW_SECS, now).await
+    switch_to(app, db, thread_id, &pool_id, to, pending.request, resets_at, now).await
 }
 
 pub fn dismiss(db: &DbConnection, thread_id: &str) {
@@ -545,7 +687,7 @@ pub fn dismiss(db: &DbConnection, thread_id: &str) {
 
 /// Volta à conta de origem; devolve o contexto para abrir a próxima mensagem.
 /// Grava `handoff_key` e preserva `pending` até que o envio confirme `Ok` (`commit_switch_sent` / `commit_before_send`).
-fn return_to_origin(db: &DbConnection, thread_id: &str, now: i64) -> Result<String, String> {
+fn return_to_origin_inner(app: Option<&AppHandle>, db: &DbConnection, thread_id: &str, now: i64) -> Result<String, String> {
     let switched: Switched = load(db, &switched_key(thread_id)).ok_or("A conversa não trocou de conta.")?;
     if let Some(id) = switched.origin.as_deref() {
         crate::accounts::ensure_supported_outside_pty(db, id)?;
@@ -560,6 +702,7 @@ fn return_to_origin(db: &DbConnection, thread_id: &str, now: i64) -> Result<Stri
         store::set_account(&conn, thread_id, switched.origin.as_deref()).map_err(|e| e.to_string())?;
         store::clear_remote_id(&conn, thread_id).map_err(|e| e.to_string())?;
     }
+    emit_account_changed(app, thread_id, &switched.origin);
     save::<Switched>(db, &switched_key(thread_id), None);
     save(db, &handoff_key(thread_id), Some(&now));
     Ok(context)
@@ -588,6 +731,17 @@ pub(super) fn prepare_before_send_db(
     working: bool,
     now: i64,
 ) -> (PreparedSend, Option<(&'static str, String)>) {
+    prepare_before_send_inner(None, db, thread_id, text, working, now)
+}
+
+fn prepare_before_send_inner(
+    app: Option<&AppHandle>,
+    db: &DbConnection,
+    thread_id: &str,
+    text: &str,
+    working: bool,
+    now: i64,
+) -> (PreparedSend, Option<(&'static str, String)>) {
     if working {
         return (PreparedSend::unchanged(text), None);
     }
@@ -601,20 +755,29 @@ pub(super) fn prepare_before_send_db(
     }
     let label = account_label(db, switched.origin.as_deref());
     if mode == Mode::Ask {
-        save(db, &pending_key(thread_id), Some(&Pending { kind: "return".into(), to: switched.origin, to_label: label.clone(), request: None, pool_id: None, agent_id: None, model: None }));
+        save(db, &pending_key(thread_id), Some(&Pending {
+            kind: "return".into(),
+            to: switched.origin,
+            to_label: label.clone(),
+            request: None,
+            pool_id: None,
+            agent_id: None,
+            model: None,
+            resets_at: None,
+        }));
         return (
             PreparedSend { text: manual_text, clear_manual_handoff, clear_pending: false },
-            Some(("poolReturnAsk", format!("A conta {label} renovou. Voltar para ela?"))),
+            Some(("poolReturnAsk", notice_pool_return(&label))),
         );
     }
-    match return_to_origin(db, thread_id, now) {
+    match return_to_origin_inner(app, db, thread_id, now) {
         Ok(context) => (
             PreparedSend {
                 text: format!("{context}\n\n{manual_text}"),
                 clear_manual_handoff: true,
                 clear_pending: true,
             },
-            Some(("poolReturn", format!("A conta original renovou. Voltando para a conta {label}."))),
+            Some(("poolReturn", notice_pool_return(&label))),
         ),
         Err(_) => (PreparedSend { text: manual_text, clear_manual_handoff, clear_pending: false }, None),
     }
@@ -625,14 +788,15 @@ pub(super) fn prepare_before_send_db(
 /// Só limpa `handoff_key`/`pending` quando [`commit_before_send`] for chamado após o envio dar `Ok`.
 pub(super) fn before_send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str) -> PreparedSend {
     let working = api::status(thread_id).working;
-    let (prepared, notice) = prepare_before_send_db(db, thread_id, text, working, crate::util::now_ts());
+    let (prepared, notice) = prepare_before_send_inner(Some(app), db, thread_id, text, working, crate::util::now_ts());
     if let Some((code, body)) = notice {
         turn::save_notice(app, db, thread_id, code, &body);
     }
     prepared
 }
 
-/// Confirma que o envio preparado por [`before_send`] deu `Ok`: limpa os marcadores pendentes.
+/// Confirma que o envio preparado por [`before_send`] deu `Ok`: limpa os marcadores pendentes e
+/// desmarca `switched_turn_pending` (a pessoa iniciou um novo envio explícito — M-4).
 pub(super) fn commit_before_send(db: &DbConnection, thread_id: &str, prepared: &PreparedSend) {
     if prepared.clear_manual_handoff {
         save::<i64>(db, &handoff_key(thread_id), None);
@@ -640,19 +804,23 @@ pub(super) fn commit_before_send(db: &DbConnection, thread_id: &str, prepared: &
     if prepared.clear_pending {
         save::<Pending>(db, &pending_key(thread_id), None);
     }
+    clear_switched_turn_pending(db, thread_id);
 }
 
 /// `pool:<nome>` ao criar a conversa: a conta que o pool escolhe agora e o id do pool. Erro claro se o pool não
-/// existe ou não tem conta usável (a conversa não nasce presa a uma conta sem limite).
+/// existe ou não tem conta usável (a conversa não nasce presa a uma conta sem limite). Só avança o cursor de
+/// `round_robin` se a escolha suceder (M-6).
 pub fn resolve_at_create(db: &DbConnection, agent_id: &str, pool_name: &str) -> Result<(Option<String>, String), String> {
-    let spec = crate::accounts::pools::spec_for(db, pool_name)?;
     let roster = crate::runs::roster::snapshot(db, false)?;
     let agent = roster.agent(agent_id).ok_or_else(|| format!("'{agent_id}' fora do roster"))?;
-    let (account, _) = crate::runs::routing::pick_in_pool(agent, &spec, crate::util::now_ts()).map_err(|e| format!("Pool '{pool_name}': {e}"))?;
-    if let Some(id) = account.as_deref() {
-        crate::accounts::ensure_supported_outside_pty(db, id)?;
-    }
-    Ok((account, spec.id))
+    crate::accounts::pools::with_pool_pick(db, pool_name, |spec| {
+        let (account, _) = crate::runs::routing::pick_in_pool(agent, spec, crate::util::now_ts())
+            .map_err(|e| format!("Pool '{pool_name}': {e}"))?;
+        if let Some(id) = account.as_deref() {
+            crate::accounts::ensure_supported_outside_pty(db, id)?;
+        }
+        Ok((account, spec.id.clone()))
+    })
 }
 
 // ── Troca manual de conta (a pessoa escolhe, em qualquer conversa) ──────────────────────────────────────────
@@ -682,6 +850,10 @@ pub fn check_manual_switch(working: bool, pending_requests: usize, current: &Opt
 /// A parte de banco da troca manual: valida, passa a conta, esquece a sessão e deixa o resumo para a próxima
 /// mensagem. Devolve (conta anterior, conta nova). Não conta no teto do pool nem ativa a volta à original.
 pub(super) fn set_account_manual(db: &DbConnection, thread_id: &str, to: &Option<String>, working: bool, now: i64) -> Result<(Option<String>, Option<String>), String> {
+    set_account_manual_inner(None, db, thread_id, to, working, now)
+}
+
+fn set_account_manual_inner(app: Option<&AppHandle>, db: &DbConnection, thread_id: &str, to: &Option<String>, working: bool, now: i64) -> Result<(Option<String>, Option<String>), String> {
     let row = api::thread(db, thread_id)?;
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -698,6 +870,7 @@ pub(super) fn set_account_manual(db: &DbConnection, thread_id: &str, to: &Option
         store::set_account(&conn, thread_id, to.as_deref()).map_err(|e| e.to_string())?;
         store::clear_remote_id(&conn, thread_id).map_err(|e| e.to_string())?;
     }
+    emit_account_changed(app, thread_id, to);
     // A escolha da pessoa manda: o pool deixa de querer «voltar à original» e a pergunta pendente perde o sentido.
     save::<Switched>(db, &switched_key(thread_id), None);
     save::<Pending>(db, &pending_key(thread_id), None);
@@ -728,7 +901,7 @@ pub async fn switch_manual(app: &AppHandle, db: &DbConnection, thread_id: &str, 
     let gate = pool_gate(thread_id);
     let _held = gate.lock().await;
     let working = api::status(thread_id).working;
-    let (_, to) = set_account_manual(db, thread_id, &to, working, crate::util::now_ts())?;
-    turn::save_notice(app, db, thread_id, "accountSwitch", &format!("Agora na conta {}. O agente recebe um resumo desta conversa na próxima mensagem.", account_label(db, to.as_deref())));
+    let (_, to) = set_account_manual_inner(Some(app), db, thread_id, &to, working, crate::util::now_ts())?;
+    turn::save_notice(app, db, thread_id, "accountSwitch", &notice_account_switch(&account_label(db, to.as_deref())));
     Ok(())
 }

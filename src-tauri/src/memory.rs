@@ -1720,21 +1720,23 @@ pub fn task_tool_with_history_scope(
                 reason: input.reason,
                 acknowledge_secret: false,
             };
+            let created = propose(
+                conn,
+                &input.scope,
+                &workspace_id,
+                mission,
+                &proposal,
+                ProposalActor {
+                    kind: &actor,
+                    run_id: Some(&run_id),
+                    task_id: Some(task_id),
+                    fact_id: None,
+                },
+            )?;
+            repo_scope::tag_new_entry_repo(conn, &created.entry_id, repo_key.as_deref())?;
             encode(
-                &serde_json::to_value(propose(
-                    conn,
-                    &input.scope,
-                    &workspace_id,
-                    mission,
-                    &proposal,
-                    ProposalActor {
-                        kind: &actor,
-                        run_id: Some(&run_id),
-                        task_id: Some(task_id),
-                        fact_id: None,
-                    },
-                )?)
-                .map_err(|_| "could not encode memory proposal".to_string())?,
+                &serde_json::to_value(created)
+                    .map_err(|_| "could not encode memory proposal".to_string())?,
             )?
         }
         "memory.update" => {
@@ -1843,19 +1845,21 @@ pub fn task_tool_with_history_scope(
         "memory.promoteFact" => {
             let input: TaskFactPromotion = serde_json::from_value(args)
                 .map_err(|_| "invalid memory.promoteFact arguments".to_string())?;
+            let created = promote_fact(
+                conn,
+                &run_id,
+                &input.fact_id,
+                &input.scope,
+                &input.key,
+                input.priority,
+                input.reason.as_deref(),
+                &actor,
+                Some(task_id),
+            )?;
+            repo_scope::tag_new_entry_repo(conn, &created.entry_id, repo_key.as_deref())?;
             encode(
-                &serde_json::to_value(promote_fact(
-                    conn,
-                    &run_id,
-                    &input.fact_id,
-                    &input.scope,
-                    &input.key,
-                    input.priority,
-                    input.reason.as_deref(),
-                    &actor,
-                    Some(task_id),
-                )?)
-                .map_err(|_| "could not encode memory proposal".to_string())?,
+                &serde_json::to_value(created)
+                    .map_err(|_| "could not encode memory proposal".to_string())?,
             )?
         }
         _ => return Err("unknown Shared Memory tool".into()),
@@ -1988,11 +1992,18 @@ pub async fn memory_propose_user(
     workspace_id: String,
     mission_id: Option<String>,
     input: ProposalInput,
+    cwd: Option<String>,
     app: tauri::AppHandle,
     db: tauri::State<'_, DbConnection>,
 ) -> Result<ProposalResult, String> {
     let db = db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let repository_key = match cwd.as_deref() {
+            Some(path) if !path.trim().is_empty() => {
+                repo_scope::repo_key(std::path::Path::new(path))
+            }
+            _ => repo_scope::mission_repo_key_unlocked(&db, mission_id.as_deref())?,
+        };
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
         let result = propose(
             &conn,
@@ -2007,6 +2018,9 @@ pub async fn memory_propose_user(
                 fact_id: None,
             },
         );
+        if let Ok(ref created) = result {
+            let _ = repo_scope::tag_new_entry_repo(&conn, &created.entry_id, repository_key.as_deref());
+        }
         drop(conn);
         if result.is_ok() { notify_changed(&app); }
         result

@@ -202,7 +202,7 @@ fn a_pergunta_guardada_antes_dos_campos_novos_ainda_le() {
     let lido: Pending = serde_json::from_str(antigo).unwrap();
     assert_eq!((lido.agent_id, lido.model), (None, None));
     // E a nova ida e volta.
-    let nova = Pending { kind: "fallback".into(), to: None, to_label: "Claude · opus".into(), request: Some("faça x".into()), pool_id: None, agent_id: Some("claude-code".into()), model: Some("opus".into()) };
+    let nova = Pending { kind: "fallback".into(), to: None, to_label: "Claude · opus".into(), request: Some("faça x".into()), pool_id: None, agent_id: Some("claude-code".into()), model: Some("opus".into()), resets_at: None };
     let volta: Pending = serde_json::from_str(&serde_json::to_string(&nova).unwrap()).unwrap();
     assert_eq!(volta, nova);
 }

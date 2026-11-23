@@ -214,12 +214,61 @@ pub struct EffectiveDefaults {
     pub selection: Option<EffectiveSelection>,
 }
 
+fn live_pool_members(conn: &Connection, pool: &crate::accounts::pools::Pool) -> Vec<Option<String>> {
+    let mut out = Vec::new();
+    for member in &pool.members {
+        match member {
+            None => out.push(None),
+            Some(id) => {
+                let exists = conn
+                    .query_row(
+                        "SELECT 1 FROM agent_accounts WHERE id = ?1 AND agent_id = ?2",
+                        rusqlite::params![id, &pool.agent_id],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .is_ok();
+                if exists {
+                    out.push(Some(id.clone()));
+                }
+            }
+        }
+    }
+    out
+}
+
 fn limited_probe<'a>(
     conn: &'a Connection,
     account_id: Option<&'a str>,
     now: i64,
 ) -> impl Fn(&str) -> Option<i64> + 'a {
-    move |agent_id| crate::conversa::limite::limited_until(conn, agent_id, account_id, now)
+    move |agent_id| {
+        if let Some(pool_name) = account_id.and_then(crate::accounts::pools::pool_ref) {
+            let pools = crate::accounts::pools::load_with_conn(conn);
+            if let Ok(pool) = crate::accounts::pools::find(&pools, pool_name) {
+                if pool.agent_id == agent_id {
+                    let members = live_pool_members(conn, pool);
+                    if !members.is_empty() {
+                        // O pool só dispara o modelo reserva quando TODAS as contas existentes dele estão esgotadas (B-1).
+                        let mut earliest: Option<i64> = None;
+                        for member in &members {
+                            let Some(until) = crate::conversa::limite::limited_until(
+                                conn,
+                                agent_id,
+                                member.as_deref(),
+                                now,
+                            ) else {
+                                return None;
+                            };
+                            earliest = Some(earliest.map_or(until, |cur| cur.min(until)));
+                        }
+                        return earliest;
+                    }
+                }
+            }
+            return crate::conversa::limite::limited_until(conn, agent_id, None, now);
+        }
+        crate::conversa::limite::limited_until(conn, agent_id, account_id, now)
+    }
 }
 
 /// Para quem abre conversa sem tela: lê os padrões e devolve o agente e o modelo a usar. Erro de leitura não

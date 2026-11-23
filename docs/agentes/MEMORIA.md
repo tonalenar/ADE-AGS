@@ -106,7 +106,7 @@ As seções seguintes descrevem o SQLite legado do ADE, que agentes só podem le
   - remove acentos, separa camelCase, usa stopwords PT/ES/EN e dá peso 3× à key;
   - lê só entradas aprovadas e respeita `repo_key`.
 - CLI:
-  - `ags memory search "<q>" [--limit] [--at <data>]`;
+  - `ags memory search "<q>" [--limit] [--at <data>]` (funciona tanto em missões quanto em abas soltas, filtrado por `repo_key`);
   - `ags memory history --key --scope`;
   - `ags memory index`;
   - `ags memory open <página|id|key>`;
@@ -126,11 +126,10 @@ As seções seguintes descrevem o SQLite legado do ADE, que agentes só podem le
 ## RepoSync (`memory/repo_sync.rs`)
 - Ordem: o SQLite commita primeiro; depois `note_dirty`; depois `enqueue`.
 - Um worker único roda o git **sem o mutex do banco**. A guarda `EXPORT_DB_HOLD` recusa git chamado com o mutex preso.
-- Em falha: backoff de até 6 tentativas, e a aprovação não é revertida.
+- Em falha: backoff de até 6 tentativas consecutivas; ao atingir 6 falhas, pausa novas tentativas automáticas e exibe o estado pausado na UI até clique manual em "Tentar de novo" ou nova aprovação, sem reverter a aprovação.
 - `pause/resume_workspace` é o contrato com o purge.
 - `reconcile_pending()` reenfileira o que ficou pendente quando o app abre.
 - **Lost wakeup** (PR #218): o `Drop` pega o lock do estado antes de marcar `stop` e chamar `notify_all`. Sem isso, o `join()` podia esperar para sempre (o CI travou 30 min).
 
 ## Pontos de atenção conhecidos
-- `memory::snapshot_run`: o SQL dos candidatos do **índice** não filtra `repo_key`; o top-K filtra. O índice pode listar chaves de outro repo.
 - `docs/ade-ags/SHARED_MEMORY.md` ainda descreve o snapshot antigo (16 entradas por prioridade, "8 entradas / 1,8 KB" no briefing). O contrato IPC atual está em `MEMORY_STAGE25_CONTRACT_AUDIT.md`.

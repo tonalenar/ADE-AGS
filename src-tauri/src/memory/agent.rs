@@ -175,10 +175,21 @@ pub fn propose_for_mission_with_repo(
 /// que é o do projeto onde o agente está. Fica pendente, como qualquer proposta de agente.
 #[cfg(test)]
 pub fn propose_for_workspace(conn: &Connection, workspace_id: &str, p: &AgentProposal<'_>) -> Result<ProposalResult, String> {
+    propose_for_workspace_with_repo(conn, workspace_id, p, None)
+}
+
+/// Propõe uma memória do PROJETO a partir de uma aba solta, marcando o `repo_key` derivado da pasta da aba.
+#[cfg(test)]
+pub fn propose_for_workspace_with_repo(
+    conn: &Connection,
+    workspace_id: &str,
+    p: &AgentProposal<'_>,
+    repo_key: Option<&str>,
+) -> Result<ProposalResult, String> {
     if p.scope != "workspace" {
         return Err("Fora de uma missão só existe o escopo 'workspace' (memória do projeto): use --scope workspace.".into());
     }
-    propose_in(conn, workspace_id, None, p, None)
+    propose_in(conn, workspace_id, None, p, repo_key)
 }
 
 #[cfg(test)]
@@ -233,9 +244,11 @@ fn propose_in(
         &input,
         ProposalActor { kind: p.author.kind(), run_id: None, task_id: None, fact_id: None },
     )?;
-    // A memória nova de uma missão é do repositório dela (ver `repo_scope`).
+    // A memória nova de uma missão ou aba solta herda o repositório dela (ver `repo_scope`).
     if let Some(mission) = mission {
         super::repo_scope::tag_new_entry(conn, &result.entry_id, mission, repo_key)?;
+    } else {
+        super::repo_scope::tag_new_entry_repo(conn, &result.entry_id, repo_key)?;
     }
     Ok(result)
 }

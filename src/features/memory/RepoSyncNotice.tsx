@@ -39,16 +39,19 @@ export function RepoSyncNotice({ workspaceId }: { workspaceId: string }) {
   if (!status || status.phase === "idle" || (status.phase === "synced" && warnings.length === 0)) return null;
 
   const failed = status.phase === "failed";
+  const exhausted = failed && Boolean(status.exhausted);
   return (
     <div role={failed ? "alert" : "status"} className={`flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-[11.5px] leading-4 ${failed ? "bg-red-500/10 text-red-700 dark:text-red-300" : "bg-amber-500/10 text-amber-800 dark:text-amber-200"}`}>
       <div className="min-w-0 flex-1">
         {status.phase !== "synced" && (
           <p>
-            {failed
-              ? t("memoryInbox.syncFailed", { error: status.error ?? "" })
-              : status.phase === "syncing"
-                ? t("memoryInbox.syncing")
-                : t("memoryInbox.syncQueued")}
+            {exhausted
+              ? t("memoryInbox.syncPaused", { attempts: status.attempts ?? 6, error: status.error ?? "" })
+              : failed
+                ? t("memoryInbox.syncFailed", { error: status.error ?? "" })
+                : status.phase === "syncing"
+                  ? t("memoryInbox.syncing")
+                  : t("memoryInbox.syncQueued")}
           </p>
         )}
         {warnings.map((warning) => <p key={warning}>{warning}</p>)}

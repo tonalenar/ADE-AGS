@@ -281,10 +281,11 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
     }))
 }
 
-/// `ags memory search "<assunto>" --mission <id>`: busca por relevância no histórico SQLite aprovado.
-/// Para consultar páginas atuais do ai-memory, use as tools MCP escopadas.
+/// `ags memory search "<assunto>" [--mission <id>]`: busca por relevância no histórico SQLite aprovado do
+/// workspace e (quando em missão) da missão; funciona em missão e em aba solta. Páginas atuais do ai-memory
+/// ficam nas tools MCP escopadas.
 pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    let id = memory_caller_mission(args)?;
+    let tab = authenticated_tab(args)?;
     let query = arg_str(args, "query")?;
     let limit = arg_u64_checked(args, "limit")?.unwrap_or(5) as usize;
     let at = match args.get("at") {
@@ -298,13 +299,35 @@ pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, Stri
         None => None,
     };
     let db = db(app)?;
-    let repo_key = crate::memory::repo_scope::mission_repo_key_unlocked(&db, Some(&id))?;
+    let (workspace, mission) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        workspace_for_caller(&conn, &tab)?
+    };
+    let repo_key = match mission.as_deref() {
+        Some(id) => crate::memory::repo_scope::mission_repo_key_unlocked(&db, Some(id))?,
+        None => crate::memory::repo_scope::tab_repo_key_unlocked(&db, &tab)?,
+    };
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let tab = authenticated_tab(args).ok();
-    memory_search_on(&conn, &id, &query, limit, at, repo_key.as_deref(), tab.as_deref())
+    let current_owner = workspace_for_caller(&conn, &tab)?;
+    if current_owner != (workspace.clone(), mission.clone()) {
+        return Err("o contexto da aba mudou durante a busca de memória".into());
+    }
+    let fail_closed = mission.is_some() && repo_key.is_none();
+    memory_search_in(
+        &conn,
+        &workspace,
+        mission.as_deref(),
+        &query,
+        limit,
+        at,
+        repo_key.as_deref(),
+        fail_closed,
+        Some(tab.as_str()),
+    )
 }
 
 /// O núcleo de `memory_search`, com o banco já aberto: lê só as memórias aprovadas da missão.
+#[cfg(test)]
 pub(super) fn memory_search_on(
     conn: &rusqlite::Connection,
     id: &str,
@@ -316,23 +339,48 @@ pub(super) fn memory_search_on(
 ) -> Result<Value, String> {
     let mission = crate::missions::store::get(conn, id)?
         .ok_or_else(|| format!("não há nenhuma missão {id}"))?;
+    memory_search_in(
+        conn,
+        &mission.workspace_id,
+        Some(&mission.id),
+        query,
+        limit,
+        at,
+        repo_key,
+        true,
+        tab,
+    )
+}
+
+/// Busca nas memórias aprovadas de um workspace (e opcionalmente de uma missão), funcionando também em abas soltas.
+pub(super) fn memory_search_in(
+    conn: &rusqlite::Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    query: &str,
+    limit: usize,
+    at: Option<i64>,
+    repo_key: Option<&str>,
+    fail_closed: bool,
+    tab: Option<&str>,
+) -> Result<Value, String> {
     let hits = match at {
         Some(at) => crate::memory::search::search_at_with_repo(
             conn,
-            &mission.workspace_id,
-            Some(&mission.id),
+            workspace_id,
+            mission_id,
             repo_key,
-            true,
+            fail_closed,
             query,
             limit,
             at,
         )?,
         None => crate::memory::search::search_with_repo(
             conn,
-            &mission.workspace_id,
-            Some(&mission.id),
+            workspace_id,
+            mission_id,
             repo_key,
-            true,
+            fail_closed,
             query,
             limit,
         )?,
@@ -342,8 +390,8 @@ pub(super) fn memory_search_on(
         conn,
         &crate::memory::usage::UsageRow {
             ts: crate::memory::usage::now(),
-            workspace_id: &mission.workspace_id,
-            mission_id: Some(id),
+            workspace_id,
+            mission_id,
             tab_id: tab,
             action: "search",
             query: Some(query),
@@ -373,13 +421,16 @@ pub(super) fn memory_repo_read(
         let conn = db.lock().map_err(|e| e.to_string())?;
         workspace_for_caller(&conn, &tab)?
     };
-    let repo_key = crate::memory::repo_scope::mission_repo_key_unlocked(&db, mission.as_deref())?;
+    let repo_key = match mission.as_deref() {
+        Some(id) => crate::memory::repo_scope::mission_repo_key_unlocked(&db, Some(id))?,
+        None => crate::memory::repo_scope::tab_repo_key_unlocked(&db, &tab)?,
+    };
     let conn = db.lock().map_err(|e| e.to_string())?;
     let current_owner = workspace_for_caller(&conn, &tab)?;
     if current_owner != (workspace.clone(), mission.clone()) {
         return Err("o contexto da aba mudou durante a leitura da memória".into());
     }
-    let text = crate::memory::repo::approved_open_with_repo(
+    let (text, resolved_key) = crate::memory::repo::approved_open_with_repo_resolved(
         &conn,
         &workspace,
         mission.as_deref(),
@@ -390,7 +441,7 @@ pub(super) fn memory_repo_read(
     let read_keys: Vec<String> = if index {
         Vec::new()
     } else {
-        vec![path.clone()]
+        resolved_key.into_iter().collect()
     };
     let hits = u32::from(!text.trim().is_empty());
     let action = if index { "index" } else { "open" };

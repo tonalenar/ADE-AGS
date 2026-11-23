@@ -12,6 +12,8 @@ pub(crate) struct TabInjection {
     pub args: Vec<String>,
     pub env: HashMap<String, String>,
     pub settings_file: Option<PathBuf>,
+    /// Verdadeiro quando o servidor MCP `ai-memory` foi gravado no arquivo `--mcp-config` da aba/conversa.
+    pub mcp_injected: bool,
 }
 impl Drop for TabInjection {
     fn drop(&mut self) {
@@ -283,6 +285,7 @@ pub(crate) fn prepare(
     );
     std::fs::write(&config_path, config.to_string())
         .map_err(|_| "Não foi possível gravar o MCP da aba.".to_string())?;
+    plan.mcp_injected = true;
     let config_arg = crate::util::external_path(&config_path)
         .to_string_lossy()
         .into_owned();

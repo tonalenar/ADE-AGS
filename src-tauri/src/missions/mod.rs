@@ -572,6 +572,7 @@ pub(crate) fn check_launch_now(
                 )
             }));
         }
+        let pools = crate::accounts::pools::load(db);
         for (agent_id, model, account_id) in actors {
             let assignment = crate::runs::routing::Assignment {
                 agent_id,
@@ -582,7 +583,7 @@ pub(crate) fn check_launch_now(
                 auto_account: false,
                 pool_origin: None,
             };
-            precheck::validate_launch(&roster, &assignment, crate::util::now_ts())?;
+            precheck::validate_launch_with_pools(&roster, &assignment, &pools, crate::util::now_ts())?;
         }
         Ok(())
     } else {

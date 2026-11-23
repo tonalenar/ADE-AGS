@@ -4787,6 +4787,10 @@ fn una_falla_se_clasifica_por_lo_que_dijo_la_cli() {
         "provider returned status code: 429",
         r#"{"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}"#,
         "You exceeded your current quota, please check your plan and billing details.",
+        "API error: RESOURCE_EXHAUSTED",
+        "API error: RESOURCE_EXHAUSTED (429)",
+        "You have exhausted your capacity on this model. Try again later.",
+        "model capacity exhausted",
     ] {
         assert_eq!(classify(text), RateLimited, "{text}");
     }
@@ -5158,6 +5162,107 @@ fn un_pedido_con_pool_se_rutea_y_queda_fijado_a_la_cuenta_elegida() {
     let a = routing::route(&roster, &Tiers::default(), &pedido, AHORA).unwrap();
     assert_eq!(a.account_id.as_deref(), Some("extra"));
     assert!(!a.auto_account, "con un pool no se pasa a una cuenta de afuera");
+}
+
+#[test]
+fn agente_sem_suporte_a_contas_na_frota_recusa_pool_com_erro_claro() {
+    let mut roster = roster_de_prueba();
+    let agy = agente(&mut roster, "claude-code");
+    agy.agent_id = "antigravity".into();
+    agy.label = "Antigravity".into();
+    agy.capabilities.accounts = false;
+
+    let mut spec = pool_spec(Strategy::Sticky, &[None, Some("trabajo")], 0);
+    spec.agent_id = "antigravity".into();
+    let pedido = RouteRequest {
+        agent_id: Some("antigravity".into()),
+        model: None,
+        complexity: None,
+        account: AccountChoice::Pool(spec),
+    };
+    let err = routing::route(&roster, &Tiers::default(), &pedido, AHORA).unwrap_err();
+    assert!(err.contains("Antigravity") && err.contains("Trabajo"), "{err}");
+}
+
+#[test]
+fn erro_de_limite_de_conta_vem_em_portugues() {
+    let mut roster = claude_con_tres();
+    agente(&mut roster, "claude-code").accounts[1].limit = Some("atingiu o teto diário".into());
+    let pedido = RouteRequest {
+        agent_id: Some("claude-code".into()),
+        model: None,
+        complexity: None,
+        account: AccountChoice::Fixed(Some("trabajo".into())),
+    };
+    let err = routing::route(&roster, &Tiers::default(), &pedido, AHORA).unwrap_err();
+    assert!(err.starts_with("a conta trabajo"), "{err}");
+    assert!(!err.contains("la cuenta"), "{err}");
+}
+
+#[test]
+fn resolve_account_choice_e_validate_launch_com_pool() {
+    let db = std::sync::Arc::new(std::sync::Mutex::new(crate::database::test_db()));
+    let p = crate::accounts::pools::Pool {
+        id: "p1".into(),
+        name: "Trabalho".into(),
+        agent_id: "claude-code".into(),
+        members: vec![None, Some("trabajo".into())],
+        strategy: Strategy::RoundRobin,
+        failover: true,
+        paused: false,
+    };
+    crate::accounts::pools::save(&db, &[p.clone()]).unwrap();
+
+    // resolve_account_choice resolve pool:Trabalho, conta fixa e auto (sem avançar cursor).
+    let choice = routing::resolve_account_choice(&db, Some("pool:Trabalho".into())).unwrap();
+    assert!(matches!(choice, AccountChoice::Pool(ref spec) if spec.id == "p1" && spec.start == 0));
+    assert_eq!(crate::accounts::pools::spec_preview(&db, "p1").unwrap().start, 0);
+    assert_eq!(routing::resolve_account_choice(&db, Some("trabajo".into())).unwrap(), AccountChoice::Fixed(Some("trabajo".into())));
+    assert_eq!(routing::resolve_account_choice(&db, Some("   ".into())).unwrap(), AccountChoice::Auto);
+    assert_eq!(routing::resolve_account_choice(&db, None).unwrap(), AccountChoice::Auto);
+
+    // route_with_pool_cursor só avança o cursor quando o roteamento dá certo.
+    let mut roster = claude_con_tres();
+    let req = RouteRequest {
+        agent_id: Some("claude-code".into()),
+        model: None,
+        complexity: None,
+        account: choice,
+    };
+    let a1 = routing::route_with_pool_cursor(&db, &roster, &Tiers::default(), &req, AHORA).unwrap();
+    assert_eq!(a1.account_id, None);
+    assert_eq!(crate::accounts::pools::spec_preview(&db, "p1").unwrap().start, 1);
+
+    // validate_launch_with_pools aceita pool:Trabalho quando há conta logada/disponível e rejeita sem login/esgotado.
+    let assign = routing::Assignment {
+        agent_id: "claude-code".into(),
+        model: None,
+        account_id: Some("pool:Trabalho".into()),
+        routed_by: routing::RoutedBy::Manual,
+        notes: vec![],
+        auto_account: false,
+        pool_origin: None,
+    };
+    assert!(crate::missions::precheck::validate_launch_with_pools(&roster, &assign, &[p.clone()], AHORA).is_ok());
+    assert_eq!(
+        crate::missions::precheck::validate_launch_with_pools(&roster, &assign, &[], AHORA).unwrap_err(),
+        "missions.error.accountMissing"
+    );
+    for acc in &mut agente(&mut roster, "claude-code").accounts {
+        acc.logged_in = false;
+    }
+    assert_eq!(
+        crate::missions::precheck::validate_launch_with_pools(&roster, &assign, &[p.clone()], AHORA).unwrap_err(),
+        "missions.error.loginRequired"
+    );
+    for acc in &mut agente(&mut roster, "claude-code").accounts {
+        acc.logged_in = true;
+        acc.limit = Some("atingiu o teto".into());
+    }
+    assert_eq!(
+        crate::missions::precheck::validate_launch_with_pools(&roster, &assign, &[p], AHORA).unwrap_err(),
+        "missions.error.usageExhausted"
+    );
 }
 
 #[test]

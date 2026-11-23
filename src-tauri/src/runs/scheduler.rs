@@ -565,28 +565,37 @@ fn failover_in_pool(
     if !members.contains(&task.account_id) {
         return Err("a conta original não pertence mais ao pool".into());
     }
-    let spec = crate::accounts::pools::spec_for(db, &origin.id)?;
-    if spec.paused || spec.agent_id != task.agent_id {
-        return Err("o pool está pausado ou não permite mais troca para esta TUI".into());
-    }
-    // No modo `auto` com pool não pausado, autorizamos a seleção de substituição no pool.
-    let spec = crate::accounts::pools::PoolSpec { failover: true, ..spec };
-    let request = super::routing::RouteRequest {
-        agent_id: Some(task.agent_id.clone()),
-        // Try the current model first; confirmed model-access errors may choose another.
-        model: task.model.clone(),
-        complexity: None,
-        account: AccountChoice::Pool(spec),
-    };
     let roster = super::roster::snapshot(db, false)?;
-    let assignment = super::pool_failover::replacement(&roster, &super::routing::load_tiers(db),
-        &request, &task.account_id, kind, now)?;
-    if assignment.agent_id != task.agent_id
-        || assignment.account_id == task.account_id
-        || !members.contains(&assignment.account_id)
-    {
-        return Err("não restou outra conta elegível dentro do pool".into());
-    }
+    let tiers = super::routing::load_tiers(db);
+    let assignment = crate::accounts::pools::with_pool_pick(db, &origin.id, |spec| {
+        if spec.paused || spec.agent_id != task.agent_id {
+            return Err("o pool está pausado ou não permite mais troca para esta TUI".into());
+        }
+        // No modo `auto` com pool não pausado, autorizamos a seleção de substituição no pool.
+        let spec = crate::accounts::pools::PoolSpec { failover: true, ..spec.clone() };
+        let request = super::routing::RouteRequest {
+            agent_id: Some(task.agent_id.clone()),
+            // Try the current model first; confirmed model-access errors may choose another.
+            model: task.model.clone(),
+            complexity: None,
+            account: AccountChoice::Pool(spec),
+        };
+        let assignment = super::pool_failover::replacement(
+            &roster,
+            &tiers,
+            &request,
+            &task.account_id,
+            kind,
+            now,
+        )?;
+        if assignment.agent_id != task.agent_id
+            || assignment.account_id == task.account_id
+            || !members.contains(&assignment.account_id)
+        {
+            return Err("não restou outra conta elegível dentro do pool".into());
+        }
+        Ok(assignment)
+    })?;
     if !super::pool_failover::reserve_failover(db, &task.id, &origin.id, now)? {
         return Err("o limite de failover da tarefa ou do pool foi atingido".into());
     }

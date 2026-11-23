@@ -676,3 +676,57 @@ fn recruits_ilegivel_recusa_atualizacao() {
     assert_eq!(std::fs::read(&path).unwrap(), original);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn squads_aceitam_pool_valido_e_verificam_disponibilidade_de_pool() {
+    let conn = test_db();
+    add_account(&conn, "acc-c1", "claude-code");
+    add_account(&conn, "acc-x1", "codex");
+
+    let pools_json = serde_json::json!([
+        {"id":"p-claude","name":"Trabalho","agentId":"claude-code","members":[null,"acc-c1"],"strategy":"least_used","failover":true,"paused":false},
+        {"id":"p-codex","name":"CodexPool","agentId":"codex","members":[null,"acc-x1"],"strategy":"sticky","failover":true,"paused":false},
+        {"id":"p-vazio","name":"Orfao","agentId":"codex","members":["acc-apagada"],"strategy":"sticky","failover":true,"paused":false}
+    ])
+    .to_string();
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('accounts.pools', ?1)",
+        [pools_json],
+    )
+    .unwrap();
+
+    let mut draft = input("Squad Pool");
+    draft.lead.auto_account = false;
+    draft.lead.account_id = Some("pool:Trabalho".into());
+    draft.lead.model = None;
+    draft.members[0].auto_account = false;
+    draft.members[0].account_id = Some("pool:CodexPool".into());
+
+    let valid = store::validate(&conn, &draft).unwrap();
+    let saved = store::create(&conn, &valid).unwrap();
+    assert_eq!(saved.lead.account_id.as_deref(), Some("pool:Trabalho"));
+    assert_eq!(saved.lead.availability, AssignmentAvailability::Available);
+    assert_eq!(saved.members[0].account_id.as_deref(), Some("pool:CodexPool"));
+    assert_eq!(saved.members[0].availability, AssignmentAvailability::Available);
+
+    // Pool de outro agente falha na validação.
+    let mut wrong_agent = draft.clone();
+    wrong_agent.lead.account_id = Some("pool:CodexPool".into());
+    assert!(store::validate(&conn, &wrong_agent).unwrap_err().contains("belongs to 'codex'"));
+
+    // Pool inexistente falha na validação.
+    let mut missing = draft.clone();
+    missing.lead.account_id = Some("pool:Inexistente".into());
+    assert!(store::validate(&conn, &missing).unwrap_err().contains("Inexistente"));
+
+    // Pool sem membros vivos falha na validação.
+    let mut empty = draft.clone();
+    empty.members[0].account_id = Some("pool:Orfao".into());
+    assert!(store::validate(&conn, &empty).unwrap_err().contains("no available accounts"));
+
+    // Se o pool for removido depois de salvo, assignment_status reporta AccountMissing.
+    conn.execute("UPDATE settings SET value = '[]' WHERE key = 'accounts.pools'", []).unwrap();
+    let reloaded = store::get(&conn, &saved.id).unwrap().unwrap();
+    assert_eq!(reloaded.lead.availability, AssignmentAvailability::AccountMissing);
+    assert_eq!(reloaded.members[0].availability, AssignmentAvailability::AccountMissing);
+}

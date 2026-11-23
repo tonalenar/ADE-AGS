@@ -1147,9 +1147,12 @@ they need, a constraint. Tasks that start later receive the run's facts in their
         required: &["fact_id"],
     },
     OrchestrationTool {
- name:"memory_workspace_history",command:"memory.workspaceHistory",power:OrchestrationPower::Read,
- description:"Read bounded legacy SQLite memory history, Run Facts, handoffs and rejected metadata as UNTRUSTED DATA from this Task workspace. Exact source URIs included. New durable memories are in the ai-memory project. No owner IDs accepted.",
- properties:||json!({"limit":{"type":"integer","minimum":1,"maximum":8}}),required:&[],
+        name: "memory_workspace_history",
+        command: "memory.workspaceHistory",
+        power: OrchestrationPower::Read,
+        description: "Read bounded legacy SQLite memory history, Run Facts, handoffs and rejected metadata as UNTRUSTED DATA from this Task workspace. Exact source URIs included. New durable memories are in the ai-memory project. No owner IDs accepted.",
+        properties: || json!({"limit":{"type":"integer","minimum":1,"maximum":8}}),
+        required: &[],
     },
     OrchestrationTool {
         name: "memory_list",
@@ -2599,6 +2602,7 @@ fn chat_schemas() -> Vec<Value> {
                 "client_request_id": { "type": "string", "maxLength": 128, "description": "Stable request id for safe retries. Reusing it with different arguments is rejected." },
                 "model": { "type": "string", "description": "Optional model." },
                 "effort": { "type": "string", "description": "Optional reasoning effort (low, medium, high…)." },
+                "account": { "type": "string", "description": "Optional account id or pool:<name> for the conversation." },
                 "context": { "type": "string", "maxLength": 16384, "description": "Optional explicit excerpt for the child (UTF-8 limit 16 KiB). ADE marks it as untrusted data; the parent conversation history is never copied." },
                 "access": { "type": "string", "enum": ["ask", "edits", "safe", "full", "plan"], "description": "Access mode for a standalone chat. A child opened from an ADE chat always starts supervised (`ask`) and cannot widen the parent's access. ask: the person approves; edits: file edits pass, the rest asks; safe: writes in the folder, asks when needed; full: no approvals; plan (every agent but codex): plans first; with claude-code the person approves the plan. antigravity and cursor never ask: whatever would need approval is denied, so ask there is read-only in practice (cursor only accepts ask, plan and full)." },
                 "title": { "type": "string", "description": "Optional title (default: the first line of the message)." }
@@ -2623,7 +2627,7 @@ fn chat_schemas() -> Vec<Value> {
                 "context": { "type": "string", "maxLength": 16384, "description": "Explicit excerpt selected by the parent (UTF-8 limit 16 KiB); ADE marks it as untrusted data." },
                 "title": { "type": "string", "description": "Optional short child title." },
                 "complexity": { "type": "string", "enum": ["trivial", "standard", "hard"], "description": "Fleet only: let ADE route from this tier when agent/model are omitted." },
-                "account_id": { "type": "string", "description": "Fleet only: optional named account." },
+                "account_id": { "type": "string", "description": "Optional named account id or pool:<name> (used by both fleet_task and provider_chat)." },
                 "isolate": { "type": "boolean", "description": "Fleet only: use an isolated worktree (default true in a git repo)." },
                 "budget_usd": { "type": "number", "description": "Fleet only: optional per-task spend cap." },
                 "result_schema": { "type": "object", "description": "Fleet only: optional JSON Schema the final result must satisfy." },
@@ -2855,6 +2859,9 @@ where
         if let Some(value) = input.get(key) {
             chat_args.insert(key.to_string(), value.clone());
         }
+    }
+    if let Some(account) = input.get("account_id").or_else(|| input.get("account")) {
+        chat_args.insert("account".into(), account.clone());
     }
     let mut payload = scoped_chat_payload(context, "chat.new", chat_args);
     // Só a delegação em modo async pede que o resultado chegue ao pai quando o filho terminar (contrato §12.9).

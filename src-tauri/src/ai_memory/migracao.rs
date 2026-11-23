@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use super::client::{Client, PageWrite};
 use crate::database::DbConnection;
-use crate::memory::agent::looks_like_secret;
+use crate::memory::agent::looks_like_user_secret;
 use crate::memory::repo_scope;
 use crate::util::now_ts;
 
@@ -62,6 +62,7 @@ struct Candidate {
     task_id: Option<String>,
     ttl_days: Option<i64>,
     repo_key: Option<String>,
+    secret_acknowledged: bool,
 }
 
 /// Pasta de uma missão do workspace, com o repositório lido dos arquivos `.git` (sem rodar git).
@@ -230,7 +231,8 @@ fn candidates(conn: &Connection, workspace_id: &str) -> Result<Vec<Candidate>, S
     let mut stmt = conn
         .prepare(
             "SELECT e.id, e.scope, e.mission_id, e.key, r.revision, r.kind, r.body, r.content_hash,
-                    r.created_at, r.source_run_id, r.source_task_id, e.ttl_days, e.repo_key
+                    r.created_at, r.source_run_id, r.source_task_id, e.ttl_days, e.repo_key,
+                    EXISTS(SELECT 1 FROM memory_secret_overrides o WHERE o.entry_id = e.id AND o.revision = r.revision)
              FROM memory_entries e
              JOIN memory_revisions r ON r.entry_id = e.id AND r.revision = e.current_revision AND r.status = 'approved'
              WHERE e.workspace_id = ?1 AND e.status = 'active' AND e.scope IN ('workspace', 'mission')
@@ -253,6 +255,7 @@ fn candidates(conn: &Connection, workspace_id: &str) -> Result<Vec<Candidate>, S
                 task_id: r.get(10)?,
                 ttl_days: r.get(11)?,
                 repo_key: r.get(12)?,
+                secret_acknowledged: r.get(13)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -281,7 +284,7 @@ fn folder_for<'a>(
 /// Decide o que fazer com uma memória. `Err` para a cópia (falha do processo); `Ok` é o resultado
 /// dela, inclusive as recusas por conteúdo ou por conflito.
 fn process(client: &Client, cand: &Candidate, recorded: &Recorded) -> Result<Outcome, String> {
-    if looks_like_secret(&cand.key) || looks_like_secret(&cand.body) {
+    if !cand.secret_acknowledged && (looks_like_user_secret(&cand.key) || looks_like_user_secret(&cand.body)) {
         return Ok(Outcome::SkippedSecret);
     }
     let path = wiki_path(cand);
