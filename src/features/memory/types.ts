@@ -241,6 +241,10 @@ export interface RepoSyncStatus {
   error: string | null;
   commit: string | null;
   pending: number;
+  /** Quantas tentativas consecutivas falharam. */
+  attempts?: number;
+  /** Verdadeiro quando atingiu o limite de tentativas automáticas (6) e aguarda clique manual. */
+  exhausted?: boolean;
   /** Omissões de credencial. Chegam também quando a exportação falha e o usuário tenta de novo. */
   warnings?: string[];
 }

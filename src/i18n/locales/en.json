@@ -3614,6 +3614,7 @@
   "memoryInbox.syncQueued": "Memory repository export is queued.",
   "memoryInbox.syncing": "Syncing the memory repository…",
   "memoryInbox.syncFailed": "The approval was saved, but the repository export failed: {{error}}",
+  "memoryInbox.syncPaused": "Export paused after {{attempts}} consecutive failures ({{error}}). Click Try again after fixing the issue.",
   "memoryInbox.syncFailedTitle": "Memory export failed",
   "memoryInbox.syncRetry": "Try again",
   "memoryPurge.button": "Purge",

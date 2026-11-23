@@ -109,4 +109,11 @@ describe("RepoSyncNotice", () => {
     await act(async () => { listener({ payload: { ...failed, workspaceId: "*", error: "recuperação pendente falhou" } }); });
     expect(container.querySelector("[role='alert']")?.textContent).toContain("recuperação pendente falhou");
   });
+
+  it("mostra estado pausado após atingir o limite de tentativas e permite tentar de novo", async () => {
+    sync.getRepoSyncStatus.mockResolvedValue({ ...failed, attempts: 6, exhausted: true });
+    await render();
+    expect(container.querySelector("[role='alert']")?.textContent).toContain("memoryInbox.syncPaused");
+    expect(container.textContent).toContain("memoryInbox.syncRetry");
+  });
 });
