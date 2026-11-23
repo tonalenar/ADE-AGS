@@ -19,6 +19,15 @@ fn is_conclusion(kind: &str) -> bool {
 /// ao barramento (`chat.changed`): é o que acorda `ags chat wait`, sem polling. A conclusão só sai depois da tentativa
 /// de gravação (contrato §11.4): com banco, quem a publica é a fila de gravação.
 pub fn emit(app: &AppHandle, thread_id: &str, kind: &str, mut payload: Value) {
+    // Deltas esperam a janela de 16 ms e saem juntos; qualquer outro evento esvazia a fila antes de sair, para manter a ordem.
+    if kind == "delta" {
+        if let (Some(item_id), Some(delta)) = (payload.get("itemId").and_then(Value::as_str), payload.get("delta").and_then(Value::as_str)) {
+            let tipo = payload.get("kind").and_then(Value::as_str).unwrap_or_default();
+            super::deltas::emit_delta(app, thread_id, item_id, delta, tipo);
+            return;
+        }
+    }
+    super::deltas::flush(app, thread_id);
     payload["threadId"] = json!(thread_id);
     payload["type"] = json!(kind);
     let conclusion = is_conclusion(kind);
