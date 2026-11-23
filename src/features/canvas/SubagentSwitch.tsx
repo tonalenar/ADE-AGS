@@ -11,7 +11,7 @@ export function SubagentSwitch({ value, onChange }: { value: boolean; onChange: 
   return (
     <div className="flex items-center justify-between gap-3 rounded-[10px] bg-white px-3.5 py-2.5 shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.1)] dark:bg-black/20 dark:shadow-[inset_0_0_0_0.5px_rgba(84,84,88,0.55)]">
       <span className="min-w-0">
-        <span id={switchId} className="block text-[13px] leading-[17px] text-gray-900 dark:text-[#f5f5f7]">{t("role.subagent")}</span>
+        <span id={switchId} className="block text-[13px] leading-[17px] text-gray-900 dark:text-ink">{t("role.subagent")}</span>
         <span className="block text-[11px] leading-[14px] text-gray-500 dark:text-white/60">{t("role.subagentHint")}</span>
       </span>
       <button type="button" role="switch" aria-checked={value} aria-labelledby={switchId}

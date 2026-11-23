@@ -246,11 +246,6 @@ pub async fn ai_memory_probe(cwd: String) -> Result<Untrusted<Probe>, String> {
 }
 
 #[tauri::command]
-pub async fn ai_memory_status(cwd: String) -> Result<Untrusted<Status>, String> {
-    blocking(move || Client::installed(&cwd)?.read(Read::Status)).await
-}
-
-#[tauri::command]
 pub async fn ai_memory_handoffs(cwd: String) -> Result<Untrusted<Vec<Handoff>>, String> {
     blocking(move || Client::installed(&cwd)?.read(Read::Handoffs)).await
 }
@@ -336,7 +331,7 @@ pub async fn ai_memory_migrate(
 }
 
 /// Registro da cópia do workspace, sem o corpo das memórias.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ai_memory_migration_report(
     workspace_id: String,
     db: tauri::State<'_, DbConnection>,

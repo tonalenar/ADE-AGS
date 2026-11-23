@@ -1,18 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { Button } from "neogestify-ui-components";
 
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { defaultStart, filterBranches, parseExcluded, type BranchInfo } from "./floorsModel";
-
-export interface CreatedFloor {
-  id: string;
-  name: string;
-  branch: string;
-  cwd: string;
-}
+import { floorBranches, floorCreate, type CreatedFloor } from "./ipc";
+export type { CreatedFloor };
 
 type Mode = "new" | "existing";
 
@@ -40,7 +34,7 @@ export function NewFloorDialog({ cwd, onClose, onCreated }: {
 
   useEffect(() => {
     let alive = true;
-    invoke<BranchInfo[]>("floor_branches", { cwd })
+    floorBranches(cwd)
       .then((list) => {
         if (!alive) return;
         setBranches(list);
@@ -58,7 +52,7 @@ export function NewFloorDialog({ cwd, onClose, onCreated }: {
     setBusy(true);
     setError(null);
     try {
-      const floor = await invoke<CreatedFloor>("floor_create", {
+      const floor = await floorCreate({
         cwd,
         name: name.trim(),
         from: mode === "new" ? from || null : null,

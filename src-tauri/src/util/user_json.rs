@@ -137,9 +137,49 @@ fn quarantine(path: &Path, bytes: &[u8]) -> Result<PathBuf, UserJsonError> {
     Ok(candidate)
 }
 
+/// Política de durabilidade na gravação atômica de JSON do usuário.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncMode {
+    /// Força `sync_all()` antes de renomear (padrão seguro para gravações esporádicas e fechamento).
+    Sync,
+    /// Escrita atômica (`tmp` + `.bak` + `rename`) sem `sync_all()` por gravação;
+    /// o chamador garante durabilidade em intervalo maior ou no fechamento via [`sync_user_json`].
+    AtomicNoSync,
+}
+
 /// Grava JSON em arquivo temporário exclusivo, preserva a versão anterior e renomeia no fim.
 pub fn write_user_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    write_user_json_inner(path, value, None)
+    write_user_json_inner(path, value, None, SyncMode::Sync)
+}
+
+/// Como [`write_user_json`], permitindo escolher se chama `sync_all()` antes do `rename`.
+pub fn write_user_json_with_sync<T: Serialize>(
+    path: &Path,
+    value: &T,
+    sync: SyncMode,
+) -> Result<(), String> {
+    write_user_json_inner(path, value, None, sync)
+}
+
+/// Força `sync_all()` no arquivo já gravado (ex.: em intervalo periódico ou no fechamento).
+/// Se o arquivo não existir, não faz nada.
+pub fn sync_user_json(path: &Path) -> Result<(), String> {
+    let file = match OpenOptions::new().write(true).open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "Não foi possível abrir {} para sincronização: {error}",
+                path.display()
+            ));
+        }
+    };
+    file.sync_all().map_err(|error| {
+        format!(
+            "Não foi possível sincronizar {} em disco: {error}",
+            path.display()
+        )
+    })
 }
 
 /// Grava apenas se o arquivo ainda corresponde ao snapshot usado para montar `value`.
@@ -149,13 +189,14 @@ pub fn write_user_json_if_unchanged<T: Serialize>(
     value: &T,
     expected: Option<&UserJsonSnapshot>,
 ) -> Result<(), String> {
-    write_user_json_inner(path, value, Some(expected))
+    write_user_json_inner(path, value, Some(expected), SyncMode::Sync)
 }
 
 fn write_user_json_inner<T: Serialize>(
     path: &Path,
     value: &T,
     expected: Option<Option<&UserJsonSnapshot>>,
+    sync: SyncMode,
 ) -> Result<(), String> {
     let body =
         serde_json::to_vec(value).map_err(|e| format!("Não foi possível serializar JSON: {e}"))?;
@@ -178,7 +219,10 @@ fn write_user_json_inner<T: Serialize>(
         .map(|metadata| metadata.permissions());
 
     let (tmp, mut file) = create_temp(parent, &name, timestamp, existing_permissions.as_ref())?;
-    let write_result = file.write_all(&body).and_then(|()| file.sync_all());
+    let write_result = match sync {
+        SyncMode::Sync => file.write_all(&body).and_then(|()| file.sync_all()),
+        SyncMode::AtomicNoSync => file.write_all(&body),
+    };
     if let Err(error) = write_result {
         let _ = fs::remove_file(&tmp);
         return Err(format!(

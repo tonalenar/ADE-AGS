@@ -293,12 +293,12 @@ fn announce(app: &AppHandle, db: &DbConnection, thread_id: &str) {
 
 // ── Comandos Tauri ──────────────────────────────────────────────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_title_settings_get(db: State<'_, DbConnection>) -> TitleSettings {
     load_settings(&db)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_title_settings_set(db: State<'_, DbConnection>, settings: TitleSettings) -> Result<TitleSettings, String> {
     let settings = clean_settings(settings)?;
     let raw = serde_json::to_string(&settings).map_err(|error| error.to_string())?;

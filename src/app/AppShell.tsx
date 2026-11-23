@@ -1,3 +1,4 @@
+import { useDocumentSpellcheck } from "@/features/chat/spellcheckPref";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { lazyWithRetry } from "@/app/lazyWithRetry";
 import { StatusBarRegion } from "@/app/StatusBarRegion";
@@ -91,6 +92,7 @@ function toFrontendTab(row: RestoredTabRow): Tab {
 }
 
 export function AppShell() {
+  useDocumentSpellcheck();
   const { t } = useTranslation();
   useFileDropToTerminal();
   useSessionCheckpoints();

@@ -15,7 +15,7 @@ import {
   buildMissionTeam, setRole, removeStroke, removeText, toggleOrchestrator, moveTerminals, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
   type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type RemoteClientSummary, type Stroke,
 } from "./board";
-import { safeViewport, type Box, type Rect, type Viewport } from "./geometry";
+import { safeViewport, sameRectMap, type Box, type Rect, type Viewport } from "./geometry";
 import { buildComparisonBoard, type ComparisonNode } from "@/features/compare/layout";
 
 export type WorkMode = "tabs" | "canvas";
@@ -118,49 +118,68 @@ export function missionBoardKeysOf(missionId: string): string[] {
   return Object.keys(useCanvasStore.getState().boards).filter((k) => k.startsWith(prefix) && missionOfKey(k) === missionId);
 }
 
+let cachedTabsForRefs: readonly { id: string }[] | null = null;
+let cachedLiveRefs: ReadonlySet<string> = new Set();
+
+function currentLiveRefs(): ReadonlySet<string> {
+  const tabs = useTabsStore.getState().tabs;
+  if (tabs !== cachedTabsForRefs) {
+    cachedTabsForRefs = tabs;
+    cachedLiveRefs = new Set(tabs.map((item) => item.id));
+  }
+  return cachedLiveRefs;
+}
+
 /** O canvas da aba: especial legado, time, sessão existente ou a sessão própria. */
 export function boardKeyOfTab(tab: { id: string; cwd: string }, boards: Record<string, Board> = useCanvasStore.getState().boards): string {
   const prefix = `${windowLabel}|`;
-  for (const [key, board] of Object.entries(boards)) {
+  for (const key in boards) {
     // Primeiro, pertencimento explícito a um canvas especial legado.
-    if (key.startsWith(prefix) && (key.includes(MISSION_SEP) || key.includes(CONV_SEP) || key.includes(COMPARE_SEP)) && tab.id in board.nodes) return key;
+    if (key.startsWith(prefix) && (key.includes(MISSION_SEP) || key.includes(CONV_SEP) || key.includes(COMPARE_SEP)) && tab.id in boards[key].nodes) return key;
   }
   const folder = boardKey(tab.cwd);
   const old = boards[folder];
+  const teamState = useTeamIndex.getState();
   // Sem a lista de times ainda não se sabe se a aba é integrante (e vai para o canvas do orquestrador) ou
   // não: a conversa antiga fica na pasta até saber, para não ser levada ao canvas errado e lá ficar.
-  if (!useTeamIndex.getState().loaded && old && hasSessionArtifacts(old, tab.id)) return folder;
-  const liveRefs = new Set(useTabsStore.getState().tabs.map((item) => item.id));
-  const team = useTeamIndex.getState().teams.find((item) => item.orchestrator === tab.id || item.members.some((member) => member.member === tab.id));
+  if (!teamState.loaded && old && hasSessionArtifacts(old, tab.id)) return folder;
+  const team = teamState.teams.find((item) => item.orchestrator === tab.id || item.members.some((member) => member.member === tab.id));
   // Times promovidos a partir de um canvas de pasta já eram um conjunto manual autorizado:
   // mantenha a pasta como dona para todos, em vez de separar os integrantes na migração.
   if (team?.origin === "canvas" && team.boardKey === folder) return folder;
   // Ligações manuais entre conversas mantêm o grupo na pasta. Outros times seguem a coroa
   // e copiam aditivamente as autorizações para o canvas do orquestrador.
-  if (!team && old?.edges?.some((edge) =>
-    (edge.a === tab.id && (liveRefs.has(edge.b) || edge.b.startsWith("thread:")))
-    || (edge.b === tab.id && (liveRefs.has(edge.a) || edge.a.startsWith("thread:"))))) return folder;
+  if (!team && old?.edges?.length) {
+    const liveRefs = currentLiveRefs();
+    if (old.edges.some((edge) =>
+      (edge.a === tab.id && (liveRefs.has(edge.b) || edge.b.startsWith("thread:")))
+      || (edge.b === tab.id && (liveRefs.has(edge.a) || edge.a.startsWith("thread:"))))) return folder;
+  }
   if (team?.orchestrator && team.orchestrator !== tab.id) {
     const leadRef = team.orchestrator;
-    const leadBoard = Object.entries(boards).find(([key, board]) => key.startsWith(prefix)
-      && (key.includes(MISSION_SEP) || key.includes(CONV_SEP) || key.includes(COMPARE_SEP))
-      && (leadRef in board.nodes || leadRef in board.threads))?.[0];
-    if (leadBoard) return leadBoard;
+    for (const key in boards) {
+      const board = boards[key];
+      if (key.startsWith(prefix)
+        && (key.includes(MISSION_SEP) || key.includes(CONV_SEP) || key.includes(COMPARE_SEP))
+        && (leadRef in board.nodes || leadRef in board.threads)) return key;
+    }
     const storedSpecial = team.boardKey && (team.boardKey.includes(MISSION_SEP) || team.boardKey.includes(CONV_SEP) || team.boardKey.includes(COMPARE_SEP))
       ? team.boardKey
       : null;
     if (storedSpecial) return storedSpecial;
-    const leadSession = Object.entries(boards).find(([key, board]) => key.startsWith(prefix)
-      && sessionRefOfKey(key) === leadRef && (leadRef in board.nodes || leadRef in board.threads))?.[0];
-    if (leadSession) return leadSession;
+    for (const key in boards) {
+      const board = boards[key];
+      if (key.startsWith(prefix) && sessionRefOfKey(key) === leadRef && (leadRef in board.nodes || leadRef in board.threads)) return key;
+    }
     const lead = useTabsStore.getState().tabs.find((item) => item.id === leadRef);
     return sessionBoardKey(lead?.cwd ?? team.cwd, leadRef);
   }
   // Uma aba também pode ter sido colocada no canvas #s: de uma conversa por protocolo. Esse
   // nó explícito define o pertencimento, mesmo que o canvas próprio da aba já tenha sido criado.
-  const existingSession = Object.entries(boards).find(([key, board]) => key.startsWith(prefix)
-    && key.includes(SESSION_SEP) && tab.id in board.nodes)?.[0];
-  return existingSession ?? sessionBoardKey(tab.cwd, tab.id);
+  for (const key in boards) {
+    if (key.startsWith(prefix) && key.includes(SESSION_SEP) && tab.id in boards[key].nodes) return key;
+  }
+  return sessionBoardKey(tab.cwd, tab.id);
 }
 
 /** A ref tem algo no canvas `board` (nó, cartão, corda, coroa, papel ou marca de subagente)? */
@@ -262,6 +281,33 @@ function updateBoard(key: string, fn: (b: Board) => Board, queueBeforeLoad = tru
   scheduleSave(key);
 }
 
+function sameBoxPatch(box: Box, patch: Partial<Box>): boolean {
+  return (patch.x === undefined || patch.x === box.x)
+    && (patch.y === undefined || patch.y === box.y)
+    && (patch.w === undefined || patch.w === box.w)
+    && (patch.h === undefined || patch.h === box.h);
+}
+
+function applyNodeBoxPatch(b: Board, id: string, patch: Partial<Box>): Board {
+  const thread = b.threads[id];
+  if (thread) return sameBoxPatch(thread, patch) ? b : { ...b, threads: { ...b.threads, [id]: { ...thread, ...patch } } };
+  const remote = b.remotes?.[id];
+  if (remote) return sameBoxPatch(remote, patch) ? b : { ...b, remotes: { ...b.remotes, [id]: { ...remote, ...patch } } };
+  const note = b.notes[id];
+  if (note) return sameBoxPatch(note.box, patch) ? b : setNoteBox(b, id, patch);
+  const portal = b.portals[id];
+  if (portal) return sameBoxPatch(portal.box, patch) ? b : updatePortal(b, id, { box: { ...portal.box, ...patch } });
+  const text = b.texts[id];
+  if (text) return sameBoxPatch(text.box, patch) ? b : updateText(b, id, { box: { ...text.box, ...patch } });
+  const folder = b.folders[id];
+  if (folder) return sameBoxPatch(folder.box, patch) ? b : updateFolder(b, id, { box: { ...folder.box, ...patch } });
+  const image = b.images[id];
+  if (image) return sameBoxPatch(image.box, patch) ? b : { ...b, images: { ...b.images, [id]: { ...image, box: { ...image.box, ...patch } } } };
+  const box = b.nodes[id];
+  if (!box || sameBoxPatch(box, patch)) return b;
+  return { ...b, nodes: { ...b.nodes, [id]: { ...box, ...patch } } };
+}
+
 export const canvasActions = {
   focusDesktop: (key: string, id: string) => useCanvasStore.setState({ desktopFocus: { key, id, nonce: ++desktopFocusSequence } }),
   /** Dá um cartão à conversa por protocolo `ref` no canvas `key` (num lugar livre; já tendo, não muda nada). */
@@ -275,24 +321,13 @@ export const canvasActions = {
   /** Pede ao canvas `key` que centre e destaque `ref` (a conversa escolhida fora dele). */
   focusRef: (key: string, ref: string) => useCanvasStore.setState({ focus: { key, ref, nonce: ++focusSequence } }),
   moveNode: (key: string, id: string, patch: Partial<Box>) =>
+    updateBoard(key, (b) => applyNodeBoxPatch(b, id, patch)),
+  /** Grava várias posições/dimensões no fim de um arrasto numa única atualização do store. */
+  moveNodes: (key: string, patches: Record<string, Partial<Box>>) =>
     updateBoard(key, (b) => {
-      const thread = b.threads[id];
-      if (thread) return { ...b, threads: { ...b.threads, [id]: { ...thread, ...patch } } };
-      const remote = b.remotes?.[id];
-      if (remote) return { ...b, remotes: { ...b.remotes, [id]: { ...remote, ...patch } } };
-      const note = b.notes[id];
-      if (note) return setNoteBox(b, id, patch);
-      const portal = b.portals[id];
-      if (portal) return updatePortal(b, id, { box: { ...portal.box, ...patch } });
-      const text = b.texts[id];
-      if (text) return updateText(b, id, { box: { ...text.box, ...patch } });
-      const folder = b.folders[id];
-      if (folder) return updateFolder(b, id, { box: { ...folder.box, ...patch } });
-      const image = b.images[id];
-      if (image) return { ...b, images: { ...b.images, [id]: { ...image, box: { ...image.box, ...patch } } } };
-      const box = b.nodes[id];
-      if (!box) return b;
-      return { ...b, nodes: { ...b.nodes, [id]: { ...box, ...patch } } };
+      let next = b;
+      for (const id in patches) next = applyNodeBoxPatch(next, id, patches[id]!);
+      return next;
     }),
   /** Põe o terminal de uma aba num retângulo escolhido (o desenhado na tela); o nó nasce aí em vez da próxima célula livre. */
   placeNode: (key: string, tabId: string, box: Box) =>
@@ -361,7 +396,10 @@ export const canvasActions = {
     updateBoard(key, (b) => addStroke(b, { ...stroke, id: crypto.randomUUID() })),
   removeStroke: (key: string, id: string) => updateBoard(key, (b) => removeStroke(b, id)),
   undoStroke: (key: string) => updateBoard(key, (b) => undoStroke(b)),
-  setViewport: (key: string, viewport: Viewport) => updateBoard(key, (b) => ({ ...b, viewport: safeViewport(viewport, b.viewport) })),
+  setViewport: (key: string, viewport: Viewport) => updateBoard(key, (b) => {
+    const next = safeViewport(viewport, b.viewport);
+    return b.viewport.x === next.x && b.viewport.y === next.y && b.viewport.zoom === next.zoom ? b : { ...b, viewport: next };
+  }),
   connect: (key: string, a: string, b: string) => updateBoard(key, (board) => addEdge(board, a, b)),
   disconnect: (key: string, edgeId: string) => updateBoard(key, (board) => removeEdge(board, edgeId)),
   disconnectPair: (key: string, a: string, b: string) => updateBoard(key, (board) => removeEdgeBetween(board, a, b)),
@@ -400,7 +438,11 @@ export const canvasActions = {
     updateBoard(key, (board) => buildComparisonBoard(board, titleId, title, entries)),
   setLiveRects: (liveRects: Record<string, Rect>) => {
     const prev = useCanvasStore.getState().liveRects;
-    if (JSON.stringify(prev) !== JSON.stringify(liveRects)) useCanvasStore.setState({ liveRects });
+    if (!sameRectMap(prev, liveRects)) useCanvasStore.setState({ liveRects });
+  },
+  setDesktopRects: (desktopRects: Record<string, Rect>) => {
+    const prev = useCanvasStore.getState().desktopRects;
+    if (!sameRectMap(prev, desktopRects)) useCanvasStore.setState({ desktopRects });
   },
 };
 

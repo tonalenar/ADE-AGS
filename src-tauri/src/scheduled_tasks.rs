@@ -5,7 +5,7 @@
 
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use chrono::{DateTime, Local};
@@ -15,6 +15,8 @@ use crate::routines::{self, Schedule};
 
 pub const MAX_TASKS: usize = 100;
 const FILE_VERSION: u32 = 1;
+/// Quantas execuções cada tarefa guarda; as mais antigas saem.
+pub const MAX_HISTORY: usize = 200;
 const MAX_PROMPT_CHARS: usize = 12_000;
 const MAX_SCHEDULE_HORIZON_SECS: i64 = 10 * 365 * 24 * 60 * 60;
 
@@ -158,36 +160,44 @@ fn file_path() -> Result<PathBuf, String> {
     Ok(dir.join("scheduled-tasks.json"))
 }
 
-fn read_file() -> Result<TasksFile, String> {
-    let path = file_path()?;
-    let raw = match std::fs::read_to_string(&path) {
+/// Lê o arquivo e devolve também o texto lido (para `update_at` não regravar o que não mudou).
+fn read_file_at(path: &Path) -> Result<(TasksFile, Option<String>), String> {
+    let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(TasksFile::default())
+            return Ok((TasksFile::default(), None))
         }
         Err(error) => return Err(format!("Não foi possível ler {}: {error}", path.display())),
     };
-    let file: TasksFile = serde_json::from_str(&raw)
-        .map_err(|error| format!("O arquivo de tarefas agendadas está inválido: {error}"))?;
-    if file.version != FILE_VERSION {
-        return Err(format!(
-            "Versão {} do arquivo de tarefas agendadas não é suportada.",
-            file.version
-        ));
-    }
-    Ok(file)
+    let invalid = match serde_json::from_str::<TasksFile>(&raw) {
+        Ok(file) if file.version == FILE_VERSION => return Ok((file, Some(raw))),
+        Ok(file) => format!("a versão {} do arquivo não é suportada", file.version),
+        Err(error) => format!("o JSON está inválido: {error}"),
+    };
+    // Um arquivo ruim não pode parar todas as tarefas: guarda uma cópia ao lado e segue com a lista vazia.
+    let backup = path.with_file_name(format!(
+        "scheduled-tasks.invalido-{}-{}.json",
+        crate::util::now_ts(),
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    ));
+    std::fs::rename(path, &backup).map_err(|error| {
+        format!("O arquivo de tarefas agendadas é inválido ({invalid}) e não foi possível guardar uma cópia: {error}")
+    })?;
+    eprintln!(
+        "[tarefas agendadas] {invalid}; o arquivo foi guardado em {} e a lista recomeçou vazia",
+        backup.display()
+    );
+    Ok((TasksFile::default(), None))
 }
 
-fn write_file(file: &TasksFile) -> Result<(), String> {
-    let path = file_path()?;
+fn write_file_at(path: &Path, body: &[u8]) -> Result<(), String> {
     let tmp = path.with_file_name(format!(
         ".scheduled-tasks.{}.tmp",
         uuid::Uuid::new_v4().simple()
     ));
-    let body = serde_json::to_vec_pretty(file).map_err(|error| error.to_string())?;
     let write_result = (|| {
         let mut file = OpenOptions::new().create_new(true).write(true).open(&tmp)?;
-        file.write_all(&body)?;
+        file.write_all(body)?;
         file.sync_all()
     })();
     if let Err(error) = write_result {
@@ -197,7 +207,7 @@ fn write_file(file: &TasksFile) -> Result<(), String> {
             tmp.display()
         ));
     }
-    if let Err(error) = std::fs::rename(&tmp, &path) {
+    if let Err(error) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!(
             "Não foi possível atualizar {}: {error}",
@@ -209,17 +219,30 @@ fn write_file(file: &TasksFile) -> Result<(), String> {
 
 pub fn all() -> Result<Vec<ScheduledTask>, String> {
     let _guard = LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    Ok(read_file()?.tasks)
+    Ok(read_file_at(&file_path()?)?.0.tasks)
 }
 
 pub fn update<T>(
     change: impl FnOnce(&mut Vec<ScheduledTask>) -> Result<T, String>,
 ) -> Result<T, String> {
     let _guard = LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    let mut file = read_file()?;
+    update_at(&file_path()?, change)
+}
+
+fn update_at<T>(
+    path: &Path,
+    change: impl FnOnce(&mut Vec<ScheduledTask>) -> Result<T, String>,
+) -> Result<T, String> {
+    let (mut file, raw) = read_file_at(path)?;
     let value = change(&mut file.tasks)?;
     file.version = FILE_VERSION;
-    write_file(&file)?;
+    for task in &mut file.tasks {
+        trim_history(task);
+    }
+    let body = serde_json::to_vec_pretty(&file).map_err(|error| error.to_string())?;
+    if raw.as_deref().map(str::as_bytes) != Some(body.as_slice()) {
+        write_file_at(path, &body)?;
+    }
     Ok(value)
 }
 
@@ -323,15 +346,7 @@ pub fn recover_at_boot(now: DateTime<Local>) -> Result<bool, String> {
                 };
                 push_history(task, run);
             }
-            match task.schedule {
-                Schedule::Once { .. } => {
-                    task.enabled = false;
-                    task.next_run = None;
-                }
-                _ => {
-                    task.next_run = routines::next_run(&task.schedule, now).map(|at| at.timestamp())
-                }
-            }
+            advance(task, now);
             task.updated_at = now.timestamp();
         }
         Ok(changed)
@@ -340,6 +355,36 @@ pub fn recover_at_boot(now: DateTime<Local>) -> Result<bool, String> {
 
 pub fn push_history(task: &mut ScheduledTask, run: TaskRun) {
     task.history.push(run);
+    trim_history(task);
+}
+
+/// Mantém só as últimas `MAX_HISTORY` execuções (também encolhe arquivos antigos que já passaram do teto).
+fn trim_history(task: &mut ScheduledTask) {
+    if task.history.len() > MAX_HISTORY {
+        let excess = task.history.len() - MAX_HISTORY;
+        task.history.drain(..excess);
+    }
+}
+
+/// Passa a tarefa para o próximo horário: a recorrente segue para o próximo futuro; a única se desliga.
+pub fn advance(task: &mut ScheduledTask, now: DateTime<Local>) {
+    match task.schedule {
+        Schedule::Once { .. } => {
+            task.enabled = false;
+            task.next_run = None;
+        }
+        _ => task.next_run = next_run(&task.schedule, now),
+    }
+}
+
+/// Reivindica a execução vencida (`scheduled_for`) **antes** do dispatch: avança o `next_run` na mesma gravação. Se o
+/// registro do fim falhar depois, o próximo tick não vê mais a tarefa vencida e o prompt não é enviado de novo.
+pub fn claim_due(task: &mut ScheduledTask, scheduled_for: i64, now: DateTime<Local>) -> Result<(), String> {
+    if !task.enabled || task.next_run != Some(scheduled_for) {
+        return Err("O horário desta tarefa mudou antes do dispatch.".into());
+    }
+    advance(task, now);
+    Ok(())
 }
 
 pub fn next_run(schedule: &Schedule, now: DateTime<Local>) -> Option<i64> {
@@ -349,3 +394,7 @@ pub fn next_run(schedule: &Schedule, now: DateTime<Local>) -> Option<i64> {
 pub fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
+
+#[cfg(test)]
+#[path = "scheduled_tasks_test.rs"]
+mod test;

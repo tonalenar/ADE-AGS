@@ -319,6 +319,20 @@ pub async fn conversation_timeline(tab_id: String) -> Result<Option<canal::timel
         .map_err(|e| e.to_string())
 }
 
+/// Como `conversation_timeline`, mas só a cauda que mudou desde o que o front já tem (`known`: a revisão e o
+/// número de itens da última resposta). Sem `known`, vem tudo. O backend guarda o builder da aba e lê só os
+/// bytes novos do transcript (`canal::timeline_cache`).
+#[tauri::command]
+pub async fn conversation_timeline_since(tab_id: String, known: Option<canal::timeline_cache::Known>) -> Result<Option<canal::timeline_cache::TimelineDelta>, String> {
+    let Some(snapshot) = canal::snapshot(&tab_id) else { return Ok(None) };
+    let path = PathBuf::from(&snapshot.path);
+    tauri::async_runtime::spawn_blocking(move || canal::timeline_cache::read_since(&tab_id, &path, &snapshot.agent_id, known))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
 /// `ags tab state <id>`.
 pub(super) fn tab_state(_app: &AppHandle, args: &Value) -> Result<Value, String> {
     let tab = arg_str(args, "tab")?;

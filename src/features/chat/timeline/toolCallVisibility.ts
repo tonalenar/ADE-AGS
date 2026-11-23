@@ -51,8 +51,26 @@ function rowsShown(rows: BodyRow[], mode: ToolCallVisibility): BodyRow[] {
   return shown;
 }
 
-/** Os turnos com o corpo filtrado pelo modo. `showAll` devolve os mesmos turnos, sem copiar. */
+const filteredTurnCache = new WeakMap<Turn, Partial<Record<ToolCallVisibility, { body: BodyRow[]; result: Turn }>>>();
+
+function filterTurn(turn: Turn, mode: ToolCallVisibility): Turn {
+  let byMode = filteredTurnCache.get(turn);
+  const cached = byMode?.[mode];
+  if (cached && cached.body === turn.body) return cached.result;
+
+  const shown = rowsShown(turn.body, mode);
+  const unchanged = shown.length === turn.body.length && shown.every((row, index) => row === turn.body[index]);
+  const result = unchanged ? turn : { ...turn, body: shown };
+  if (!byMode) {
+    byMode = {};
+    filteredTurnCache.set(turn, byMode);
+  }
+  byMode[mode] = { body: turn.body, result };
+  return result;
+}
+
+/** Os turnos com o corpo filtrado pelo modo. Preserva a identidade de turnos inalterados para o memo da timeline. */
 export function applyToolCallVisibility(turns: Turn[], mode: ToolCallVisibility): Turn[] {
   if (mode === "showAll") return turns;
-  return turns.map((turn) => ({ ...turn, body: rowsShown(turn.body, mode) }));
+  return turns.map((turn) => filterTurn(turn, mode));
 }

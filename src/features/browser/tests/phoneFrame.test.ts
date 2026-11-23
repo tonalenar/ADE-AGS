@@ -12,11 +12,18 @@ describe("navegador com cara de celular", () => {
     expect(isPhoneViewport(null)).toBe(false);
   });
 
-  it("a moldura tem a mesma espessura na tela qualquer que seja a escala da página", () => {
-    const half = phoneScreen(0.5).boxShadow as string;
-    const full = phoneScreen(1).boxShadow as string;
-    expect(half.startsWith("0 0 0 22px")).toBe(true);
-    expect(full.startsWith("0 0 0 11px")).toBe(true);
+  it("a moldura é proporcional ao aparelho: encolhe junto com a escala, até o mínimo legível", () => {
+    const monitorBezel = (scale: number) => parseFloat((phoneScreen(scale).boxShadow as string).split(" ")[3]) * scale;
+    expect(monitorBezel(1)).toBeCloseTo(10, 5);
+    expect(monitorBezel(0.5)).toBeCloseTo(5, 5);
+    expect(monitorBezel(0.2)).toBeCloseTo(4, 5);
     expect(phoneScreen(1).overflow).toBe("hidden");
+  });
+
+  it("as cores da moldura vêm dos tokens do tema, sem hex", () => {
+    const shadow = phoneScreen(1).boxShadow as string;
+    expect(shadow).toContain("var(--color-device-bezel)");
+    expect(shadow).toContain("var(--color-device-rim)");
+    expect(shadow).not.toMatch(/#[0-9a-f]{3,6}/i);
   });
 });

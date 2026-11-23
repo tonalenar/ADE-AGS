@@ -173,6 +173,27 @@ pub(crate) fn task_pool(db: &DbConnection, task_id: &str) -> Option<PoolOrigin> 
         .and_then(|raw| serde_json::from_str(&raw).ok())
 }
 
+/// A origem de pool da tarefa: a gravada pelo ruteio ou, numa tarefa com conta FIXA que é membro de um pool do
+/// mesmo agente (não pausado), o pool implícito. A escolha implícita é gravada para ficar estável e auditável.
+pub(crate) fn origin_for_task(
+    db: &DbConnection,
+    task_id: &str,
+    agent_id: &str,
+    account: &Option<String>,
+) -> Option<PoolOrigin> {
+    if let Some(origin) = task_pool(db, task_id) {
+        return Some(origin);
+    }
+    let pools = crate::accounts::pools::load(db);
+    let pool = crate::accounts::pools::implicit_pool(&pools, agent_id, account)?;
+    let origin = PoolOrigin { id: pool.id.clone(), name: pool.name.clone(), agent_id: pool.agent_id.clone() };
+    if let Ok(conn) = db.lock() {
+        let _ = record_task_pool(&conn, task_id, Some(&origin));
+    }
+    eprintln!("[runs] tarefa {task_id}: conta fixa em pool, usando o pool implícito '{}'", origin.name);
+    Some(origin)
+}
+
 pub(crate) fn task_already_failed_over(db: &DbConnection, task_id: &str) -> bool {
     crate::database::get_setting(db, &task_failover_key(task_id))
         .ok()

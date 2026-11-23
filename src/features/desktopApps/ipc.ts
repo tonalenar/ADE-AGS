@@ -42,3 +42,7 @@ export const updateConsult = (cwd: string, id: string, status: Consult["status"]
   invoke<void>("gemini_desktop_task_update", { cwd, id, status, response: response ?? null, error: error ?? null });
 export const retryConsult = (cwd: string, id: string) =>
   invoke<void>("gemini_desktop_task_retry", { cwd, id });
+
+/** Manda um texto de uma sessão para outra do time pelo Gemini Desktop. */
+export const geminiDesktopPeerSend = (from: string, to: string, text: string) =>
+  invoke<void>("gemini_desktop_peer_send", { from, to, text });

@@ -172,4 +172,56 @@ describe("cobertura de overlays sobre superfície nativa", () => {
     expect(coversOf(surface, rect)).toEqual([]);
     expect(hitCoversOf(surface)).toEqual([{ x: 290, y: 10, width: 100, height: 36 }]);
   });
+
+  it("ignora_overlays_com_opacity_zero_ou_ancestral_transparente", () => {
+    const surface = document.createElement("div");
+    host.appendChild(surface);
+
+    const fadeTooltip = document.createElement("div");
+    fadeTooltip.setAttribute("role", "tooltip");
+    fadeTooltip.style.opacity = "0";
+    fadeTooltip.getBoundingClientRect = () => rectOf(20, 20, 200, 40);
+
+    const fadedParent = document.createElement("div");
+    fadedParent.style.opacity = "0";
+    const childDialog = document.createElement("div");
+    childDialog.setAttribute("role", "dialog");
+    childDialog.getBoundingClientRect = () => rectOf(0, 0, 400, 300);
+    fadedParent.appendChild(childDialog);
+
+    document.body.append(fadeTooltip, fadedParent);
+    try {
+      vi.spyOn(document, "elementFromPoint").mockReturnValue(null);
+      expect(coversOf(surface, { x: 0, y: 0, width: 400, height: 300 })).toEqual([]);
+    } finally {
+      fadeTooltip.remove();
+      fadedParent.remove();
+    }
+  });
+
+  it("ignora_overlay_com_z_index_inferior_a_superficie_nativa", () => {
+    const pipWrap = document.createElement("div");
+    pipWrap.style.position = "absolute";
+    pipWrap.style.zIndex = "35";
+    const surface = document.createElement("div");
+    pipWrap.appendChild(surface);
+
+    const behindOverlay = document.createElement("div");
+    behindOverlay.setAttribute("role", "dialog");
+    behindOverlay.style.position = "fixed";
+    behindOverlay.style.zIndex = "10";
+    behindOverlay.getBoundingClientRect = () => rectOf(0, 0, 400, 300);
+
+    const frontOverlay = document.createElement("div");
+    frontOverlay.setAttribute("role", "dialog");
+    frontOverlay.style.position = "fixed";
+    frontOverlay.style.zIndex = "50";
+    frontOverlay.getBoundingClientRect = () => rectOf(50, 50, 120, 80);
+
+    host.append(pipWrap, behindOverlay, frontOverlay);
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(null);
+
+    const covers = coversOf(surface, { x: 0, y: 0, width: 400, height: 300 });
+    expect(covers).toEqual([{ x: 50, y: 50, width: 120, height: 80 }]);
+  });
 });

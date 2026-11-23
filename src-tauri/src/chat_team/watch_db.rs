@@ -119,6 +119,67 @@ pub fn gather(conn: &Connection, now: i64) -> Result<Vec<Watched>, String> {
     Ok(out)
 }
 
+/// O estado real de um integrante ou filho, para a interface e para quem consulta.
+#[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberState {
+    /// `thread:<id>`.
+    pub member: String,
+    /// O orquestrador (ou a conversa de origem) a quem ele responde.
+    pub parent: String,
+    /// `working`, `waiting_input`, `ended_without_delivery`, `failed` ou `idle` (`RealState::as_str`).
+    pub state: &'static str,
+    /// Desde quando está nesse estado, até onde se sabe (ms): início do turno, ou a última atividade.
+    pub since: i64,
+}
+
+/// O estado real de todos os integrantes por protocolo dos times de conversa e dos filhos ativos (`parent_ref`).
+/// Só lê o banco; nada é escrito nem avisado.
+pub fn states(conn: &Connection, now: i64) -> Result<Vec<MemberState>, String> {
+    let no_sent = HashSet::new();
+    let mut out: Vec<MemberState> = Vec::new();
+    let mut push = |member: &Member, parent: &str| {
+        let state = super::watch::real_state(member, now);
+        let since = member.working.as_ref().map_or(member.last_activity, |(_, started)| *started);
+        out.push(MemberState { member: member.id.clone(), parent: parent.to_string(), state: state.as_str(), since });
+    };
+    for team in store::teams(conn)? {
+        if !team.led() || team.origin == store::ORIGIN_MISSION {
+            continue;
+        }
+        for m in store::members(conn, &team.id)? {
+            if let Some(view) = member_view(conn, &m, &team.orchestrator, &no_sent)? {
+                push(&view, &team.orchestrator);
+            }
+        }
+    }
+    for child in chat::active_side_threads(conn).map_err(err)? {
+        let Some(parent_ref) = child.parent_ref.as_deref() else { continue };
+        let Some(parent) = parent_target(conn, parent_ref)? else { continue };
+        let member_ref = format!("thread:{}", child.id);
+        let row = MemberRow {
+            team_id: format!("chat-lineage:{parent}"),
+            member: member_ref.clone(),
+            agent_id: child.agent_id.clone(),
+            label: child.title.clone(),
+            role: "subagente".into(),
+            model: child.model.clone(),
+            policy: model::Policy::Ask,
+            branch: None,
+            worktree: None,
+            origin: "new".into(),
+            position: 0,
+            created_at: child.created_at,
+            updated_at: child.updated_at,
+            subagent: true,
+        };
+        if let Some(view) = member_view(conn, &row, &parent, &no_sent)? {
+            push(&view, &parent);
+        }
+    }
+    Ok(out)
+}
+
 /// Normaliza a referência da UI para o destinatário real da fila e só vigia um pai que ainda existe.
 fn parent_target(conn: &Connection, parent_ref: &str) -> Result<Option<String>, String> {
     if let Some(thread_id) = parent_ref.strip_prefix("thread:") {
@@ -157,7 +218,7 @@ fn child_watcher(conn: &Connection, parent: &str, child: &chat::ThreadRow, now: 
         auto_decide: false,
         allow_tools: false,
         watch: true,
-        watch_stall: false,
+        watch_stall: true,
         origin: store::ORIGIN_CHAT.into(),
         board_key: None,
         mission_id: None,
@@ -166,7 +227,7 @@ fn child_watcher(conn: &Connection, parent: &str, child: &chat::ThreadRow, now: 
     Ok(Watched {
         orchestrator_name: super::api::orchestrator_peer_name(conn, &team),
         team,
-        input: Input { flags: Flags { blocks: true, stall: false }, members: Vec::new(), sent },
+        input: Input { flags: Flags { blocks: true, stall: true }, members: Vec::new(), sent },
     })
 }
 
@@ -226,7 +287,19 @@ fn member_view(conn: &Connection, m: &MemberRow, orchestrator: &str, sent: &Hash
         timeout_marked,
         calls: calls_of(recent),
         context: context_of(&thread.agent_id, thread.model.as_deref(), &items),
+        task_at: task_at(conn, &m.member, orchestrator)?,
     }))
+}
+
+/// Quando o orquestrador mandou a tarefa mais recente a `member` (`tell`, `handoff` ou `ask` sem resposta automática).
+fn task_at(conn: &Connection, member: &str, orchestrator: &str) -> Result<Option<i64>, String> {
+    conn.query_row(
+        "SELECT MAX(COALESCE(delivered_at, created_at)) FROM peer_messages WHERE from_tab_id = ?1 AND to_tab_id = ?2
+           AND kind IN ('tell', 'ask', 'handoff') AND NOT (kind = 'ask' AND reply = 1)",
+        params![orchestrator, member],
+        |r| r.get::<_, Option<i64>>(0),
+    )
+    .map_err(err)
 }
 
 fn has_item(items: &[Item], id: &str) -> bool {

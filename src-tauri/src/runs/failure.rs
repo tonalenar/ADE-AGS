@@ -49,6 +49,8 @@ const RATE_LIMIT: &[&str] = &[
     "exhausted your capacity",
     "capacity exhausted",
     "capacity_exhausted",
+    "individual quota reached",
+    "upgrade your subscription to increase your limits",
 ];
 
 /// Frases de credencial. Claude Code ("Invalid API key · Please run /login", "OAuth token has
@@ -70,6 +72,17 @@ const AUTH: &[&str] = &[
 lazy_static::lazy_static! {
     /// Los códigos HTTP solo con algo que diga que son un estado ("status 429", "HTTP 401",
     /// "code: 429"): suelto, `401` aparece en `main.rs:401:5` y `429` en cualquier conteo.
+    /// Cota esgotada em frases soltas do Antigravity/Gemini e similares («Individual quota reached.», «quota has been
+    /// reached, please upgrade»): `reached`/`exhausted` só conta quando fecha a frase ou vem com contexto de conta/plano,
+    /// para não pegar «quota reached the 10 file limit of the cache» de um log de código.
+    static ref QUOTA_REACHED: regex::Regex = regex::Regex::new(
+        r"\bquota\s+(?:has\s+been\s+)?(?:reached|exhausted)\s*(?:$|[.!,:;·|)\-—]|for\s+(?:this|your|the)\s+(?:account|plan|user|model|subscription)\b|please\b|resets?\b|upgrade\b)"
+    ).unwrap();
+    /// «Daily limit reached, resets in 2 hours», «Message limit reached. Resets at 18:00»: limite atingido com a
+    /// renovação anunciada logo depois.
+    static ref LIMIT_REACHED_RESETS: regex::Regex = regex::Regex::new(
+        r"\blimits?\s+reached\b[^\n]{0,120}?\bresets?\s+(?:in|at)\b"
+    ).unwrap();
     /// "401 Unauthorized" y "429 Too Many Requests" ya los cubren las frases.
     static ref HTTP_429: regex::Regex = regex::Regex::new(r"(status|http|code)[^a-z0-9]{0,3}429\b").unwrap();
     static ref HTTP_402: regex::Regex = regex::Regex::new(r"(status|http|code)[^a-z0-9]{0,3}402\b").unwrap();
@@ -118,7 +131,7 @@ pub fn classify(error: &str) -> FailureKind {
     } else if MODEL_ACCESS.iter().any(|p| text.contains(p))
         || (text.contains("model") && ["not supported when using", "does not exist", "not found", "access to this model"].iter().any(|p| text.contains(p))) {
         FailureKind::ModelUnavailable
-    } else if RATE_LIMIT.iter().any(|p| text.contains(p)) || HTTP_429.is_match(&text) {
+    } else if RATE_LIMIT.iter().any(|p| text.contains(p)) || HTTP_429.is_match(&text) || QUOTA_REACHED.is_match(&text) || LIMIT_REACHED_RESETS.is_match(&text) {
         FailureKind::RateLimited
     } else if AUTH.iter().any(|p| text.contains(p)) || HTTP_401.is_match(&text) || HTTP_403.is_match(&text) {
         FailureKind::AuthExpired

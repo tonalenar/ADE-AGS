@@ -3427,6 +3427,29 @@ mod provas {
     }
 
     #[test]
+    fn so_o_comando_compact_de_tui_e_reconhecido() {
+        let g = super::super::guard::is_compact_command;
+        assert!(g("/compact"));
+        assert!(g("  /compact  \n"));
+        assert!(g("/COMPACT focar no teste"));
+        assert!(!g("/compactar"));
+        assert!(!g("compacte o contexto"));
+        assert!(!g("/clear"));
+    }
+
+    #[test]
+    fn um_agente_nao_digita_compact_em_outra_aba_e_na_propria_so_com_o_autocompact_ligado() {
+        let g = super::super::guard::compact_command_error;
+        let recusa = g(&aba("m1"), "m2", "/compact", true).unwrap();
+        assert!(recusa.contains("própria"), "{recusa}");
+        assert!(g(&aba("lead"), "m2", "  /compact foco", true).is_some(), "nem o orquestrador");
+        assert!(g(&aba("m1"), "m1", "/compact", false).is_some(), "autocompact desligado");
+        assert!(g(&aba("m1"), "m1", "/compact", true).is_none());
+        assert!(g(&aba("m1"), "m2", "rode os testes", true).is_none(), "outro texto não muda");
+        assert!(g(&Caller::Outside, "m2", "/compact", false).is_none(), "a pessoa segue livre");
+    }
+
+    #[test]
     fn quem_abriu_a_aba_fica_registrado_so_com_prova() {
         let (quem, aba_id) = (
             format!("abridor-{}", uuid::Uuid::new_v4()),
@@ -4439,7 +4462,6 @@ mod autorizacao {
             "chat.open",
             "chat.settle",
             "chat.goal",
-            "chat.compact",
         ] {
             let ok = |de: &str, alvo: &str, abriu: &[(&str, &str)]| {
                 decide(metodo, json!({ "thread": alvo }), aba(de), abriu).is_ok()
@@ -4467,6 +4489,21 @@ mod autorizacao {
                 "{metodo}: a pessoa em terminal próprio"
             );
         }
+    }
+
+    #[test]
+    fn um_agente_so_compacta_a_propria_conversa_e_a_pessoa_continua_podendo() {
+        let compactar = |de: Result<Principal, String>, alvo: &str, abriu: &[(&str, &str)]| {
+            decide("chat.compact", json!({ "thread": alvo }), de, abriu)
+        };
+        let recusa = compactar(aba("lead"), "filha", &[]).unwrap_err();
+        assert!(recusa.contains("própria conversa"), "{recusa}");
+        assert!(compactar(aba("m1"), "nova", &[("thread:nova", "m1")]).is_err(), "a que ele abriu não é a dele");
+        assert!(compactar(aba("m1"), "da-pessoa", &[]).is_err());
+        assert!(compactar(tarefa("t1"), "eu", &[]).is_err());
+        let entregue = compactar(aba("thread:eu"), "eu", &[]).unwrap();
+        assert_eq!(entregue["from"], "thread:eu", "o handler confere o autocompact pelo `from` provado");
+        assert!(compactar(fora(), "da-pessoa", &[]).unwrap().get("from").is_none());
     }
 
     #[test]
@@ -4772,6 +4809,15 @@ mod autorizacao {
                 "{metodo}: tarefa não declara aba"
             );
         }
+    }
+
+    #[test]
+    fn forge_run_de_aba_sempre_leva_a_aba_provada_para_o_despachante_conferir_a_pasta() {
+        let sem_aba = passa("forge.run", json!({ "cwd": "/outro/repo", "tool": "git_push" }), aba("m1"));
+        assert_eq!(sem_aba["tabId"], "m1", "omitir o tabId não pode contornar a conferência da pasta");
+        assert!(recusa("forge.run", json!({ "cwd": "/x", "tabId": "lead" }), aba("m1")).contains("m1"));
+        let pessoa = passa("forge.run", json!({ "cwd": "/repo", "tool": "git_pr_list" }), fora());
+        assert!(pessoa.get("tabId").is_none(), "a pessoa continua sem aba");
     }
 
     #[test]
@@ -5101,7 +5147,6 @@ mod autorizacao {
                 json!({ "thread": "c-abriu", "text": "agora o teste" }),
             ),
             ("chat.stop", json!({ "thread": "c-abriu" })),
-            ("chat.compact", json!({ "thread": "c-abriu" })),
             (
                 "chat.goal",
                 json!({ "thread": "c-abriu", "action": "show" }),

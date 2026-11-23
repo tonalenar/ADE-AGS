@@ -35,6 +35,10 @@ export interface ChatPrefs {
   showSkillsInSlashMenu: boolean;
   /** Quando o Enter envia (ou quebra a linha): "Enviar com" no T3 Code. */
   sendShortcut: SendShortcut;
+  /** Corretor ortográfico nativo do sistema nos campos de texto (sublinha erros e abre o menu de correção). */
+  spellcheck: boolean;
+  /** Sugestão do próximo prompt em cinza no composer, depois do turno do agente. Heurística local, sem token. */
+  promptSuggestions: boolean;
   /** Quais chamadas de ferramenta aparecem no fold "Trabalhou por …" da conversa. */
   toolCallVisibility: ToolCallVisibility;
 }
@@ -44,7 +48,7 @@ export type FollowUpBehavior = "steer" | "queue";
 
 const KEY = "cc-chat-prefs";
 
-export const DEFAULT_CHAT_PREFS: ChatPrefs = { cwd: null, agentId: null, model: null, effort: null, accountId: null, access: "safe", plan: false, fastMode: false, worktree: false, worktreeSubmodules: null, structured: true, width: "normal", followUpBehavior: "steer", showSkillsInSlashMenu: true, sendShortcut: "enter", toolCallVisibility: "showAll" };
+export const DEFAULT_CHAT_PREFS: ChatPrefs = { cwd: null, agentId: null, model: null, effort: null, accountId: null, access: "safe", plan: false, fastMode: false, worktree: false, worktreeSubmodules: null, structured: true, width: "normal", followUpBehavior: "steer", showSkillsInSlashMenu: true, sendShortcut: "enter", spellcheck: true, promptSuggestions: true, toolCallVisibility: "showAll" };
 
 const listeners = new Set<() => void>();
 let snapshot: ChatPrefs | null = null;
@@ -71,6 +75,8 @@ export function parseChatPrefs(raw: unknown): ChatPrefs {
     followUpBehavior: o.followUpBehavior === "queue" ? "queue" : "steer",
     showSkillsInSlashMenu: o.showSkillsInSlashMenu !== false,
     sendShortcut: isSendShortcut(o.sendShortcut) ? o.sendShortcut : "enter",
+    spellcheck: o.spellcheck !== false,
+    promptSuggestions: o.promptSuggestions !== false,
     toolCallVisibility: isToolCallVisibility(o.toolCallVisibility) ? o.toolCallVisibility : "showAll",
   };
 }

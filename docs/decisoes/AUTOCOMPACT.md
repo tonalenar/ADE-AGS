@@ -9,6 +9,12 @@ A §2.3 do `AGENTS.md` dizia "Só o usuário … faz purge/compact". Ela vem da 
 
 Por isso o `AGENTS.md` passou a distinguir os dois: purge/compact **da memória** é só do usuário; a compactação **de contexto** acontece só quando o usuário a deixou ligada, e o agente nunca a liga nem muda o limiar por conta própria (a configuração só se altera pela tela).
 
+## Agente não compacta a conversa de outro (decisão do usuário, 23/11/2026)
+Compactar o contexto muda a conversa de quem a usa, então a decisão é da pessoa. O servidor impõe:
+- `chat.compact` (`ags chat compact`, MCP `chat_compact`): um agente só pede a compactação da **própria** conversa (`thread:<id>` provado pelo PID), e só se o autocompact da pessoa está ligado para o agente dela. Outra conversa (de colega, aberta por ele com `chat new` ou ligada no canvas) é recusada em `ipc/authz.rs`; com o autocompact desligado a recusa vem do handler (`autocompact::agent_compact_error`). Tarefa da Frota segue recusada.
+- `/compact` digitado em outra aba ou conversa (`ags peer tell|ask --raw`, `ags tab send`) é recusado (`ipc/guard.rs::compact_command_error`, `peers.rs::compact_to_other_refusal`, motivo `compact_to_other`). Na própria aba, `tab send /compact` só passa com o autocompact ligado. Sem `--raw`, o texto vai com o cabeçalho de peer e não é um comando.
+- A pessoa não muda: pela tela (comando Tauri `chat_thread_compact_context`) e pelo `ags` num terminal dela, fora do app, compacta qualquer conversa.
+
 ## Padrão de 50% (decisão do usuário, 19/11/2026)
 O usuário pediu que o limiar padrão passasse de ~83% para **50%**, e que o padrão valesse **também para o Claude Code**. Antes, sem um % escolhido, a ADE não passava limite ao Claude, que usa o dele e numa janela de 1M só compacta bem acima de 83%.
 - `DEFAULT_PCT` = 50 no Rust (`conversa/autocompact.rs`) e no front (`autocompact/model.ts`); a marca do medidor de contexto usa o mesmo valor.

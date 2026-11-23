@@ -34,3 +34,14 @@ fn modelo_de_provedor_remoto_fica_com_disponibilidade_desconhecida() {
     let roster = roster::opencode_roster_models(&modelos, None);
     assert!(roster.iter().all(|m| m.availability == ModelAvailability::Unknown && !m.local));
 }
+
+#[test]
+fn variants_do_opencode_viram_niveis_de_esforco_do_modelo() {
+    let verbose = "anthropic/claude-sonnet-5-5\n{\n  \"name\": \"Sonnet 5.5\",\n  \"variants\": {\"high\": {}, \"low\": {}, \"medium\": {}, \"estranho\": {}}\n}\nopencode/big-pickle\n{\n  \"name\": \"Big Pickle\"\n}\n";
+    let modelos = roster::parse_opencode_models(verbose);
+    assert_eq!(modelos[0].variants, ["low", "medium", "high"], "só níveis conhecidos, na ordem do menor ao maior");
+    assert!(modelos[1].variants.is_empty());
+    let roster = roster::opencode_roster_models(&modelos, None);
+    assert_eq!(roster[0].reasoning_levels.as_deref(), Some(["low".to_string(), "medium".to_string(), "high".to_string()].as_slice()));
+    assert!(roster[1].reasoning_levels.is_none(), "sem variants não se inventa esforço");
+}

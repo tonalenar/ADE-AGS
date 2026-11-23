@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { ConversationCard } from "./chatModel";
 import type { FolderDiff } from "./ChatSidebar";
 import { threadKey } from "./structured/model";
+import { onThreadEvent } from "./threadEvents";
 import { readWorkingDiffStat } from "./workingDiffRead";
 
 /** Quanto esperar depois do último "a conversa cresceu" de uma pasta para reler o `--numstat` dela. */
@@ -47,16 +48,17 @@ export function useFolderDiffs(cards: ConversationCard[]): Record<string, Folder
       timers.current.set(cwd, window.setTimeout(() => load(cwd), DIFF_DEBOUNCE_MS));
     });
     // A conversa por protocolo não tem transcript: o diff relê quando o turno dela acaba.
-    const offThread = listen<{ threadId: string; type: string; phase?: string }>("cc-chat-thread", (e) => {
-      if (e.payload.type !== "phase" || e.payload.phase !== "idle") return;
-      const cwd = tabCwd.current.get(threadKey(e.payload.threadId));
+    // Um ouvinte só do cc-chat-thread (threadEvents, #444).
+    const offThread = onThreadEvent<{ threadId: string; type: string; phase?: string }>((e) => {
+      if (e.type !== "phase" || e.phase !== "idle") return;
+      const cwd = tabCwd.current.get(threadKey(e.threadId));
       if (cwd) load(cwd);
     });
     const pending = timers.current;
     return () => {
       alive = false;
       off.then((fn) => fn()).catch(() => undefined);
-      offThread.then((fn) => fn()).catch(() => undefined);
+      offThread();
       pending.forEach((id) => window.clearTimeout(id));
       pending.clear();
     };

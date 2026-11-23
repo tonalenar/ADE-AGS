@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { AlertaToast } from "@/shared/ui/alerts";
 
 import { iphoneButtonState } from "./ipc";
-import type { FrameButton, FrameLayout } from "./model";
+import { placeFrameButton, type FrameButton, type FrameLayout, type FrameSide } from "./model";
 
 /** O rótulo de cada botão da lateral, com o atalho do Mac (quando há). */
 function labelKey(b: FrameButton): string {
@@ -15,7 +15,7 @@ function labelKey(b: FrameButton): string {
 
 /** Um botão físico na borda da moldura: aperta ao descer o ponteiro e solta ao subir (segurar funciona como no
  *  aparelho), acende enquanto apertado e mostra o nome ao lado ao passar o mouse. */
-function SideButton({ b, device, name, height, width, enabled }: { b: FrameButton; device: string; name: string; height: number; width: number; enabled: boolean }) {
+function SideButton({ b, device, name, short, placed, enabled }: { b: FrameButton; device: string; name: string; short: number; placed: { side: FrameSide; start: number; along: number }; enabled: boolean }) {
   const { t } = useTranslation();
   const [pressed, setPressed] = useState(false);
   const [hover, setHover] = useState(false);
@@ -46,17 +46,23 @@ function SideButton({ b, device, name, height, width, enabled }: { b: FrameButto
   }, [device, b.button]);
   // O botão sai da borda só o que sai no aparelho (~0,9% da largura) e tem o mesmo metal do aro; a área de clique é
   // maior que o desenho e avança um pouco sobre o aro, para não exigir mira de pixel.
-  const thick = Math.max(2.5, width * 0.009);
+  const thick = Math.max(2.5, short * 0.009);
   const grab = 6;
-  const along = b.side === "top" ? Math.max(14, Math.round(b.height * width)) : Math.max(12, Math.round(b.height * height));
-  const start = b.side === "top" ? Math.round(b.top * width) : Math.round(b.top * height);
-  const pos = b.side === "top"
-    ? { top: -thick - 2, left: start, width: along, height: thick + 2 + grab }
-    : { top: start, height: along, width: thick + 2 + grab, [b.side]: -thick - 2 };
-  const visual = b.side === "top"
-    ? { top: 2, left: 0, right: 0, height: thick + 1, borderRadius: `${thick}px ${thick}px 0 0`, transform: pressed ? `translateY(${thick * 0.6}px)` : undefined }
-    : { top: 0, bottom: 0, width: thick + 1, [b.side]: 2, borderRadius: b.side === "left" ? `${thick}px 0 0 ${thick}px` : `0 ${thick}px ${thick}px 0`,
-      transform: pressed ? `translateX(${(b.side === "left" ? 1 : -1) * thick * 0.6}px)` : undefined };
+  const { side } = placed;
+  const along = placed.side === "top" || placed.side === "bottom" ? Math.max(14, placed.along) : Math.max(12, placed.along);
+  const start = placed.start;
+  const horizontal = side === "top" || side === "bottom";
+  const pos: React.CSSProperties = horizontal
+    ? { left: start, width: along, height: thick + 2 + grab, [side]: -thick - 2 }
+    : { top: start, height: along, width: thick + 2 + grab, [side]: -thick - 2 };
+  const toward = side === "left" || side === "top" ? 1 : -1;
+  const visual: React.CSSProperties = horizontal
+    ? { left: 0, right: 0, height: thick + 1, [side]: 2,
+      borderRadius: side === "top" ? `${thick}px ${thick}px 0 0` : `0 0 ${thick}px ${thick}px`,
+      transform: pressed ? `translateY(${toward * thick * 0.6}px)` : undefined }
+    : { top: 0, bottom: 0, width: thick + 1, [side]: 2,
+      borderRadius: side === "left" ? `${thick}px 0 0 ${thick}px` : `0 ${thick}px ${thick}px 0`,
+      transform: pressed ? `translateX(${toward * thick * 0.6}px)` : undefined };
   return (
     <>
       <button type="button" aria-label={label} title={label} disabled={!enabled}
@@ -65,7 +71,7 @@ function SideButton({ b, device, name, height, width, enabled }: { b: FrameButto
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
         className="nodrag group absolute z-[2] cursor-pointer disabled:cursor-default focus-visible:outline-none" style={pos}>
         <span aria-hidden="true" style={visual}
-          className={`absolute transition-[transform,filter] duration-100 motion-reduce:transition-none ${b.side === "top" ? "bg-gradient-to-b" : "bg-gradient-to-r"}
+          className={`absolute transition-[transform,filter] duration-100 motion-reduce:transition-none ${horizontal ? "bg-gradient-to-b" : "bg-gradient-to-r"}
             from-gray-400 via-gray-200 to-gray-400 dark:from-gray-600 dark:via-gray-400 dark:to-gray-600 shadow-[0_0_0_0.5px_rgba(0,0,0,0.25)]
             group-hover:brightness-110 group-focus-visible:ring-2 group-focus-visible:ring-accent-500 ${pressed ? "brightness-90" : ""} group-disabled:opacity-70`} />
       </button>
@@ -75,9 +81,9 @@ function SideButton({ b, device, name, height, width, enabled }: { b: FrameButto
           // Por dentro da moldura (à direita dos botões da esquerda, à esquerda do da direita, abaixo do superior): fora
           // dela a legenda passava da borda do painel e era cortada. Por cima da tela nativa, o `role="tooltip"` abre um
           // buraco na camada (ver `browser/nativeSurface.ts::OVERLAYS`).
-          style={b.side === "top"
-            ? { top: thick + 8, left: "50%", transform: "translateX(-50%)" }
-            : { top: start + along / 2 - 12, ...(b.side === "left" ? { left: thick + 10 } : { right: thick + 10 }) }}>
+          style={horizontal
+            ? { [side]: thick + 8, left: "50%", transform: "translateX(-50%)" }
+            : { top: start + along / 2 - 12, ...(side === "left" ? { left: thick + 10 } : { right: thick + 10 }) }}>
           {label}
         </span>
       )}
@@ -98,15 +104,23 @@ export function DeviceFrame({ device, name, layout, screen, enabled, children }:
   enabled: boolean;
   children: ReactNode;
 }) {
-  const pad = Math.round(screen.width * layout.bezel);
-  const screenRadius = Math.round(screen.width * layout.radius);
+  // Tudo sai do LADO MENOR da tela: girar o aparelho não muda a moldura, os cantos nem a ilha, só os leva de lugar.
+  const short = Math.min(screen.width, screen.height);
+  const landscape = screen.width > screen.height;
+  const pad = Math.round(short * layout.bezel);
+  const screenRadius = Math.round(short * layout.radius);
   const outer = { width: screen.width + 2 * pad, height: screen.height + 2 * pad };
-  const rim = Math.max(2, Math.round(screen.width * 0.011));
-  const island = { width: Math.round(screen.width * 0.29), height: Math.round(screen.width * 0.085), top: Math.round(screen.width * 0.027) };
+  const rim = Math.max(2, Math.round(short * 0.011));
+  const islandLong = Math.round(short * 0.29);
+  const islandShort = Math.round(short * 0.085);
+  const islandBox: React.CSSProperties = landscape
+    ? { left: Math.round(short * 0.027), top: "50%", transform: "translateY(-50%)", width: islandShort, height: islandLong }
+    : { top: Math.round(short * 0.027), left: "50%", transform: "translateX(-50%)", width: islandLong, height: islandShort };
   return (
     <div className="relative shrink-0" style={outer}>
       {layout.buttons.map((b) => (
-        <SideButton key={`${b.side}-${b.button}`} b={b} device={device} name={name} height={outer.height} width={outer.width} enabled={enabled} />
+        <SideButton key={`${b.side}-${b.button}`} b={b} device={device} name={name} short={Math.min(outer.width, outer.height)}
+          placed={placeFrameButton(b, landscape, outer)} enabled={enabled} />
       ))}
       {/* O aro de metal (fino, com brilho em cima e sombra embaixo), a borda preta e a tela. Os botões ficam por cima, encostados no aro. */}
       <div className="absolute inset-0 z-[1] bg-gradient-to-b from-gray-200 via-gray-400 to-gray-300 dark:from-gray-500 dark:via-gray-700 dark:to-gray-600
@@ -116,8 +130,7 @@ export function DeviceFrame({ device, name, layout, screen, enabled, children }:
           <div className="relative h-full w-full overflow-hidden bg-black" style={{ borderRadius: screenRadius }}>
             {children}
             {layout.island && (
-              <span aria-hidden="true" className="pointer-events-none absolute left-1/2 -translate-x-1/2 rounded-full bg-black"
-                style={{ top: island.top, width: island.width, height: island.height }} />
+              <span aria-hidden="true" className="pointer-events-none absolute rounded-full bg-black" style={islandBox} />
             )}
           </div>
         </div>
@@ -127,6 +140,6 @@ export function DeviceFrame({ device, name, layout, screen, enabled, children }:
 }
 
 /** O raio dos cantos da tela, em px, para a tela nativa (`PhysicalMirror`). */
-export function screenRadiusOf(layout: FrameLayout, screenWidth: number): number {
-  return Math.round(screenWidth * layout.radius);
+export function screenRadiusOf(layout: FrameLayout, screenWidth: number, screenHeight = screenWidth): number {
+  return Math.round(Math.min(screenWidth, screenHeight) * layout.radius);
 }

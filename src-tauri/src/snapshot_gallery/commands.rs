@@ -4,20 +4,20 @@
 use super::gallery::{delete_in, image_path_in, list_in, SnapshotItem};
 use crate::computer_use::snapshot::captures_dir;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn snapshot_gallery_list() -> Result<Vec<SnapshotItem>, String> {
     list_in(&captures_dir()?)
 }
 
 /// Copia o PNG para a área de transferência do Mac. Reaproveita a cópia de PNG que já existe (ela só confere o formato);
 /// o caminho vem da pasta de capturas, nunca de um texto livre.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn snapshot_gallery_copy(id: String) -> Result<(), String> {
     let path = image_path_in(&captures_dir()?, &id)?;
     crate::iphone::commands::iphone_copy_image(path.to_string_lossy().into_owned())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn snapshot_gallery_delete(id: String) -> Result<(), String> {
     delete_in(&captures_dir()?, &id)
 }
