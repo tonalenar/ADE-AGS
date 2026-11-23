@@ -11,7 +11,7 @@ describe("parseChatPrefs", () => {
 
   it("guarda só o que serve", () => {
     expect(parseChatPrefs({ cwd: "/p", agentId: "codex", model: 3, effort: "", accountId: "a1", access: "ask", extra: true }))
-      .toEqual({ cwd: "/p", agentId: "codex", model: null, effort: null, accountId: "a1", access: "ask", plan: false, fastMode: false, worktree: false, worktreeSubmodules: null, structured: true, width: "normal", followUpBehavior: "steer", showSkillsInSlashMenu: true, sendShortcut: "enter", toolCallVisibility: "showAll" });
+      .toEqual({ cwd: "/p", agentId: "codex", model: null, effort: null, accountId: "a1", access: "ask", plan: false, fastMode: false, worktree: false, worktreeSubmodules: null, structured: true, width: "normal", followUpBehavior: "steer", showSkillsInSlashMenu: true, sendShortcut: "enter", spellcheck: true, promptSuggestions: true, toolCallVisibility: "showAll" });
   });
 
   it("aceita fila como comportamento padrão e descarta valores desconhecidos", () => {
@@ -24,6 +24,13 @@ describe("parseChatPrefs", () => {
     expect(parseChatPrefs({ sendShortcut: "shift" }).sendShortcut).toBe("enter");
     expect(parseChatPrefs({ toolCallVisibility: "zen" }).toolCallVisibility).toBe("zen");
     expect(parseChatPrefs({ toolCallVisibility: "tudo" }).toolCallVisibility).toBe("showAll");
+  });
+
+  it("ortografia e sugestões: ligadas por padrão, só `false` desliga", () => {
+    expect(parseChatPrefs({}).spellcheck).toBe(true);
+    expect(parseChatPrefs({}).promptSuggestions).toBe(true);
+    expect(parseChatPrefs({ spellcheck: false, promptSuggestions: false })).toMatchObject({ spellcheck: false, promptSuggestions: false });
+    expect(parseChatPrefs({ spellcheck: "não", promptSuggestions: 0 })).toMatchObject({ spellcheck: true, promptSuggestions: true });
   });
 
   it("permissão desconhecida cai no nível das missões (safe)", () => {

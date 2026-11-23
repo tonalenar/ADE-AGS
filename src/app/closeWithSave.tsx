@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -11,7 +10,7 @@ import { saveForClose, type SaveStep } from "@/features/tabs/persistence";
 import { flushCanvasSavesForClose } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { ptyKill } from "@/features/terminal/ipc";
-import { closeAndForgetWindow, confirmExitAll } from "@/shared/ipc/window";
+import { closeAndForgetWindow, closeWindowSaved, confirmExitAll, previewSaveSite, previewUnsavedSites, updateRestart } from "@/shared/ipc/window";
 
 /**
  * Cerrar guardando antes, con una alerta que muestra cuánto falta.
@@ -119,12 +118,12 @@ function withTimeout(work: Promise<void>): Promise<void> {
 /** Los sitios del navegador con cambios sin escribir. Solo al cerrar la app: mientras
  *  queda otra ventana, los proxies siguen vivos y su guardador los escribe solo. */
 async function unsavedSites(): Promise<string[]> {
-  return invoke<string[]>("preview_unsaved_sites").catch(() => []);
+  return previewUnsavedSites().catch(() => []);
 }
 
 async function saveSites(sites: string[], onDone: (origin: string) => void) {
   for (const origin of sites) {
-    await invoke("preview_save_site", { origin }).catch(console.error);
+    await previewSaveSite(origin).catch(console.error);
     onDone(origin);
   }
 }
@@ -184,7 +183,7 @@ export async function closeWindowWithSave(mode: "button" | "system"): Promise<vo
   // ventana tapada.
   const closed = mode === "button"
     ? closeAndForgetWindow(win.label)
-    : invoke("close_window_saved", { label: win.label });
+    : closeWindowSaved(win.label);
   await closed.catch((e) => {
     console.error(e);
     alert.close();
@@ -268,7 +267,7 @@ export async function exitAllWithSave(then: "exit" | "restart" = "exit"): Promis
     console.error("[close] no se pudo guardar todo antes de salir", e);
   }
   // Como en `closeWindowWithSave`: la alerta se va con la app.
-  const finish = then === "restart" ? invoke<void>("update_restart") : confirmExitAll();
+  const finish = then === "restart" ? updateRestart() : confirmExitAll();
   await finish.catch((e) => {
     console.error(e);
     alert.close();

@@ -1024,6 +1024,8 @@ fn claude_live_probe_remove_variaveis_sobrescritoras_em_conta_extra() {
     let mut cmd = portable_pty::CommandBuilder::new("claude");
     cmd.env("ANTHROPIC_API_KEY", "sk-herdada");
     cmd.env("CLAUDE_CODE_OAUTH_TOKEN", "oauth-herdada");
+    cmd.env("CLAUDECODE", "1");
+    cmd.env("CLAUDE_CODE_ACCOUNT_UUID", "acc-pai");
     let extra_env = vec![("CLAUDE_CONFIG_DIR".to_string(), "/tmp/conta-ton".to_string())];
     super::live::apply_probe_env(&mut cmd, &extra_env);
     assert_eq!(
@@ -1032,4 +1034,454 @@ fn claude_live_probe_remove_variaveis_sobrescritoras_em_conta_extra() {
     );
     assert!(cmd.get_env("ANTHROPIC_API_KEY").is_none());
     assert!(cmd.get_env("CLAUDE_CODE_OAUTH_TOKEN").is_none());
+    assert!(cmd.get_env("CLAUDECODE").is_none());
+    assert!(cmd.get_env("CLAUDE_CODE_ACCOUNT_UUID").is_none());
+
+    let mut sys_cmd = portable_pty::CommandBuilder::new("claude");
+    sys_cmd.env("CLAUDE_CONFIG_DIR", "/tmp/vazado");
+    super::live::apply_probe_env(&mut sys_cmd, &[]);
+    assert!(
+        sys_cmd.get_env("CLAUDE_CONFIG_DIR").is_none(),
+        "conta principal nao pode herdar CLAUDE_CONFIG_DIR externo"
+    );
+}
+
+#[test]
+fn capture_problem_detecta_rate_limit_429_e_load_failed() {
+    assert_eq!(
+        super::live::capture_problem("Claude is temporarily limiting requests to the usage page (not your usage limit). Try again in a moment."),
+        Some("accounts.plan.problem.rateLimited")
+    );
+    assert_eq!(
+        super::live::capture_problem("The usage page is rate limited until 2:30 PM."),
+        Some("accounts.plan.problem.rateLimited")
+    );
+    assert_eq!(
+        super::live::capture_problem("Couldn't load usage data"),
+        Some("accounts.plan.problem.loadFailed")
+    );
+    // Se as barras do cache do proprio Claude estiverem na tela junto com o aviso, o parser aproveita as barras e sinaliza o aviso.
+    let seeded = "Current session\r\n  14% used\r\n  Resets 3pm\r\nCurrent week (all models)\r\n  36% used\r\n  Resets Sep 20\r\nShowing last-known usage as of 5m ago (rate limited until 2:30 PM)\r\n";
+    let (usage, notice) = super::parse::parse_usage_screen_with_notice(seeded);
+    assert!(usage.available);
+    assert_eq!(usage.session.as_ref().unwrap().percent, 14);
+    assert_eq!(usage.week.as_ref().unwrap().percent, 36);
+    assert_eq!(notice, Some("accounts.plan.problem.rateLimited"));
+}
+
+#[test]
+fn parse_usage_aceita_formato_compacto_com_resets_na_mesma_linha() {
+    let compact = "Current session · Resets 4pm (America/Sao_Paulo)\r\n██████████\r\n22% used\r\nCurrent week (all models) · Resets Fri 10am\r\n████\r\n41% used\r\n";
+    let u = parse_usage_screen(compact);
+    assert!(u.available);
+    assert_eq!(u.session.as_ref().unwrap().percent, 22);
+    assert_eq!(
+        u.session.as_ref().unwrap().resets.as_deref(),
+        Some("4pm (America/Sao_Paulo)")
+    );
+    assert_eq!(u.week.as_ref().unwrap().percent, 41);
+    assert_eq!(u.week.as_ref().unwrap().resets.as_deref(), Some("Fri 10am"));
+}
+
+#[test]
+fn claude_usage_preserva_ultimo_valor_bom_e_aplica_backoff_exponencial() {
+    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let db: crate::database::DbConnection = Arc::new(Mutex::new(crate::database::test_db()));
+    let state = super::live::ClaudeUsageState::default();
+    let calls = AtomicUsize::new(0);
+    let now = 1_800_000_000_i64;
+
+    let ok_screen = "Current session\r\n  28% used\r\n  Resets 5pm\r\nCurrent week (all models)\r\n  44% used\r\n  Resets Mon 9am\r\n";
+    let first = super::live::fetch_claude_usage_with(
+        &db,
+        &state,
+        "system:claude-code",
+        true,
+        true,
+        now,
+        None,
+        || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(super::parse::parse_usage_screen_with_notice(ok_screen))
+        },
+    )
+    .unwrap();
+    assert!(first.available);
+    assert_eq!(first.session.as_ref().unwrap().percent, 28);
+    assert!(first.problem.is_none());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    // Apos TTL (400s > 300s), nova consulta falha com 429: deve preservar 28% / 44% e agendar backoff de 120s.
+    let second = super::live::fetch_claude_usage_with(
+        &db,
+        &state,
+        "system:claude-code",
+        true,
+        false,
+        now + 400,
+        None,
+        || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Err("accounts.plan.problem.rateLimited".to_string())
+        },
+    )
+    .unwrap();
+    assert!(second.available, "nao pode descartar o ultimo valor valido em erro 429");
+    assert!(second.cached);
+    assert_eq!(second.fetched_at, now);
+    assert_eq!(second.session.as_ref().unwrap().percent, 28);
+    assert_eq!(second.week.as_ref().unwrap().percent, 44);
+    assert_eq!(second.problem.as_deref(), Some("accounts.plan.problem.rateLimited"));
+    assert_eq!(second.retry_at, Some(now + 400 + 120));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+    // Chamada automatica durante o backoff NAO deve chamar a sonda.
+    let skipped = super::live::fetch_claude_usage_with(
+        &db,
+        &state,
+        "system:claude-code",
+        true,
+        false,
+        now + 450,
+        None,
+        || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            panic!("nao deve rodar sonda durante backoff automatico");
+        },
+    )
+    .unwrap();
+    assert!(skipped.available);
+    assert_eq!(skipped.retry_at, Some(now + 400 + 120));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+    // Segunda falha apos vencer o primeiro backoff dobra/escala o intervalo (300s para 429).
+    let third = super::live::fetch_claude_usage_with(
+        &db,
+        &state,
+        "system:claude-code",
+        true,
+        false,
+        now + 400 + 125,
+        None,
+        || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Err("accounts.plan.problem.rateLimited".to_string())
+        },
+    )
+    .unwrap();
+    assert_eq!(third.retry_at, Some(now + 400 + 125 + 300));
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+
+    // Chamada manual com sucesso reseta backoff e limpa problem.
+    let recovered_screen = "Current session\r\n  31% used\r\n  Resets 5pm\r\nCurrent week (all models)\r\n  46% used\r\n  Resets Mon 9am\r\n";
+    let recovered = super::live::fetch_claude_usage_with(
+        &db,
+        &state,
+        "system:claude-code",
+        true,
+        true,
+        now + 600,
+        None,
+        || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(super::parse::parse_usage_screen_with_notice(recovered_screen))
+        },
+    )
+    .unwrap();
+    assert!(recovered.available);
+    assert_eq!(recovered.session.as_ref().unwrap().percent, 31);
+    assert!(recovered.problem.is_none());
+    assert!(recovered.retry_at.is_none());
+}
+
+#[test]
+fn claude_usage_erro_de_auth_nao_esconde_sessao_expirada_com_cache_antigo() {
+    use std::sync::{Arc, Mutex};
+
+    let db: crate::database::DbConnection = Arc::new(Mutex::new(crate::database::test_db()));
+    let state = super::live::ClaudeUsageState::default();
+    let now = 1_800_000_000_i64;
+    let ok_screen = "Current session\r\n  10% used\r\nCurrent week (all models)\r\n  20% used\r\n";
+
+    let _ = super::live::fetch_claude_usage_with(
+        &db,
+        &state,
+        "system:claude-code",
+        true,
+        true,
+        now,
+        None,
+        || Ok(super::parse::parse_usage_screen_with_notice(ok_screen)),
+    )
+    .unwrap();
+
+    let expired = super::live::fetch_claude_usage_with(
+        &db,
+        &state,
+        "system:claude-code",
+        true,
+        true,
+        now + 600,
+        None,
+        || Err("accounts.auth.expired".to_string()),
+    )
+    .unwrap();
+    assert!(!expired.available);
+    assert_eq!(expired.problem.as_deref(), Some("accounts.auth.expired"));
+}
+
+#[test]
+fn claude_usage_le_cached_usage_utilization_do_claude_json_isolado_sem_abrir_sonda() {
+    use std::sync::{Arc, Mutex};
+
+    let root = std::env::temp_dir().join(format!("ags-claude-json-cache-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let config_path = root.join(".claude.json");
+    let now = 1_800_000_000_i64;
+    let resets_5h = chrono::DateTime::from_timestamp(now + 3600, 0)
+        .unwrap()
+        .to_rfc3339();
+    let resets_7d = chrono::DateTime::from_timestamp(now + 86_400, 0)
+        .unwrap()
+        .to_rfc3339();
+
+    std::fs::write(
+        &config_path,
+        serde_json::json!({
+            "oauthAccount": { "accountUuid": "uuid-conta-extra", "emailAddress": "extra@exemplo.com" },
+            "cachedUsageUtilization": {
+                "fetchedAtMs": (now - 60) * 1000,
+                "accountUuid": "uuid-conta-extra",
+                "utilization": {
+                    "five_hour": { "utilization": 19.4, "resets_at": resets_5h },
+                    "seven_day": { "utilization": 52.8, "resets_at": resets_7d },
+                    "limits": [
+                        {
+                            "kind": "weekly_scoped",
+                            "group": "weekly",
+                            "percent": 11.0,
+                            "resets_at": resets_7d,
+                            "scope": { "model": { "display_name": "Sonnet" } }
+                        }
+                    ]
+                }
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let db: crate::database::DbConnection = Arc::new(Mutex::new(crate::database::test_db()));
+    let state = super::live::ClaudeUsageState::default();
+    let res = super::live::fetch_claude_usage_with(
+        &db,
+        &state,
+        "conta-extra-1",
+        false,
+        false,
+        now,
+        Some(&config_path),
+        || panic!("nao deveria abrir sonda quando .claude.json tem leitura fresca"),
+    )
+    .unwrap();
+
+    assert!(res.available);
+    assert_eq!(res.fetched_at, now - 60);
+    assert_eq!(res.session.as_ref().unwrap().percent, 19);
+    assert_eq!(res.session.as_ref().unwrap().resets_at, Some(now + 3600));
+    assert_eq!(res.week.as_ref().unwrap().percent, 53);
+    assert_eq!(res.week_models.len(), 1);
+    assert_eq!(res.week_models[0].model, "Sonnet");
+    assert_eq!(res.week_models[0].meter.percent, 11);
+
+    // Se accountUuid divergir do oauthAccount atual, ignora o cache do outro usuario.
+    std::fs::write(
+        &config_path,
+        serde_json::json!({
+            "oauthAccount": { "accountUuid": "uuid-novo" },
+            "cachedUsageUtilization": {
+                "fetchedAtMs": (now - 30) * 1000,
+                "accountUuid": "uuid-antigo",
+                "utilization": { "five_hour": { "utilization": 99.0, "resets_at": resets_5h } }
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    assert!(
+        super::live::read_claude_config_usage(&config_path, now).is_none(),
+        "read_claude_config_usage deve descartar cache de outro accountUuid"
+    );
+    let db2: crate::database::DbConnection = Arc::new(Mutex::new(crate::database::test_db()));
+    let state2 = super::live::ClaudeUsageState::default();
+    let mut probed = false;
+    let res2 = super::live::fetch_claude_usage_with(
+        &db2,
+        &state2,
+        "conta-extra-2",
+        false,
+        false,
+        now,
+        Some(&config_path),
+        || {
+            probed = true;
+            Ok(super::parse::parse_usage_screen_with_notice(
+                "Current session\r\n  5% used\r\nCurrent week (all models)\r\n  12% used\r\n",
+            ))
+        },
+    )
+    .unwrap();
+    assert!(probed, "cache de outro accountUuid nao pode ser usado");
+    assert_eq!(res2.session.as_ref().unwrap().percent, 5);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn claude_usage_aproveita_runs_quota_de_rate_limit_event_como_fonte_fresca() {
+    use std::sync::{Arc, Mutex};
+
+    let db: crate::database::DbConnection = Arc::new(Mutex::new(crate::database::test_db()));
+    let state = super::live::ClaudeUsageState::default();
+    let now = 1_800_000_000_i64;
+
+    crate::runs::quota::record(
+        &db,
+        "conta-extra-1",
+        crate::runs::quota::Quota {
+            five_hour: Some(crate::runs::quota::QuotaWindow {
+                utilization: 0.34,
+                resets_at: Some(now + 7200),
+            }),
+            seven_day: Some(crate::runs::quota::QuotaWindow {
+                utilization: 0.61,
+                resets_at: Some(now + 172_800),
+            }),
+            ..Default::default()
+        },
+        now - 45,
+    );
+
+    let res = super::live::fetch_claude_usage_with(
+        &db,
+        &state,
+        "conta-extra-1",
+        false,
+        false,
+        now,
+        None,
+        || panic!("nao deveria abrir sonda quando runs::quota tem evento recente"),
+    )
+    .unwrap();
+
+    assert!(res.available);
+    assert_eq!(res.fetched_at, now - 45);
+    assert_eq!(res.session.as_ref().unwrap().percent, 34);
+    assert_eq!(res.session.as_ref().unwrap().resets_at, Some(now + 7200));
+    assert_eq!(res.week.as_ref().unwrap().percent, 61);
+}
+
+#[test]
+fn claude_usage_conta_api_key_retorna_api_key_sem_sonda() {
+    use std::sync::{Arc, Mutex};
+
+    let db: crate::database::DbConnection = Arc::new(Mutex::new(crate::database::test_db()));
+    db.lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at, kind)
+             VALUES ('acc-api', 'claude-code', 'API', '/tmp/api-claude', 1, 'api_key')",
+            [],
+        )
+        .unwrap();
+
+    let state = super::live::ClaudeUsageState::default();
+    let res = super::live::fetch_claude_usage_with(
+        &db,
+        &state,
+        "acc-api",
+        true,
+        true,
+        1_800_000_000,
+        None,
+        || panic!("conta api_key nao pode abrir sonda PTY"),
+    )
+    .unwrap();
+    assert!(!res.available);
+    assert_eq!(res.problem.as_deref(), Some("accounts.plan.problem.apiKey"));
+}
+
+#[tokio::test]
+async fn claude_usage_single_flight_deduplica_chamadas_concorrentes() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Condvar, Mutex};
+
+    let db: crate::database::DbConnection = Arc::new(Mutex::new(crate::database::test_db()));
+    let state = Arc::new(super::live::ClaudeUsageState::default());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
+    let entered_tx = Arc::new(Mutex::new(Some(entered_tx)));
+    let release = Arc::new((Mutex::new(false), Condvar::new()));
+
+    let run_one = |calls: Arc<AtomicUsize>,
+                   state: Arc<super::live::ClaudeUsageState>,
+                   db: crate::database::DbConnection,
+                   entered_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+                   release: Arc<(Mutex<bool>, Condvar)>| async move {
+        super::live::fetch_claude_usage_async_with(
+            &db,
+            &state,
+            "system:claude-code",
+            true,
+            true,
+            1_800_000_000,
+            None,
+            move || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                if let Some(tx) = entered_tx.lock().unwrap().take() {
+                    let _ = tx.send(());
+                }
+                let (lock, cv) = &*release;
+                let mut guard = lock.lock().unwrap();
+                while !*guard {
+                    guard = cv.wait(guard).unwrap();
+                }
+                Ok(super::parse::parse_usage_screen_with_notice(
+                    "Current session\r\n  15% used\r\nCurrent week (all models)\r\n  25% used\r\n",
+                ))
+            },
+        )
+        .await
+    };
+
+    let f1 = tokio::spawn(run_one(
+        calls.clone(),
+        state.clone(),
+        db.clone(),
+        entered_tx.clone(),
+        release.clone(),
+    ));
+    entered_rx.await.unwrap();
+    let f2 = tokio::spawn(run_one(
+        calls.clone(),
+        state.clone(),
+        db.clone(),
+        entered_tx.clone(),
+        release.clone(),
+    ));
+    tokio::task::yield_now().await;
+    {
+        let (lock, cv) = &*release;
+        *lock.lock().unwrap() = true;
+        cv.notify_all();
+    }
+
+    let u1 = f1.await.unwrap().unwrap();
+    let u2 = f2.await.unwrap().unwrap();
+    assert!(u1.available && u2.available);
+    assert_eq!(u1.session.as_ref().unwrap().percent, 15);
+    assert_eq!(u2.session.as_ref().unwrap().percent, 15);
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "duas chamadas concorrentes devem rodar apenas 1 sonda");
 }

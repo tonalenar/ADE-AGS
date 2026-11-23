@@ -421,3 +421,34 @@ fn modo_unificado_e_pausa_decidem_acao_da_tarefa() {
     assert_eq!(task_action(PoolMode::Auto, false, FailureKind::RateLimited, true), TaskPoolAction::None);
     assert_eq!(task_action(PoolMode::Ask, false, FailureKind::RateLimited, true), TaskPoolAction::None);
 }
+
+#[test]
+fn tarefa_de_conta_fixa_membro_de_pool_ganha_origem_implicita_e_fica_gravada() {
+    let db = test_db();
+    let pool = Pool {
+        id: "p1".into(), name: "Gemini".into(), agent_id: "antigravity".into(),
+        members: vec![Some("a".into()), Some("b".into())], strategy: Strategy::LeastUsed, failover: true, paused: false,
+    };
+    crate::accounts::pools::save(&db, &[pool]).unwrap();
+    assert!(task_pool(&db, "t1").is_none());
+    let origin = origin_for_task(&db, "t1", "antigravity", &Some("a".into())).unwrap();
+    assert_eq!((origin.id.as_str(), origin.name.as_str(), origin.agent_id.as_str()), ("p1", "Gemini", "antigravity"));
+    assert_eq!(task_pool(&db, "t1"), Some(origin));
+    assert!(origin_for_task(&db, "t2", "antigravity", &Some("z".into())).is_none());
+    assert!(origin_for_task(&db, "t3", "codex", &Some("a".into())).is_none());
+}
+
+#[test]
+fn origem_explicita_da_tarefa_vence_a_implicita() {
+    let db = test_db();
+    let pool = |id: &str, name: &str| Pool {
+        id: id.into(), name: name.into(), agent_id: "antigravity".into(),
+        members: vec![Some("a".into()), Some("b".into())], strategy: Strategy::LeastUsed, failover: true, paused: false,
+    };
+    crate::accounts::pools::save(&db, &[pool("p1", "Alfa"), pool("p2", "Beta")]).unwrap();
+    {
+        let conn = db.lock().unwrap();
+        record_task_pool(&conn, "t1", Some(&PoolOrigin { id: "p2".into(), name: "Beta".into(), agent_id: "antigravity".into() })).unwrap();
+    }
+    assert_eq!(origin_for_task(&db, "t1", "antigravity", &Some("a".into())).unwrap().id, "p2");
+}

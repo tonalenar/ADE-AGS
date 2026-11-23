@@ -14,6 +14,7 @@ import { dispatchSkillMentions } from "../skillMentions";
 import { useAgentSkillsStore } from "@/features/skills/agentSkillsStore";
 import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, forgetGoneAnswerErrors, isLocalAcpAgent, threadKey, type ThreadEvent, type ThreadLive } from "./model";
 import { addLogFailure, dismissLogFailure, parseLogFailure, type LogFailure } from "./logFailureModel";
+import { onThreadEvent } from "../threadEvents";
 
 /** O sinal da janela quando uma gravação do log de execução falha de vez (ver `runs/execution_log.rs`). */
 const LOG_FAILED_EVENT = "cc-harness-log-failed";
@@ -40,9 +41,11 @@ interface StructuredState {
   arrivalSeq: number;
   /** Última chegada local de cada pedido, por conversa e id do pedido. */
   requestArrivalSeq: Record<string, Record<string, number>>;
+  /** Hora (ms) do último item recebido por conversa, fora de `threads` para não trocar o array a cada item. */
+  lastItemAt: Record<string, number>;
 }
 
-export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, hydrateErrors: {}, logFailures: {}, answerErrors: {}, arrivalSeq: 0, requestArrivalSeq: {} }));
+export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, hydrateErrors: {}, logFailures: {}, answerErrors: {}, arrivalSeq: 0, requestArrivalSeq: {}, lastItemAt: {} }));
 
 /** Um sinal de falha do log entra na conversa afetada, sem repetir o mesmo aviso. Sinal sem conversa é ignorado. */
 export function recordLogFailure(raw: unknown): void {
@@ -126,6 +129,7 @@ export function removeDeletedSideChat(id: string): void {
     hydrateErrors: withoutKey(state.hydrateErrors, id),
     answerErrors: forgetGoneAnswerErrors(state.live[id] ?? EMPTY_LIVE, EMPTY_LIVE, state.answerErrors),
     requestArrivalSeq: Object.fromEntries(Object.entries(state.requestArrivalSeq).filter(([threadId]) => threadId !== id)),
+    lastItemAt: withoutKey(state.lastItemAt, id),
   }));
 }
 
@@ -163,8 +167,7 @@ export function startStructured(): void {
   started = true;
   void reloadThreads();
   void listen<unknown>(LOG_FAILED_EVENT, (e) => recordLogFailure(e.payload));
-  void listen<ThreadEvent | { type: "created"; threadId: string; thread: ThreadRow }>("cc-chat-thread", (e) => {
-    const event = e.payload;
+  onThreadEvent<ThreadEvent | { type: "created"; threadId: string; thread: ThreadRow }>((event) => {
     if (event.type === "delta") {
       deltas.push(event);
       return;
@@ -192,9 +195,10 @@ export function startStructured(): void {
     }
     patchLive(event.threadId, (live) => applyThreadEvent(live, event));
     if (event.type === "item") {
-      useStructured.setState((s) => ({ threads: s.threads.map((t) => (t.id === event.threadId ? { ...t, updatedAt: Date.now() } : t)) }));
+      // Atualiza só o mapa auxiliar de recência para não recriar o array `threads` a cada item de streaming.
+      useStructured.setState((s) => ({ lastItemAt: { ...s.lastItemAt, [event.threadId]: Date.now() } }));
     }
-  });
+  }, { deltas: true });
 }
 
 /** Quantas vezes a leitura de uma conversa por protocolo é tentada antes de desistir. */

@@ -156,3 +156,52 @@ fn emulador_que_sai_e_esperado_pela_thread() {
     let resultado = watch_child(child, |job| std::thread::Builder::new().spawn(job).map(|_| ()));
     assert!(resultado.is_ok(), "{resultado:?}");
 }
+
+#[test]
+fn cache_de_avds_evita_relancar_emulator_e_nao_grava_falha_ou_timeout() {
+    let slot = Mutex::new(AvdCache::default());
+    let ttl = Duration::from_secs(60);
+    let t0 = Instant::now();
+    let mut calls = 0;
+
+    // Erro ou timeout inicial devolve vazio, mas NÃO grava no cache.
+    let first = avds_with(&slot, || t0, ttl, || {
+        calls += 1;
+        Err(())
+    });
+    assert!(first.is_empty());
+    assert_eq!(calls, 1);
+
+    // Chamada seguinte tenta de novo porque o erro não foi cacheado.
+    let second = avds_with(&slot, || t0 + Duration::from_secs(1), ttl, || {
+        calls += 1;
+        Ok(vec!["Pixel_8".into()])
+    });
+    assert_eq!(second, vec!["Pixel_8"]);
+    assert_eq!(calls, 2);
+
+    // Dentro do TTL usa o cache sem executar o processo.
+    let cached = avds_with(&slot, || t0 + Duration::from_secs(30), ttl, || {
+        calls += 1;
+        Ok(vec!["Outro".into()])
+    });
+    assert_eq!(cached, vec!["Pixel_8"]);
+    assert_eq!(calls, 2);
+
+    // Após vencer o TTL, erro/timeout preserva a última lista boa sem sobrescrever com vazio.
+    let stale_fallback = avds_with(&slot, || t0 + Duration::from_secs(65), ttl, || {
+        calls += 1;
+        Err(())
+    });
+    assert_eq!(stale_fallback, vec!["Pixel_8"]);
+    assert_eq!(calls, 3);
+
+    // Invalidação força nova leitura mesmo dentro do TTL.
+    slot.lock().unwrap().invalidate();
+    let refreshed = avds_with(&slot, || t0 + Duration::from_secs(35), ttl, || {
+        calls += 1;
+        Ok(vec!["Pixel_8".into(), "Pixel_9".into()])
+    });
+    assert_eq!(refreshed, vec!["Pixel_8", "Pixel_9"]);
+    assert_eq!(calls, 4);
+}

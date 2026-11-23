@@ -137,12 +137,21 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
     })),
 
   updateView: (id, patch) =>
-    set((s) => ({
-      views: s.views.map((v) => (v.id === id ? ({ ...v, ...patch } as ViewTab) : v)),
-      portalViews: s.portalViews.some((v) => v.id === id)
-        ? s.portalViews.map((v) => (v.id === id ? ({ ...v, ...patch } as BrowserView) : v))
-        : s.portalViews,
-    })),
+    set((s) => {
+      const samePatch = <T extends object>(item: T, next: Partial<T>): boolean =>
+        (Object.keys(next) as (keyof T)[]).every((key) => Object.is(item[key], next[key]));
+      const view = s.views.find((v) => v.id === id);
+      const portal = s.portalViews.find((v) => v.id === id);
+      const viewChanged = !!view && !samePatch(view, patch as Partial<ViewTab>);
+      const portalChanged = !!portal && !samePatch(portal, patch as Partial<BrowserView>);
+      if (!viewChanged && !portalChanged) return s;
+      return {
+        views: viewChanged ? s.views.map((v) => (v.id === id ? ({ ...v, ...patch } as ViewTab) : v)) : s.views,
+        portalViews: portalChanged
+          ? s.portalViews.map((v) => (v.id === id ? ({ ...v, ...patch } as BrowserView) : v))
+          : s.portalViews,
+      };
+    }),
 
   retargetPath: (from, to) =>
     set((s) => ({

@@ -7,24 +7,24 @@ use crate::util::spawn::{hidden_command, output};
 
 use super::{delete_in, dir, known_html_path, list_in, read_html_in, RenderPage};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn render_list() -> Result<Vec<RenderPage>, String> {
     list_in(&dir()?, None)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn render_read(id: String) -> Result<String, String> {
     read_html_in(&dir()?, &id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn render_delete(id: String) -> Result<(), String> {
     delete_in(&dir()?, &id)
 }
 
 /// Abre a página no navegador padrão do sistema, pelo arquivo que já está na pasta de dados. Não é uma URL da rede:
 /// o caminho sai do índice, e o programa é o do sistema para abrir arquivos `.html`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn render_open_external(id: String) -> Result<(), String> {
     let path = crate::util::external_path::external_path(&known_html_path(&dir()?, &id)?);
     let (program, args): (&str, Vec<std::path::PathBuf>) = if cfg!(target_os = "macos") {

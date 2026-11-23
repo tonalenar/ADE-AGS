@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -105,7 +105,7 @@ function RailGroup({ label, expanded }: { label: string; expanded: boolean }) {
  * As seções vão em três grupos — agentes, orquestração, recursos — para que sete ícones
  * não se leiam como uma fila só. Com `railExpanded` cada uma ganha o nome ao lado.
  */
-export function ActivityRail({ agentCount, width }: { agentCount: number; width: number }) {
+export const ActivityRail = memo(function ActivityRail({ agentCount, width }: { agentCount: number; width: number }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -234,4 +234,4 @@ export function ActivityRail({ agentCount, width }: { agentCount: number; width:
       </RailButton>
     </nav>
   );
-}
+});

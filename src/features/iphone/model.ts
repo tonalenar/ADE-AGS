@@ -161,13 +161,34 @@ export function frameLayout(model: string, family: "iphone" | "ipad"): FrameLayo
   };
 }
 
+export type FrameSide = "left" | "right" | "top" | "bottom";
+
+/**
+ * Onde o botão fica na orientação. Deitado (anti-horário, ilha à esquerda), a borda esquerda em pé vai para baixo, a
+ * direita para cima e a de cima para a esquerda. `start`/`along` em px, ao longo da borda. Pura.
+ */
+export function placeFrameButton(b: FrameButton, landscape: boolean, outer: { width: number; height: number }): { side: FrameSide; start: number; along: number } {
+  const long = landscape ? outer.width : outer.height;
+  if (b.side === "top") {
+    const length = Math.round(b.height * (landscape ? outer.height : outer.width));
+    const from = Math.round(b.top * (landscape ? outer.height : outer.width));
+    return landscape
+      ? { side: "left", start: Math.round(outer.height - from - length), along: length }
+      : { side: "top", start: from, along: length };
+  }
+  const side: FrameSide = !landscape ? b.side : b.side === "left" ? "bottom" : "top";
+  return { side, start: Math.round(b.top * long), along: Math.round(b.height * long) };
+}
+
 /** O zoom do aparelho no painel: 1 = um pixel CSS por ponto do iOS. */
 export const ZOOM = { min: 0.25, max: 2, step: 0.1 } as const;
 
 /** O zoom que faz o aparelho (tela + borda) caber em `box`. */
 export function fitScale(screen: { width: number; height: number }, box: { w: number; h: number }, bezel: number): number {
   if (box.w <= 0 || box.h <= 0 || screen.width <= 0 || screen.height <= 0) return ZOOM.min;
-  const outer = { w: screen.width * (1 + 2 * bezel), h: screen.height + screen.width * 2 * bezel };
+  // A moldura é proporcional ao lado menor, em pé ou deitado.
+  const pad = Math.min(screen.width, screen.height) * bezel;
+  const outer = { w: screen.width + 2 * pad, h: screen.height + 2 * pad };
   return Math.max(ZOOM.min, Math.min(ZOOM.max, box.w / outer.w, box.h / outer.h));
 }
 

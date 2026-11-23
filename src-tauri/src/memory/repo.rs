@@ -258,6 +258,7 @@ pub fn default_root() -> Result<PathBuf,String> {
 }
 
 /// Read provenance only; launching a Run must not export or mutate user files.
+#[cfg(test)]
 pub fn current_commit(conn: &Connection, workspace: &str) -> Option<String> {
     let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)", [workspace], |row| row.get(0)).ok()?;
     if !exists {
@@ -830,7 +831,7 @@ pub(crate) fn redaction_needles(bodies: &[String]) -> Vec<String> {
     needles
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_export_repo(workspace_id: String, sync: tauri::State<super::repo_sync::RepoSync>) -> Result<ExportResult, String> {
     // The worker renders under the database lock and runs git only after releasing it.
     sync.export_now(&workspace_id)

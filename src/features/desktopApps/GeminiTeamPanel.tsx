@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { canvasActions, flushSave, useActiveBoardKey, useCanvasStore } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 import { comparablePath } from "@/features/tabs/viewTabs";
+import { geminiDesktopPeerSend } from "./ipc";
 
 export function GeminiTeamPanel({ cwd }: { cwd: string }) {
   const { t } = useTranslation();
@@ -24,7 +24,7 @@ export function GeminiTeamPanel({ cwd }: { cwd: string }) {
     setBusy(true); setMessage("");
     try {
       await flushSave(key);
-      await invoke("gemini_desktop_peer_send", { from: id, to: target, text });
+      await geminiDesktopPeerSend(id, target, text);
       setMessage(t("geminiDesktop.sentToPeer")); setText("");
     } catch (e) { setMessage(String(e)); }
     finally { setBusy(false); }

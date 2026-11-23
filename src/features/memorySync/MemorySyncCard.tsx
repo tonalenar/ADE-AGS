@@ -14,6 +14,7 @@ import { openExternalUrl } from "@/shared/openExternalUrl";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 
 import { useMemorySyncStore } from "./store";
+import { memorySyncWarning } from "./types";
 
 const DEFAULT_REPO_NAME = "ade-memoria";
 const INTERVAL_OPTIONS = [1, 3, 6, 12, 24] as const;
@@ -54,6 +55,8 @@ export function MemorySyncCard({ activeCwd, workspaceId }: MemorySyncCardProps) 
   const loadAccounts = useForgeStore((s) => s.load);
   const setAccountsOpen = useUiStore((s) => s.setAccountsOpen);
 
+  const lastWarning = status?.last ? memorySyncWarning(status.last) : null;
+
   const eligibleAccounts = accounts.filter((account) => account.kind !== "other");
 
   const [configuring, setConfiguring] = useState(false);
@@ -91,13 +94,13 @@ export function MemorySyncCard({ activeCwd, workspaceId }: MemorySyncCardProps) 
     if (!next) {
       setEditingTarget(false);
     }
-    void setEnabled(next, activeCwd);
+    void setEnabled(next);
   };
 
   const handleConnect = async () => {
     const cleanRepo = repoName.trim() || DEFAULT_REPO_NAME;
     if (!effectiveAccountId) return;
-    await setup(effectiveAccountId, cleanRepo, activeCwd);
+    await setup(effectiveAccountId, cleanRepo);
     const updated = useMemorySyncStore.getState();
     if (updated.status?.configured && !updated.error) {
       setConfiguring(false);
@@ -270,7 +273,7 @@ export function MemorySyncCard({ activeCwd, workspaceId }: MemorySyncCardProps) 
                   variant="outline"
                   size="sm"
                   disabled={!status.enabled || running}
-                  onClick={() => void restoreNow(activeCwd)}
+                  onClick={() => void restoreNow()}
                 >
                   {running && <AnimateSpin className="w-3.5 h-3.5 mr-1.5" />}
                   {t("memorySync.restoreNow")}
@@ -293,7 +296,11 @@ export function MemorySyncCard({ activeCwd, workspaceId }: MemorySyncCardProps) 
       {status?.last && (
         <div className="flex flex-col gap-2 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50/70 dark:bg-white/[0.03] px-4 py-3 text-[12.5px]">
           <div className="flex flex-wrap items-center gap-2 text-gray-800 dark:text-white/85">
-            <CheckCircleIcon className="w-4 h-4 shrink-0 text-emerald-500" />
+            {lastWarning ? (
+              <InfoIcon className="w-4 h-4 shrink-0 text-amber-500" />
+            ) : (
+              <CheckCircleIcon className="w-4 h-4 shrink-0 text-emerald-500" />
+            )}
             <span className="font-medium">
               {t(status.last.restored ? "memorySync.lastRestore" : "memorySync.last", { time: formatDateTime(status.last.at) })}
             </span>
@@ -313,6 +320,11 @@ export function MemorySyncCard({ activeCwd, workspaceId }: MemorySyncCardProps) 
               revisions: status.last.sqliteRevisions,
             })}
           </p>}
+          {lastWarning && (
+            <p role="alert" className="m-0 text-[12px] font-medium text-amber-700 dark:text-amber-300">
+              {t(lastWarning === "unavailable" ? "memorySync.warnUnavailable" : "memorySync.warnEmpty")}
+            </p>
+          )}
           {status.last.aiMemoryNote && (
             <p className="m-0 text-[12px] text-amber-700 dark:text-amber-300">
               {status.last.aiMemoryNote}
@@ -335,17 +347,17 @@ export function MemorySyncCard({ activeCwd, workspaceId }: MemorySyncCardProps) 
             {t("memorySync.conflictsTitle", { count: status.last.restore.conflicts.length })}
           </span>
           {status.last.restore.conflicts.map((conflict) => (
-            <div key={conflict.path} className="flex flex-col gap-2 border-t border-amber-300/40 pt-2 first:border-0 first:pt-0">
-              <strong className="text-[12px]">{conflict.title} · <code>{conflict.path}</code></strong>
+            <div key={conflict.remotePath} className="flex flex-col gap-2 border-t border-amber-300/40 pt-2 first:border-0 first:pt-0">
+              <strong className="text-[12px]">{conflict.title} · <code>{conflict.remotePath}</code></strong>
               <div className="grid gap-2 md:grid-cols-2">
                 <div className="min-w-0"><span className="text-[11px] font-medium">{t("memorySync.localVersion")}</span><pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-md bg-white/70 dark:bg-black/20 p-2 text-[11px]">{conflict.localBody}</pre></div>
                 <div className="min-w-0"><span className="text-[11px] font-medium">{t("memorySync.remoteVersion")}</span><pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-md bg-white/70 dark:bg-black/20 p-2 text-[11px]">{conflict.remoteBody}</pre></div>
               </div>
               <div className="flex gap-2">
-                <Button size="sm" variant="outline" disabled={running} onClick={() => void resolveConflict(workspaceId, activeCwd, conflict.path, false)}>
+                <Button size="sm" variant="outline" disabled={running} onClick={() => void resolveConflict(workspaceId, activeCwd, conflict.remotePath, false)}>
                   {t("memorySync.keepLocal")}
                 </Button>
-                <Button size="sm" variant="primary" disabled={running} onClick={() => void resolveConflict(workspaceId, activeCwd, conflict.path, true)}>
+                <Button size="sm" variant="primary" disabled={running} onClick={() => void resolveConflict(workspaceId, activeCwd, conflict.remotePath, true)}>
                   {t("memorySync.useRemote")}
                 </Button>
               </div>

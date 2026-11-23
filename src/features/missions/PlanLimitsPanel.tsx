@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { planLimits } from "./budgetIpc";
 import { nearLimit, type PlanLimits } from "./budgetTypes";
 import { dateLocale } from "@/i18n/dateLocale";
+import { startVisiblePolling } from "@/shared/visiblePolling";
 
 /** Solo lectura de las ventanas de uso de cada plan; sin datos expuestos = «no medido», en gris. */
 export function PlanLimitsView({ limits }: { limits: PlanLimits[] }) {
@@ -52,10 +53,17 @@ export function PlanLimitsPanel() {
   const [limits, setLimits] = useState<PlanLimits[]>([]);
   useEffect(() => {
     let stale = false;
-    const load = () => planLimits().then((l) => { if (!stale) setLimits(l); }).catch(() => { if (!stale) setLimits([]); });
-    load();
-    const timer = setInterval(load, 120_000);
-    return () => { stale = true; clearInterval(timer); };
+    const poll = startVisiblePolling(
+      () =>
+        planLimits()
+          .then((l) => { if (!stale) setLimits(l); })
+          .catch(() => { if (!stale) setLimits([]); }),
+      120_000,
+    );
+    return () => {
+      stale = true;
+      poll.stop();
+    };
   }, []);
   return <PlanLimitsView limits={limits} />;
 }

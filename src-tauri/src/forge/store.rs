@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use super::provider::{bare_host, ForgeKind};
 use super::secret::{storage_of, Storage};
@@ -28,9 +28,7 @@ pub struct GitAccount {
 }
 
 pub(super) fn db(app: &AppHandle) -> Result<DbConnection, String> {
-    app.try_state::<DbConnection>()
-        .map(|s| s.inner().clone())
-        .ok_or_else(|| "La base de datos todavía no está lista".to_string())
+    crate::database::db_of(app)
 }
 
 pub(super) fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TeamFeedItem, TeamMember, TeamView } from "../ipc";
 import {
-  CLOSED, LEAD_ONLY_PREFIX, agentMono, applyMention, branchFor, conversationAccess, defaultPolicy, delegationCards, deliveries,
+  AWARENESS_RULES, CLOSED, LEAD_ONLY_PREFIX, agentMono, applyMention, branchFor, conversationAccess, defaultPolicy, delegationCards, deliveries,
   memberState, mentionOptions, mentionQuery, orchestratorState, placeOf, rosterNotice, rosterRows, rosterSignature, routeMessage,
   sidebarGrouping, stateTone, takenRefs, teamGridIds, teamLedBy, type LiveInput,
 } from "../teamModel";
@@ -138,6 +138,8 @@ describe("o composer", () => {
     const notice = rosterNotice(TEAM, () => null, (r) => r.toUpperCase(), (p) => p);
     expect(notice).toContain("Codex (codex; FRONTEND; edits, team/ui)");
     expect(notice).toContain("ags peer tell");
+    expect(notice).toContain(AWARENESS_RULES);
+    expect(notice.endsWith("Use `ags team list` para ver o time.")).toBe(true);
     const before = rosterSignature(TEAM);
     expect(rosterSignature({ ...TEAM, members: TEAM.members.slice(1) })).not.toBe(before);
     expect(rosterNotice({ ...TEAM, members: [] }, () => null, (r) => r, (p) => p)).toContain("ninguém ligado");

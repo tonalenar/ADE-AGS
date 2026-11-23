@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::json;
 
 use super::clients::{ClientStore, Preset};
-use super::http::{AuditEntry, MAX_BODY_BYTES, RATE_LIMIT_PER_SEC, ServerConfig, start_on};
+use super::http::{AuditEntry, Limits, MAX_BODY_BYTES, RATE_LIMIT_PER_SEC, ServerConfig, start_on};
 use super::{DEFAULT_PORT, bind_addrs, bind_addrs_on};
 
 fn isolated_store(name: &str) -> ClientStore {
@@ -33,6 +33,7 @@ fn test_config(
             audit_log.lock().unwrap().push(entry);
         }),
         now_fn: now,
+        limits: Limits::default(),
     }
 }
 
@@ -297,6 +298,146 @@ async fn limite_de_taxa_429() {
         .unwrap();
     assert_eq!(throttled.status(), reqwest::StatusCode::TOO_MANY_REQUESTS);
     server.shutdown();
+}
+
+// ── Conexões: teto, prazos, desligamento e limite antes da autenticação ──
+
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+
+async fn spawn_with_limits(store: ClientStore, limits: Limits) -> (super::http::RunningServer, SocketAddr) {
+    let loopback = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+    let mut config = test_config(store, Arc::new(Mutex::new(Vec::new())), Arc::new(crate::util::now_ts));
+    config.limits = limits;
+    let server = start_on(&[loopback], config).await.expect("servidor de teste");
+    let addr = server.addrs()[0];
+    (server, addr)
+}
+
+fn ping_request(token: &str) -> String {
+    let body = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
+    format!(
+        "POST /mcp HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+/// Lê uma resposta HTTP inteira (cabeçalhos + corpo por Content-Length) e devolve o texto.
+async fn read_response(stream: &mut TcpStream) -> String {
+    let mut buf = Vec::new();
+    loop {
+        let mut chunk = [0u8; 2048];
+        let n = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut chunk))
+            .await
+            .expect("resposta não chegou")
+            .unwrap();
+        assert!(n > 0, "conexão fechada antes da resposta completa: {:?}", String::from_utf8_lossy(&buf));
+        buf.extend_from_slice(&chunk[..n]);
+        let text = String::from_utf8_lossy(&buf).to_string();
+        if let Some(end) = text.find("\r\n\r\n") {
+            let len = text[..end]
+                .lines()
+                .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok()))
+                .unwrap_or(0);
+            if buf.len() >= end + 4 + len {
+                return text;
+            }
+        }
+    }
+}
+
+/// A conexão foi fechada pelo servidor (EOF) dentro do prazo?
+async fn closed_by_server(stream: &mut TcpStream, within: Duration) -> bool {
+    let mut chunk = [0u8; 256];
+    matches!(tokio::time::timeout(within, stream.read(&mut chunk)).await, Ok(Ok(0)) | Ok(Err(_)))
+}
+
+#[tokio::test]
+async fn desligar_fecha_tambem_as_conexoes_keep_alive_ja_abertas() {
+    let store = isolated_store("shutdown-keepalive");
+    let (_, token) = store.pair("KA", Preset::Read, vec!["/repo".into()], "/repo", None).unwrap();
+    let (server, addr) = spawn_with_limits(store, Limits::default()).await;
+
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    stream.write_all(ping_request(&token).as_bytes()).await.unwrap();
+    assert!(read_response(&mut stream).await.starts_with("HTTP/1.1 200"));
+
+    server.shutdown();
+    assert!(closed_by_server(&mut stream, Duration::from_secs(3)).await, "a conexão keep-alive seguiu aberta depois de desligar");
+}
+
+#[tokio::test]
+async fn conexoes_alem_do_teto_sao_fechadas_e_as_de_dentro_do_teto_seguem() {
+    let store = isolated_store("teto-conexoes");
+    let (_, token) = store.pair("Teto", Preset::Read, vec!["/repo".into()], "/repo", None).unwrap();
+    let limits = Limits { max_connections: 2, ..Limits::default() };
+    let (server, addr) = spawn_with_limits(store, limits).await;
+
+    let mut first = TcpStream::connect(addr).await.unwrap();
+    let _second = TcpStream::connect(addr).await.unwrap();
+    let mut third = TcpStream::connect(addr).await.unwrap();
+    assert!(closed_by_server(&mut third, Duration::from_secs(3)).await, "a terceira conexão deveria ser fechada");
+    first.write_all(ping_request(&token).as_bytes()).await.unwrap();
+    assert!(read_response(&mut first).await.starts_with("HTTP/1.1 200"));
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn cabecalho_que_nao_termina_expira() {
+    let store = isolated_store("prazo-cabecalho");
+    let limits = Limits { header_read_timeout: Duration::from_millis(300), ..Limits::default() };
+    let (server, addr) = spawn_with_limits(store, limits).await;
+
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    stream.write_all(b"POST /mcp HTTP/1.1\r\nHost: x\r\n").await.unwrap();
+    assert!(closed_by_server(&mut stream, Duration::from_secs(5)).await, "cabeçalho incompleto deveria expirar");
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn corpo_que_nao_chega_expira_com_408() {
+    let store = isolated_store("prazo-corpo");
+    let (_, token) = store.pair("Corpo", Preset::Read, vec!["/repo".into()], "/repo", None).unwrap();
+    let limits = Limits { body_read_timeout: Duration::from_millis(300), ..Limits::default() };
+    let (server, addr) = spawn_with_limits(store, limits).await;
+
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let head = format!("POST /mcp HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token}\r\nContent-Length: 100\r\n\r\n{{");
+    stream.write_all(head.as_bytes()).await.unwrap();
+    assert!(read_response(&mut stream).await.starts_with("HTTP/1.1 408"));
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn o_limite_por_ip_vale_antes_da_autenticacao() {
+    let store = isolated_store("limite-antes-da-auth");
+    let limits = Limits { pre_auth_per_sec: 3, ..Limits::default() };
+    let (server, addr) = spawn_with_limits(store, limits).await;
+
+    let http = reqwest::Client::new();
+    let url = format!("http://{addr}/mcp");
+    let mut statuses = Vec::new();
+    for _ in 0..4 {
+        let res = http.post(&url).bearer_auth("token-errado").json(&json!({ "id": 1 })).send().await.unwrap();
+        statuses.push(res.status());
+    }
+    assert_eq!(&statuses[..3], &[reqwest::StatusCode::UNAUTHORIZED; 3]);
+    assert_eq!(statuses[3], reqwest::StatusCode::TOO_MANY_REQUESTS, "token errado também gasta o limite do IP");
+    server.shutdown();
+}
+
+#[test]
+fn autenticar_nao_regrava_o_indice_no_keyring_e_o_last_seen_vem_da_memoria() {
+    let store = isolated_store("last-seen-memoria");
+    let (client, token) = store.pair("Visto", Preset::Read, vec!["/repo".into()], "/repo", None).unwrap();
+    let antes = store.raw_index_json().unwrap();
+    for _ in 0..5 {
+        store.authenticate_at(&token, 1_700_000_000).unwrap();
+    }
+    assert_eq!(store.raw_index_json().unwrap(), antes, "cada requisição regravava o índice inteiro no keyring");
+    let listado = store.list().into_iter().find(|c| c.id == client.id).unwrap();
+    assert_eq!(listado.last_seen_at, Some(1_700_000_000));
 }
 
 // ── Parte B3: presets e ações perigosas com confirmação ──────────

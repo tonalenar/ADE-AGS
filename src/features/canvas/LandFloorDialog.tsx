@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { Button } from "neogestify-ui-components";
 
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { canLand, conflictPrompt, landState, type BranchInfo, type LandPreview, type LandResult } from "./floorsModel";
+import { floorBranches, floorLand, floorLandPreview } from "./ipc";
 
 export interface LandableFloor {
   id: string;
@@ -40,14 +40,14 @@ export function LandFloorDialog({ floor, groundCwd, onClose, onLanded, onAskAgen
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<BranchInfo[]>("floor_branches", { cwd: groundCwd }).then(setBranches).catch(() => setBranches([]));
+    floorBranches(groundCwd).then(setBranches).catch(() => setBranches([]));
   }, [groundCwd]);
 
   useEffect(() => {
     let alive = true;
     setPreview(null);
     setError(null);
-    invoke<LandPreview>("floor_land_preview", { id: floor.id, target })
+    floorLandPreview(floor.id, target)
       .then((p) => {
         if (!alive) return;
         setPreview(p);
@@ -64,7 +64,7 @@ export function LandFloorDialog({ floor, groundCwd, onClose, onLanded, onAskAgen
     setBusy(true);
     setError(null);
     try {
-      const result = await invoke<LandResult>("floor_land", {
+      const result = await floorLand({
         id: floor.id, target: preview.target, deleteBranch: discardFloor && deleteBranch, discardFloor,
       });
       onLanded(result);

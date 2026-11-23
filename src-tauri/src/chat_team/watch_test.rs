@@ -11,7 +11,7 @@ fn flags() -> Flags {
 fn member(id: &str) -> Member {
     Member {
         id: format!("thread:{id}"), label: "Codex Backend".into(), role: "Backend".into(), working: None, last_activity: T0, requests: vec![], last_turn: None,
-        awaiting_model: false, timeout_marked: false, calls: vec![], context: None,
+        awaiting_model: false, timeout_marked: false, calls: vec![], context: None, task_at: None,
     }
 }
 
@@ -428,7 +428,7 @@ mod do_banco {
         let q = serde_json::json!([{ "id": "q", "question": "Qual banco?", "options": ["SQLite", "Postgres"] }]);
         request(&w, "r2", "question", "Qual banco?", q, NOW - 25_000);
         let i = input(&w);
-        assert!(i.flags.blocks && !i.flags.stall);
+        assert!(i.flags.blocks && i.flags.stall, "«sem progresso» nasce ligado nos times novos");
         let m = &i.members[0];
         assert_eq!((m.id.as_str(), m.label.as_str()), ("thread:codex", "Codex Backend"));
         assert!(!m.role.is_empty());
@@ -437,6 +437,19 @@ mod do_banco {
         assert_eq!(m.requests[1].options, ["SQLite", "Postgres"]);
         let plan = evaluate(&i, NOW);
         assert_eq!(plan.notices.len(), 2, "{plan:?}");
+    }
+
+    #[test]
+    fn estados_reais_vem_do_banco_e_a_tarefa_nao_iniciada_vira_ocioso() {
+        let w = world();
+        let tell = crate::peer_queue::store::NewMessage { client_id: Some("tarefa-1"), kind: "tell", from_tab_id: "thread:lead", from_name: "Claude Code", to_tab_id: "thread:codex", to_name: "Codex Backend", text: "revise", ..Default::default() };
+        crate::peer_queue::store::admit(&w.conn, &tell, crate::peer_queue::store::State::Queued, NOW - 600_000).unwrap();
+        let i = input(&w);
+        assert_eq!(i.members[0].task_at, Some(NOW - 600_000));
+        assert_eq!(evaluate(&i, NOW).notices[0].key, format!("vigia-chat-idle-thread:codex-{}", NOW - 600_000));
+        let states = watch_db::states(&w.conn, NOW).unwrap();
+        assert_eq!(states.len(), 1);
+        assert_eq!((states[0].member.as_str(), states[0].parent.as_str(), states[0].state), ("thread:codex", "thread:lead", "waiting_input"));
     }
 
     #[test]
@@ -609,6 +622,7 @@ mod do_banco {
     fn time_com_o_vigia_desligado_ou_sem_integrante_de_conversa_nao_entra() {
         let w = world();
         super::super::store::set_watch(&w.conn, &w.team, false).unwrap();
+        super::super::store::set_watch_stall(&w.conn, &w.team, false).unwrap();
         assert!(watch_db::gather(&w.conn, NOW).unwrap().is_empty(), "os dois interruptores desligados: nada a ler");
         super::super::store::set_watch_stall(&w.conn, &w.team, true).unwrap();
         assert_eq!(watch_db::gather(&w.conn, NOW).unwrap().len(), 1);
@@ -616,4 +630,70 @@ mod do_banco {
         chat::set_state(&w.conn, "lead", "settled", NOW).unwrap();
         assert!(watch_db::gather(&w.conn, NOW).unwrap().is_empty());
     }
+}
+
+// ── Ocioso com a tarefa na mão, e o estado real ──────────────────────
+
+fn stall_input(members: Vec<Member>, sent: Vec<Sent>) -> Input {
+    Input { flags: Flags { blocks: true, stall: true }, members, sent }
+}
+
+#[test]
+fn tarefa_recebida_e_nunca_iniciada_vira_aviso_de_ocioso_depois_do_prazo() {
+    let mut m = member("a");
+    m.task_at = Some(T0);
+    let early = evaluate(&stall_input(vec![m.clone()], vec![]), T0 + IDLE_AFTER_MS - 1);
+    assert!(early.notices.is_empty(), "{early:?}");
+    assert_eq!(early.wake_at, Some(T0 + IDLE_AFTER_MS), "volta a olhar no prazo, sem polling");
+    let due = evaluate(&stall_input(vec![m.clone()], vec![]), T0 + IDLE_AFTER_MS);
+    assert_eq!(due.notices.len(), 1, "{due:?}");
+    assert_eq!(due.notices[0].key, format!("vigia-chat-idle-thread:a-{T0}"));
+    assert!(due.notices[0].text.contains("ocioso") && due.notices[0].text.contains("escrito na conversa dele"), "{}", due.notices[0].text);
+    let again = evaluate(&stall_input(vec![m], vec![sent(&due.notices[0].key, T0 + IDLE_AFTER_MS)]), T0 + IDLE_AFTER_MS * 3);
+    assert!(again.notices.is_empty(), "uma vez só");
+}
+
+#[test]
+fn ocioso_so_vale_com_o_interruptor_de_estagnacao_e_sem_turno_em_andamento() {
+    let mut m = member("a");
+    m.task_at = Some(T0);
+    assert!(evaluate(&input(vec![m.clone()], vec![]), T0 + IDLE_AFTER_MS * 2).notices.is_empty(), "interruptor desligado");
+    m.working = Some(("r1".into(), T0 + 1000));
+    assert!(evaluate(&stall_input(vec![m], vec![]), T0 + IDLE_AFTER_MS * 2).notices.iter().all(|n| !n.key.contains("idle")), "trabalhando não é ocioso");
+}
+
+#[test]
+fn turno_que_comecou_depois_da_tarefa_nao_e_ocioso() {
+    let mut m = member("a");
+    m.task_at = Some(T0);
+    m.last_turn = Some(turn("r1", TurnStatus::Completed, T0 + 120_000, Some("feito"), None));
+    let plan = evaluate(&stall_input(vec![m], vec![]), T0 + IDLE_AFTER_MS * 2);
+    assert!(plan.notices.iter().all(|n| !n.key.contains("idle")), "{plan:?}");
+}
+
+#[test]
+fn estado_real_do_integrante() {
+    let m = member("a");
+    assert_eq!(real_state(&m, T0), RealState::Idle);
+    let mut working = m.clone();
+    working.working = Some(("r1".into(), T0));
+    assert_eq!(real_state(&working, T0 + 1), RealState::Working);
+    let mut asking = m.clone();
+    asking.requests = vec![req("r1", "command", "ls", ReqState::Pending, T0)];
+    assert_eq!(real_state(&asking, T0 + 1), RealState::WaitingInput);
+    let mut untouched = m.clone();
+    untouched.task_at = Some(T0);
+    assert_eq!(real_state(&untouched, T0 + IDLE_AFTER_MS), RealState::WaitingInput, "tarefa na mão e parado");
+    assert_eq!(real_state(&untouched, T0 + 1000), RealState::Idle, "ainda dentro do prazo de começar");
+    let mut failed = m.clone();
+    failed.last_turn = Some(turn("r1", TurnStatus::Failed, T0, None, Some("boom")));
+    assert_eq!(real_state(&failed, T0 + 1), RealState::Failed);
+    let mut ended = m.clone();
+    let mut t = turn("r2", TurnStatus::Completed, T0, Some("terminei"), None);
+    t.from_orchestrator = true;
+    ended.last_turn = Some(t.clone());
+    assert_eq!(real_state(&ended, T0 + 1), RealState::EndedWithoutDelivery);
+    t.reported = true;
+    ended.last_turn = Some(t);
+    assert_eq!(real_state(&ended, T0 + 1), RealState::Idle, "entregou");
 }

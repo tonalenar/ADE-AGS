@@ -102,7 +102,7 @@ pub struct RenderingInfo {
     pub forced_by_env: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rendering_info(db: tauri::State<'_, DbConnection>) -> RenderingInfo {
     let applies = cfg!(target_os = "linux");
     RenderingInfo {

@@ -299,3 +299,53 @@ fn empty_pool_error_gera_payload_estruturado_e_remocao_da_ultima_conta_preserva_
     assert_eq!(parsed["code"], EMPTY_POOL_CODE);
     assert_eq!(parsed["pool"], "Solo");
 }
+
+fn pool_de(agent: &str, name: &str, members: &[Option<&str>], paused: bool) -> Pool {
+    Pool { agent_id: agent.into(), paused, ..pool(name, members, Strategy::LeastUsed) }
+}
+
+#[test]
+fn pool_implicito_da_conta_fixa_membro_de_pool_do_mesmo_agente() {
+    let pools = [pool_de("claude-code", "Trabalho", &[Some("a"), Some("b")], false)];
+    assert_eq!(implicit_pool(&pools, "claude-code", &Some("a".into())).map(|p| p.name.as_str()), Some("Trabalho"));
+    assert!(implicit_pool(&pools, "codex", &Some("a".into())).is_none(), "outro agente");
+    assert!(implicit_pool(&pools, "claude-code", &Some("z".into())).is_none(), "conta fora do pool");
+}
+
+#[test]
+fn pool_implicito_ignora_pausado_e_pool_de_uma_conta_so() {
+    let pools = [
+        pool_de("claude-code", "Pausado", &[Some("a"), Some("b")], true),
+        pool_de("claude-code", "Solo", &[Some("a")], false),
+    ];
+    assert!(implicit_pool(&pools, "claude-code", &Some("a".into())).is_none());
+}
+
+#[test]
+fn pool_implicito_com_varios_pools_escolhe_por_nome_e_id_sempre_o_mesmo() {
+    let a = pool_de("claude-code", "Zeta", &[Some("a"), Some("b")], false);
+    let b = pool_de("claude-code", "alfa", &[Some("a"), Some("b")], false);
+    let c = Pool { id: "id-0".into(), ..pool_de("claude-code", "Alfa", &[Some("a"), Some("b")], false) };
+    for pools in [[a.clone(), b.clone(), c.clone()], [c.clone(), b.clone(), a.clone()], [b.clone(), a.clone(), c.clone()]] {
+        assert_eq!(implicit_pool(&pools, "claude-code", &Some("a".into())).map(|p| p.id.as_str()), Some("id-0"));
+    }
+}
+
+#[test]
+fn pool_implicito_aceita_a_conta_principal_como_membro() {
+    let pools = [pool_de("claude-code", "P", &[None, Some("b")], false)];
+    assert_eq!(implicit_pool(&pools, "claude-code", &None).map(|p| p.name.as_str()), Some("P"));
+}
+
+#[test]
+fn pool_padrao_do_agente_so_com_pool_ativo_de_duas_contas() {
+    let pools = [
+        pool_de("antigravity", "Pausado", &[Some("a"), Some("b")], true),
+        pool_de("antigravity", "Solo", &[Some("a")], false),
+        pool_de("antigravity", "Gemini", &[Some("a"), Some("b"), Some("c")], false),
+        pool_de("codex", "Outro", &[Some("x"), Some("y")], false),
+    ];
+    assert_eq!(default_pool_for_agent(&pools, "antigravity").map(|p| p.name.as_str()), Some("Gemini"));
+    assert_eq!(default_pool_for_agent(&pools, "codex").map(|p| p.name.as_str()), Some("Outro"));
+    assert!(default_pool_for_agent(&pools, "claude-code").is_none());
+}

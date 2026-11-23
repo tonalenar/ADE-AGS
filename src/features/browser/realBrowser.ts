@@ -2,6 +2,8 @@
 // `src-tauri/src/real_browser/mod.rs`. O flag `realChrome` da vista continua com esse nome por ser o estado salvo.
 import { invoke } from "@tauri-apps/api/core";
 
+import type { DeviceHint } from "./deviceCatalog";
+
 /** Sites externos e servidores locais abrem diretamente no Chromium/WebView2. */
 export function shouldOpenInRealChrome(url: string, realChrome: boolean | undefined): boolean {
   if (realChrome !== undefined) return realChrome;
@@ -103,8 +105,32 @@ export function placeOf(rect: Box, layoutWidth: number, pageZoom: number, clips:
   };
 }
 
+function sameBox(a: Box | null, b: Box | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
+function sameBoxes(a: Box[] | undefined, b: Box[] | undefined): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    if (!sameBox(left[i]!, right[i]!)) return false;
+  }
+  return true;
+}
+
 export function samePlace(a: Place | null, b: Place): boolean {
-  return !!a && JSON.stringify(a) === JSON.stringify(b);
+  if (!a) return false;
+  return a.visible === b.visible
+    && a.zoom === b.zoom
+    && (a.clickToExpand ?? false) === (b.clickToExpand ?? false)
+    && (a.cornerRadius ?? 0) === (b.cornerRadius ?? 0)
+    && sameBox(a.rect, b.rect)
+    && sameBox(a.visibleRect, b.visibleRect)
+    && sameBoxes(a.holes, b.holes)
+    && sameBoxes(a.hitHoles, b.hitHoles);
 }
 
 /** `script`: o piloto dos agentes, que o navegador roda em todo documento (o mesmo que o proxy injeta no outro). */
@@ -130,8 +156,9 @@ export const realBrowserDeleteProfile = (profileId: string) =>
 
 /** Faz a página se passar por um iPhone, um Android ou o navegador de mesa (`null`) e recarrega. */
 /** `chrome`: os rótulos da moldura desenhada dentro da página; sem ele (modo Completo) a página fica limpa. */
-export const realBrowserEmulate = (id: string, platform: "ios" | "android" | null, chrome: Record<string, string> | null = null) =>
-  invoke<void>("real_browser_emulate", { id, platform, chrome });
+/** `device`: o modelo (densidade, `model` do user agent e área segura em pé e deitado); a rotação o reaproveita sozinha. */
+export const realBrowserEmulate = (id: string, platform: "ios" | "android" | null, chrome: Record<string, string> | null = null, device: DeviceHint | null = null) =>
+  invoke<void>("real_browser_emulate", { id, platform, chrome, device });
 
 export const realBrowserFocus = (id: string) => invoke<void>("real_browser_focus", { id });
 
@@ -141,6 +168,10 @@ export const realBrowserPost = (id: string, message: unknown) => invoke<void>("r
 /** A foto da página agora: PNG em base64 e o tamanho em px CSS. */
 export const realBrowserScreenshot = (id: string) =>
   invoke<{ data: string; width: number; height: number }>("real_browser_screenshot", { id });
+
+/** A foto da página direto num arquivo de captura (o PNG do Chrome, sem recodificar): devolve o caminho. */
+export const realBrowserShotSave = (id: string, tag?: string) =>
+  invoke<string>("real_browser_screenshot_save", { id, tag: tag ?? null });
 
 /** A foto da página num canvas, com o tamanho da página em px CSS. */
 export async function realBrowserShot(id: string): Promise<{ canvas: HTMLCanvasElement; width: number; height: number }> {

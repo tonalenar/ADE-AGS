@@ -52,6 +52,32 @@ describe("activity.settle: espera por estado (E1)", () => {
     expect(describeWait(report!)).toBeNull();
   });
 
+  it("o silêncio de rede conta desde o último pedido de verdade: sem rede, a ação direta assenta em 150 ms, não em 250", async () => {
+    const f = fakeEnv();
+    const a = createActivity(f.env);
+    let report: Awaited<ReturnType<typeof a.settle>> | null = null;
+    void a.settle({ maxMs: 1500, quietMs: 150, netIdleMs: 250, pendingMaxMs: 12_000, minMs: 150 }).then((r) => { report = r; });
+    await f.advance(149);
+    expect(report).toBeNull();
+    await f.advance(30);
+    expect(report!.reason).toBe("quiet");
+    expect(report!.waitedMs).toBeLessThan(250);
+  });
+
+  it("um pedido que acabou de terminar ainda segura o silêncio de rede pelos 250 ms", async () => {
+    const f = fakeEnv();
+    const a = createActivity(f.env);
+    const end = a.begin();
+    await f.advance(100);
+    end();
+    let report: Awaited<ReturnType<typeof a.settle>> | null = null;
+    void a.settle({ maxMs: 1500, quietMs: 150, netIdleMs: 250, pendingMaxMs: 12_000, minMs: 150 }).then((r) => { report = r; });
+    await f.advance(200);
+    expect(report).toBeNull();
+    await f.advance(100);
+    expect(report!.reason).toBe("quiet");
+  });
+
   it("uma busca de 8 s por XHR: espera o pedido terminar, a rede ociosa e o DOM quieto (não o teto curto de 350 ms)", async () => {
     const f = fakeEnv();
     const a = createActivity(f.env);

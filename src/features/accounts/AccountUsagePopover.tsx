@@ -10,7 +10,7 @@ import {
 } from "./usage";
 import { codexAccountUsage } from "./ipc";
 import type { AgentAccount, CodexUsage, QuotaWindow } from "./types";
-import { accountProblemKey, accountProblemText } from "./problem";
+import { accountProblemKey, accountProblemText, mergeClaudeUsage } from "./problem";
 
 /** Un perfil sintético (`system:*`) no tiene fila en la base: para el backend es `null`. */
 function realAccountId(account: AgentAccount): string | null {
@@ -135,14 +135,21 @@ export function AccountUsagePopover({ account, onLogin }: { account: AgentAccoun
     setAsking(false);
     setRefreshing(false);
     if (account.agentId !== "claude-code") return;
+    if (account.kind === "api_key") {
+      setLive({
+        available: false, session: null, week: null, weekModels: [],
+        fetchedAt: 0, cached: false, problem: "accounts.plan.problem.apiKey", retryAt: null,
+      });
+      return;
+    }
     let stale = false;
 
     const ask = async (force: boolean) => {
-      return claudeLiveUsage(account.id, force);
+      return claudeLiveUsage(account.id, force, force);
     };
     const asFailure = (problem: string): LiveUsage => ({
       available: false, session: null, week: null, weekModels: [],
-      fetchedAt: 0, cached: false, problem,
+      fetchedAt: 0, cached: false, problem, retryAt: null,
     });
 
     (async () => {
@@ -153,9 +160,14 @@ export function AccountUsagePopover({ account, onLogin }: { account: AgentAccoun
           setAsking(true);
           const stored = await ask(false).catch(() => null);
           if (stale) return;
-          if (stored) setLive(stored);
-          // Lo guardado todavía sirve: no hay nada más que hacer.
-          if (stored?.available && isUsageFresh(stored.fetchedAt, Math.floor(Date.now() / 1000))) {
+          if (stored) setLive((cur) => mergeClaudeUsage(cur ?? undefined, stored));
+          const nowSecs = Math.floor(Date.now() / 1000);
+          const inBackoff = stored?.retryAt != null && stored.retryAt > nowSecs;
+          // Lo guardado todavía sirve (o estamos en janela de backoff automático): no hay nada más que hacer.
+          if (stored?.available && (isUsageFresh(stored.fetchedAt, nowSecs) || inBackoff)) {
+            return;
+          }
+          if (!stored?.available && inBackoff) {
             return;
           }
         }
@@ -163,7 +175,7 @@ export function AccountUsagePopover({ account, onLogin }: { account: AgentAccoun
         if (stale) return;
         setRefreshing(true);
         const fresh = await ask(true).catch((e) => asFailure(String(e)));
-        if (!stale) setLive(fresh);
+        if (!stale) setLive((cur) => mergeClaudeUsage(cur ?? undefined, fresh));
       } finally {
         if (!stale) {
           setAsking(false);
@@ -177,6 +189,7 @@ export function AccountUsagePopover({ account, onLogin }: { account: AgentAccoun
 
   const plan = planLabel(usage?.plan.tier ?? null);
   const now = Math.floor(Date.now() / 1000);
+  const retryIn = live?.retryAt && live.retryAt > now ? live.retryAt - now : null;
   const problemKey = accountProblemKey(live?.problem ?? null);
   const needsLogin = !account.loggedIn || problemKey === "accounts.auth.expired" || problemKey === "accounts.auth.required";
 
@@ -292,18 +305,23 @@ export function AccountUsagePopover({ account, onLogin }: { account: AgentAccoun
                   <RefreshIcon className="w-3.5 h-3.5" />
                 </Button>
               </div>
+              {live.problem && (
+                <Alert variant="neutral">{accountProblemText(live.problem, t, retryIn)}</Alert>
+              )}
             </>
           ) : live ? (
             <>
-              <Alert variant={needsLogin ? "warning" : "neutral"}>{accountProblemText(live.problem, t)}</Alert>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={onLogin}>
-                  {t("settings.accounts.relogin")}
-                </Button>
-                <Button variant="outline" size="sm" disabled={refreshing} onClick={() => setReload((n) => n + 1)}>
-                  {t("accounts.plan.refresh")}
-                </Button>
-              </div>
+              <Alert variant={needsLogin ? "warning" : "neutral"}>{accountProblemText(live.problem, t, retryIn)}</Alert>
+              {account.kind !== "api_key" && (
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={onLogin}>
+                    {t("settings.accounts.relogin")}
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={refreshing} onClick={() => setReload((n) => n + 1)}>
+                    {t("accounts.plan.refresh")}
+                  </Button>
+                </div>
+              )}
             </>
           ) : null}
         </div>

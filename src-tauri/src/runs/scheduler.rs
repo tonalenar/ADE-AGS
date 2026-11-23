@@ -6,10 +6,12 @@
 //! ticks seguidos no despachan la misma tarea dos veces.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Condvar, Mutex, TryLockError};
+use std::sync::{Condvar, Mutex};
+#[cfg(test)]
+use std::sync::TryLockError;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::database::DbConnection;
 
@@ -134,7 +136,7 @@ pub fn wait_change(run_id: &str, seen: u64, timeout: Duration) -> u64 {
 }
 
 fn db_of(app: &AppHandle) -> Option<DbConnection> {
-    app.try_state::<DbConnection>().map(|s| s.inner().clone())
+    crate::database::try_db(app)
 }
 
 /// El lock de `tick`. Quien cambia un run por fuera del agendador (rollback y restauración de foto) lo toma también:
@@ -144,6 +146,7 @@ pub(super) fn tick_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 /// Como `tick_lock`, sem esperar: `None` se o TICK já está tomado por outro.
+#[cfg(test)]
 pub(super) fn try_tick_lock() -> Option<std::sync::MutexGuard<'static, ()>> {
     match TICK.try_lock() {
         Ok(guard) => Some(guard),
@@ -470,7 +473,7 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
     // Uma tarefa com origem de pool segue o modo global unificado (`chat.pool.mode`) e o estado
     // `paused` do próprio pool: `auto` troca dentro do pool, `ask` pausa e notifica, `off` ou
     // pausado não troca sozinho.
-    if let Some(origin) = super::pool_failover::task_pool(db, &task.id)
+    if let Some(origin) = super::pool_failover::origin_for_task(db, &task.id, &task.agent_id, &task.account_id)
     {
         let pool = crate::accounts::pools::load(db)
             .into_iter()

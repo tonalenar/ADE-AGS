@@ -70,7 +70,7 @@ export function AgentPickerStep({ agents, selected, lastId, onSelect }: AgentPic
 
             <span className="flex flex-col min-w-0" title={agent.version ?? undefined}>
               <span className="flex items-center gap-1.5 min-w-0">
-                <span className="truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-[#f5f5f7]">
+                <span className="truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-ink">
                   {agent.label}
                 </span>
                 {isLastUsed && (

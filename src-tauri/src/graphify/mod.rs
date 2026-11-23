@@ -255,7 +255,7 @@ pub fn default_steps() -> Vec<GraphifyStep> {
 /// `cwd` es el proyecto sobre el que se está mirando — el de la tab activa. Decide dónde
 /// caen los destinos de alcance `project`, que son los que conviven con las skills que la
 /// app monta en ese repo.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn graphify_plan(
     cwd: String,
     scope: Scope,
@@ -283,7 +283,7 @@ pub fn graphify_install_command(platform: Option<String>, scope: Scope) -> Strin
 
 /// Guarda los comandos editados. Devuelve los que quedaron vigentes, que es lo que la
 /// interfaz muestra: así guardar y leer no pueden discrepar.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn graphify_save_steps(
     steps: Vec<GraphifyStep>,
     db: tauri::State<crate::database::DbConnection>,

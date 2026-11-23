@@ -2553,6 +2553,10 @@ const CHAT_TOOLS: &[ChatTool] = &[
     ChatTool { name: "chat_show", ipc: "chat.show", read_only: true },
     ChatTool { name: "chat_stop", ipc: "chat.stop", read_only: false },
     ChatTool { name: "chat_pending", ipc: "chat.pending", read_only: true },
+    ChatTool { name: "system_load", ipc: "system.load", read_only: true },
+    ChatTool { name: "team_queue_add", ipc: "team.queue", read_only: false },
+    ChatTool { name: "team_queue_list", ipc: "team.queue", read_only: true },
+    ChatTool { name: "team_queue_cancel", ipc: "team.queue", read_only: false },
 ];
 
 fn chat_schemas() -> Vec<Value> {
@@ -2577,7 +2581,7 @@ fn chat_schemas() -> Vec<Value> {
         }),
         json!({
             "name": "chat_compact",
-            "description": "Compact the context of an idle structured chat conversation using the provider's native mechanism. Currently supported for Codex and Claude Code; no turn or pending approval may be active. Custom instructions are supported by Claude Code only.",
+            "description": "Compact the context of YOUR OWN idle structured chat conversation using the provider's native mechanism. Refused for any other conversation (only the person compacts those, from the app) and when the person has switched ADE autocompact off. Currently supported for Codex and Claude Code; no turn or pending approval may be active. Custom instructions are supported by Claude Code only.",
             "inputSchema": { "type": "object", "properties": {
                 "thread": thread.clone(),
                 "instructions": { "type": "string", "maxLength": 10000, "description": "Optional compaction instructions (Claude Code only)." }
@@ -2594,17 +2598,19 @@ fn chat_schemas() -> Vec<Value> {
         }),
         json!({
             "name": "chat_new",
-            "description": "Open a provider-native child chat thread and send its first message. When called from a chat-mode conversation, ADE links the child to the current parent and shows it in the side-chat panel; the child starts supervised and cannot widen the parent's access. Choose an id from chat_providers; omit agent to inherit the parent's provider. Only pass context explicitly selected for this task: ADE marks it as untrusted data and never copies the conversation history. Supply a stable client_request_id when retrying this tool so ADE reuses the same child and avoids duplicate first messages; if delivery is uncertain, inspect the child before sending again. Use delegate_task for headless Fleet execution, DAGs, worktrees or budgets.",
+            "description": "Open a provider-native child chat thread and send its first message. When called from a chat-mode conversation, ADE links the child to the current parent and shows it in the side-chat panel; the child starts supervised and cannot widen the parent's access. Choose an id from chat_providers; omit agent to inherit the parent's provider. Only pass context explicitly selected for this task: ADE marks it as untrusted data and never copies the conversation history. Supply a stable client_request_id when retrying this tool so ADE reuses the same child and avoids duplicate first messages; if delivery is uncertain, inspect the child before sending again. A child is a subagent of the parent conversation and starts with effort `low` unless you pass `effort` (do that only when the person asked for another level). When the person asks you to hand a task to a new subagent, call this tool. Before it opens the child, ADE checks the simultaneous-agent limit (default 3), the machine load and, if you pass `areas`, overlap with other active tasks; a refusal comes back as `{refused: true, reason, message}` (agent_limit, machine_overloaded, area_overlap) with nothing created: do not retry in a loop, enqueue with team_queue_add and wait for the notice. Use delegate_task for headless Fleet execution, DAGs, worktrees or budgets.",
             "inputSchema": { "type": "object", "properties": {
                 "text": { "type": "string", "description": "The first message." },
                 "cwd": { "type": "string", "description": "Folder the agent works in (default: yours)." },
                 "agent": { "type": "string", "description": "Provider id from chat_providers, including configured local ACP agents. Defaults to the current parent provider, or Codex without a parent." },
                 "client_request_id": { "type": "string", "maxLength": 128, "description": "Stable request id for safe retries. Reusing it with different arguments is rejected." },
                 "model": { "type": "string", "description": "Optional model." },
-                "effort": { "type": "string", "description": "Optional reasoning effort (low, medium, high…)." },
+                "effort": { "type": "string", "description": "Optional reasoning effort (low, medium, high…). A child chat defaults to low." },
                 "account": { "type": "string", "description": "Optional account id or pool:<name> for the conversation." },
                 "context": { "type": "string", "maxLength": 16384, "description": "Optional explicit excerpt for the child (UTF-8 limit 16 KiB). ADE marks it as untrusted data; the parent conversation history is never copied." },
                 "access": { "type": "string", "enum": ["ask", "edits", "safe", "full", "plan"], "description": "Access mode for a standalone chat. A child opened from an ADE chat always starts supervised (`ask`) and cannot widen the parent's access. ask: the person approves; edits: file edits pass, the rest asks; safe: writes in the folder, asks when needed; full: no approvals; plan (every agent but codex): plans first; with claude-code the person approves the plan. antigravity and cursor never ask: whatever would need approval is denied, so ask there is read-only in practice (cursor only accepts ask, plan and full)." },
+                "areas": { "type": "array", "items": { "type": "string" }, "description": "Files or folders (globs ok, e.g. src/features/chat/**) this task will change. ADE refuses to start the child while another active task of yours declared an overlapping area, and says whom to wait for; queue it with team_queue_add instead. Always declare it when you delegate code changes." },
+                "allow_overlap": { "type": "boolean", "description": "Start anyway despite an overlapping area. Only when you are sure the two tasks will not conflict." },
                 "title": { "type": "string", "description": "Optional title (default: the first line of the message)." }
             }, "required": ["text"] },
         }),
@@ -2625,6 +2631,8 @@ fn chat_schemas() -> Vec<Value> {
                 "model": { "type": "string", "description": "Optional model for the selected provider or Fleet agent." },
                 "effort": { "type": "string", "description": "Optional reasoning effort for native chat." },
                 "context": { "type": "string", "maxLength": 16384, "description": "Explicit excerpt selected by the parent (UTF-8 limit 16 KiB); ADE marks it as untrusted data." },
+                "areas": { "type": "array", "items": { "type": "string" }, "description": "Files or folders (globs ok, e.g. src/features/chat/**) this task will change. ADE refuses to start the child while another active task of yours declared an overlapping area, and says whom to wait for; queue it with team_queue_add instead. Always declare it when you delegate code changes." },
+                "allow_overlap": { "type": "boolean", "description": "Start anyway despite an overlapping area. Only when you are sure the two tasks will not conflict." },
                 "title": { "type": "string", "description": "Optional short child title." },
                 "complexity": { "type": "string", "enum": ["trivial", "standard", "hard"], "description": "Fleet only: let ADE route from this tier when agent/model are omitted." },
                 "account_id": { "type": "string", "description": "Optional named account id or pool:<name> (used by both fleet_task and provider_chat)." },
@@ -2677,6 +2685,38 @@ fn chat_schemas() -> Vec<Value> {
             "description": "Approvals and questions waiting for the person (of one conversation, or all). Only the person answers them, in the app.",
             "inputSchema": { "type": "object", "properties": { "thread": thread }, "required": [] },
         }),
+        json!({
+            "name": "system_load",
+            "description": "Read-only. The machine's load (load average, CPU, free memory, running cargo/rustc builds), the simultaneous-agent limit (default 3) and how many of your agents are working. `canLaunch` says whether a new agent may start now and `why` explains a refusal. Read this before launching an agent; if it is overloaded or full, enqueue with team_queue_add and wait for the notice instead of polling, and tell the person why you are waiting.",
+            "inputSchema": { "type": "object", "properties": {}, "required": [] },
+        }),
+        json!({
+            "name": "team_queue_add",
+            "description": "Queue a task that starts by itself, as a native child chat like chat_new, once every condition holds and the agent limit, load and area overlap allow it; ADE then sends you a notice. Conditions: `after` (names or ids of your agents that must finish), `when_load_low`, `after_branch` (a branch that must exist, e.g. another agent's; start from it). Declare `areas` so tasks that touch the same files run one after the other. At least one condition is required (without one, use chat_new). Never poll: keep working or wait for the notice, and explain to the person what you are waiting for. The queue is persistent and capped at 20 waiting tasks.",
+            "inputSchema": { "type": "object", "properties": {
+                "task": { "type": "string", "description": "Self-contained instructions for the child." },
+                "after": { "type": "array", "items": { "type": "string" }, "description": "Your agents (name from team list or thread:<id>) that must finish first." },
+                "when_load_low": { "type": "boolean", "description": "Wait until the machine is no longer overloaded." },
+                "after_branch": { "type": "array", "items": { "type": "string" }, "description": "Branches that must exist before it starts." },
+                "areas": { "type": "array", "items": { "type": "string" }, "description": "Files or folders (globs ok) the task changes." },
+                "agent": { "type": "string", "description": "Provider id from chat_providers (omit to inherit yours)." },
+                "model": { "type": "string" },
+                "effort": { "type": "string" },
+                "account": { "type": "string", "description": "Account id or pool:<name>." },
+                "context": { "type": "string", "maxLength": 16384, "description": "Explicit excerpt for the child, marked untrusted." },
+                "title": { "type": "string" }
+            }, "required": ["task"] },
+        }),
+        json!({
+            "name": "team_queue_list",
+            "description": "Read-only. Your queued tasks with the reason each one is still waiting (an agent still working, load, branch, agent limit, same area). `all` also lists resolved ones.",
+            "inputSchema": { "type": "object", "properties": { "all": { "type": "boolean" } }, "required": [] },
+        }),
+        json!({
+            "name": "team_queue_cancel",
+            "description": "Cancel a queued task that has not started yet.",
+            "inputSchema": { "type": "object", "properties": { "id": { "type": "string", "description": "The id team_queue_add returned." } }, "required": ["id"] },
+        }),
     ]
 }
 
@@ -2686,6 +2726,32 @@ where
 {
     if tool.ipc == "harness.delegate" {
         return delegate_agent(context, arguments, send);
+    }
+    if matches!(tool.ipc, "system.load" | "team.queue") {
+        if matches!(context, McpContext::Remote { .. }) {
+            return tool_error("a consciência do orquestrador só existe numa conversa ou aba da ADE, não num cliente remoto");
+        }
+        let mut args = match arguments {
+            Value::Object(map) => map,
+            _ => serde_json::Map::new(),
+        };
+        match tool.name {
+            "team_queue_add" => {
+                args.insert("action".into(), json!("add"));
+            }
+            "team_queue_list" => {
+                args.insert("action".into(), json!("list"));
+            }
+            "team_queue_cancel" => {
+                args.insert("action".into(), json!("cancel"));
+            }
+            _ => {}
+        }
+        let payload = scoped_chat_payload(context, tool.ipc, args);
+        return match send(tool.ipc, payload) {
+            Ok(data) => content(data),
+            Err(error) => tool_error(&error),
+        };
     }
     if tool.ipc == "harness.graph" {
         let McpContext::Cwd { tab: Some(tab), .. } = context else {
@@ -2735,7 +2801,7 @@ fn scoped_chat_payload(
         // Só `delegate_agent` (async) liga a entrega do resultado; o modelo não a escolhe pelo `chat_new`.
         args.remove("harness_delivery");
     }
-    if let (McpContext::Cwd { cwd, tab, .. }, "chat.new") = (context, command) {
+    if let (McpContext::Cwd { cwd, tab, .. }, "chat.new" | "team.queue" | "system.load") = (context, command) {
         args.remove("parent_ref");
         if let Some(tab) = tab.as_deref().filter(|tab| !tab.trim().is_empty()) {
             let parent_ref = if tab.starts_with("thread:") { tab.to_string() } else { format!("tab:{tab}") };
@@ -2855,7 +2921,7 @@ where
     let mut chat_args = serde_json::Map::new();
     chat_args.insert("text".into(), json!(task));
     chat_args.insert("client_request_id".into(), json!(request_id));
-    for key in ["agent", "model", "effort", "context", "title"] {
+    for key in ["agent", "model", "effort", "context", "title", "areas", "allow_overlap"] {
         if let Some(value) = input.get(key) {
             chat_args.insert(key.to_string(), value.clone());
         }
@@ -2876,6 +2942,10 @@ where
             ));
         }
     };
+    if created.get("refused").and_then(Value::as_bool) == Some(true) {
+        // Recusa da porta de entrada (limite, carga ou área): nada foi criado; o motivo diz o que fazer.
+        return content(created);
+    }
     let Some(thread_id) = created
         .get("thread")
         .and_then(|thread| thread.get("id"))

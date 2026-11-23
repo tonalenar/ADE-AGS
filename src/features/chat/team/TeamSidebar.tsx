@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, type NavigateFunction } from "react-router-dom";
 
@@ -9,6 +9,7 @@ import { openMember } from "./TeamPanel";
 import type { TeamView } from "./ipc";
 import { AgentMono, useRoleLabel } from "./TeamParts";
 import { CONVERSATION_DRAG_MIME, memberState, sidebarGrouping, stateTone, teamLedBy, type SidebarGrouping } from "./teamModel";
+import { dismissProvision, loadDismissedProvisions, visibleProvisions } from "./provisionGhosts";
 import { startTeams, useTeamStore } from "./teamStore";
 import { useTeamLive } from "./useTeamLive";
 
@@ -64,7 +65,9 @@ export function TeamMembers({ orchestrator, members, cards, selectedId }: {
   const feed = useTeamStore((s) => (team ? s.feeds[team.id] : undefined));
   const live = useTeamLive(cards);
   const { t } = useTranslation();
-  const pending = team?.provisions ?? [];
+  const [dismissed, setDismissed] = useState(loadDismissedProvisions);
+  // Integrante que nunca entrou (falhou, ou ficou "entrando" para sempre) não fica na barra para sempre: some com o tempo ou ao dispensar.
+  const pending = visibleProvisions(team?.provisions ?? [], Date.now(), dismissed);
   if (!team || (members.length === 0 && pending.length === 0)) return null;
   return (
     <div role="group" className="flex flex-col">
@@ -93,6 +96,9 @@ export function TeamMembers({ orchestrator, members, cards, selectedId }: {
           <span className="flex-1 min-w-0 truncate">
             {p.label} · {p.state === "failed" ? t("chat.team.provision.failed", { reason: p.failure ?? "" }) : t("chat.team.provision.entering")}
           </span>
+          <button type="button" aria-label={t("chat.team.provision.dismiss")} title={t("chat.team.provision.dismiss")}
+            onClick={() => setDismissed(dismissProvision(p.id))}
+            className="shrink-0 w-5 h-5 rounded hover:bg-gray-200/60 dark:hover:bg-white/10">×</button>
         </div>
       ))}
     </div>

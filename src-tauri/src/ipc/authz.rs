@@ -228,6 +228,8 @@ pub(crate) const METHODS: &[(&str, Class)] = &[
     ("team.unlink", CALLER),
     ("team.role", CALLER),
     ("team.delegate", CALLER),
+    ("team.queue", CALLER),
+    ("system.load", CALLER_OR_OUTSIDE),
     ("say.send", CALLER),
     ("recall.get", CALLER),
     ("floor.list", CALLER),
@@ -582,7 +584,9 @@ fn scope_actor(
                     "`{command}` declara uma tarefa da Frota, mas quem chamou é `{me}`: o `taskId` só vale para o processo da tarefa."
                 ));
             }
-            if is_remote {
+            // `forge.run` age com a conta Git da pessoa: o despachante confere a pasta pedida com a da aba,
+            // então a aba provada sempre viaja, mesmo que o chamador omita o `tabId`.
+            if is_remote || command == "forge.run" {
                 Ok(with_key(args, "tabId", me))
             } else {
                 Ok(args.clone())
@@ -625,6 +629,17 @@ Peça à pessoa para fechar o resto."
                 };
             };
             let key = thread_ref(thread);
+            // Compactar o contexto muda a conversa de quem a usa: o agente só pede a PRÓPRIA (e o handler confere o autocompact).
+            if command == "chat.compact" {
+                return if me == key {
+                    Ok(with_key(args, "from", me))
+                } else {
+                    Err(format!(
+                        "`{command}` só compacta a sua própria conversa, nunca a de outro agente ou a da pessoa: a conversa {thread} não é a sua. \
+Se o contexto dela precisa ser compactado, avise a pessoa; ela compacta pela tela da ADE AGS."
+                    ))
+                };
+            }
             if crate::ipc::guard::in_reach(&boards()?, me, &key, opened_by(&key).as_deref()) {
                 Ok(args.clone())
             } else {

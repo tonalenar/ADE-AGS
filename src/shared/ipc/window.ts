@@ -21,3 +21,21 @@ export const confirmExitAll = () => invoke<void>("confirm_exit_all");
 /** Emite un evento a TODAS las ventanas (incluida la que llama). */
 export const broadcastEvent = (event: string, payload: string) =>
   invoke<void>("broadcast_event", { event, payload });
+
+/** Fecha a janela depois de salvar tudo (`close_window_saved`). */
+export const closeWindowSaved = (label: string) => invoke<void>("close_window_saved", { label });
+
+/** Reinicia a app para aplicar a atualização baixada. */
+export const updateRestart = () => invoke<void>("update_restart");
+
+/** Reposiciona os botões nativos do macOS sobre o lugar reservado na interface. */
+export const windowControlsPlace = (place: { x: number; y: number; visible: boolean }) =>
+  invoke<void>("window_controls_place", place);
+
+/** Em que fase está a abertura do banco (`db_boot_status`). */
+export const dbBootStatus = () => invoke<{ phase: string }>("db_boot_status");
+
+/** Os sites do navegador com mudanças sem gravar, e a gravação de um deles. */
+export const previewUnsavedSites = () => invoke<string[]>("preview_unsaved_sites");
+
+export const previewSaveSite = (origin: string) => invoke<void>("preview_save_site", { origin });

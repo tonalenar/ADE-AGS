@@ -61,6 +61,8 @@ export function threadCards(threads: ThreadRow[], groups: RepoGroup[], labelOf: 
 
 export interface ThreadLive {
   items: TimelineItem[];
+  /** Índice dos ids presentes em `items`, mantido para evitar recriar `Set` a cada lote de deltas. */
+  itemIds?: ReadonlySet<string>;
   requests: RequestRow[];
   phase: "working" | "idle";
   /** O texto (e o raciocínio) do agente chegando, por item, antes do item completo. */
@@ -72,7 +74,21 @@ export interface ThreadLive {
   providerConfig: ProviderRuntimeConfig | null;
 }
 
-export const EMPTY_LIVE: ThreadLive = { items: [], requests: [], phase: "idle", drafts: [], error: null, providerCommands: [], providerConfig: null };
+const EMPTY_ITEM_IDS: ReadonlySet<string> = new Set();
+const itemIdsByArray = new WeakMap<readonly TimelineItem[], ReadonlySet<string>>();
+
+export const EMPTY_LIVE: ThreadLive = { items: [], itemIds: EMPTY_ITEM_IDS, requests: [], phase: "idle", drafts: [], error: null, providerCommands: [], providerConfig: null };
+itemIdsByArray.set(EMPTY_LIVE.items, EMPTY_ITEM_IDS);
+
+/** Índice dos ids de `items`, reaproveitado por identidade do array para que `applyDeltas` seja O(deltas). */
+function knownItemIds(items: readonly TimelineItem[]): ReadonlySet<string> {
+  const cached = itemIdsByArray.get(items);
+  if (cached) return cached;
+  const ids = new Set<string>();
+  for (const item of items) ids.add(item.id);
+  itemIdsByArray.set(items, ids);
+  return ids;
+}
 
 /**
  * Um texto curto com o que as telas leem de cada conversa: o id, a fase, quantos pedidos pendentes (aprovação e
@@ -124,10 +140,23 @@ export type ThreadEvent =
 export function applyThreadEvent(live: ThreadLive, event: ThreadEvent): ThreadLive {
   switch (event.type) {
     case "item": {
-      const at = live.items.findIndex((i) => i.id === event.item.id);
-      const items = at >= 0 ? live.items.map((i, k) => (k === at ? event.item : i)) : [...live.items, event.item];
+      const prevIds = knownItemIds(live.items);
+      const exists = prevIds.has(event.item.id);
+      let items: TimelineItem[];
+      let itemIds: ReadonlySet<string>;
+      if (exists) {
+        const at = live.items.findIndex((i) => i.id === event.item.id);
+        items = at >= 0 ? live.items.map((i, k) => (k === at ? event.item : i)) : [...live.items, event.item];
+        itemIds = prevIds;
+      } else {
+        items = [...live.items, event.item];
+        const nextIds = new Set(prevIds);
+        nextIds.add(event.item.id);
+        itemIds = nextIds;
+      }
+      itemIdsByArray.set(items, itemIds);
       const drafts = live.drafts.some((d) => d.itemId === event.item.id) ? live.drafts.filter((d) => d.itemId !== event.item.id) : live.drafts;
-      return { ...live, items, drafts };
+      return { ...live, items, itemIds, drafts };
     }
     case "delta":
       return applyDeltas(live, [event]);
@@ -153,10 +182,10 @@ export function applyThreadEvent(live: ThreadLive, event: ThreadEvent): ThreadLi
 /** Os pedaços de um quadro de uma vez (o store junta os `delta` por `requestAnimationFrame`). Pura. */
 export function applyDeltas(live: ThreadLive, deltas: DeltaInput[]): ThreadLive {
   // Um pedaço de um item que já chegou inteiro (atrasado na fila) não reabre o rascunho.
-  const known = new Set(live.items.map((i) => i.id));
+  const known = knownItemIds(live.items);
   const fresh = deltas.filter((d) => !known.has(d.itemId));
   if (fresh.length === 0) return live;
-  return { ...live, drafts: appendDeltas(live.drafts, fresh) };
+  return { ...live, itemIds: known, drafts: appendDeltas(live.drafts, fresh) };
 }
 
 /** A conversa depois de um evento `thread`: só o que veio muda. Pura. */

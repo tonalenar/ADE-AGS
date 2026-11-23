@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import type { TimelineDelta, TimelineKnown } from "./timeline/delta";
 import type { Timeline } from "./timeline/types";
 import type { ChatWorktreeSubmodules } from "./chatWorkspacePrefs";
 
@@ -19,14 +20,30 @@ export const harnessCapabilityMatrix = () => invoke<HarnessCapabilityMatrixRow[]
  */
 export const conversationTimeline = (tabId: string) => invoke<Timeline | null>("conversation_timeline", { tabId });
 
+/**
+ * Como `conversationTimeline`, mas só a cauda que mudou desde `known` (`conversation_timeline_since`). Sem
+ * `known`, vem tudo. Use `applyTimelineDelta` para juntar ao que já se tem.
+ */
+export const conversationTimelineSince = (tabId: string, known: TimelineKnown | null) =>
+  invoke<TimelineDelta | null>("conversation_timeline_since", { tabId, known });
+
 export interface WorkingDiff {
   root: string;
   text: string;
   truncated: boolean;
 }
 
+export interface WorkingDiffStat {
+  root: string;
+  added: number;
+  removed: number;
+}
+
 /** O `git diff HEAD` da pasta (`scm/commands.rs`, `scm_working_diff`). `null` = fora de um repo. */
 export const scmWorkingDiff = (cwd: string) => invoke<WorkingDiff | null>("scm_working_diff", { cwd });
+
+/** Totais `+`/`−` não commitados via `git diff HEAD --numstat` (`scm/commands.rs`, `scm_working_diff_stat`). `null` = fora de um repo. */
+export const scmWorkingDiffStat = (cwd: string) => invoke<WorkingDiffStat | null>("scm_working_diff_stat", { cwd });
 
 /** Um worktree novo para uma conversa (`conversa.rs`): onde o agente roda e a branch criada. */
 export const chatNewWorktree = (cwd: string, title: string, agentId: string, submodules: ChatWorktreeSubmodules) =>

@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { listen } from "@tauri-apps/api/event";
 
 import { WindowControls, WindowLights } from "@/app/WindowLights";
 import { floatAspectRatioOf } from "@/features/browser/deviceMode";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import { useLocalAcpStore } from "@/features/agents/localAcpStore";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
 import { AttachCwdContext } from "./attachments/AttachmentStrip";
@@ -18,20 +16,17 @@ import { clampFloatRect, defaultFloatRect, fitFloatRectToRatio } from "./floatRe
 import { useChatFileDrop } from "./attachments/useChatFileDrop";
 import { newConversation, reopenFolder } from "./chatActions";
 import { PanelRightIcon, SidebarIcon } from "./chatIcons";
-import { chatProjects, conversationCards, type ChatProject, type ConversationCard } from "./chatModel";
+import { hasTimeline } from "./chatModel";
 import { ProjectBadge } from "./ChatProjectBadge";
 import { useChatProjectIdentityList } from "./chatProjectIdentity";
 import { normalizeProjectPath } from "./chatProjectPrefs";
 import { MissionsSection } from "@/features/missions/MissionsSection";
-import { ChatSidebar, IconButton, type FolderDiff } from "./ChatSidebar";
+import { ChatSidebar, IconButton } from "./ChatSidebar";
 import { ChatPage } from "./ChatPage";
 import { SettingsSidebar, SpacesSidebar } from "./ChatPageSidebar";
 import { isFullscreenRoute, isSettingsRoute } from "./chatSpaces";
 import { useElementWidth } from "./ComposerColumn";
 import { CHAT_SHELL_ATTR, ConversationView } from "./ConversationView";
-import { hasTimeline } from "./chatModel";
-import { parseUnifiedDiff } from "./diffModel";
-import { readWorkingDiff } from "./workingDiffRead";
 import { startChatLive } from "./liveStore";
 import { SummaryPane } from "./summary/SummaryPane";
 import { SUMMARY_POPOVER_W, SummaryPopover } from "./summary/SummaryPopover";
@@ -45,15 +40,18 @@ import { RightPanel } from "./RightPanel";
 import { runInShell } from "./shellTerminal";
 import { startProjectScriptSettleWatcher } from "./projectScriptAutomation";
 import { syncProjectDefaults } from "./projectDefaultsSync";
-import { applyProjectGrouping, buildRepoIndex, useProjectGrouping } from "./sidebar/projectGrouping";
+import { useSidebarCards } from "./sidebar/useSidebarCards";
 import { RunCodeContext } from "./timeline/CodeBlockFrame";
 import { PanelToolbar } from "./PanelToolbar";
 import { ShellModeSwitch } from "./ShellModeSwitch";
 import { useTeamDraft } from "./team/draftStore";
 import { closeSummary, forgetLastPanel, setChatBrowserFloatRect, type RightPanelTab, panelForNewConversation, setRightPanel, toggleRightPanel, useChatStore } from "./store";
-import { threadCards, threadIdOf, threadKey } from "./structured/model";
+import { threadIdOf } from "./structured/model";
 import { startStructured, useStructured } from "./structured/store";
 import { StructuredConversationView } from "./structured/StructuredConversationView";
+import { useFolderDiffs } from "./useFolderDiffs";
+
+export { useFolderDiffs };
 
 /**
  * A casca do modo chat (pranchetas 1 e 2, estilo T3 Code): a sidebar de conversas, a conversa aberta
@@ -72,18 +70,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const closePage = useCallback(() => navigate(tabCount > 0 ? "/workspace" : "/"), [navigate, tabCount]);
   const threads = useStructured((s) => s.threads);
   const selectedThread = useChatStore((s) => s.thread);
-  const detected = useTabsStore((s) => s.detectedAgents);
-  const localProviders = useLocalAcpStore((s) => s.providers);
-  const localProvidersLoaded = useLocalAcpStore((s) => s.loaded);
-  const loadLocalProviders = useLocalAcpStore((s) => s.load);
-  useEffect(() => { if (!localProvidersLoaded) void loadLocalProviders().catch(console.error); }, [localProvidersLoaded, loadLocalProviders]);
-  const projectGrouping = useProjectGrouping();
-  const cards = useMemo(() => {
-    const labelOf = (id: string) => detected.find((a) => a.id === id)?.label ?? localProviders.find((a) => a.id === id)?.label ?? id;
-    const all = [...threadCards(threads, groups, labelOf, selectedThread), ...conversationCards(groups)].sort((a, b) => b.openedAt - a.openedAt);
-    return applyProjectGrouping(all, projectGrouping, buildRepoIndex(groups));
-  }, [groups, threads, detected, localProviders, selectedThread, projectGrouping]);
-  const projects = useMemo(() => chatProjects(groups), [groups]);
+  const { cards, projects, closed } = useSidebarCards(groups);
   const projectIdentities = useChatProjectIdentityList();
   const knownProjects = useMemo(() => {
     const byPath = new Map(projects.map((candidate) => [normalizeProjectPath(candidate.cwd), candidate]));
@@ -93,10 +80,6 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
     return [...byPath.values()];
   }, [projects, projectIdentities]);
   const selectableProjects = useMemo(() => knownProjects.filter((candidate) => !projectIdentities[normalizeProjectPath(candidate.cwd)]?.archived), [knownProjects, projectIdentities]);
-  const closed = useMemo(() => {
-    const open = new Set(cards.map((c) => c.cwd));
-    return groups.flatMap((g) => g.workspaces).filter((w) => w.closed && !open.has(w.cwd)).map((w): ChatProject => ({ cwd: w.cwd, name: w.title, branch: w.branch }));
-  }, [groups, cards]);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const composing = useChatStore((s) => s.composing);
   const panelOpen = useChatStore((s) => s.panel !== null);
@@ -177,6 +160,12 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
     return () => window.removeEventListener("ade:chat-add-project", onAddProject);
   }, [addProject]);
 
+  const collapseSidebar = useCallback(() => setSidebarOpen(false), []);
+  const onAddProjectClick = useCallback(() => { void addProject(); }, [addProject]);
+  const onReopenFolder = useCallback((cwd: string) => { void reopenFolder(cwd); }, []);
+  const missionsCwd = active?.cwd ?? folder ?? projects[0]?.cwd ?? null;
+  const extraTop = useMemo(() => <MissionsSection cwd={missionsCwd} />, [missionsCwd]);
+
   const project = active ? active.project : knownProjects.find((p) => p.cwd === folder)?.name ?? null;
 
   return (
@@ -187,10 +176,10 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
         : <SpacesSidebar activeCount={cards.length} onBack={closePage} />)}
       {sidebarOpen && !page && (
         <ChatSidebar cards={cards} projects={knownProjects} closed={closed} diffs={diffs} selectedId={active?.tabId ?? null}
-          onCollapse={() => setSidebarOpen(false)} onAddProject={() => { void addProject(); }}
-          onReopen={(cwd) => { void reopenFolder(cwd); }}
+          onCollapse={collapseSidebar} onAddProject={onAddProjectClick}
+          onReopen={onReopenFolder}
           // As missões também se criam e se iniciam daqui (mesmos comandos das Abas e do Canvas).
-          extraTop={<MissionsSection cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} />} />
+          extraTop={extraTop} />
       )}
 
       {page && (
@@ -273,7 +262,12 @@ function BrowserFloatHost({ hidden }: { hidden: boolean }) {
     const view = s.views.find((v) => v.id === viewId);
     return view?.kind === "browser" ? (view.viewport ?? null) : null;
   });
-  const aspectRatio = floatAspectRatioOf(viewport);
+  const mobile = useViewTabsStore((s) => {
+    if (!viewId) return null;
+    const view = s.views.find((v) => v.id === viewId);
+    return view?.kind === "browser" ? (view.mobile ?? null) : null;
+  });
+  const aspectRatio = floatAspectRatioOf(viewport, mobile);
   const prevRatioRef = useRef<{ viewId: string | null; ratio: number | null }>({ viewId: null, ratio: null });
 
   const measure = useCallback(() => {
@@ -327,53 +321,5 @@ function BrowserFloatHost({ hidden }: { hidden: boolean }) {
   }, [floating, hidden, measure, viewId]);
 
   return null;
-}
-
-/** Quanto esperar depois do último "a conversa cresceu" de uma pasta para reler o diff dela. */
-const DIFF_DEBOUNCE_MS = 3000;
-
-/** O `+/−` não commitado de cada pasta com conversa aberta, relido quando um agente dela trabalha. */
-export function useFolderDiffs(cards: ConversationCard[]): Record<string, FolderDiff> {
-  const [diffs, setDiffs] = useState<Record<string, FolderDiff>>({});
-  const cwds = useMemo(() => [...new Set(cards.map((c) => c.cwd))].sort().join("\n"), [cards]);
-  const tabCwd = useRef(new Map<string, string>());
-  tabCwd.current = new Map(cards.map((c) => [c.tabId, c.cwd]));
-  const timers = useRef(new Map<string, number>());
-
-  useEffect(() => {
-    const load = (cwd: string) => {
-      readWorkingDiff(cwd)
-        .then((diff) => {
-          const files = diff ? parseUnifiedDiff(diff.text) : [];
-          const total = files.reduce((n, f) => ({ added: n.added + f.added, removed: n.removed + f.removed }), { added: 0, removed: 0 });
-          setDiffs((prev) => ({ ...prev, [cwd]: total }));
-        })
-        .catch(() => undefined);
-    };
-    const list = cwds ? cwds.split("\n") : [];
-    list.forEach(load);
-    const off = listen<{ tabId: string }>("cc-conversation-grew", (e) => {
-      const cwd = tabCwd.current.get(e.payload.tabId);
-      if (!cwd) return;
-      const prev = timers.current.get(cwd);
-      if (prev) window.clearTimeout(prev);
-      timers.current.set(cwd, window.setTimeout(() => load(cwd), DIFF_DEBOUNCE_MS));
-    });
-    // A conversa por protocolo não tem transcript: o diff relê quando o turno dela acaba.
-    const offThread = listen<{ threadId: string; type: string; phase?: string }>("cc-chat-thread", (e) => {
-      if (e.payload.type !== "phase" || e.payload.phase !== "idle") return;
-      const cwd = tabCwd.current.get(threadKey(e.payload.threadId));
-      if (cwd) load(cwd);
-    });
-    const pending = timers.current;
-    return () => {
-      off.then((fn) => fn()).catch(() => undefined);
-      offThread.then((fn) => fn()).catch(() => undefined);
-      pending.forEach((id) => window.clearTimeout(id));
-      pending.clear();
-    };
-  }, [cwds]);
-
-  return diffs;
 }
 

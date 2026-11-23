@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::io;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use super::adapter::AgentAdapter;
 
@@ -7,6 +9,10 @@ use super::adapter::AgentAdapter;
 /// migración, un chequeo de actualización, esperando algo— y la lista no puede quedar
 /// colgada de ella.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Backoff inicial quando algum agente estoura o prazo sob carga; cresce até [`TIMEOUT_BACKOFF_MAX`].
+pub(crate) const TIMEOUT_BACKOFF_BASE: Duration = Duration::from_secs(10);
+pub(crate) const TIMEOUT_BACKOFF_MAX: Duration = Duration::from_secs(60);
 
 /// Una TUI tal como la ve el frontend: lo que dice el registro más lo que solo se puede
 /// saber sondeando esta máquina.
@@ -58,7 +64,13 @@ pub fn version_line(stdout: &[u8], stderr: &[u8]) -> Option<String> {
     })
 }
 
-fn probe_agent(adapter: &'static dyn AgentAdapter) -> AgentInfo {
+#[derive(Clone, Debug)]
+pub(crate) struct ProbeOutcome {
+    pub info: AgentInfo,
+    pub timed_out: bool,
+}
+
+fn probe_agent(adapter: &'static dyn AgentAdapter) -> ProbeOutcome {
     let def = adapter.def();
     // El shell de emergencia se reporta disponible sin sondear. En Windows el binario ni
     // siquiera está en el PATH con ese nombre, así que sondearlo lo daría por ausente.
@@ -72,28 +84,129 @@ fn probe_agent(adapter: &'static dyn AgentAdapter) -> AgentInfo {
     // Con la ruta que se encontró y no con el nombre: en Windows un `opencode.cmd` de npm
     // no se ejecuta por su nombre a secas. Con tope y sin stdin: una TUI que se pone a
     // esperar algo no puede dejar colgada la lista entera.
+    let mut timed_out = false;
     let version = path.as_ref().and_then(|p| {
         let mut cmd = crate::util::spawn::hidden_command(p);
         cmd.arg(def.version_flag);
-        crate::util::output_with_timeout(&mut cmd, VERSION_TIMEOUT)
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| version_line(&o.stdout, &o.stderr))
+        match crate::util::output_with_timeout(&mut cmd, VERSION_TIMEOUT) {
+            Ok(out) if out.status.success() => version_line(&out.stdout, &out.stderr),
+            Ok(_) => None,
+            Err(err) => {
+                if err.kind() == io::ErrorKind::TimedOut {
+                    timed_out = true;
+                }
+                None
+            }
+        }
     });
 
-    AgentInfo {
-        id: def.id.to_string(),
-        label: def.label.to_string(),
-        command: def.command.to_string(),
-        launch_args: def
-            .launch_args
-            .map(|a| a.iter().map(|s| s.to_string()).collect()),
-        available: assumed || path.is_some(),
-        version,
-        path: path.map(|p| p.to_string_lossy().into_owned()),
-        resume: def.resume.map(str::to_string),
-        skills_dir: def.skills_dir.map(str::to_string),
+    ProbeOutcome {
+        info: AgentInfo {
+            id: def.id.to_string(),
+            label: def.label.to_string(),
+            command: def.command.to_string(),
+            launch_args: def
+                .launch_args
+                .map(|a| a.iter().map(|s| s.to_string()).collect()),
+            available: assumed || path.is_some(),
+            version,
+            path: path.map(|p| p.to_string_lossy().into_owned()),
+            resume: def.resume.map(str::to_string),
+            skills_dir: def.skills_dir.map(str::to_string),
+        },
+        timed_out,
     }
+}
+
+/// Prazo de espera antes de tentar sondar novamente após um timeout sob carga (10s, 20s, 40s, 60s).
+pub(crate) fn timeout_backoff(streak: u32) -> Duration {
+    let shift = streak.saturating_sub(1).min(4);
+    let secs = TIMEOUT_BACKOFF_BASE.as_secs().saturating_mul(1_u64 << shift);
+    Duration::from_secs(secs).min(TIMEOUT_BACKOFF_MAX)
+}
+
+#[derive(Default)]
+pub(crate) struct DetectCache {
+    /// Só guarda sondas completas (sem timeout); vale por [`DETECT_TTL`].
+    fresh: Option<(Instant, Vec<AgentInfo>)>,
+    /// Quando algum `--version` estourou o prazo, segura novas sondas só pelo backoff curto
+    /// em vez de gravar "sem versão" por 5 minutos.
+    backoff: Option<TimeoutBackoff>,
+}
+
+struct TimeoutBackoff {
+    until: Instant,
+    streak: u32,
+    partial: Vec<AgentInfo>,
+}
+
+impl DetectCache {
+    pub(crate) fn lookup(&self, now: Instant, refresh: bool) -> Option<Vec<AgentInfo>> {
+        if refresh {
+            return None;
+        }
+        if let Some((at, agents)) = &self.fresh
+            && now.saturating_duration_since(*at) < DETECT_TTL
+        {
+            return Some(agents.clone());
+        }
+        if let Some(backoff) = &self.backoff
+            && now < backoff.until
+        {
+            return Some(backoff.partial.clone());
+        }
+        None
+    }
+
+    pub(crate) fn record(&mut self, now: Instant, outcomes: Vec<ProbeOutcome>) -> Vec<AgentInfo> {
+        let any_timeout = outcomes.iter().any(|outcome| outcome.timed_out);
+        let previous = self
+            .fresh
+            .as_ref()
+            .map(|(_, agents)| agents)
+            .or_else(|| self.backoff.as_ref().map(|b| &b.partial));
+
+        let agents: Vec<AgentInfo> = outcomes
+            .into_iter()
+            .map(|mut outcome| {
+                if outcome.timed_out
+                    && outcome.info.version.is_none()
+                    && let Some(prev) = previous.and_then(|list| {
+                        list.iter()
+                            .find(|item| item.id == outcome.info.id && item.path == outcome.info.path)
+                    })
+                {
+                    outcome.info.version = prev.version.clone();
+                }
+                outcome.info
+            })
+            .collect();
+
+        if any_timeout {
+            // Não grava resultado com timeout como verdade por 5 min; aplica backoff curto.
+            self.fresh = None;
+            let streak = self.backoff.as_ref().map_or(1, |b| b.streak.saturating_add(1));
+            self.backoff = Some(TimeoutBackoff {
+                until: now + timeout_backoff(streak),
+                streak,
+                partial: agents.clone(),
+            });
+        } else {
+            self.fresh = Some((now, agents.clone()));
+            self.backoff = None;
+        }
+        agents
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_fresh(&self) -> bool {
+        self.fresh.is_some()
+    }
+}
+
+fn probe_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
 /// Detecta qué agentes de IA están instalados en el PATH del sistema.
@@ -109,18 +222,28 @@ fn probe_agent(adapter: &'static dyn AgentAdapter) -> AgentInfo {
 /// Los sondeos van en paralelo: son independientes, y en serie la lista tardaba la SUMA de
 /// todos los `--version` — con uno lento, varios segundos de "no hay agentes".
 ///
-/// El resultado se guarda [`DETECT_TTL`]: se pide al abrir cada ventana, al entrar a la
-/// flota y al panel de cuentas, y lo instalado no cambia entre esas visitas. `refresh`
-/// vuelve a sondear (el botón "buscar de nuevo" de la configuración).
+/// El resultado se guarda [`DETECT_TTL`] quando nenhum agente estoura o prazo; se algum
+/// sofrer timeout sob carga, não grava no cache de 5 min e tenta de novo após backoff curto.
+/// `refresh` vuelve a sondear (el botón "buscar de nuevo" de la configuración).
 #[tauri::command]
 pub async fn detect_agents(refresh: Option<bool>) -> Result<Vec<AgentInfo>, String> {
-    if !refresh.unwrap_or(false)
-        && let Some((at, agents)) = DETECTED.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
-        && at.elapsed() < DETECT_TTL
+    let force = refresh.unwrap_or(false);
+    if let Some(cached) = DETECTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .lookup(Instant::now(), force)
     {
-        return Ok(agents.clone());
+        return Ok(cached);
     }
-    let agents: Vec<AgentInfo> = tokio::task::spawn_blocking(|| {
+    let _guard = probe_lock().lock().await;
+    if let Some(cached) = DETECTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .lookup(Instant::now(), force)
+    {
+        return Ok(cached);
+    }
+    let outcomes: Vec<ProbeOutcome> = tokio::task::spawn_blocking(|| {
         std::thread::scope(|scope| {
             let probes: Vec<_> = super::adapter::adapters()
                 .iter()
@@ -132,16 +255,18 @@ pub async fn detect_agents(refresh: Option<bool>) -> Result<Vec<AgentInfo>, Stri
     })
     .await
     .map_err(|e| e.to_string())?;
-    *DETECTED.lock().unwrap_or_else(|e| e.into_inner()) =
-        Some((std::time::Instant::now(), agents.clone()));
+    let agents = DETECTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .record(Instant::now(), outcomes);
     Ok(agents)
 }
 
 /// Cuánto vale una detección antes de volver a sondear.
-const DETECT_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+pub(crate) const DETECT_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 lazy_static::lazy_static! {
-    static ref DETECTED: std::sync::Mutex<Option<(std::time::Instant, Vec<AgentInfo>)>> = std::sync::Mutex::new(None);
+    static ref DETECTED: std::sync::Mutex<DetectCache> = std::sync::Mutex::new(DetectCache::default());
 }
 
 /// Dónde busca la app los programas: qué aportó el shell del usuario, qué carpetas

@@ -219,4 +219,135 @@ describe("seção Decisões (experimental)", () => {
     expect(host.textContent).toContain("settings.decisions.autoUpdatedKeepEdits");
     expect(host.textContent).not.toContain("settings.decisions.autoUpdated ");
   });
+
+  it("testar conexão envia o que está editado na tela, sem depender do SQLite salvo", async () => {
+    await mount(settings({ provider: "none", baseUrl: "http://localhost:8000", model: "multilingual", keySaved: false }));
+    const provider = host.querySelector<HTMLSelectElement>('select[aria-label="settings.decisions.provider"]')!;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(provider, "jev");
+    await act(async () => { provider.dispatchEvent(new Event("change", { bubbles: true })); });
+
+    const keyInput = host.querySelector<HTMLInputElement>('input[aria-label="settings.decisions.key"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(keyInput, "sk-teste-rascunho-123456");
+      keyInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    const calls: Array<{ cmd: string; args: unknown }> = [];
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      calls.push({ cmd, args });
+      if (cmd === "decision_test_connection") return { ok: true, latencyMs: 42, error: null };
+      return undefined;
+    });
+
+    const testBtn = Array.from(host.querySelectorAll("button")).find((b) => b.textContent === "settings.decisions.test")!;
+    await act(async () => { testBtn.click(); });
+
+    const testCall = calls.find((c) => c.cmd === "decision_test_connection");
+    expect(testCall?.args).toEqual({
+      slot: "primary",
+      draft: {
+        provider: "jev",
+        baseUrl: "https://api.typesafe.ai",
+        model: "jev-latest",
+        timeoutMs: 800,
+        apiKey: "sk-teste-rascunho-123456",
+      },
+    });
+  });
+
+  it("save grava a chave no keyring antes das flags e não grava flags se o keyring falhar", async () => {
+    await mount(settings({ enabled: false, provider: "none", browserPilot: false, keySaved: false }));
+
+    const provider = host.querySelector<HTMLSelectElement>('select[aria-label="settings.decisions.provider"]')!;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(provider, "jev");
+    await act(async () => { provider.dispatchEvent(new Event("change", { bubbles: true })); });
+
+    const keyInput = host.querySelector<HTMLInputElement>('input[aria-label="settings.decisions.key"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(keyInput, "sk-chave-valida-123456");
+      keyInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    // Primeiro caso: keyring falha -> decision_settings_set NÃO é chamado.
+    const orderFail: string[] = [];
+    invokeMock.mockImplementation(async (cmd: string) => {
+      orderFail.push(cmd);
+      if (cmd === "decision_key_set") throw new Error("cofre bloqueado");
+      return undefined;
+    });
+
+    const saveBtn = Array.from(host.querySelectorAll("button")).find((b) => b.textContent === "settings.decisions.save")!;
+    await act(async () => { saveBtn.click(); });
+
+    expect(orderFail).toEqual(["decision_key_set"]);
+    expect(host.textContent).toContain("cofre bloqueado");
+
+    // Segundo caso: keyring funciona -> decision_key_set vem ANTES de decision_settings_set.
+    const orderOk: string[] = [];
+    invokeMock.mockImplementation(async (cmd: string) => {
+      orderOk.push(cmd);
+      if (cmd === "decision_settings_set") return settings({ enabled: false, provider: "jev", baseUrl: "https://api.typesafe.ai", model: "jev-latest", keySaved: true });
+      if (cmd === "decision_settings_get") return settings({ enabled: false, provider: "jev", baseUrl: "https://api.typesafe.ai", model: "jev-latest", keySaved: true });
+      return undefined;
+    });
+
+    await act(async () => { saveBtn.click(); });
+    expect(orderOk.indexOf("decision_key_set")).toBe(0);
+    expect(orderOk.indexOf("decision_settings_set")).toBe(1);
+  });
+
+  it("amarra browserVision a browserPilot na UI: ligar visão liga piloto e desligar piloto desliga visão", async () => {
+    await mount(settings({ enabled: true, provider: "jev", browserPilot: false, browserVision: false, keySaved: true }));
+    const switchByLabel = (label: string) => {
+      const span = Array.from(host.querySelectorAll("span")).find((el) => el.textContent === label && el.id);
+      return span ? host.querySelector<HTMLButtonElement>(`button[role="switch"][aria-labelledby="${span.id}"]`) : null;
+    };
+
+    const pilotSwitch = switchByLabel("settings.decisions.point.browser")!;
+    const visionSwitch = switchByLabel("settings.decisions.point.browserVision")!;
+    expect(pilotSwitch.getAttribute("aria-checked")).toBe("false");
+    expect(visionSwitch.getAttribute("aria-checked")).toBe("false");
+    expect(host.textContent).toContain("settings.decisions.point.browserVisionRequiresPilot");
+
+    // Ligar visão também liga o piloto.
+    await act(async () => { visionSwitch.click(); });
+    expect(pilotSwitch.getAttribute("aria-checked")).toBe("true");
+    expect(visionSwitch.getAttribute("aria-checked")).toBe("true");
+
+    // Desligar piloto desliga a visão junto.
+    await act(async () => { pilotSwitch.click(); });
+    expect(pilotSwitch.getAttribute("aria-checked")).toBe("false");
+    expect(visionSwitch.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("ativar Jev no navegador em um passo configura e salva sem chamar o Jev (nem gastar saldo)", async () => {
+    await mount(settings({ enabled: false, provider: "none", browserPilot: false, keySaved: true }));
+    const calls: Array<{ cmd: string; args: unknown }> = [];
+    invokeMock.mockImplementation(async (cmd: string, args?: unknown) => {
+      calls.push({ cmd, args });
+      if (cmd === "decision_settings_set") {
+        return settings({ enabled: true, provider: "jev", baseUrl: "https://api.typesafe.ai", model: "jev-latest", browserPilot: true, keySaved: true });
+      }
+      if (cmd === "decision_settings_get") {
+        return settings({ enabled: true, provider: "jev", baseUrl: "https://api.typesafe.ai", model: "jev-latest", browserPilot: true, keySaved: true });
+      }
+      return undefined;
+    });
+
+    const quickBtn = Array.from(host.querySelectorAll("button")).find((b) => b.textContent === "settings.decisions.quickBrowser.enable")!;
+    expect(quickBtn).toBeDefined();
+    await act(async () => { quickBtn.click(); });
+
+    const setCall = calls.find((c) => c.cmd === "decision_settings_set");
+    expect(setCall).toBeDefined();
+    expect((setCall?.args as { input: DecisionSettings }).input).toMatchObject({
+      enabled: true,
+      provider: "jev",
+      baseUrl: "https://api.typesafe.ai",
+      model: "jev-latest",
+      browserPilot: true,
+    });
+    // Nunca chama test_connection nem pick_step ao ativar.
+    expect(calls.some((c) => c.cmd === "decision_test_connection" || c.cmd === "decision_pick_step")).toBe(false);
+  });
 });

@@ -6,12 +6,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::ai_memory::client::{Client, Read};
-use crate::ai_memory::marker;
 use crate::ai_memory::scoped_bridge::reserved_project;
 use crate::ai_memory::types::{Page, Project, RecentPage};
 use crate::memory::agent::looks_like_user_secret;
 
-pub const DEFAULT_REPO_NAME: &str = "ade-memoria";
 pub const DEFAULT_INTERVAL_HOURS: u32 = 6;
 const RECENT_EXPORT_LIMIT: u32 = 500;
 
@@ -24,16 +22,26 @@ pub struct SkippedMemoryPage {
     pub reason: String,
 }
 
+/// Resultado da leitura do ai-memory no envio: a UI não pode tratar "nada lido" como sucesso.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AiMemoryStatus {
+    #[default]
+    Ok,
+    Empty,
+    Unavailable,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct ExportBundle {
     pub files: BTreeMap<String, Vec<u8>>,
-    pub ai_memory_prefix: Option<String>,
     pub sqlite_prefix: Option<String>,
     pub ai_memory_pages: usize,
     pub sqlite_entries: usize,
     pub sqlite_revisions: usize,
     pub skipped_pages: Vec<SkippedMemoryPage>,
     pub ai_memory_note: Option<String>,
+    pub ai_memory_status: AiMemoryStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -62,7 +70,6 @@ pub(crate) struct LegacyEntry {
 pub(crate) struct LegacyRevision {
     pub entry_id: String,
     pub scope: String,
-    pub mission_id: Option<String>,
     pub key: String,
     pub revision: i64,
     pub operation: String,
@@ -195,7 +202,7 @@ pub(crate) fn load_legacy_snapshot(
 
     let mut rev_stmt = conn
         .prepare(
-            "SELECT r.entry_id, e.scope, e.mission_id, e.key, r.revision, r.operation, r.kind, r.priority, r.body, r.actor_kind, r.reason, r.created_at, r.decided_at
+            "SELECT r.entry_id, e.scope, e.key, r.revision, r.operation, r.kind, r.priority, r.body, r.actor_kind, r.reason, r.created_at, r.decided_at
              FROM memory_revisions r
              JOIN memory_entries e ON e.id = r.entry_id
              WHERE e.workspace_id = ?1
@@ -209,17 +216,16 @@ pub(crate) fn load_legacy_snapshot(
             Ok(LegacyRevision {
                 entry_id: r.get(0)?,
                 scope: r.get(1)?,
-                mission_id: r.get(2)?,
-                key: r.get(3)?,
-                revision: r.get(4)?,
-                operation: r.get(5)?,
-                kind: r.get(6)?,
-                priority: r.get(7)?,
-                body: r.get(8)?,
-                actor_kind: r.get(9)?,
-                reason: r.get(10)?,
-                created_at: r.get(11)?,
-                decided_at: r.get(12)?,
+                key: r.get(2)?,
+                revision: r.get(3)?,
+                operation: r.get(4)?,
+                kind: r.get(5)?,
+                priority: r.get(6)?,
+                body: r.get(7)?,
+                actor_kind: r.get(8)?,
+                reason: r.get(9)?,
+                created_at: r.get(10)?,
+                decided_at: r.get(11)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -232,28 +238,6 @@ pub(crate) fn load_legacy_snapshot(
         entries,
         revisions,
     })
-}
-
-fn resolve_explicit_ai_memory_scope(client: &Client, cwd: &Path) -> Option<(String, String)> {
-    // Marcador explícito manda: par seguro é usado; projeto reservado bloqueia (sem palpite pela pasta).
-    match marker::resolve(cwd, dirs::home_dir().as_deref()) {
-        marker::Scope::Pair(workspace, project) => return Some((workspace, project)),
-        marker::Scope::Reserved => return None,
-        marker::Scope::Missing => {}
-    }
-    let projects = client.read::<Vec<Project>>(Read::Projects).ok()?.data;
-    let folder = cwd.file_name()?.to_str()?;
-    let mut matches = projects
-        .iter()
-        .filter(|p| p.project_name.eq_ignore_ascii_case(folder));
-    let project = matches.next()?;
-    if matches.next().is_some()
-        || reserved_project(&project.project_name)
-        || reserved_project(&project.workspace_name)
-    {
-        return None;
-    }
-    Some((project.workspace_name.clone(), project.project_name.clone()))
 }
 
 fn render_ai_memory_page(page: &Page) -> Vec<u8> {
@@ -287,56 +271,79 @@ fn render_ai_memory_page(page: &Page) -> Vec<u8> {
     out.into_bytes()
 }
 
-fn export_ai_memory(
-    ai_memory_program: Option<&Path>,
-    cwd: Option<&str>,
-    bundle: &mut ExportBundle,
-) -> Result<(), String> {
-    let Some(cwd_str) = cwd.map(str::trim).filter(|s| !s.is_empty()) else {
-        bundle.ai_memory_note =
-            Some("Nenhuma pasta de projeto aberta; enviado apenas o histórico legado do SQLite.".into());
-        return Ok(());
+/// Pasta neutra para o cliente do ai-memory: o escopo vai sempre explícito (`--workspace`/`--project`),
+/// então o backup não depende de aba nem de projeto aberto.
+pub(crate) fn neutral_cwd() -> PathBuf {
+    dirs::home_dir()
+        .filter(|p| p.is_absolute() && p.is_dir())
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+fn export_ai_memory(ai_memory_program: Option<&Path>, bundle: &mut ExportBundle) -> Result<(), String> {
+    let unavailable = |bundle: &mut ExportBundle, note: String| {
+        bundle.ai_memory_status = AiMemoryStatus::Unavailable;
+        bundle.ai_memory_note = Some(note);
     };
-    let cwd_path = PathBuf::from(cwd_str);
-    if !cwd_path.is_absolute() || !cwd_path.is_dir() {
-        bundle.ai_memory_note =
-            Some("Pasta do projeto indisponível; enviado apenas o histórico legado do SQLite.".into());
-        return Ok(());
-    }
     let Some(program) = ai_memory_program else {
-        bundle.ai_memory_note =
-            Some("ai-memory não encontrado no PATH; enviado apenas o histórico legado do SQLite.".into());
+        unavailable(
+            bundle,
+            "ai-memory não encontrado no PATH; enviado apenas o histórico legado do SQLite.".into(),
+        );
         return Ok(());
     };
-
-    let client = Client::at(Some(program.to_path_buf()), cwd_path.clone())?;
+    let client = Client::at(Some(program.to_path_buf()), neutral_cwd())?;
     if let Err(err) = client.ensure_supported() {
-        bundle.ai_memory_note =
-            Some(format!("ai-memory indisponível ({err}); enviado apenas o histórico legado do SQLite."));
+        unavailable(bundle, format!("ai-memory indisponível ({err}); enviado apenas o histórico legado do SQLite."));
         return Ok(());
     }
-
-    let explicit_scope = resolve_explicit_ai_memory_scope(&client, &cwd_path);
-    if let Some((ref ws, ref proj)) = explicit_scope {
-        bundle.ai_memory_prefix = Some(format!(
-            "ai-memory/{}/{}/",
-            safe_segment(ws, "default"),
-            safe_segment(proj, "project")
-        ));
-    }
-
-    let recent = match client.read::<Vec<RecentPage>>(Read::RecentLimit(RECENT_EXPORT_LIMIT)) {
+    let projects = match client.read::<Vec<Project>>(Read::Projects) {
         Ok(res) => res.data,
         Err(err) => {
-            bundle.ai_memory_note =
-                Some(format!("ai-memory não respondeu ({err}); enviado apenas o histórico legado do SQLite."));
+            unavailable(
+                bundle,
+                format!("ai-memory não respondeu ({err}); enviado apenas o histórico legado do SQLite."),
+            );
             return Ok(());
         }
     };
 
-    let mut seen_paths = HashSet::new();
-    let mut detected_scope: Option<(String, String)> = explicit_scope.clone();
+    let mut seen_projects = HashSet::new();
+    for project in projects {
+        let (workspace, name) = (project.workspace_name.trim(), project.project_name.trim());
+        if workspace.is_empty()
+            || name.is_empty()
+            || reserved_project(workspace)
+            || reserved_project(name)
+            || !seen_projects.insert((workspace.to_string(), name.to_string()))
+        {
+            continue;
+        }
+        export_ai_memory_project(&client, workspace, name, bundle)?;
+    }
 
+    if bundle.ai_memory_pages == 0 && bundle.skipped_pages.is_empty() {
+        bundle.ai_memory_status = AiMemoryStatus::Empty;
+        bundle.ai_memory_note = Some("O ai-memory não tem páginas de projeto para enviar.".into());
+    }
+    Ok(())
+}
+
+fn export_ai_memory_project(
+    client: &Client,
+    workspace: &str,
+    project: &str,
+    bundle: &mut ExportBundle,
+) -> Result<(), String> {
+    let recent = client
+        .read::<Vec<RecentPage>>(Read::RecentScoped {
+            limit: RECENT_EXPORT_LIMIT,
+            workspace: workspace.to_string(),
+            project: project.to_string(),
+        })
+        .map_err(|err| format!("ai-memory não respondeu ao listar {workspace}/{project} ({err})."))?
+        .data;
+
+    let mut seen_paths = HashSet::new();
     for item in recent {
         let Some(rel_path) = safe_rel_path(&item.path) else {
             continue;
@@ -344,31 +351,11 @@ fn export_ai_memory(
         if !seen_paths.insert(rel_path.clone()) {
             continue;
         }
-        let Some(page) = client.find_page(&item.path)? else {
+        let Some(page) = client.find_page_scoped(&item.path, workspace, project)? else {
             continue;
         };
-        if page.workspace.trim().is_empty()
-            || page.project.trim().is_empty()
-            || reserved_project(&page.workspace)
-            || reserved_project(&page.project)
-        {
+        if page.workspace != workspace || page.project != project {
             continue;
-        }
-        if let Some((ref exp_ws, ref exp_proj)) = explicit_scope {
-            if page.workspace != *exp_ws || page.project != *exp_proj {
-                continue;
-            }
-        } else if let Some((ref cur_ws, ref cur_proj)) = detected_scope {
-            if page.workspace != *cur_ws || page.project != *cur_proj {
-                continue;
-            }
-        } else {
-            detected_scope = Some((page.workspace.clone(), page.project.clone()));
-            bundle.ai_memory_prefix = Some(format!(
-                "ai-memory/{}/{}/",
-                safe_segment(&page.workspace, "default"),
-                safe_segment(&page.project, "project")
-            ));
         }
 
         let raw_title = page.title.as_deref().unwrap_or(&page.path);
@@ -393,13 +380,14 @@ fn export_ai_memory(
             continue;
         }
 
-        let ws_seg = safe_segment(&page.workspace, "default");
-        let proj_seg = safe_segment(&page.project, "project");
-        let target = format!("ai-memory/{ws_seg}/{proj_seg}/{rel_path}");
+        let target = format!(
+            "ai-memory/{}/{}/{rel_path}",
+            safe_segment(workspace, "default"),
+            safe_segment(project, "project")
+        );
         bundle.files.insert(target, render_ai_memory_page(&page));
         bundle.ai_memory_pages += 1;
     }
-
     Ok(())
 }
 
@@ -553,11 +541,10 @@ fn export_legacy(snapshot: &LegacySnapshot, bundle: &mut ExportBundle) {
 /// Monta a árvore filtrada para envio ao espelho privado.
 pub(crate) fn build_export_bundle(
     ai_memory_program: Option<&Path>,
-    cwd: Option<&str>,
     legacy: Option<&LegacySnapshot>,
 ) -> Result<ExportBundle, String> {
     let mut bundle = ExportBundle::default();
-    export_ai_memory(ai_memory_program, cwd, &mut bundle)?;
+    export_ai_memory(ai_memory_program, &mut bundle)?;
     if let Some(snapshot) = legacy {
         export_legacy(snapshot, &mut bundle);
     }

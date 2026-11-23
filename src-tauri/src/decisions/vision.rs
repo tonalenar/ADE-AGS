@@ -204,7 +204,7 @@ pub fn pick(db: &DbConnection, query: &VisualQuery) -> VisualReply {
         None => return VisualReply::without("error", "Não consegui ler os ajustes de Decisões."),
     };
     if !settings.active() || !settings.allows(POINT_BROWSE_VISION) || !settings.allows(super::points::POINT_BROWSE) {
-        return VisualReply::without("off", "A reserva visual está desligada: ligue em Ajustes → Decisões (Navegador do canvas: reserva visual).");
+        return VisualReply::without("off", "A reserva visual está desligada: ligue o piloto e a reserva visual em Ajustes → Decisões (Navegador — piloto act e reserva visual).");
     }
     // Imagens e `box` são do Jev 1.14: nenhum outro provedor entende.
     if settings.provider != ProviderKind::Jev {
@@ -323,10 +323,20 @@ fn send(settings: &config::Settings, api_key: Option<&str>, boundary: &str, payl
     let text = response.text().map_err(|e| http::map_transport(e, api_key).code())?;
     let text = super::shadow::redact(&text, api_key);
     match status.as_u16() {
-        200 => Ok(text),
+        200 => {
+            http::clear_quota_exhausted(settings.provider, &settings.base_url);
+            Ok(text)
+        }
         401 => Err("O Jev recusou a chave (401).".into()),
         code => {
             let detail = super::protocol::client_error_message(&text);
+            if super::protocol::is_quota_exhausted(code, &detail, &text) {
+                let reason = format!(
+                    "O Jev está sem saldo ou com a cota esgotada (http {code}): recarregue o saldo ou confira em Ajustes → Decisões."
+                );
+                http::mark_quota_exhausted(settings.provider, &settings.base_url, reason.clone());
+                return Err(reason);
+            }
             Err(if detail.is_empty() { format!("O Jev respondeu HTTP {code}.") } else { format!("O Jev respondeu HTTP {code}: {detail}") })
         }
     }

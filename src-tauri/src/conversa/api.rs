@@ -16,7 +16,7 @@ use crate::database::DbConnection;
 use super::codex::RequestFailure;
 use super::envio::{SendError, SendMode};
 use super::store::{self, MessageSearchHit, RequestRow, ThreadRow, Tuning};
-use super::{agy, claude, codex, codex_map, cursor, opencode};
+use super::{claude, codex, codex_map, cursor, opencode};
 
 /// Quem fala com o agente de uma conversa por protocolo.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,7 +211,6 @@ fn live_turn(thread_id: &str) -> Option<Option<String>> {
         .map(|s| s.turn())
         .or_else(|| claude::get(thread_id).map(|s| s.turn()))
         .or_else(|| opencode::get(thread_id).map(|s| s.turn()))
-        .or_else(|| agy::get(thread_id).map(|s| s.turn()))
         .or_else(|| cursor::get(thread_id).map(|s| s.turn()))
 }
 
@@ -221,7 +220,6 @@ fn close(thread_id: &str) {
     codex::close(thread_id);
     claude::close(thread_id);
     opencode::close(thread_id);
-    agy::close(thread_id);
     cursor::close(thread_id);
 }
 
@@ -231,7 +229,6 @@ pub(super) fn has_live_session(thread_id: &str) -> bool {
     codex::get(thread_id).is_some()
         || claude::get(thread_id).is_some()
         || opencode::get(thread_id).is_some()
-        || agy::get(thread_id).is_some()
         || cursor::get(thread_id).is_some()
 }
 
@@ -312,6 +309,12 @@ pub fn create_child_async(
     create_inner(db, input, Some(identity), true)
 }
 
+/// O pedido já tem recibo: repeti-lo devolve a mesma conversa e não cria nada novo.
+pub fn child_request_seen(db: &DbConnection, identity: &ChildRequestIdentity) -> bool {
+    let Ok(conn) = db.lock() else { return false };
+    store::child_chat_receipt(&conn, &identity.caller_key, &identity.request_id).ok().flatten().is_some()
+}
+
 fn existing_child_outcome(
     conn: &rusqlite::Connection,
     identity: &ChildRequestIdentity,
@@ -382,16 +385,20 @@ fn create_inner(
     let id = uuid::Uuid::new_v4().to_string();
     // `pool:<nome>` no lugar da conta: o pool escolhe a conta agora e a conversa fica ligada a ele (o pool de
     // contas do chat só troca com o pool escolhido pela pessoa).
-    let (account_id, pool_id) = match input
-        .account_id
+    // Subagente/integrante sem conta escolhida nasce no pool padrão do agente (se houver um ativo): o failover
+    // vale desde o primeiro turno. Se o pool padrão não tem conta usável agora, a conversa nasce sem conta fixa.
+    let requested = super::pool::with_default_pool(db, &input.agent_id, input.account_id.clone(), input.parent_ref.is_some());
+    let defaulted = input.account_id.is_none() && requested.is_some();
+    let (account_id, pool_id) = match requested
         .as_deref()
         .and_then(crate::accounts::pools::pool_ref)
     {
-        Some(name) => {
-            let (account, pool) = super::pool::resolve_at_create(db, &input.agent_id, name)?;
-            (account, Some(pool))
-        }
-        None => (input.account_id.clone(), None),
+        Some(name) => match super::pool::resolve_at_create(db, &input.agent_id, name) {
+            Ok((account, pool)) => (account, Some(pool)),
+            Err(_) if defaulted => (None, None),
+            Err(e) => return Err(e),
+        },
+        None => (requested.clone(), None),
     };
     if let Some(id) = account_id.as_deref() {
         crate::accounts::ensure_supported_outside_pty(db, id)?;
@@ -1452,10 +1459,6 @@ pub async fn interrupt(thread_id: &str) -> Result<Interrupted, String> {
     }
     if let Some(session) = opencode::get(thread_id) {
         return opencode::interrupt(&session).await.map(interrupted_of);
-    }
-    if agy::get(thread_id).is_some() {
-        agy::interrupt(thread_id);
-        return Ok(Interrupted::Sent);
     }
     if cursor::get(thread_id).is_some() {
         cursor::interrupt(thread_id);

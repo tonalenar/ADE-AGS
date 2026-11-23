@@ -302,4 +302,37 @@ describe("vista do navegador nativo", () => {
     await act(async () => { frames.shift()?.(0); });
     expect(placedPlaces[placedPlaces.length - 1]?.visibleRect).toEqual({ x: 0, y: 0, width: 400, height: 300 });
   });
+
+  it("visivel_e_parada_nao_mantem_loop_raf_continuo_a_60fps", async () => {
+    let clock = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => (clock += 100));
+    vi.spyOn(HTMLElement.prototype, "checkVisibility").mockReturnValue(true);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 10, y: 20, left: 10, top: 20, width: 400, height: 300, right: 410, bottom: 320, toJSON: () => ({}),
+    } as DOMRect);
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    render({ floatingPreview: true });
+    await act(async () => undefined);
+    // Consome o frame inicial pós-open: como nada mudou, o laço deve dormir sem reagendar rAF.
+    await act(async () => { frames.shift()?.(0); });
+    expect(frames).toHaveLength(0);
+
+    // Mutações de style/class em nós comuns do body (ex.: streaming do chat) não acordam o rAF.
+    const chatMessage = document.createElement("div");
+    document.body.appendChild(chatMessage);
+    try {
+      coversSpy.mockClear();
+      await act(async () => {
+        chatMessage.className = "streaming";
+        chatMessage.style.opacity = "0.9";
+      });
+      expect(frames).toHaveLength(0);
+      expect(coversSpy).not.toHaveBeenCalled();
+    } finally {
+      chatMessage.remove();
+    }
+  });
 });

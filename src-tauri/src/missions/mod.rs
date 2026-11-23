@@ -51,7 +51,7 @@ pub use types::{
 use std::path::Path;
 
 use rusqlite::Connection;
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::database::DbConnection;
 use crate::runs::routing::{Assignment, RouteRequest};
@@ -80,11 +80,7 @@ pub(crate) fn notify_for_run<R: Runtime>(app: &AppHandle<R>, conn: &Connection, 
 }
 
 fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
-    Ok(app
-        .try_state::<DbConnection>()
-        .ok_or_else(|| "o banco de dados não está disponível".to_string())?
-        .inner()
-        .clone())
+    crate::database::db_of(app)
 }
 
 // ── Lo que no lanza nada ────────────────────────────────────────
@@ -770,25 +766,6 @@ pub async fn mission_finish_terminals(
     .await
 }
 
-/// Reavalia de forma segura e idempotente a entrega de uma missão concluída.
-#[tauri::command]
-pub async fn mission_redeliver(
-    app: AppHandle,
-    mission_id: String,
-    pull_request: Option<String>,
-    test_result: Option<TestResult>,
-) -> Result<RedeliverOutcome, String> {
-    let outcome = tauri::async_runtime::spawn_blocking({
-        let app = app.clone();
-        let mission_id = mission_id.clone();
-        move || redeliver_now(&app, &mission_id, pull_request.as_deref(), test_result)
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    notify(&app, &mission_id);
-    Ok(outcome)
-}
-
 pub fn redeliver_now(
     app: &AppHandle,
     mission_id: &str,
@@ -955,61 +932,11 @@ pub(crate) fn precheck_text(conn: &Connection, mission_id: &str) -> Result<Strin
     )))
 }
 
-#[tauri::command]
-pub async fn mission_precheck(app: AppHandle, mission_id: String) -> Result<String, String> {
-    let db = db_of(&app)?;
-    let check_db = db.clone();
-    let check_id = mission_id.clone();
-    tauri::async_runtime::spawn_blocking(move || check_launch_now(&check_db, &check_id, true))
-        .await
-        .map_err(|e| e.to_string())??;
-    let lookup_id = mission_id.clone();
-    let (cwd, objective, similar) = crate::database::blocking_db(&db, move |conn| {
-        let mission = store::get(conn, &lookup_id)?.ok_or("missions.error.changed")?;
-        let similar =
-            precheck::similar_missions(conn, &lookup_id, &mission.cwd, &mission.objective);
-        Ok((mission.cwd, mission.objective, similar))
-    })
-    .await?;
-    tokio::task::spawn_blocking(move || {
-        let check = precheck::run_with_similar(&cwd, &objective, similar);
-        Ok(precheck::render(&check))
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 // ── Memoria del proyecto en el briefing ─────────────────────────────
-
-/// El bloque de memoria aprobada (workspace + misión) para el briefing del Orquestador. Vacío si
-/// no hay nada. Solo lee.
-pub(crate) fn memory_context_text(
-    conn: &Connection,
-    workspace_id: &str,
-    mission_id: &str,
-    objective: &str,
-    repo_key: Option<&str>,
-) -> Result<String, String> {
-    let docs = crate::memory::search::load_docs_with_repo(
-        conn,
-        workspace_id,
-        Some(mission_id),
-        repo_key,
-        true,
-    )?;
-    // 10 entradas / 2.600 caracteres: cabem ~9 com o corte de 280 por corpo (antes eram ~6).
-    Ok(crate::memory::search::briefing_block(
-        &docs,
-        mission_id,
-        objective,
-        10,
-        2_600,
-    ))
-}
 
 /// O bloco de memória do briefing do `prepare_team`. Com `memory_relevance` ligado, o Jev escolhe as
 /// memórias relevantes ao objetivo (ver `decisions/relevance.rs`); se não escolher, sai o índice de
-/// sempre, com as mesmas entradas de `memory_context_text`. Não segura o banco na chamada ao provedor.
+/// sempre, com as mesmas entradas do briefing da missão. Não segura o banco na chamada ao provedor.
 pub(crate) fn memory_briefing(db: &DbConnection, mission_id: &str) -> Result<String, String> {
     memory_briefing_with_reader(db, mission_id, crate::ai_memory::project_context)
 }
@@ -1075,36 +1002,6 @@ fn memory_briefing_with_reader(
         }
     }
     Ok(text)
-}
-
-#[tauri::command]
-pub async fn mission_memory_context(app: AppHandle, mission_id: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || mission_memory_context_now(&app, mission_id))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-pub(crate) fn mission_memory_context_now(app: &AppHandle, mission_id: String) -> Result<String, String> {
-    let db = db_of(&app)?;
-    let mission = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        store::get(&conn, &mission_id)?
-            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?
-    };
-    if crate::ai_memory::memory_enabled(&db) {
-        if let Ok(context) = crate::ai_memory::project_context(&mission.cwd, &mission.objective) {
-            return Ok(context);
-        }
-    }
-    let repo = crate::memory::repo_scope::repo_key(Path::new(&mission.cwd));
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    memory_context_text(
-        &conn,
-        &mission.workspace_id,
-        &mission.id,
-        &mission.objective,
-        repo.as_deref(),
-    )
 }
 
 pub(crate) fn mark_test_now(

@@ -64,4 +64,32 @@ describe("spawnMember em modo TUI", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("pool_pick", { agentId: "codex", pool: "Trabalho" });
     expect(mocks.addTab).toHaveBeenCalledWith(expect.objectContaining({ accountId: "acc-codex-2" }));
   });
+
+  it("em modo chat sem conta escolhida usa o pool padrão do agente; a conta escolhida vale sempre", async () => {
+    mocks.invoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "chat_team_provision_begin") return { id: "prov-1", label: "Antigravity · Generalista" };
+      if (cmd === "pool_default_ref") return "pool:Gemini";
+      if (cmd === "chat_thread_create") return { id: "th-1", ...args };
+      return undefined;
+    });
+    const base = {
+      teamId: "team-1",
+      agent: { id: "antigravity", label: "Antigravity", command: "agy", available: true, isStructured: true } as never,
+      role: "generalista",
+      policy: "read" as const,
+      cwd: "/repo",
+      worktree: false,
+      model: null,
+      effort: null,
+      structured: true,
+      subagent: true,
+    };
+    await spawnMember({ ...base, account: null });
+    expect(mocks.invoke).toHaveBeenCalledWith("chat_thread_create", expect.objectContaining({ accountId: "pool:Gemini" }));
+
+    mocks.invoke.mockClear();
+    await spawnMember({ ...base, account: "acc-fixa" });
+    expect(mocks.invoke).not.toHaveBeenCalledWith("pool_default_ref", expect.anything());
+    expect(mocks.invoke).toHaveBeenCalledWith("chat_thread_create", expect.objectContaining({ accountId: "acc-fixa" }));
+  });
 });

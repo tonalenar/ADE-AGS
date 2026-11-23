@@ -21,7 +21,7 @@ export function MissionObjective({ objective, title }: { objective: string; titl
   const points = useMemo(() => numberedPoints(parts), [parts]);
   const structured = parts.sections.length > 0;
   const long = objective.length > COLLAPSE_OVER;
-  const heading = title && <h3 className="text-[15px] leading-5 font-semibold text-gray-900 dark:text-[#f5f5f7]">{title}</h3>;
+  const heading = title && <h3 className="text-[15px] leading-5 font-semibold text-gray-900 dark:text-ink">{title}</h3>;
 
   if (!long && !structured) {
     return (
@@ -40,7 +40,7 @@ export function MissionObjective({ objective, title }: { objective: string; titl
       {!open && points.length > 0 && (
         <ol className="flex flex-col" aria-label={t("missions.objective.points")}>
           {points.map((point) => (
-            <li key={point.n} className={`flex gap-3 py-[7px] text-gray-900 dark:text-[#f5f5f7] border-b last:border-b-0 border-black/[0.06] dark:border-[rgba(84,84,88,0.35)] ${TEXT}`}>
+            <li key={point.n} className={`flex gap-3 py-[7px] text-gray-900 dark:text-ink border-b last:border-b-0 border-black/[0.06] dark:border-[rgba(84,84,88,0.35)] ${TEXT}`}>
               <span className="w-[18px] shrink-0 text-right text-[13px] font-semibold tabular-nums text-accent-600 dark:text-accent-400">{point.n}</span>
               <span>{point.label}</span>
             </li>

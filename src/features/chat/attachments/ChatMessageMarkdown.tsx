@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Markdown, type CodeBlockRenderer, type MarkdownTone } from "@/shared/ui/Markdown";
 import { htmlImagesToMarkdown } from "@/shared/ui/htmlImages";
@@ -9,8 +9,22 @@ import { mediaOfItems } from "../timeline/mediaCache";
 import type { TimelineItem } from "../timeline/types";
 import { loadImage } from "./useImagePreview";
 
+export interface ChatMessageMarkdownProps {
+  content: string;
+  tone?: MarkdownTone;
+  renderCodeBlock?: CodeBlockRenderer;
+  streaming?: boolean;
+}
+
+function sameChatMarkdownProps(prev: ChatMessageMarkdownProps, next: ChatMessageMarkdownProps): boolean {
+  return prev.content === next.content
+    && (prev.tone ?? "chat") === (next.tone ?? "chat")
+    && (prev.streaming ?? false) === (next.streaming ?? false)
+    && prev.renderCodeBlock === next.renderCodeBlock;
+}
+
 /** Markdown de conversa com imagens locais da pasta do projeto no visualizador compartilhado. */
-export function ChatMessageMarkdown({ content, tone = "chat", renderCodeBlock, streaming = false }: { content: string; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer; streaming?: boolean }) {
+export const ChatMessageMarkdown = memo(function ChatMessageMarkdown({ content, tone = "chat", renderCodeBlock, streaming = false }: ChatMessageMarkdownProps) {
   const { load, open } = useConversationMarkdownImages(content);
   return (
     <>
@@ -18,16 +32,16 @@ export function ChatMessageMarkdown({ content, tone = "chat", renderCodeBlock, s
       <MentionedImageStrip content={content} />
     </>
   );
-}
+}, sameChatMarkdownProps);
 
 /** As imagens citadas por caminho na resposta viram miniaturas abaixo dela; clicar abre o visualizador da ADE. */
-function MentionedImageStrip({ content }: { content: string }) {
+const MentionedImageStrip = memo(function MentionedImageStrip({ content }: { content: string }) {
   const cwd = useContext(AttachCwdContext);
   const found: ShownAttachment[] = useMemo(() => mentionedMedia(content, cwd).slice(0, 24)
     .map((media) => ({ path: media.path, name: media.name, kind: media.kind === "video" ? "file" : "image", size: null })), [content, cwd]);
   const items = useSameShown(found);
   return items.length > 0 ? <AttachmentStrip items={items} className="mt-3" /> : null;
-}
+});
 
 /** Mantém a lista de anexos a mesma enquanto só o texto cresce: a fileira registra no visualizador a cada troca de lista. */
 function useSameShown(found: ShownAttachment[]): ShownAttachment[] {
@@ -47,11 +61,11 @@ function sameShown(a: readonly ShownAttachment[], b: readonly ShownAttachment[])
 }
 
 /** Miniaturas de imagens citadas por Markdown em saídas de ferramentas. */
-export function ChatMarkdownImageStrip({ content, className = "" }: { content: string; className?: string }) {
+export const ChatMarkdownImageStrip = memo(function ChatMarkdownImageStrip({ content, className = "" }: { content: string; className?: string }) {
   const { gallery } = useConversationMarkdownImages(content);
   const items: ShownAttachment[] = gallery.map((image) => ({ path: image.path, name: image.name, kind: "image", size: null, preview: image.preview }));
   return items.length > 0 ? <AttachmentStrip items={items} className={className} /> : null;
-}
+});
 
 /** Indexa respostas e saídas de ferramentas mesmo quando uma linha antiga está recolhida. Conta por item, sem reler os outros. */
 export function ChatMarkdownMediaIndex({ items }: { items: readonly TimelineItem[] }) {
@@ -87,6 +101,11 @@ function useGalleryOf(found: MarkdownImageMedia[]) {
   const gallery = useMemo(() => images.map((image) => ({ ...image, preview: image.preview ?? loadedPreviews[image.path] ?? null })), [images, loadedPreviews]);
 
   useEffect(() => {
+    // Sem imagens na fala, não dispara setState assíncrono com um `{}` novo na montagem.
+    if (images.length === 0) {
+      setLoadedPreviews((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+      return;
+    }
     let active = true;
     void Promise.all(images.map(async (image) => {
       if (image.preview) return [image.path, image.preview] as const;

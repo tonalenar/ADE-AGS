@@ -13,6 +13,7 @@ import { accessModesFor, extractSlashCommand, midTurnOf, queueHintKey, type Conv
 import { fastModeForThread, saveFastModeForThread } from "../fastMode";
 import { goalPauseResumeAvailable, isLegacyGoalClearAlias, matrixProviderForAgent, useHarnessCapability } from "../harnessCapabilities";
 import { messageFor } from "../attachments/send";
+import { suggestNextPrompt } from "../composerSuggest";
 import { ChatComposer } from "../ChatComposer";
 import { newConversationLocal } from "../chatActions";
 import { useChatPrefs } from "../chatPrefs";
@@ -29,6 +30,8 @@ import { ContextMeter } from "../autocompact/ContextMeter";
 import { contextUsageOf, isCompacting } from "../autocompact/model";
 import { clearThreadSearchJump, requestTimelineFollow, unqueueMessage, updateQueuedMessage, useChatStore } from "../store";
 import { useTeamComposer } from "../team/TeamComposer";
+import { LineagePanel, SubagentStatusLines } from "../team/SubagentLineage";
+import { TeamQueuePanel } from "../team/TeamQueue";
 import { TeamThreadFeed } from "../team/TeamThreadFeed";
 import { HarnessRunFeed } from "./HarnessRunFeed";
 import { TimelineView, type ApprovalNote } from "../timeline/ConversationTimeline";
@@ -125,6 +128,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   const shownItems = useMemo(() => (side?.history.length ? [...side.history, ...items] : items), [side?.history, items]);
   const quoteSourceIds = useMemo(() => new Set(items.map((item) => item.id)), [items]);
   const promptHistory = useMemo(() => items.flatMap((item) => item.kind === "user" && item.text?.trim() ? [item.text] : []), [items]);
+  const nextPromptSuggestion = useMemo(() => working ? null : suggestNextPrompt(items, { yes: t("chat.composer.suggest.yes"), runTests: t("chat.composer.suggest.runTests") }), [working, items, t]);
   // Com o agente trabalhando, a mensagem na fila dele só entra no fio quando o turno dela começa: o envio otimista espera.
   const pending = usePending(key, items, working);
   const streaming = useMemo(() => new Set(live.drafts.map((d) => d.itemId)), [live.drafts]);
@@ -147,7 +151,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   }, [items, key, thread.id]);
   // Responde o pedido aberto. Resolve `true` só quando o backend aceita (a caixa usa isso para limpar ou manter o texto).
   const answer = useCallback((choice: string): Promise<boolean> => (request ? answerRequest(thread.id, request.id, choice) : Promise.resolve(false)), [request, thread.id]);
-  const timelineAfter = useMemo(() => side ? null : <><TeamThreadFeed conversation={card} cards={cards} /><HarnessRunFeed threadId={thread.id} /></>, [side, card, cards, thread.id]);
+  const timelineAfter = useMemo(() => side ? null : <><TeamThreadFeed conversation={card} cards={cards} /><HarnessRunFeed threadId={thread.id} /><SubagentStatusLines threadId={thread.id} /><TeamQueuePanel threadId={thread.id} /><LineagePanel threadId={thread.id} /></>, [side, card, cards, thread.id]);
   const handleGoalAction = (action: "show" | "set" | "pause" | "resume" | "clear", objective?: string) => {
     void runThreadGoalAction(thread.id, action, objective);
   };
@@ -229,7 +233,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
         {(live.error ?? team?.error) && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{live.error ?? team?.error}</p>}
         <LogFailureNotice threadId={thread.id} />
         <ChatComposer cwd={thread.cwd} quoteKey={card.tabId} quoteThreadId={thread.id} quoteSourceIds={quoteSourceIds} promptHistory={promptHistory}
-          turnActive={working} forceSend={!!request}
+          turnActive={working} suggestion={request ? null : nextPromptSuggestion} forceSend={!!request}
           placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working
             ? t(queueHintKey(thread.agentId, followUpBehavior, steerCapability.support, interruptCapability.support), { key: QUEUE_KEY })
             : team?.placeholder ?? (side ? t("chat.sideChat.placeholder") : t("chat.composer.reply"))}

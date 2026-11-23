@@ -114,6 +114,7 @@ pub fn check_input(text: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
 pub fn history(conn: &Connection, workspace: &str, n: usize) -> Result<Value, String> {
     history_with_repo(conn, workspace, n, None, false, None)
 }
@@ -312,6 +313,7 @@ pub fn history_with_repo(
     Ok(result)
 }
 
+#[cfg(test)]
 pub fn validate_start(conn: &Connection, workspace: &str) -> Result<Value, String> {
     validate_start_with_repo(conn, workspace, None, false, None)
 }

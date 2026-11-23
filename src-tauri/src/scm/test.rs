@@ -735,3 +735,60 @@ detached
     assert!(!rows[2].current);
     assert_eq!(rows[2].branch, None);
 }
+
+#[test]
+fn parse_numstat_soma_linhas_e_ignora_binarios() {
+    use super::commands::parse_numstat;
+    let raw = "12\t4\tsrc/app.tsx\n-\t-\tassets/logo.png\n3\t0\tsrc/novo.ts\n\n";
+    assert_eq!(parse_numstat(raw), (15, 4));
+    assert_eq!(parse_numstat(""), (0, 0));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn working_diff_stat_conta_totais_com_e_sem_head() {
+    use super::commands::scm_working_diff_stat;
+
+    // Fora de um repo devolve None.
+    let fora = std::env::temp_dir().join(format!("cc-scm-fora-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&fora);
+    std::fs::create_dir_all(&fora).unwrap();
+    assert_eq!(scm_working_diff_stat(fora.to_string_lossy().into_owned()).await.unwrap(), None);
+    let _ = std::fs::remove_dir_all(&fora);
+
+    let dir = temp_repo("numstat");
+    let root = std::fs::canonicalize(&dir).unwrap().to_string_lossy().to_string();
+
+    // Sem HEAD: lê o que está staged no índice.
+    std::fs::write(dir.join("a.txt"), "um\ndois\ntres\n").unwrap();
+    git_in(&dir, &["add", "a.txt"]);
+    let st = scm_working_diff_stat(root.clone()).await.unwrap().expect("repo sem HEAD");
+    assert_eq!((st.added, st.removed), (3, 0));
+
+    // Com HEAD: lê mudanças do working tree e do índice contra HEAD.
+    git_in(&dir, &["commit", "-q", "-m", "base"]);
+    let limpo = scm_working_diff_stat(root.clone()).await.unwrap().expect("repo limpo");
+    assert_eq!((limpo.added, limpo.removed), (0, 0));
+
+    std::fs::write(dir.join("a.txt"), "um\ndois editado\ntres\nquatro\n").unwrap();
+    let editado = scm_working_diff_stat(root.clone()).await.unwrap().expect("repo editado");
+    assert_eq!((editado.added, editado.removed), (2, 1));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn leitura_do_scm_define_git_optional_locks_zero_e_escrita_nao() {
+    use std::ffi::OsStr;
+    let read_cmd = super::git::base_command("/repo", &["status"], true);
+    let read_envs: Vec<_> = read_cmd.get_envs().collect();
+    assert!(
+        read_envs.contains(&(OsStr::new("GIT_OPTIONAL_LOCKS"), Some(OsStr::new("0")))),
+        "leituras do SCM devem definir GIT_OPTIONAL_LOCKS=0: {read_envs:?}"
+    );
+    let write_cmd = super::git::base_command("/repo", &["commit", "-m", "x"], false);
+    let write_envs: Vec<_> = write_cmd.get_envs().collect();
+    assert!(
+        !write_envs.iter().any(|(k, _)| *k == OsStr::new("GIT_OPTIONAL_LOCKS")),
+        "escritas do SCM não devem silenciar locks opcionais: {write_envs:?}"
+    );
+}

@@ -54,6 +54,17 @@ pub fn db_boot_status() -> DbBootStatus {
 /// admite escrituras concurrentes, así que el `Mutex` es el que serializa el acceso.
 pub type DbConnection = Arc<Mutex<Connection>>;
 
+/// Obtém o handle compartilhado do banco registrado no estado do Tauri.
+pub fn try_db(app: &tauri::AppHandle) -> Option<DbConnection> {
+    use tauri::Manager;
+    app.try_state::<DbConnection>().map(|s| s.inner().clone())
+}
+
+/// Obtém o handle compartilhado do banco ou devolve erro amigável quando ainda não está pronto.
+pub fn db_of(app: &tauri::AppHandle) -> Result<DbConnection, String> {
+    try_db(app).ok_or_else(|| "o banco de dados não está disponível".to_string())
+}
+
 /// Roda `work` com a conexão travada numa thread de bloqueio, fora do runtime async.
 pub(crate) async fn blocking_db<T, F>(db: &DbConnection, work: F) -> Result<T, String>
 where
@@ -138,6 +149,20 @@ pub(crate) fn open_side_connection_at(path: &std::path::Path) -> SqlResult<Conne
         "PRAGMA foreign_keys = ON;
          PRAGMA busy_timeout = 30000;",
     )?;
+    Ok(conn)
+}
+
+/// Timeout curto da conexão lateral usada pelo checkpoint periódico do WAL (F-K10).
+/// Evita que a manutenção espere 30 s por leitores ou escritores ativos.
+pub(crate) const WAL_CHECKPOINT_BUSY_TIMEOUT_MS: u64 = 250;
+
+/// Conexão lateral dedicada ao `PRAGMA wal_checkpoint(PASSIVE)`, com `busy_timeout` curto.
+pub(crate) fn open_wal_checkpoint_connection_at(path: &std::path::Path) -> SqlResult<Connection> {
+    let conn = Connection::open(path)?;
+    conn.execute_batch(&format!(
+        "PRAGMA foreign_keys = ON;
+         PRAGMA busy_timeout = {WAL_CHECKPOINT_BUSY_TIMEOUT_MS};"
+    ))?;
     Ok(conn)
 }
 

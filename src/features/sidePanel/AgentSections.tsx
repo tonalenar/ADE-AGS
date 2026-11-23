@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { tabConnectors, tabContextUsage, type Connector, type ContextUsage } from "@/features/tabs/panelIpc";
 import type { Tab } from "@/features/tabs/types";
+import { startVisiblePolling } from "@/shared/visiblePolling";
 
 import { shortTokens } from "./panelModel";
 import { Row, Section } from "./Section";
@@ -10,7 +11,7 @@ import { Row, Section } from "./Section";
 /** Só estes agentes têm transcript e config que a ADE sabe ler (ver `session/panel.rs`). */
 const READABLE = new Set(["claude-code", "codex"]);
 
-/** O contexto muda a cada resposta do agente: relê enquanto a aba está aberta. */
+/** O contexto muda a cada resposta do agente: relê enquanto a aba está aberta e a janela visível. */
 const CONTEXT_POLL_MS = 15_000;
 
 function useContext(tab: Tab) {
@@ -19,14 +20,16 @@ function useContext(tab: Tab) {
     setUsage(undefined);
     if (!READABLE.has(tab.agentId) || !tab.sessionId) return;
     let alive = true;
-    const load = () => tabContextUsage(tab.agentId, tab.cwd, tab.sessionId!, tab.accountId ?? null)
-      .then((u) => alive && setUsage(u))
-      .catch(() => alive && setUsage(null));
-    load();
-    const timer = window.setInterval(load, CONTEXT_POLL_MS);
+    const poll = startVisiblePolling(
+      () =>
+        tabContextUsage(tab.agentId, tab.cwd, tab.sessionId!, tab.accountId ?? null)
+          .then((u) => { if (alive) setUsage(u); })
+          .catch(() => { if (alive) setUsage(null); }),
+      CONTEXT_POLL_MS,
+    );
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      poll.stop();
     };
   }, [tab.agentId, tab.cwd, tab.sessionId, tab.accountId]);
   return usage;

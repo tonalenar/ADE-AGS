@@ -516,12 +516,12 @@ pub(super) fn routine_delete(app: &AppHandle, args: &Value) -> Result<Value, Str
 
 // ── Para la pantalla ────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn routine_list_all() -> Vec<Routine> {
     routines::all()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn routine_set_catch_up(app: AppHandle, id: String, catch_up: bool) -> Result<(), String> {
     routines::update(|all| {
         let r = all.iter_mut().find(|r| r.id == id).ok_or("A rotina não existe mais.")?;
@@ -535,7 +535,7 @@ pub fn routine_set_catch_up(app: AppHandle, id: String, catch_up: bool) -> Resul
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn routine_set_enabled(app: AppHandle, id: String, enabled: bool) -> Result<(), String> {
     let now = Local::now();
     routines::update(|all| {
@@ -552,7 +552,7 @@ pub fn routine_run_now(app: AppHandle, id: String) -> Result<String, String> {
     run_and_record(&app, &id, false)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn routine_remove(app: AppHandle, id: String) -> Result<(), String> {
     routines::update(|all| {
         all.retain(|r| r.id != id);
