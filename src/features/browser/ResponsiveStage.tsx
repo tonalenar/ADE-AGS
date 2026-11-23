@@ -58,23 +58,32 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
    *  escala se recalculara con cada movimiento, el borde se escaparía del puntero. */
   const [drag, setDrag] = useState<{ draft: Viewport; scale: number } | null>(null);
 
+  const stageMode = device ? "device" : (!drag && isFillViewport(viewport)) ? "fill" : (floatingPreview && !!viewport && !isFillViewport(viewport)) ? "mini" : viewport ? "framed" : "free";
+
   // Mede antes de pintar: sem isso o primeiro quadro saía com o palco 0×0, a escala caía em 1 e o celular aparecia
-  // gigante por um instante (e a vista nativa ia junto).
+  // gigante por um instante (e a vista nativa ia junto). O ResizeObserver fica conectado uma única vez no mount.
+  useLayoutEffect(() => {
+    const el = stage.current;
+    if (!el) return;
+    const update = (width: number, height: number) => {
+      setBox((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+    };
+    const observer = new ResizeObserver(([entry]) => {
+      update(entry.contentRect.width, entry.contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   useLayoutEffect(() => {
     const el = stage.current;
     if (!el) return;
     const style = getComputedStyle(el);
     const px = (v: string) => parseFloat(v) || 0;
-    setBox({
-      width: Math.max(0, el.clientWidth - px(style.paddingLeft) - px(style.paddingRight)),
-      height: Math.max(0, el.clientHeight - px(style.paddingTop) - px(style.paddingBottom)),
-    });
-    const observer = new ResizeObserver(([entry]) => {
-      setBox({ width: entry.contentRect.width, height: entry.contentRect.height });
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [viewport]);
+    const width = Math.max(0, el.clientWidth - px(style.paddingLeft) - px(style.paddingRight));
+    const height = Math.max(0, el.clientHeight - px(style.paddingTop) - px(style.paddingBottom));
+    setBox((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+  }, [stageMode]);
 
   const shown = drag?.draft ?? viewport;
   const z = clampZoom(zoom);

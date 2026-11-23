@@ -2,7 +2,7 @@
  * O que um conteúdo nativo por cima do webview (o navegador do Portal, a tela do simulador iOS) precisa saber do
  * DOM: o retângulo do elemento que reserva o espaço, quem o recorta e o que do app está por cima dele.
  */
-import type { Box } from "./realBrowser";
+import { intersect, type Box } from "./realBrowser";
 
 /** O que do app pode ficar por cima da página: menus, diálogos, dicas, o painel lateral. */
 export const OVERLAYS = 'dialog[open], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tooltip"], [popover], [data-radix-popper-content-wrapper], [data-session-panel], [data-over-webview]:not([data-over-webview="hit"]), [data-native-overlay]';
@@ -18,9 +18,61 @@ export function boxOf(el: Element): Box {
   return { x: r.left, y: r.top, width: r.width, height: r.height };
 }
 
-function isVisibleOverlay(el: Element): boolean {
+function isOpaqueAndShown(el: Element): boolean {
   const s = getComputedStyle(el);
-  return s.display !== "none" && s.visibility !== "hidden";
+  if (s.display === "none" || s.visibility === "hidden" || s.visibility === "collapse") return false;
+  const opacity = s.opacity === "" ? 1 : Number.parseFloat(s.opacity);
+  return !Number.isFinite(opacity) || opacity > 0;
+}
+
+function isVisibleOverlay(el: Element): boolean {
+  for (let cur: Element | null = el; cur; cur = cur.parentElement) {
+    if (!isOpaqueAndShown(cur)) return false;
+  }
+  return true;
+}
+
+function ancestorChain(el: Element): Element[] {
+  const chain: Element[] = [];
+  for (let cur: Element | null = el; cur; cur = cur.parentElement) chain.push(cur);
+  return chain.reverse();
+}
+
+/** Primeiro `z-index` numérico a partir de `branch` até `leaf`, representando o nível no contexto do LCA. */
+function stackingLevel(chain: Element[], startIndex: number): number | null {
+  for (let i = startIndex; i < chain.length; i++) {
+    const z = getComputedStyle(chain[i]!).zIndex;
+    if (z && z !== "auto") {
+      const parsed = Number(z);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return null;
+}
+
+/** Verdadeiro quando `overlay` pinta acima de `surface` na ordem de empilhamento (z-index / ordem do DOM). */
+function isAboveInPaintOrder(overlay: Element, surface: Element, overlap: Box): boolean {
+  const overlayChain = ancestorChain(overlay);
+  const surfaceChain = ancestorChain(surface);
+  let common = 0;
+  const limit = Math.min(overlayChain.length, surfaceChain.length);
+  while (common < limit && overlayChain[common] === surfaceChain[common]) common += 1;
+
+  const overlayZ = stackingLevel(overlayChain, common);
+  const surfaceZ = stackingLevel(surfaceChain, common);
+  if (overlayZ !== null || surfaceZ !== null) {
+    const oz = overlayZ ?? 0;
+    const sz = surfaceZ ?? 0;
+    if (oz !== sz) return oz > sz;
+  }
+
+  // Se o overlay recebe ponteiro e o ponto central da interseção acerta a própria superfície nativa, está atrás dela.
+  if (getComputedStyle(overlay).pointerEvents !== "none") {
+    const hit = document.elementFromPoint(overlap.x + overlap.width / 2, overlap.y + overlap.height / 2);
+    if (hit && (hit === surface || surface.contains(hit))) return false;
+  }
+
+  return Boolean(surface.compareDocumentPosition(overlay) & Node.DOCUMENT_POSITION_FOLLOWING);
 }
 
 /** Os ancestrais que recortam o que passa da borda deles (o canvas, a área de conteúdo). */
@@ -48,7 +100,10 @@ export function hitCoversOf(el: HTMLElement): Box[] {
 export function coversOf(el: HTMLElement, rect: Box, ignore?: string): Box[] {
   const found = new Set<Element>();
   for (const overlay of document.querySelectorAll(OVERLAYS)) {
-    if (!overlay.contains(el) && !el.contains(overlay) && isVisibleOverlay(overlay)) found.add(overlay);
+    if (overlay.contains(el) || el.contains(overlay) || !isVisibleOverlay(overlay)) continue;
+    const overlap = intersect(boxOf(overlay), rect);
+    if (!overlap || !isAboveInPaintOrder(overlay, el, overlap)) continue;
+    found.add(overlay);
   }
   for (let i = 0; i < GRID.cols; i++) {
     for (let j = 0; j < GRID.rows; j++) {
