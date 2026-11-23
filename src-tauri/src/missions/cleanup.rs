@@ -61,19 +61,7 @@ pub fn prune(
 }
 
 fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let mut command = crate::util::spawn::hidden_command("git");
-    command
-        .arg("-C")
-        .arg(crate::util::external_path(repo))
-        .args(args);
-    let out = crate::util::output_with_timeout(&mut command, Duration::from_secs(120))
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-    }
-    Ok(String::from_utf8_lossy(&out.stdout)
-        .trim_end_matches(['\r', '\n'])
-        .to_string())
+    crate::util::git::run(repo, args, Duration::from_secs(120))
 }
 
 fn size(path: &Path) -> Result<u64, String> {

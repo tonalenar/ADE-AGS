@@ -258,6 +258,7 @@ pub fn default_root() -> Result<PathBuf,String> {
 }
 
 /// Read provenance only; launching a Run must not export or mutate user files.
+#[cfg(test)]
 pub fn current_commit(conn: &Connection, workspace: &str) -> Option<String> {
     let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)", [workspace], |row| row.get(0)).ok()?;
     if !exists {

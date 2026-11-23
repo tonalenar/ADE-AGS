@@ -306,6 +306,7 @@ pub fn tag_new_entry_repo(
 
 /// Marca uma memória recém-criada por uma missão com o repositório dela. Correção de uma memória
 /// existente não muda a chave (uma memória sem chave, de antes, continua valendo em todos).
+#[cfg(test)]
 pub fn tag_new_entry(
     conn: &Connection,
     entry_id: &str,

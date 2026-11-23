@@ -337,6 +337,7 @@ pub(crate) fn active_turn_id(
     Ok((turns.len() == 1).then(|| turns[0].clone()))
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn insert_thread(
     conn: &Connection,
@@ -353,6 +354,7 @@ pub fn insert_thread(
     )
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn insert_thread_with_parent(
     conn: &Connection,

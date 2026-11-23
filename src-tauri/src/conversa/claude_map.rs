@@ -106,11 +106,13 @@ pub enum Start<'a> {
 }
 
 /// Os argumentos do `claude` de uma conversa. Pura.
+#[cfg(test)]
 pub fn launch_args(row: &ThreadRow, start: Start<'_>) -> Vec<String> {
     launch_args_with_auto_compact(row, start, None)
 }
 
 /// Argv do Claude com limite opcional por sessão, sem editar arquivos de configuração do usuário.
+#[cfg(test)]
 pub fn launch_args_with_auto_compact(
     row: &ThreadRow,
     start: Start<'_>,
@@ -120,6 +122,7 @@ pub fn launch_args_with_auto_compact(
 }
 
 /// Argv do Claude com as configurações privadas desta sessão, sem editar arquivos da conta.
+#[cfg(test)]
 pub fn launch_args_with_options(
     row: &ThreadRow,
     start: Start<'_>,
@@ -181,11 +184,6 @@ pub fn launch_args_for_session(
         args.extend(["--effort".into(), "xhigh".into()]);
     }
     (args, Value::Object(settings))
-}
-
-/// A mensagem do usuário no formato do `--input-format stream-json`.
-pub fn user_message(text: &str) -> Value {
-    user_message_with(text, Vec::new())
 }
 
 /// Com imagens em linha: os blocos `image` (base64) vêm antes do texto, como o Claude Code os monta.

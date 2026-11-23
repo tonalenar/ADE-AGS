@@ -109,7 +109,9 @@ export function createActivity(env: ActivityEnv): Activity {
       // Os pedidos de antes da ação não contam.
       const ambient = options.baseline ?? new Set<number>();
       let lastDom = started;
-      let lastNet = started;
+      // A rede conta desde o último evento REAL (um pedido que começou ou terminou), não desde o início da espera: sem
+      // atividade de rede não há o que esperar por silêncio, e o piso de 250 ms deixava de ser estado para ser relógio.
+      let lastNet = lastEventAt ?? started - options.netIdleMs;
       let sawNav = false;
       let sawLoading = false;
       let maxRequests = 0;

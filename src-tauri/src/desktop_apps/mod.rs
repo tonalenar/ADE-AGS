@@ -1,7 +1,9 @@
 //! Gemini Desktop is a graphical participant, separate from the Gemini CLI provider.
 //! Native window ownership never implies headless/MCP or autonomous Lead capabilities.
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, WebviewWindow};
+#[cfg(windows)]
+use tauri::Manager;
+use tauri::WebviewWindow;
 
 #[cfg(windows)]
 mod native;
@@ -78,6 +80,7 @@ pub fn gemini_desktop_status() -> DesktopStatus {
 }
 
 // All HWND mutations (including release of the named mutex) run on the UI thread.
+#[cfg(windows)]
 async fn on_ui<T: Send + 'static>(
     app: tauri::AppHandle,
     f: impl FnOnce() -> Result<T, String> + Send + 'static,

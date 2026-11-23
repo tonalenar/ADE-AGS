@@ -331,149 +331,20 @@ mod opencode {
     }
 }
 
-mod agy {
+mod cursor_helpers {
     use super::*;
-    use crate::conversa::agy_map::{access_flags, error_from_stderr, launch_args, prompt_input, tool_item, Mapper, Out};
-    use crate::conversa::claude_map::TurnResult;
+    use crate::conversa::cursor::pick_duration;
+    use crate::conversa::cursor_map::tool_item;
 
-    fn items(outs: &[Out]) -> Vec<&Item> {
-        outs.iter().filter_map(|o| if let Out::Item(i) = o { Some(&**i) } else { None }).collect()
-    }
-
-    fn step(index: i64, state: &str, step_type: &str, extra: Value) -> Value {
-        let mut s = json!({ "step_index": index, "state": state, "step_type": step_type });
-        s.as_object_mut().unwrap().extend(extra.as_object().cloned().unwrap_or_default());
-        json!({ "event": "step_update", "step_update": s })
-    }
-
-    /// «Trabalhou por 20h 21m» numa resposta de segundos: o `agy` informa `duration_seconds` da CONVERSA dele (que a
-    /// troca de agente retoma no dia seguinte), não do turno. Vale o relógio do app; o do agy só se couber nele.
+    /// «Trabalhou por 20h 21m» numa resposta de segundos: vale o relógio do app; o do agente só se couber nele.
     #[test]
     fn a_duracao_do_turno_nunca_passa_do_relogio_do_app() {
-        use crate::conversa::agy::pick_duration;
         let (twenty_hours, eight_s) = (73_260_000, 8_000);
         assert_eq!(pick_duration(Some(twenty_hours), eight_s), eight_s, "a duração da conversa inteira não é a do turno");
         assert_eq!(pick_duration(Some(7_200), eight_s), 7_200, "uma duração que cabe no turno é a do agente (só o modelo)");
         assert_eq!(pick_duration(Some(eight_s + 3_000), eight_s), eight_s + 3_000, "com folga de relógio");
         assert_eq!(pick_duration(None, eight_s), eight_s);
         assert_eq!(pick_duration(Some(-5), eight_s), eight_s);
-    }
-
-    #[test]
-    fn o_acesso_vira_flags_do_agy() {
-        assert!(access_flags("ask").is_empty());
-        assert_eq!(access_flags("edits"), ["--mode", "accept-edits"]);
-        assert_eq!(access_flags("safe"), ["--mode", "auto"]);
-        assert_eq!(access_flags("plan"), ["--mode", "plan"]);
-        assert_eq!(access_flags("full"), ["--dangerously-skip-permissions"]);
-    }
-
-    #[test]
-    fn os_argumentos_levam_a_mensagem_o_modelo_e_a_conversa() {
-        let fresh = launch_args(&row("antigravity", "edits"), None);
-        assert_eq!(&fresh[..4], ["--input-format", "stream-json", "--output-format", "stream-json"]);
-        let joined = fresh.join(" ");
-        for flag in ["--output-format stream-json", "--disable-slash-commands", "--mode accept-edits", "--model anthropic/claude-sonnet-5-5", "--effort high"] {
-            assert!(joined.contains(flag), "{flag} em {joined}");
-        }
-        assert!(!joined.contains("--print"));
-        assert!(!joined.contains("--conversation"));
-        let resumed = launch_args(&ThreadRow { model: None, effort: None, ..row("antigravity", "ask") }, Some("cv-1")).join(" ");
-        assert!(resumed.contains("--conversation cv-1") && !resumed.contains("--model") && !resumed.contains("--mode"), "{resumed}");
-        let prompt = prompt_input("--help\nOlá").unwrap();
-        assert_eq!(serde_json::from_str::<Value>(&prompt).unwrap(), json!({
-            "event": "user", "message": { "content": "--help\nOlá" }
-        }));
-    }
-
-    #[test]
-    fn um_turno_com_fala_em_pedacos_ferramenta_e_resultado() {
-        let mut mapper = Mapper::new("run1");
-        let mut all: Vec<Out> = Vec::new();
-        for line in [
-            json!({ "event": "init", "conversation_id": "cv-9", "init": { "tools": [] } }),
-            step(1, "ACTIVE", "agent_response", json!({ "conversation_id": "cv-9", "text_delta": "Vou " })),
-            step(1, "DONE", "agent_response", json!({ "text_delta": "listar." })),
-            step(2, "ACTIVE", "run_command", json!({ "tool_info": { "name": "run_command", "parameters": { "CommandLine": "ls -la" } } })),
-            step(2, "DONE", "run_command", json!({ "tool_info": { "name": "run_command", "parameters": { "CommandLine": "ls -la" }, "output": "a.txt\nb.txt" } })),
-            step(3, "DONE", "agent_response", json!({ "text_delta": "Há dois arquivos." })),
-            json!({ "event": "result", "result": { "conversation_id": "cv-9", "status": "SUCCESS", "response": "Há dois arquivos.", "duration_seconds": 2.5,
-                "usage": { "input_tokens": 100, "output_tokens": 20, "thinking_tokens": 10, "cache_read_tokens": 50, "total_tokens": 130 } } }),
-        ] {
-            all.extend(mapper.feed(&line, 1));
-        }
-        let sessions: Vec<_> = all.iter().filter_map(|o| if let Out::Session(s) = o { Some(s.as_str()) } else { None }).collect();
-        assert_eq!(sessions, ["cv-9"], "o id da conversa sai uma vez só");
-        let deltas: Vec<_> = all.iter().filter_map(|o| if let Out::Delta { delta, item_id, .. } = o { Some((item_id.as_str(), delta.as_str())) } else { None }).collect();
-        assert_eq!(deltas[..2], [("agy:run1:1", "Vou "), ("agy:run1:1", "listar.")]);
-        let made = items(&all);
-        let speech: Vec<_> = made.iter().filter(|i| i.kind == ItemKind::Assistant).map(|i| (i.id.as_str(), i.text.as_deref().unwrap())).collect();
-        assert_eq!(speech, [("agy:run1:1", "Vou listar."), ("agy:run1:3", "Há dois arquivos.")]);
-        let tools: Vec<_> = made.iter().filter(|i| i.kind == ItemKind::Tool).collect();
-        assert_eq!(tools.len(), 2, "rodando e depois pronta, no mesmo id");
-        assert_eq!((tools[0].status, tools[1].status, tools[1].tool, tools[1].label.as_deref(), tools[1].output.as_deref()),
-            (Some(ToolStatus::Running), Some(ToolStatus::Done), Some(ToolKind::Command), Some("ls -la"), Some("a.txt\nb.txt")));
-        assert_eq!(tools[0].id, tools[1].id);
-        assert_eq!(made.iter().find(|i| i.kind == ItemKind::Usage).and_then(|i| i.tokens), Some(130));
-        // A resposta final repete a última fala: não vira uma fala a mais.
-        assert_eq!(speech.len(), 2);
-        let Some(Out::Done(done)) = all.last() else { panic!("sem fim") };
-        assert_eq!((done.interrupted, done.error.as_deref(), done.duration_ms), (false, None, Some(2500)));
-    }
-
-    #[test]
-    fn sem_pedacos_a_resposta_final_e_a_fala() {
-        let mut mapper = Mapper::new("r");
-        let outs = mapper.feed(&json!({ "event": "result", "result": { "status": "SUCCESS", "response": "Tudo certo." } }), 1);
-        let said: Vec<_> = items(&outs).iter().filter(|i| i.kind == ItemKind::Assistant).map(|i| i.text.clone().unwrap()).collect();
-        assert_eq!(said, ["Tudo certo."]);
-    }
-
-    #[test]
-    fn a_fala_que_nao_fechou_fecha_no_resultado() {
-        let mut mapper = Mapper::new("r");
-        mapper.feed(&step(1, "ACTIVE", "agent_response", json!({ "text_delta": "meio" })), 1);
-        let outs = mapper.feed(&json!({ "event": "result", "result": { "status": "SUCCESS", "response": "meio" } }), 2);
-        let speech: Vec<_> = items(&outs).into_iter().filter(|i| i.kind == ItemKind::Assistant).collect();
-        assert_eq!(speech.len(), 1);
-        assert_eq!(speech[0].text.as_deref(), Some("meio"));
-    }
-
-    #[test]
-    fn falha_e_interrupcao_acabam_diferente() {
-        let done = |result: Value| -> TurnResult {
-            let outs = Mapper::new("r").feed(&json!({ "event": "result", "result": result }), 1);
-            match outs.into_iter().last() { Some(Out::Done(d)) => d, other => panic!("{other:?}") }
-        };
-        let failed = done(json!({ "status": "ERROR", "error": "cota esgotada" }));
-        assert_eq!((failed.interrupted, failed.error.as_deref()), (false, Some("cota esgotada")));
-        assert!(done(json!({ "status": "ERROR" })).error.unwrap().contains("ERROR"));
-        let stopped = done(json!({ "status": "ERROR", "finished_reason": "interrupted" }));
-        assert_eq!((stopped.interrupted, stopped.error), (true, None));
-        assert!(done(json!({ "status": "SUCCESS", "finished_reason": "print_timeout" })).error.is_some());
-        assert_eq!(done(json!({ "status": "SUCCESS" })).error, None);
-    }
-
-    #[test]
-    fn o_que_precisava_de_aprovacao_aparece_negado() {
-        let outs = Mapper::new("r").feed(&json!({ "event": "result", "result": { "status": "SUCCESS", "denied_actions": [
-            "git push origin main", { "command": "rm -rf build", "reason": "fora do sandbox" },
-        ] } }), 1);
-        let denied: Vec<_> = items(&outs).into_iter().filter(|i| i.status == Some(ToolStatus::Denied)).collect();
-        assert_eq!(denied.iter().map(|i| i.label.as_deref().unwrap()).collect::<Vec<_>>(), ["git push origin main", "rm -rf build"]);
-        assert_ne!(denied[0].id, denied[1].id);
-    }
-
-    #[test]
-    fn passos_que_nao_sao_ferramenta_nem_fala_ficam_de_fora() {
-        let mut mapper = Mapper::new("r");
-        for kind in ["user_input", "conversation_history", "checkpoint", "ephemeral_message"] {
-            assert!(mapper.feed(&step(1, "DONE", kind, json!({ "text_delta": "x" })), 1).is_empty(), "{kind}");
-        }
-        assert!(mapper.feed(&json!({ "event": "command_result", "command": { "name": "usage" } }), 1).is_empty());
-        let thought = mapper.feed(&step(4, "DONE", "agent_thought", json!({ "text_delta": "pensando" })), 1);
-        let reasoning = items(&thought);
-        assert_eq!((reasoning[0].kind, reasoning[0].text.as_deref()), (ItemKind::Reasoning, Some("pensando")));
     }
 
     #[test]
@@ -493,99 +364,6 @@ mod agy {
         // O que não conheço aparece com o próprio nome.
         let other = tool_item("g", "xyzzy", &Value::Null, None);
         assert_eq!((other.tool, other.label.as_deref()), (Some(ToolKind::Other), Some("xyzzy")));
-    }
-
-    #[test]
-    fn o_erro_sem_resultado_vem_do_stderr() {
-        let tail = vec!["aviso qualquer".to_string(), "AGY_ERROR: {\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"Cota esgotada\",\"retryable\":false}".to_string()];
-        assert_eq!(error_from_stderr(&tail), "Cota esgotada");
-        assert_eq!(error_from_stderr(&["error: sem login".to_string(), String::new()]), "error: sem login");
-        assert!(error_from_stderr(&[]).contains("sem responder"));
-    }
-
-    #[test]
-    fn a_conversa_recusada_do_agy_so_vale_para_a_frase_de_conversa_inexistente() {
-        use crate::conversa::agy_map::session_refused;
-        let linhas = |ls: &[&str]| ls.iter().map(|l| l.to_string()).collect::<Vec<_>>();
-        for l in [
-            "Error: conversation not found: abc",
-            "no such conversation: abc",
-            "Session not found",
-            "AGY_ERROR: {\"status\":\"NOT_FOUND\",\"message\":\"conversation abc not found\",\"retryable\":false}",
-            "AGY_ERROR: {\"status\":\"NOT_FOUND\",\"message\":\"Conversation does not exist\"}",
-        ] {
-            assert!(session_refused(&linhas(&["aviso qualquer", l])), "{l}");
-        }
-        for l in [
-            "Error: file not found: src/main.rs",
-            "ENOENT: no such file or directory, open 'a.txt'",
-            "AGY_ERROR: {\"status\":\"NOT_FOUND\",\"message\":\"file x not found\"}",
-            "AGY_ERROR: {\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"Cota esgotada\",\"retryable\":false}",
-            "AGY_ERROR: {\"status\":\"UNAUTHENTICATED\",\"message\":\"conversation requires login\"}",
-            "model not found: gemini",
-        ] {
-            assert!(!session_refused(&linhas(&[l])), "{l}");
-        }
-        assert!(!session_refused(&[]));
-    }
-
-    #[test]
-    fn o_turno_vai_ao_banco_na_ordem() {
-        let conn = crate::database::test_db();
-        store::insert_thread(&conn, "t", "antigravity", "/p", "T", &store::Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
-        let mut mapper = Mapper::new("run1");
-        let mut lines = vec![
-            step(1, "DONE", "agent_response", json!({ "text_delta": "Oi" })),
-            step(2, "ACTIVE", "run_command", json!({ "parameters": { "command": "ls" } })),
-            step(2, "DONE", "run_command", json!({ "parameters": { "command": "ls" } })),
-        ];
-        lines.push(json!({ "event": "result", "result": { "status": "SUCCESS", "response": "Oi" } }));
-        for line in lines {
-            for out in mapper.feed(&line, 1) {
-                if let Out::Item(item) = out {
-                    store::upsert_item(&conn, "t", Some("run1"), &item).unwrap();
-                }
-            }
-        }
-        let stored = store::items(&conn, "t").unwrap();
-        assert_eq!(stored.iter().map(|i| i.kind).collect::<Vec<_>>(), [ItemKind::Assistant, ItemKind::Tool]);
-        assert_eq!(stored[1].status, Some(ToolStatus::Done));
-    }
-
-    /// Uso real: um turno de verdade com `agy`, que confere os campos que o changelog só descreve
-    /// (`tool_info`, `step_type`). Gasta cota; só roda com `CC_E2E_AGY=1`.
-    #[test]
-    #[ignore = "gasta cota do modelo: rode a mão com CC_E2E_AGY=1"]
-    fn e2e_agy_um_turno_real() {
-        if std::env::var("CC_E2E_AGY").is_err() {
-            return;
-        }
-        let args = launch_args(&row("antigravity", "ask"), None);
-        let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let program = crate::util::find_program("agy").expect("agy no PATH");
-        use std::io::Write;
-        let mut child = crate::util::external_command(&program, &args).unwrap()
-            .current_dir(std::env::temp_dir())
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn().expect("agy rodou");
-        writeln!(child.stdin.take().unwrap(), "{}", prompt_input("Responda apenas: OK").unwrap()).unwrap();
-        let out = child.wait_with_output().expect("agy terminou");
-        let mut mapper = Mapper::new("e2e");
-        let mut said = String::new();
-        let mut done = false;
-        for line in String::from_utf8_lossy(&out.stdout).lines() {
-            let Ok(value) = serde_json::from_str::<Value>(line) else { continue };
-            for o in mapper.feed(&value, 0) {
-                match o {
-                    Out::Item(i) if i.kind == ItemKind::Assistant => said.push_str(i.text.as_deref().unwrap_or("")),
-                    Out::Done(d) => { assert!(d.error.is_none(), "{d:?}"); done = true; }
-                    _ => {}
-                }
-            }
-        }
-        assert!(done && said.contains("OK"), "resposta: {said}");
     }
 }
 

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use super::credentials::{WipeString, helper_program, sanitize_error};
 use super::export::{AiMemoryStatus, DEFAULT_INTERVAL_HOURS, SkippedMemoryPage, build_export_bundle, load_legacy_snapshot};
@@ -111,9 +111,7 @@ impl ForgeClient for Api {
 }
 
 fn db(app: &AppHandle) -> Result<DbConnection, String> {
-    app.try_state::<DbConnection>()
-        .map(|s| s.inner().clone())
-        .ok_or_else(|| "O banco de dados ainda não está pronto.".into())
+    crate::database::db_of(app)
 }
 
 fn get(conn: &Connection, key: &str) -> Option<String> {
@@ -167,6 +165,7 @@ fn valid_repo_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
+#[cfg(test)]
 pub(crate) fn status_db(db: &DbConnection) -> Result<MemorySyncStatus, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     Ok(read_status(&conn))

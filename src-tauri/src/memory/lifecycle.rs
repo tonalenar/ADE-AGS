@@ -12,6 +12,7 @@ pub fn stats(conn: &Connection, workspace: &str) -> Result<Value, String> {
 }
 
 /// Session data becomes only a proposal; approval remains a user action.
+#[cfg(test)]
 pub fn swarm_promote(
     conn: &Connection,
     workspace: &str,

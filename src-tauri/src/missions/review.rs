@@ -23,7 +23,10 @@ use std::time::Duration;
 use rusqlite::Connection;
 use serde::Serialize;
 
-use crate::util::{external_path, output_with_timeout};
+use crate::util::external_path;
+#[cfg(test)]
+use crate::util::output_with_timeout;
+#[cfg(test)]
 use crate::util::spawn::output_with_stdout_limit;
 
 const GIT_FAST: Duration = Duration::from_secs(20);
@@ -32,9 +35,16 @@ const GIT_SLOW: Duration = Duration::from_secs(180);
 const MAX_DIFF_BYTES: usize = 400 * 1024;
 
 fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
-    git_capped(dir, args, limit, None)
+    // Sin terminal que conteste: un editor o un prompt colgarían el comando.
+    crate::util::git::run_with_env(
+        dir,
+        args,
+        &[("GIT_EDITOR", "true"), ("GIT_MERGE_AUTOEDIT", "no")],
+        limit,
+    )
 }
 
+#[cfg(test)]
 fn git_capped(dir: &Path, args: &[&str], limit: Duration, max_stdout: Option<usize>) -> Result<String, String> {
     let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(external_path(dir)).args(args);
@@ -517,6 +527,7 @@ pub fn task_diff_with_db(
 }
 
 /// Las tareas con rama del run activo de la misión, con lo que entregó cada una.
+#[cfg(test)]
 pub fn review(conn: &Connection, mission_id: &str) -> Result<MissionReview, String> {
     let mission = super::store::get(conn, mission_id)?.ok_or("a missão não existe mais")?;
     let (integration_branch, applied_at) = integration_of(conn, mission_id)?;
@@ -595,6 +606,7 @@ fn managed_links(conn: &Connection, task: &crate::runs::Task) -> Vec<PathBuf> {
 }
 
 /// El diff completo de una entrega contra el proyecto (desde donde se separó).
+#[cfg(test)]
 pub fn task_diff(conn: &Connection, task_id: &str) -> Result<String, String> {
     let task = crate::runs::store::task_by_id(conn, task_id)?.ok_or("a tarefa não existe mais")?;
     let branch = task

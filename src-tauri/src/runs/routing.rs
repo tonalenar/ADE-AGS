@@ -131,20 +131,6 @@ pub fn resolve_account_choice(
     Ok(AccountChoice::Fixed(Some(raw)))
 }
 
-/// El pedido con `pool:Nombre` (que llega como una cuenta fija con ese texto) resuelto a su
-/// pool. Sin pool, el mismo pedido. Va antes de rutear: leer el pool es de la base, y el ruteo
-/// es puro. Usa leitura sem avançar o cursor (M-6); para avançar apenas quando o roteamento
-/// suceder, use [`route_with_pool_cursor`].
-pub fn resolve_pool(db: &DbConnection, request: &RouteRequest) -> Result<RouteRequest, String> {
-    if let AccountChoice::Fixed(Some(raw)) = &request.account {
-        if let Some(name) = crate::accounts::pools::pool_ref(raw) {
-            let spec = crate::accounts::pools::spec_preview(db, name)?;
-            return Ok(RouteRequest { account: AccountChoice::Pool(spec), ..request.clone() });
-        }
-    }
-    Ok(request.clone())
-}
-
 /// Roteia o pedido avançando o cursor de `round_robin` atomicamente e somente quando a escolha
 /// dá certo (M-6). Não faz I/O de roster: quem chama já montou `roster` antes.
 pub fn route_with_pool_cursor(

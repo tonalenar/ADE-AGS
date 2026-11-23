@@ -55,14 +55,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 }
 
 fn clip(text: &str) -> String {
-    let text = text.trim();
-    if text.chars().count() <= MAX_TEXT {
-        return text.to_string();
-    }
-    // O reticências entra DENTRO do limite: o texto guardado nunca passa de MAX_TEXT.
-    let mut out: String = text.chars().take(MAX_TEXT - 1).collect();
-    out.push('…');
-    out
+    crate::util::clip(text, MAX_TEXT)
 }
 
 /// Guarda a mensagem se os dois lados são da mesma missão. Devolve `true` se gravou.

@@ -96,6 +96,7 @@ pub const LABELS: &[Category] = &[
 ];
 
 /// Todos os serviços desligados por padrão, sem alocar nem mudar a ordem original.
+#[cfg(test)]
 pub fn all_labels() -> impl Iterator<Item = &'static str> {
     LABELS.iter().flat_map(|category| category.labels.iter().copied())
 }
