@@ -6226,6 +6226,7 @@
   "automation.paused.fixRounds_other": "{{count}} fix rounds were interrupted by the shutdown and do not come back even with the button: reopen the tasks from the Fleet.",
   "automation.resume": "Resume automation",
   "chat.team.provision.closed": "the conversation was closed before joining the team",
+  "chat.team.provision.dismiss": "Dismiss",
   "chat.team.mirror.refusedTitle": "Canvas change refused",
   "chat.team.mirror.refused": "The team did not accept the canvas change: {{error}}. The canvas went back to what the team has.",
   "chat.team.provision.entering": "joining the team…",

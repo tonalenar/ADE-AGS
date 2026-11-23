@@ -182,6 +182,19 @@ fn remember_opener(args: &Value, thread_id: &str) {
     }
 }
 
+/// O esforço de quem a conversa nova será. Conversa-filha (subagente do orquestrador) nasce no esforço BAIXO, a não ser que o
+/// pedido diga outro (o `effort` da chamada, que o orquestrador preenche quando a pessoa pede); não herda o do pai, que
+/// costuma ser o alto de quem coordena. Uma conversa avulsa mantém o que veio no pedido.
+pub(super) const SUBAGENT_DEFAULT_EFFORT: &str = "low";
+
+pub(super) fn child_effort(parented: bool, asked: Option<String>, inherited: Option<String>) -> Option<String> {
+    let asked = asked.map(|e| e.trim().to_string()).filter(|e| !e.is_empty());
+    if parented {
+        return asked.or_else(|| Some(SUBAGENT_DEFAULT_EFFORT.to_string()));
+    }
+    asked.or(inherited)
+}
+
 pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let task = arg_str(args, "text")
         .map_err(|_| "Falta a mensagem: ags chat new \"...\" --cwd <pasta>".to_string())?;
@@ -252,7 +265,7 @@ pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
         cwd: cwd.clone(),
         workspace_id: None,
         model: asked_model.or(inherited_model),
-        effort: arg_str_opt(args, "effort").or(inherited_effort),
+        effort: child_effort(parent_ref.is_some(), arg_str_opt(args, "effort"), inherited_effort),
         // Aberta por um agente, a conversa começa supervisionada: o que ela rodar, a pessoa aprova.
         // Conversas-filhas também começam supervisionadas, sem herdar uma elevação de acesso.
         access,
@@ -534,6 +547,15 @@ mod test {
         done.insert(4, item(ItemKind::Assistant, "a2", "B feito"));
         assert_eq!(reply_since_last_user(&done).as_deref(), Some("B feito"));
         assert_eq!(reply_since_last_user(&[item(ItemKind::Assistant, "a0", "só fala")]).as_deref(), Some("só fala"));
+    }
+
+    #[test]
+    fn subagente_novo_nasce_em_esforco_baixo_salvo_pedido() {
+        assert_eq!(child_effort(true, None, Some("high".into())).as_deref(), Some("low"), "não herda o esforço alto do orquestrador");
+        assert_eq!(child_effort(true, Some("  ".into()), None).as_deref(), Some("low"), "pedido vazio é sem pedido");
+        assert_eq!(child_effort(true, Some("high".into()), None).as_deref(), Some("high"), "o pedido explícito vale");
+        assert_eq!(child_effort(false, None, Some("medium".into())).as_deref(), Some("medium"), "conversa avulsa não muda");
+        assert_eq!(child_effort(false, None, None), None);
     }
 
     #[test]

@@ -768,7 +768,7 @@ function RailButton({ value, tabIndex, label, on, onClick, children }: { value: 
  * O esforço, num menu à parte (a palavra cinza ao lado do modelo, como no T3). Só aparece nos
  * agentes em que o esforço vira flag.
  */
-export function EffortMenu({ agentId, model, account, value, onChange, disabled = false, placement = "above" }: {
+export function EffortMenu({ agentId, model, account, value, onChange, disabled = false, placement = "above", forceSupported = false }: {
   agentId: string | null;
   model: string | null;
   account: string | null;
@@ -777,11 +777,14 @@ export function EffortMenu({ agentId, model, account, value, onChange, disabled 
   disabled?: boolean;
   /** Para onde o menu abre: em cima (o composer) ou embaixo (um formulário perto do topo). */
   placement?: "above" | "below";
+  /** Mostra o esforço mesmo onde o seletor da TUI não tem (o «Ligar ao time» no OpenCode). */
+  forceSupported?: boolean;
 }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
-  const { roster } = useRoster(reasoningEffortSupported(agentId), open);
-  if (!reasoningEffortSupported(agentId)) return null;
+  const supported = forceSupported || reasoningEffortSupported(agentId);
+  const { roster } = useRoster(supported, open);
+  if (!supported) return null;
   const efforts = effortChoices(agentId, model, catalogOf(roster, agentId, agentId ? accountRefFromWire(agentId, account) : null));
   const label = (e: string) => t(`chat.effort.${e}`, { defaultValue: e });
   return (
