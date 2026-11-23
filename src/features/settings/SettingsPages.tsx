@@ -23,6 +23,7 @@ import { TerminalSection } from "@/features/terminal/TerminalSection";
 import { PermissionsSection } from "@/features/chat/permissions/PermissionsSection";
 import { ChatModeSetting } from "@/features/chat/ChatModeSetting";
 import { SendShortcutSetting } from "@/features/chat/SendShortcutSetting";
+import { ComposerTextSetting } from "@/features/chat/ComposerTextSetting";
 import { ToolCallsSetting } from "@/features/chat/ToolCallsSetting";
 import { AutoCompactSetting } from "@/features/chat/autocompact/AutoCompactSetting";
 import { ClaudeAutoCompactSetting } from "@/features/chat/ClaudeAutoCompactSetting";
@@ -143,6 +144,7 @@ function ChatSettingsPage() {
     <>
       <SettingsAnchor id="chat-mode"><ChatModeSetting /></SettingsAnchor>
       <SettingsAnchor id="chat-composer"><SendShortcutSetting /></SettingsAnchor>
+      <SettingsAnchor id="chat-writing"><ComposerTextSetting /></SettingsAnchor>
       <SettingsAnchor id="chat-activity"><ToolCallsSetting /></SettingsAnchor>
       <SettingsAnchor id="chat-autocompact"><AutoCompactSetting /></SettingsAnchor>
       <SettingsAnchor id="chat-compact"><ClaudeAutoCompactSetting /></SettingsAnchor>
