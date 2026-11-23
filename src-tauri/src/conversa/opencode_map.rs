@@ -529,7 +529,142 @@ pub fn usage_item(turn: &str, response: &Value, at: Option<i64>) -> Option<Item>
     })
 }
 
+/// Limite de caracteres extraídos de `error.data` em respostas JSON-RPC de erro.
+const RPC_ERROR_DATA_MAX: usize = 1_000;
+const RPC_ERROR_DATA_MAX_DEPTH: usize = 4;
+const RPC_ERROR_DATA_MAX_ITEMS: usize = 16;
+
 /// O texto do erro de um `session/prompt` que falhou, curto.
 pub fn error_text(message: &str) -> String {
     clip(message, OUTPUT_MAX)
+}
+
+/// Extrai texto de diagnóstico de um objeto `error` JSON-RPC 2.0, combinando `error.message` e
+/// detalhes não sensíveis de `error.data` (string, objeto com `message`/`details`/`reason`/retry
+/// ou lista), limitado em tamanho e com segredos redigidos.
+pub fn rpc_error_text(error: &Value) -> String {
+    let raw_message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(code) = error.get("code").and_then(Value::as_i64)
+        && matches!(code, 401 | 402 | 403 | 429)
+    {
+        push_unique_part(&mut parts, format!("code {code}"));
+    }
+    if let Some(data) = error.get("data") {
+        collect_error_data(data, 0, &mut parts);
+    }
+
+    let data_text = if parts.is_empty() {
+        None
+    } else {
+        let joined = parts.join("; ");
+        let redacted = super::redacao::redact(&joined);
+        let clipped = clip(redacted.trim(), RPC_ERROR_DATA_MAX);
+        (!clipped.is_empty()).then_some(clipped)
+    };
+
+    let msg_text = raw_message
+        .map(|m| clip(super::redacao::redact(m).trim(), OUTPUT_MAX))
+        .filter(|s| !s.is_empty());
+
+    let combined = match (msg_text, data_text) {
+        (Some(msg), Some(detail)) => {
+            let msg_low = msg.to_ascii_lowercase();
+            let detail_low = detail.to_ascii_lowercase();
+            if msg_low == detail_low || msg_low.contains(&detail_low) {
+                msg
+            } else if detail_low.contains(&msg_low) {
+                detail
+            } else {
+                format!("{msg}: {detail}")
+            }
+        }
+        (Some(msg), None) => msg,
+        (None, Some(detail)) => detail,
+        (None, None) => "erro do agente ACP".to_string(),
+    };
+    clip(&combined, OUTPUT_MAX)
+}
+
+fn is_sensitive_error_key(key: &str) -> bool {
+    let k = key.to_ascii_lowercase();
+    [
+        "token", "secret", "password", "passwd", "api_key", "apikey",
+        "authorization", "cookie", "credential", "private_key", "headers", "env",
+    ]
+    .iter()
+    .any(|bad| k.contains(bad))
+}
+
+fn push_unique_part(parts: &mut Vec<String>, raw: String) {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let clipped = clip(trimmed, RPC_ERROR_DATA_MAX);
+    if !parts.iter().any(|p| p.eq_ignore_ascii_case(&clipped)) {
+        parts.push(clipped);
+    }
+}
+
+fn collect_error_data(value: &Value, depth: usize, parts: &mut Vec<String>) {
+    if depth > RPC_ERROR_DATA_MAX_DEPTH || parts.len() >= RPC_ERROR_DATA_MAX_ITEMS {
+        return;
+    }
+    match value {
+        Value::String(s) => push_unique_part(parts, s.clone()),
+        Value::Array(items) => {
+            for item in items.iter().take(RPC_ERROR_DATA_MAX_ITEMS) {
+                collect_error_data(item, depth + 1, parts);
+                if parts.len() >= RPC_ERROR_DATA_MAX_ITEMS {
+                    break;
+                }
+            }
+        }
+        Value::Object(map) => {
+            for key in ["status", "code", "statusCode", "status_code"] {
+                if let Some(v) = map.get(key) {
+                    if let Some(s) = v.as_str() {
+                        push_unique_part(parts, s.to_string());
+                    } else if let Some(n) = v.as_i64()
+                        && matches!(n, 401 | 402 | 403 | 429)
+                    {
+                        push_unique_part(parts, format!("status {n}"));
+                    }
+                }
+            }
+            for key in ["reason", "message", "detail", "description"] {
+                if let Some(v) = map.get(key) {
+                    collect_error_data(v, depth + 1, parts);
+                }
+            }
+            for key in ["retryDelay", "retry_delay", "retryAfter", "retry_after"] {
+                if let Some(v) = map.get(key) {
+                    if let Some(s) = v.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                        push_unique_part(parts, format!("retry after {s}"));
+                    } else if let Some(n) = v.as_i64().filter(|n| *n > 0) {
+                        push_unique_part(parts, format!("retry after {n}s"));
+                    }
+                }
+            }
+            for key in ["resetTime", "reset_time", "resetsAt", "resets_at"] {
+                if let Some(s) = map.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) {
+                    push_unique_part(parts, format!("resets at {s}"));
+                }
+            }
+            for key in ["details", "error", "errors", "cause", "violations"] {
+                if !is_sensitive_error_key(key)
+                    && let Some(v) = map.get(key)
+                {
+                    collect_error_data(v, depth + 1, parts);
+                }
+            }
+        }
+        _ => {}
+    }
 }

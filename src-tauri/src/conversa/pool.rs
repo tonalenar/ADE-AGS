@@ -101,50 +101,17 @@ pub fn decide(input: Input) -> Decision {
     }
 }
 
-/// O horário (epoch, s) em que a janela renova, lido de «resets 1:10pm (…)». `offset_secs` é o fuso local.
+/// O horário (epoch, s) em que a janela renova, lido do texto do erro via [`crate::runs::failure::parse_reset_at`]
+/// (ISO-8601, relógio 12 h / 24 h após «resets» com fuso UTC/GMT/±HH:MM, ou duração relativa).
+/// `offset_secs` é o fuso local (usado quando não há fuso ou quando há nome IANA sem tzdb no crate).
 /// Sem hora legível, vale a janela de 5 h a partir de agora.
 pub fn reset_at(text: &str, now: i64, offset_secs: i64) -> i64 {
-    clock_after_resets(text)
-        .map(|(hour, minute)| {
-            let local_now = now + offset_secs;
-            let day_start = local_now - local_now.rem_euclid(86_400);
-            let mut target = day_start + hour * 3600 + minute * 60;
-            if target <= local_now {
-                target += 86_400;
-            }
-            target - offset_secs
-        })
-        .unwrap_or(now + WINDOW_SECS)
+    reset_at_known(text, now, offset_secs).unwrap_or(now + WINDOW_SECS)
 }
 
 /// Como [`reset_at`], mas só quando a mensagem diz a hora; sem hora legível, `None` (não adivinha a janela de 5 h).
 pub fn reset_at_known(text: &str, now: i64, offset_secs: i64) -> Option<i64> {
-    clock_after_resets(text).map(|_| reset_at(text, now, offset_secs))
-}
-
-/// A hora do relógio depois de «resets» (`1:10pm`, `3pm`, `12am`), em 24 h. O fuso entre parênteses é ignorado:
-/// vale o do sistema, que é o da pessoa.
-fn clock_after_resets(text: &str) -> Option<(i64, i64)> {
-    let lower = text.to_lowercase();
-    let rest = lower[lower.find("resets")? + "resets".len()..].trim_start();
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    let hour: i64 = digits.parse().ok()?;
-    let mut after = &rest[digits.len()..];
-    let mut minute = 0;
-    if let Some(m) = after.strip_prefix(':') {
-        let mm: String = m.chars().take_while(|c| c.is_ascii_digit()).collect();
-        minute = mm.parse().ok()?;
-        after = &m[mm.len()..];
-    }
-    let pm = match after.trim_start().get(..2)? {
-        "am" => false,
-        "pm" => true,
-        _ => return None,
-    };
-    if !(1..=12).contains(&hour) || minute > 59 {
-        return None;
-    }
-    Some(((hour % 12) + if pm { 12 } else { 0 }, minute))
+    crate::runs::failure::parse_reset_at(text, now, offset_secs)
 }
 
 /// A conta original já pode voltar? Só com a hora de renovação conhecida e passada.

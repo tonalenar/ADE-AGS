@@ -737,7 +737,7 @@ fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Val
             let reply = session.pending.lock().ok().and_then(|mut p| p.remove(&id));
             if let Some(reply) = reply {
                 let result = match msg.get("error") {
-                    Some(error) => Err(error.get("message").and_then(Value::as_str).unwrap_or("erro do agente ACP").to_string()),
+                    Some(error) => Err(map::rpc_error_text(error)),
                     None => Ok(msg.get("result").cloned().unwrap_or(Value::Null)),
                 };
                 let _ = reply.send(result);
