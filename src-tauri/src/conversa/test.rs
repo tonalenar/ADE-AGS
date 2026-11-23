@@ -2303,3 +2303,29 @@ mod comandos_codex {
         assert_eq!(commands, vec![json!({"name": "resumo", "description": "Curta", "inputHint": null, "kind": "skill"})]);
     }
 }
+
+/// Eventos `rate_limit_event` recebidos durante uma conversa abastecem `runs::quota` da conta correspondente.
+#[test]
+fn claude_conversa_registra_rate_limit_event_em_runs_quota() {
+    let conn = crate::database::test_db();
+    let db: crate::database::DbConnection = std::sync::Arc::new(std::sync::Mutex::new(conn));
+    let (session, _rx) = super::claude::session_for_test("thread-quota-1");
+    let msg = json!({
+        "type": "rate_limit_event",
+        "rate_limit_info": {
+            "status": "allowed",
+            "unifiedWindows": {
+                "five_hour": { "utilization": 0.37, "resetsAt": 1789429800 },
+                "seven_day": { "utilization": 0.14, "resetsAt": 1789920000 }
+            }
+        }
+    });
+
+    super::claude::record_rate_limit_msg(&db, &session, &msg, 1_700_000_500);
+
+    let conn = db.lock().unwrap();
+    let loaded = crate::runs::quota::load(&conn, "system:claude-code").expect("cota gravada em runs::quota");
+    assert_eq!(loaded.observed_at, 1_700_000_500);
+    assert!((loaded.five_hour.as_ref().unwrap().utilization - 0.37).abs() < 1e-6);
+    assert!((loaded.seven_day.as_ref().unwrap().utilization - 0.14).abs() < 1e-6);
+}

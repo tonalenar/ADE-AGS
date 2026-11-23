@@ -367,3 +367,51 @@ fn o_client_id_proprio_precisa_ser_plausivel() {
     assert!(!valid_client_id("com espaco no meio ok"), "sem espaços");
     assert!(!valid_client_id("abc&scope=admin:org123"), "nada que quebre o corpo do formulário");
 }
+
+fn git_ok(dir: &std::path::Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+fn repo_com_remoto(root: &std::path::Path, name: &str, url: &str) -> std::path::PathBuf {
+    let dir = root.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    git_ok(&dir, &["init", "-q"]);
+    git_ok(&dir, &["commit", "-q", "--allow-empty", "-m", "i"]);
+    git_ok(&dir, &["remote", "add", "origin", url]);
+    dir
+}
+
+#[test]
+fn forge_run_de_aba_so_opera_no_repositorio_da_pasta_dela_ou_worktree() {
+    use super::tools::tab_cwd_allowed;
+    let root = std::env::temp_dir().join(format!("ade-forge-cwd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let propria = repo_com_remoto(&root, "propria", "https://github.com/ton/propria.git");
+    let outra = repo_com_remoto(&root, "outra", "https://github.com/ton/outra.git");
+    let sub = propria.join("src");
+    std::fs::create_dir_all(&sub).unwrap();
+    let worktree = root.join("propria-wt");
+    git_ok(&propria, &["worktree", "add", "-q", worktree.to_str().unwrap(), "-b", "wt"]);
+
+    let tab = propria.to_str().unwrap();
+    assert!(tab_cwd_allowed(tab, tab).is_ok());
+    assert!(tab_cwd_allowed(tab, sub.to_str().unwrap()).is_ok(), "subpasta do mesmo repositório");
+    assert!(tab_cwd_allowed(tab, worktree.to_str().unwrap()).is_ok(), "worktree do mesmo repositório");
+    assert!(tab_cwd_allowed(worktree.to_str().unwrap(), tab).is_ok(), "aba no worktree, pasta principal");
+
+    let err = tab_cwd_allowed(tab, outra.to_str().unwrap()).unwrap_err();
+    assert!(err.contains("própria pasta") || err.contains("repositório"), "{err}");
+    let nao_repo = root.join("solta");
+    std::fs::create_dir_all(&nao_repo).unwrap();
+    assert!(tab_cwd_allowed(tab, nao_repo.to_str().unwrap()).is_err());
+    assert!(tab_cwd_allowed(nao_repo.to_str().unwrap(), tab).is_err(), "aba fora de repositório não alcança um repositório");
+    assert!(tab_cwd_allowed(nao_repo.to_str().unwrap(), nao_repo.to_str().unwrap()).is_ok());
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -24,4 +24,15 @@ describe("account problems", () => {
     expect(accountProblemText(null, (key) => `translated:${key}`)).toBe("translated:accounts.plan.failed");
     expect(accountProblemKey("accounts.plan.problem.unknown")).toBeNull();
   });
+
+  it("traduz rate limit (com e sem retry) e loadFailed", async () => {
+    const i18n = createInstance();
+    await i18n.init({ lng: "pt-BR", resources: { "pt-BR": { translation: ptBR } } });
+    expect(accountProblemKey("Claude is temporarily limiting requests to the usage page"))
+      .toBe("accounts.plan.problem.rateLimited");
+    expect(accountProblemKey("Couldn't load usage data"))
+      .toBe("accounts.plan.problem.loadFailed");
+    expect(accountProblemText("accounts.plan.problem.rateLimited", i18n.t.bind(i18n), 120))
+      .toContain("2 min");
+  });
 });

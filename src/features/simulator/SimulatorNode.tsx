@@ -301,7 +301,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, cwd, portal, sele
               <DeviceFrame device={physicalId} name={portal.name} layout={frameLayout(physical?.model ?? "", physical?.family ?? "iphone")}
                 screen={{ width: Math.round(phone.screenW), height: Math.round(phone.screenH) }} enabled={!disconnected && canTouch(mirror)}>
                 <PhysicalMirror screenId={id} device={physicalId} known={!physicalLoaded || !!physical} status={mirror}
-                  radius={screenRadiusOf(frameLayout(physical?.model ?? "", physical?.family ?? "iphone"), Math.round(phone.screenW))} onError={fail} engaged={probePhysical} />
+                  radius={screenRadiusOf(frameLayout(physical?.model ?? "", physical?.family ?? "iphone"), Math.round(phone.screenW), Math.round(phone.screenH))} onError={fail} engaged={probePhysical} />
               </DeviceFrame>
             </div>
           ) : (

@@ -62,3 +62,18 @@ describe("giro do aparelho", () => {
     expect(scaleOf(deitada, box.h)).toBeCloseTo(0.64, 2);
   });
 });
+
+describe("o simulador deitado", () => {
+  it("o raio dos cantos e a moldura são os mesmos em pé e deitado", () => {
+    const portrait = phoneOf(proMax, 1);
+    const land = phoneOf(orientedScreen(proMax, true), 1);
+    expect(land.screenW).toBe(portrait.screenH);
+    expect(land.screenRadius).toBeCloseTo(portrait.screenRadius, 5);
+    expect(land.outerRadius).toBeCloseTo(portrait.outerRadius, 5);
+    expect(land.bezel).toBe(portrait.bezel);
+  });
+
+  it("o iPad deitado também mantém o raio", () => {
+    expect(phoneOf(orientedScreen(ipad, true), 1).screenRadius).toBeCloseTo(phoneOf(ipad, 1).screenRadius, 5);
+  });
+});

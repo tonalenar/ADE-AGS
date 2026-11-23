@@ -76,7 +76,7 @@ pub fn offer_pool<'a>(
         return None;
     }
     pools.iter().find(|p| {
-        if p.agent_id != agent_id {
+        if p.agent_id != agent_id || p.paused {
             return false;
         }
         let live_count = p.members.iter().filter(|m| is_live(m)).count();
@@ -219,9 +219,13 @@ fn pending_key(thread: &str) -> String {
     format!("chat.pool.pending.{thread}")
 }
 
-/// O interruptor global. Sem valor (ou valor desconhecido) = desligado.
+/// O interruptor global, o mesmo `chat.pool.mode` das tarefas: sem valor = perguntar; valor desconhecido = desligado.
 pub fn mode(db: &DbConnection) -> Mode {
-    crate::database::get_setting(db, MODE_KEY).ok().flatten().map(|raw| Mode::parse(&raw)).unwrap_or_default()
+    match crate::accounts::pools::load_mode(db) {
+        crate::accounts::pools::PoolMode::Off => Mode::Off,
+        crate::accounts::pools::PoolMode::Ask => Mode::Ask,
+        crate::accounts::pools::PoolMode::Auto => Mode::Auto,
+    }
 }
 
 /// Liga a conversa a um pool: só com isso a conversa troca de conta. `None` desliga.
@@ -231,6 +235,37 @@ pub fn bind(db: &DbConnection, thread: &str, pool_id: Option<&str>) -> Result<()
 
 pub(super) fn bound(db: &DbConnection, thread: &str) -> Option<String> {
     crate::database::get_setting(db, &pool_key(thread)).ok().flatten().filter(|id| !id.is_empty())
+}
+
+/// O pool de que a conversa depende: o ligado (escolhido ao criar ou aceito) ou, numa conversa com conta FIXA que
+/// é membro de um pool do agente (não pausado), o pool implícito. A escolha implícita é gravada em
+/// `chat.pool.thread.<id>` (estável entre reinícios e visível no cartão de limites) e registrada no log.
+pub(super) fn effective_pool(db: &DbConnection, thread: &str) -> Option<String> {
+    if let Some(id) = bound(db, thread) {
+        return Some(id);
+    }
+    let row = api::thread(db, thread).ok()?;
+    let pools = crate::accounts::pools::load(db);
+    let pool = crate::accounts::pools::implicit_pool(&pools, &row.agent_id, &row.account_id)?;
+    bind(db, thread, Some(&pool.id)).ok()?;
+    eprintln!("[chat] conversa {thread}: conta fixa em pool, usando o pool implícito '{}'", pool.name);
+    Some(pool.id.clone())
+}
+
+/// `pool:<nome>` do pool padrão do agente (não pausado, 2+ contas), para quem ainda não escolheu conta.
+pub fn default_pool_ref(db: &DbConnection, agent_id: &str) -> Option<String> {
+    let pools = crate::accounts::pools::load(db);
+    crate::accounts::pools::default_pool_for_agent(&pools, agent_id).map(|p| format!("pool:{}", p.name))
+}
+
+/// A conta pedida ao abrir uma conversa: a escolhida pela pessoa vale sempre; sem escolha, um subagente/integrante
+/// (`delegated`) nasce no pool padrão do agente, se houver.
+pub fn with_default_pool(db: &DbConnection, agent_id: &str, requested: Option<String>, delegated: bool) -> Option<String> {
+    match requested {
+        Some(account) => Some(account),
+        None if delegated => default_pool_ref(db, agent_id),
+        None => None,
+    }
 }
 
 fn load<T: for<'de> Deserialize<'de>>(db: &DbConnection, key: &str) -> Option<T> {
@@ -402,7 +437,7 @@ async fn handle_rate_limit(app: &AppHandle, db: &DbConnection, thread_id: &str, 
     if mode(db) == Mode::Off {
         return PoolTurnOutcome::Unhandled;
     }
-    if bound(db, thread_id).is_none() {
+    if effective_pool(db, thread_id).is_none() {
         return offer_join(app, db, thread_id, error);
     }
     on_failure(app, db, thread_id, error).await

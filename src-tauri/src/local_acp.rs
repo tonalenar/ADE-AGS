@@ -129,7 +129,7 @@ pub async fn get_config(db: &DbConnection, id: &str) -> Result<LocalAcpConfig, S
     }).await.map_err(|error| error.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn local_acp_list(db: tauri::State<DbConnection>) -> Result<Vec<LocalAcpProvider>, String> {
     list(&db)
 }

@@ -38,7 +38,7 @@ pub fn devices_share(devices: Vec<SharedDevice>, control: bool) -> Result<(), St
 
 /// A pessoa desligou a chave "Permitir que agentes controlem dispositivos": esquece o "Autorizar sempre
 /// neste aparelho" do JEV. Só a chave chama isto; fechar o painel ou o app não esquece nada.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn computer_use_forget(db: tauri::State<'_, crate::database::DbConnection>) -> Result<usize, String> {
     crate::computer_use::ios::forget_trust(&db)
 }

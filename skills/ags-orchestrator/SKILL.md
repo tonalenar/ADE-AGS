@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.97.0
+version: 1.98.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -254,6 +254,7 @@ method, and refuses with the id and what to do instead):
   connected to you and the ones you opened with `ags chat new` (a child conversation is registered to whoever
   opened it, so `chat wait <id>` right after `chat new` works). `chat pending` without an id lists every
   conversation's requests: give the id. A child is only created under **you** (`parent_ref` is yours or nothing).
+  `chat compact` is the exception: it works only on **your own** conversation, and only while the person has ADE autocompact on; for any other conversation it is refused.
 - **Canvas resources** — `portal …`, `device …`, `note …`, `peer …`, `team …`, `sim act`, `desk act`, `say`/`recall`,
   `routine …`, `floor …`, `role create|edit`, `notify`, `secret …`, `memory …`/`swarm …` (the mission's memory):
   they act through *your* terminal, so they only see what the canvas connects to you. A fleet task (headless) has no
@@ -490,8 +491,8 @@ ags peer check Backend --lines 40           # what is on its screen right now
   Names are checked first: one wrong name fails the whole batch before anyone is asked.
 - **`--raw`** (on `ask`, `ask --batch` and `tell`) types the text exactly as you wrote it, without
   the `[Mensagem de <name> via ADE AGS]` header and the reply hint. Use it to hand a TUI one of
-  its own commands (`ags peer ask --raw Backend "/compact"`), where a header in front would
-  turn the command into plain text. The other agent will not know the text came from you.
+  its own commands (`ags peer ask --raw Backend "/clear"`), where a header in front would
+  turn the command into plain text. `/compact` is never sent to another agent (`compact_to_other` refusal): you only compact your own conversation, and the person compacts the rest. The other agent will not know the text came from you.
 - **`tell` does not wait — end your turn.** Use it to hand over information or a task; its
   `note` says the other agent has not answered yet and the answer arrives later as a separate
   message. End your turn saying in one sentence whom you asked and what; never answer for them.
@@ -1263,11 +1264,16 @@ ags chat send <id> "now write the failing test" --client-request-id test-01  # a
 ags chat stop <id> --client-request-id stop-01   # a retry returns the receipt (outcome: sent, deferred or no_turn) and never interrupts again
 ags chat list                        # active conversations (--all includes settled ones)
 ags chat providers                  # protocol-native providers and runtime capabilities
-ags chat compact <id>               # compact Codex or Claude Code context when idle
+ags chat compact <your-own-id>      # compact YOUR conversation (Codex/Claude Code, idle, autocompact on); other conversations are refused
 ags chat goal <id> --action show    # read the persistent Codex/Claude goal
 ags chat goal <id> --action set --objective "..."
 ags chat open <id>                   # show it to the person in the chat screen
 ```
+
+A chat opened from an ADE chat (it has a parent) is a subagent of that conversation: it is linked to the parent
+(side-chat panel, lineage, parent notices) and starts with effort **low**, not the parent's effort. When the person asks
+you to hand a task to a new subagent, call `chat new` (or `delegate_agent` with `target=provider_chat`) and pass
+`--effort` only if the person asked for another level.
 
 Project defaults: when `--agent` and `--model` are omitted (and the chat has no parent), `chat new` starts
 with the agent and model the person set for that folder in Settings → Projects; if the project's main model is
@@ -1287,7 +1293,7 @@ when you intend to create a separate child. Use `agent_roster` for headless Flee
 same thread and text returns the recorded `receipt` (`deliveryState`, `replayed`) and does **not** send the
 message again; the same id with different content is rejected. `deliveryState: "unknown"` means the message may
 have reached the agent: inspect the conversation (`chat_show`) before sending another. Without the id nothing changes.
-`chat_compact` supports Codex and Claude Code; `chat_goal` supports Codex and Claude Code, with
+`chat_compact` supports Codex and Claude Code and only your own conversation, with the person's autocompact on; `chat_goal` supports Codex and Claude Code, with
 pause/resume available only for Codex. Read `chat_providers.harnessCapabilities` for the matrix and
 `chat_providers.capabilities` for runtime controls before using them.
 Pass only the excerpt needed for the task in `context`; ADE marks it as untrusted and
@@ -1730,7 +1736,7 @@ flags of each command.
 | PÁGINAS HTML | `render publish`, `render list` |
 | NOTAS DO CANVAS | `design create`, `design list`, `design delete`, `design page`, `design artboard`, `design update`, `design comment`, `design`, `design revert`, `design view`, `design open`, `design note`, `notes`, `note create`, `note read`, `note write`, `note edit` |
 | OBSERVAR TABS | `watch add`, `watch remove`, `watch list`, `watch wait` |
-| CONVERSAS DO MODO CHAT | `chat list`, `chat new`, `chat send`, `chat wait`, `chat show`, `chat stop`, `chat pending`, `chat open`, `chat settle` |
+| CONVERSAS DO MODO CHAT | `chat list`, `chat new`, `chat send`, `chat wait`, `chat show`, `chat stop`, `chat pending`, `chat compact`, `chat open`, `chat settle` |
 | EVENTOS | `events since`, `events wait` |
 | MISSÕES | `mission run`, `mission create`, `mission`, `mission review`, `mission timings`, `mission efficiency`, `mission cleanup`, `worktrees list`, `worktrees prune`, `mission precheck`, `mission startcheck`, `memory search`, `memory history`, `memory suggest`, `mission accept`, `mission apply`, `mission redeliver` |
 | JANELAS | `window list`, `window create` |

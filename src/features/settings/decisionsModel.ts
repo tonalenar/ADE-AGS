@@ -190,6 +190,60 @@ export function applyDecisionModelUpdate(dirty: boolean): "keep" | "reload" {
 }
 
 /**
+ * Liga ou desliga o piloto do navegador (`browser_step`): desligar o piloto também desliga
+ * a reserva visual (`browser_vision`), porque o backend exige os dois ligados. Pura.
+ */
+export function setBrowserPilotSetting(settings: DecisionSettings, browserPilot: boolean): DecisionSettings {
+  return {
+    ...settings,
+    browserPilot,
+    browserVision: browserPilot ? settings.browserVision : false,
+  };
+}
+
+/**
+ * Liga ou desliga a reserva visual do piloto (`browser_vision`): só funciona com o piloto
+ * de texto ligado; ao ligar a visão, o piloto liga junto. Pura.
+ */
+export function setBrowserVisionSetting(settings: DecisionSettings, browserVision: boolean): DecisionSettings {
+  return {
+    ...settings,
+    browserPilot: browserVision ? true : settings.browserPilot,
+    browserVision,
+  };
+}
+
+/** O Jev está configurado para pilotar o navegador (`browser_act` / `ags portal act`)? Pura. */
+export function isJevBrowserReady(settings: Pick<DecisionSettings, "enabled" | "provider" | "browserPilot">): boolean {
+  return settings.enabled && settings.provider === "jev" && settings.browserPilot;
+}
+
+/**
+ * Prepara em um único passo os ajustes necessários para o Jev pilotar o navegador
+ * (`enabled`, `provider="jev"`, URL, modelo e `browserPilot`), sem mudar o padrão inicial
+ * desligado nem mexer em `browserVision`. Pura.
+ */
+export function activateJevBrowser(settings: DecisionSettings): DecisionSettings {
+  return {
+    ...settings,
+    enabled: true,
+    provider: "jev",
+    baseUrl: urlAfterProviderChange(settings.baseUrl, "jev"),
+    model: modelAfterProviderChange(settings.model, "jev"),
+    browserPilot: true,
+  };
+}
+
+/** Desliga o piloto do navegador (e a reserva visual junto), preservando o provedor e outros pontos. Pura. */
+export function deactivateJevBrowser(settings: DecisionSettings): DecisionSettings {
+  return {
+    ...settings,
+    browserPilot: false,
+    browserVision: false,
+  };
+}
+
+/**
  * Pontos sem heurística local: o piloto e a visão decidem sozinhos, e a coluna `heuristic` do log guarda outra coisa
  * (`foto_enviada=true superficie=ios rotulos=23`). Comparar isso com a decisão dá sempre "discorda": com o computer use
  * em uso, a concordância do cartão caía para 1% sem nada errado no Jev.

@@ -18,8 +18,11 @@ pub mod repeat;
 pub mod state;
 pub mod tail;
 pub mod timeline;
+pub mod timeline_cache;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod timeline_cache_test;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -294,6 +297,7 @@ pub fn publish(snapshot: Snapshot) {
 
 pub fn forget(tab_id: &str) {
     snapshots().lock().unwrap_or_else(|e| e.into_inner()).remove(tab_id);
+    timeline_cache::forget(tab_id);
 }
 
 pub fn snapshot(tab_id: &str) -> Option<Snapshot> {

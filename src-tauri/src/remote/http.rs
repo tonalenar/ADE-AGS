@@ -2,10 +2,11 @@
 //!
 //! Nunca escuta em `0.0.0.0` nem `::`. Toda requisição precisa de `Authorization: Bearer`,
 //! respeita o teto de 8 MB e o limite de 20 req/s por cliente, e registra auditoria sem argumentos.
+//! Tem teto de conexões, prazos de leitura e limite por IP antes da autenticação; desligar fecha as conexões abertas.
 
 use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -16,10 +17,10 @@ use hyper::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use serde_json::{Value, json};
-use tokio::net::TcpListener;
-use tokio::sync::watch;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{Semaphore, watch};
 
 use super::clients::{ClientStore, RemoteClient};
 
@@ -29,6 +30,37 @@ pub const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 pub const RATE_LIMIT_PER_SEC: usize = 20;
 
 const RATE_WINDOW: Duration = Duration::from_secs(1);
+
+/// Conexões simultâneas aceitas por listener; as de além do teto são fechadas na hora.
+pub const MAX_CONNECTIONS: usize = 64;
+/// Prazo para o cliente mandar os cabeçalhos de uma requisição (inclui a espera numa conexão keep-alive parada).
+pub const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// Prazo para o corpo chegar inteiro depois dos cabeçalhos.
+pub const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// Requisições por segundo por IP de origem, contadas **antes** da autenticação (token errado também gasta).
+pub const PRE_AUTH_LIMIT_PER_SEC: usize = 100;
+/// Depois de desligar, uma requisição em curso tem este tempo para terminar antes de a conexão ser cortada.
+pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+
+/// Limites do listener (ajustáveis nos testes).
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    pub max_connections: usize,
+    pub header_read_timeout: Duration,
+    pub body_read_timeout: Duration,
+    pub pre_auth_per_sec: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_connections: MAX_CONNECTIONS,
+            header_read_timeout: HEADER_READ_TIMEOUT,
+            body_read_timeout: BODY_READ_TIMEOUT,
+            pre_auth_per_sec: PRE_AUTH_LIMIT_PER_SEC,
+        }
+    }
+}
 
 /// Registro de auditoria de uma chamada remota (sem argumentos).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +84,7 @@ pub struct ServerConfig {
     pub handler: FrameHandler,
     pub audit: AuditSink,
     pub now_fn: Arc<dyn Fn() -> i64 + Send + Sync + 'static>,
+    pub limits: Limits,
 }
 
 /// Instância ativa do servidor HTTP em um ou mais endereços locais/Tailscale.
@@ -99,7 +132,7 @@ impl RateLimiter {
         }
     }
 
-    fn allow(&self, client_id: &str) -> bool {
+    fn allow(&self, client_id: &str, limit: usize) -> bool {
         let now = Instant::now();
         let mut map = self.hits.lock().unwrap_or_else(|e| e.into_inner());
         let window = map.entry(client_id.to_string()).or_default();
@@ -109,7 +142,7 @@ impl RateLimiter {
         {
             window.pop_front();
         }
-        if window.len() >= RATE_LIMIT_PER_SEC {
+        if window.len() >= limit {
             return false;
         }
         window.push_back(now);
@@ -120,6 +153,8 @@ impl RateLimiter {
 struct ServerState {
     config: ServerConfig,
     limiter: RateLimiter,
+    /// Limite por IP de origem, antes de qualquer leitura do keyring.
+    pre_auth: RateLimiter,
 }
 
 /// Sobe o servidor MCP HTTP em cada endereço informado (recusa `0.0.0.0` e `::`).
@@ -155,11 +190,15 @@ pub async fn start_on(
     let state = Arc::new(ServerState {
         config,
         limiter: RateLimiter::new(),
+        pre_auth: RateLimiter::new(),
     });
+    let permits = Arc::new(Semaphore::new(state.config.limits.max_connections));
 
     for listener in listeners {
         let state = state.clone();
+        let permits = permits.clone();
         let mut rx = shutdown_rx.clone();
+        let conn_rx = shutdown_rx.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -169,15 +208,14 @@ pub async fn start_on(
                         }
                     }
                     accepted = listener.accept() => {
-                        let Ok((stream, _peer)) = accepted else { continue };
+                        let Ok((stream, peer)) = accepted else { continue };
+                        // Sem vaga, a conexão é fechada na hora (o `drop` do stream).
+                        let Ok(permit) = permits.clone().try_acquire_owned() else { continue };
                         let state = state.clone();
+                        let shutdown = conn_rx.clone();
                         tokio::spawn(async move {
-                            let io = TokioIo::new(stream);
-                            let service = service_fn(move |req| {
-                                let state = state.clone();
-                                async move { Ok::<_, Infallible>(handle_request(req, state).await) }
-                            });
-                            let _ = http1::Builder::new().serve_connection(io, service).await;
+                            serve_connection(stream, peer, state, shutdown).await;
+                            drop(permit);
                         });
                     }
                 }
@@ -191,7 +229,38 @@ pub async fn start_on(
     })
 }
 
-async fn handle_request(req: Request<Incoming>, state: Arc<ServerState>) -> Response<Full<Bytes>> {
+/// Serve uma conexão até ela fechar ou o servidor ser desligado. Desligar fecha também as keep-alive já abertas:
+/// uma requisição em curso termina (até `SHUTDOWN_GRACE`) e a conexão é encerrada.
+async fn serve_connection(stream: TcpStream, peer: SocketAddr, state: Arc<ServerState>, mut shutdown: watch::Receiver<bool>) {
+    let limits = state.config.limits;
+    let io = TokioIo::new(stream);
+    let ip = peer.ip();
+    let service = service_fn(move |req| {
+        let state = state.clone();
+        async move { Ok::<_, Infallible>(handle_request(req, state, ip).await) }
+    });
+    let conn = http1::Builder::new()
+        .timer(TokioTimer::new())
+        .header_read_timeout(limits.header_read_timeout)
+        .serve_connection(io, service);
+    tokio::pin!(conn);
+    tokio::select! {
+        _ = &mut conn => {}
+        _ = async { let _ = shutdown.wait_for(|stopped| *stopped).await.map(|_| ()); } => {
+            conn.as_mut().graceful_shutdown();
+            let _ = tokio::time::timeout(SHUTDOWN_GRACE, &mut conn).await;
+        }
+    }
+}
+
+async fn handle_request(req: Request<Incoming>, state: Arc<ServerState>, ip: IpAddr) -> Response<Full<Bytes>> {
+    // Antes de tudo (e do keyring): um IP que passa do limite não gasta mais nada do servidor.
+    if !state.pre_auth.allow(&ip.to_string(), state.config.limits.pre_auth_per_sec) {
+        return json_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            json!({ "error": "Limite de taxa excedido para este endereço" }),
+        );
+    }
     if req.uri().path() != "/mcp" {
         return json_response(StatusCode::NOT_FOUND, json!({ "error": "Rota não encontrada" }));
     }
@@ -226,7 +295,7 @@ async fn handle_request(req: Request<Incoming>, state: Arc<ServerState>) -> Resp
         }
     };
 
-    if !state.limiter.allow(&client.id) {
+    if !state.limiter.allow(&client.id, RATE_LIMIT_PER_SEC) {
         return json_response(
             StatusCode::TOO_MANY_REQUESTS,
             json!({ "error": "Limite de taxa excedido (máximo 20 req/s por cliente)" }),
@@ -246,15 +315,22 @@ async fn handle_request(req: Request<Incoming>, state: Arc<ServerState>) -> Resp
         );
     }
 
-    let body = match read_limited_body(req.into_body(), MAX_BODY_BYTES).await {
-        Ok(bytes) => bytes,
-        Err(BodyError::TooLarge) => {
+    let body_timeout = state.config.limits.body_read_timeout;
+    let body = match tokio::time::timeout(body_timeout, read_limited_body(req.into_body(), MAX_BODY_BYTES)).await {
+        Err(_) => {
+            return json_response(
+                StatusCode::REQUEST_TIMEOUT,
+                json!({ "error": "O corpo da requisição não chegou a tempo" }),
+            );
+        }
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(BodyError::TooLarge)) => {
             return json_response(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 json!({ "error": "Corpo excede o limite de 8 MB" }),
             );
         }
-        Err(BodyError::Read) => {
+        Ok(Err(BodyError::Read)) => {
             return json_response(
                 StatusCode::BAD_REQUEST,
                 json!({ "error": "Falha ao ler o corpo da requisição" }),

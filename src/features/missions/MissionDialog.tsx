@@ -118,7 +118,7 @@ export function MissionDialog({ initial, editing, editingId, onClose, onSave }: 
             onChange={(e) => set("objective", e.target.value)}
             placeholder={t("fleet.orchestrate.objectivePlaceholder")}
             className="block w-full resize-none rounded-[10px] bg-black/[0.05] px-3 py-2.5 text-[13px] leading-[19px] text-gray-900 outline-none
-              placeholder:text-gray-400 focus:ring-[3px] focus:ring-accent-500/30 dark:bg-surface-raised dark:text-[#f5f5f7] dark:placeholder:text-white/30"
+              placeholder:text-gray-400 focus:ring-[3px] focus:ring-accent-500/30 dark:bg-surface-raised dark:text-ink dark:placeholder:text-white/30"
           />
         </Field>
 
@@ -138,7 +138,7 @@ export function MissionDialog({ initial, editing, editingId, onClose, onSave }: 
                 value={form.cwd}
                 onChange={(e) => set("cwd", e.target.value)}
                 aria-label={t("missions.form.project")}
-                className="min-w-0 flex-1 bg-transparent font-mono text-[12px] text-gray-900 outline-none dark:text-[#f5f5f7]"
+                className="min-w-0 flex-1 bg-transparent font-mono text-[12px] text-gray-900 outline-none dark:text-ink"
               />
             </label>
             <Button variant="outline" onClick={pickFolder} aria-label={t("missions.form.pickFolder")}>{t("missions.form.pick")}</Button>
@@ -340,7 +340,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 function Row({ label, hint, stacked = false, children }: { label: string; hint?: string; stacked?: boolean; children: React.ReactNode }) {
   const title = (
     <span className="flex min-w-0 flex-col gap-0.5 [&>span:first-child]:whitespace-nowrap">
-      <span className="text-[13.5px] leading-[19px] text-gray-900 dark:text-[#f5f5f7]">{label}</span>
+      <span className="text-[13.5px] leading-[19px] text-gray-900 dark:text-ink">{label}</span>
       {hint && <span className="text-[11.5px] leading-4 text-gray-500 dark:text-white/50">{hint}</span>}
     </span>
   );
@@ -358,6 +358,6 @@ function Row({ label, hint, stacked = false, children }: { label: string; hint?:
 
 /** O campo de texto das pranchetas: 30px, fundo cinza, raio 7, anel de acento ao focar. */
 const FIELD = `block h-[30px] w-full rounded-[7px] bg-black/[0.05] px-2.5 text-[13px] text-gray-900 outline-none
-  placeholder:text-gray-400 focus:ring-[3px] focus:ring-accent-500/30 dark:bg-surface-raised dark:text-[#f5f5f7] dark:placeholder:text-white/30`;
+  placeholder:text-gray-400 focus:ring-[3px] focus:ring-accent-500/30 dark:bg-surface-raised dark:text-ink dark:placeholder:text-white/30`;
 
 const SELECT = "w-full";

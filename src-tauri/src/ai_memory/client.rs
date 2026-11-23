@@ -45,7 +45,11 @@ pub(crate) enum Read {
     Status,
     Handoffs,
     Recent,
-    RecentLimit(u32),
+    RecentScoped {
+        limit: u32,
+        workspace: String,
+        project: String,
+    },
     Search(String),
     SearchScoped {
         query: String,
@@ -67,13 +71,15 @@ impl Read {
             Self::Status => vec!["status", "--json"],
             Self::Handoffs => vec!["handoffs", "--json", "--limit", "50"],
             Self::Recent => vec!["recent", "--json", "--limit", "50"],
-            Self::RecentLimit(limit) => {
-                let capped = (*limit).clamp(1, 500);
+            Self::RecentScoped { limit, workspace, project } => {
+                super::sessions::validate_scope(workspace, project)?;
                 return Ok(vec![
                     "recent".into(),
                     "--json".into(),
                     "--limit".into(),
-                    capped.to_string(),
+                    (*limit).clamp(1, 500).to_string(),
+                    format!("--workspace={workspace}"),
+                    format!("--project={project}"),
                 ]);
             }
             Self::Projects => vec!["list-projects", "--json"],

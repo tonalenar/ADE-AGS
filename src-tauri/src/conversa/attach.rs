@@ -212,27 +212,27 @@ pub fn image_blocks(paths: &[String]) -> (Vec<Value>, Vec<String>) {
     (blocks, skipped)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_attachment_inspect(paths: Vec<String>) -> Vec<Inspected> {
     paths.iter().take(200).map(|p| inspect(p)).collect()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_attachment_read(path: String) -> Result<ImageData, String> {
     read_preview(&path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_attachment_remove_background_available() -> bool {
     background_removal_available()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_attachment_remove_background(path: String) -> Result<String, String> {
     remove_background(&path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_attachment_save_annotated(path: String, png_base64: String) -> Result<String, String> {
     save_annotated(&path, &png_base64)
 }

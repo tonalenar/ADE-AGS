@@ -2577,7 +2577,7 @@ fn chat_schemas() -> Vec<Value> {
         }),
         json!({
             "name": "chat_compact",
-            "description": "Compact the context of an idle structured chat conversation using the provider's native mechanism. Currently supported for Codex and Claude Code; no turn or pending approval may be active. Custom instructions are supported by Claude Code only.",
+            "description": "Compact the context of YOUR OWN idle structured chat conversation using the provider's native mechanism. Refused for any other conversation (only the person compacts those, from the app) and when the person has switched ADE autocompact off. Currently supported for Codex and Claude Code; no turn or pending approval may be active. Custom instructions are supported by Claude Code only.",
             "inputSchema": { "type": "object", "properties": {
                 "thread": thread.clone(),
                 "instructions": { "type": "string", "maxLength": 10000, "description": "Optional compaction instructions (Claude Code only)." }
@@ -2594,14 +2594,14 @@ fn chat_schemas() -> Vec<Value> {
         }),
         json!({
             "name": "chat_new",
-            "description": "Open a provider-native child chat thread and send its first message. When called from a chat-mode conversation, ADE links the child to the current parent and shows it in the side-chat panel; the child starts supervised and cannot widen the parent's access. Choose an id from chat_providers; omit agent to inherit the parent's provider. Only pass context explicitly selected for this task: ADE marks it as untrusted data and never copies the conversation history. Supply a stable client_request_id when retrying this tool so ADE reuses the same child and avoids duplicate first messages; if delivery is uncertain, inspect the child before sending again. Use delegate_task for headless Fleet execution, DAGs, worktrees or budgets.",
+            "description": "Open a provider-native child chat thread and send its first message. When called from a chat-mode conversation, ADE links the child to the current parent and shows it in the side-chat panel; the child starts supervised and cannot widen the parent's access. Choose an id from chat_providers; omit agent to inherit the parent's provider. Only pass context explicitly selected for this task: ADE marks it as untrusted data and never copies the conversation history. Supply a stable client_request_id when retrying this tool so ADE reuses the same child and avoids duplicate first messages; if delivery is uncertain, inspect the child before sending again. A child is a subagent of the parent conversation and starts with effort `low` unless you pass `effort` (do that only when the person asked for another level). When the person asks you to hand a task to a new subagent, call this tool. Use delegate_task for headless Fleet execution, DAGs, worktrees or budgets.",
             "inputSchema": { "type": "object", "properties": {
                 "text": { "type": "string", "description": "The first message." },
                 "cwd": { "type": "string", "description": "Folder the agent works in (default: yours)." },
                 "agent": { "type": "string", "description": "Provider id from chat_providers, including configured local ACP agents. Defaults to the current parent provider, or Codex without a parent." },
                 "client_request_id": { "type": "string", "maxLength": 128, "description": "Stable request id for safe retries. Reusing it with different arguments is rejected." },
                 "model": { "type": "string", "description": "Optional model." },
-                "effort": { "type": "string", "description": "Optional reasoning effort (low, medium, high…)." },
+                "effort": { "type": "string", "description": "Optional reasoning effort (low, medium, high…). A child chat defaults to low." },
                 "account": { "type": "string", "description": "Optional account id or pool:<name> for the conversation." },
                 "context": { "type": "string", "maxLength": 16384, "description": "Optional explicit excerpt for the child (UTF-8 limit 16 KiB). ADE marks it as untrusted data; the parent conversation history is never copied." },
                 "access": { "type": "string", "enum": ["ask", "edits", "safe", "full", "plan"], "description": "Access mode for a standalone chat. A child opened from an ADE chat always starts supervised (`ask`) and cannot widen the parent's access. ask: the person approves; edits: file edits pass, the rest asks; safe: writes in the folder, asks when needed; full: no approvals; plan (every agent but codex): plans first; with claude-code the person approves the plan. antigravity and cursor never ask: whatever would need approval is denied, so ask there is read-only in practice (cursor only accepts ask, plan and full)." },

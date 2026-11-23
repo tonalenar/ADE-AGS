@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { chatPoolAccept, chatPoolDismiss, chatPoolPending, type ChatPoolPending } from "@/features/accounts/chatPool";
@@ -22,18 +22,28 @@ const KNOWN = ["resumeLost", "queueDropped", "optionIgnored", "toolOutcomeUnknow
  * no limite de tokens (`responseTruncated`) ou a troca de
  * agente («Agora com Codex»). A frase vem do código; o motivo, do item.
  */
-export function NoticeRow({
-  item,
-  onResend,
-  threadId,
-  activePoolNotice = true,
-}: {
+interface NoticeRowProps {
   item: TimelineItem;
   onResend?: (text: string) => void;
   threadId?: string;
   /** Só o aviso interativo mais recente da conversa pode exibir botões de aceitar/dispensar (M-2). */
   activePoolNotice?: boolean;
-}) {
+}
+
+function sameNoticeRowProps(prev: NoticeRowProps, next: NoticeRowProps): boolean {
+  if (prev.item !== next.item) return false;
+  if (prev.threadId !== next.threadId) return false;
+  if ((prev.activePoolNotice ?? true) !== (next.activePoolNotice ?? true)) return false;
+  if (next.item.label === "queueDropped" && prev.onResend !== next.onResend) return false;
+  return true;
+}
+
+export const NoticeRow = memo(function NoticeRow({
+  item,
+  onResend,
+  threadId,
+  activePoolNotice = true,
+}: NoticeRowProps) {
   const { t } = useTranslation();
   const change = agentSwitchOf(item);
   if (change) {
@@ -70,7 +80,7 @@ export function NoticeRow({
       )}
     </div>
   );
-}
+}, sameNoticeRowProps);
 
 /**
  * Os avisos do pool de contas (`conversa::pool`): a troca que aconteceu, a que não foi possível e as duas perguntas

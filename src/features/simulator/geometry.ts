@@ -50,7 +50,8 @@ export function phoneOf(screen: SimScreen, scale: number): PhoneGeometry {
   const bezel = BEZEL_PT * scale;
   const screenW = screen.width * scale;
   const screenH = screen.height * scale;
-  const screenRadius = screenW * (screen.family === "ipad" ? 0.045 : 0.135);
+  // O raio é do lado menor: deitado, a tela tem os mesmos cantos de quando está em pé.
+  const screenRadius = Math.min(screenW, screenH) * (screen.family === "ipad" ? 0.045 : 0.135);
   return { w: screenW + 2 * bezel, h: screenH + 2 * bezel, bezel, screenW, screenH, screenRadius, outerRadius: screenRadius + bezel };
 }
 

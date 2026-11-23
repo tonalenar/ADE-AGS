@@ -3,13 +3,14 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const backend = vi.hoisted(() => ({ calls: [] as string[], feed: [] as unknown[], teams: [] as unknown[] }));
+const backend = vi.hoisted(() => ({ calls: [] as string[], feed: [] as unknown[], teams: [] as unknown[], handoff: {} as Record<string, unknown> }));
+const SIMPLE = { summary: "Resumo longo da entrega do integrante", changed_files: [], tests: [] };
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string) => {
     backend.calls.push(cmd);
     if (cmd === "chat_team_list") return Promise.resolve(backend.teams);
     if (cmd === "chat_team_feed") return Promise.resolve(backend.feed);
-    if (cmd === "chat_team_handoff") return Promise.resolve({ id: 7, from: "thread:x", handoff: { summary: "Resumo longo da entrega do integrante", changed_files: [], tests: [] } });
+    if (cmd === "chat_team_handoff") return Promise.resolve({ id: 7, from: "thread:x", handoff: backend.handoff });
     return Promise.resolve(null);
   },
 }));
@@ -20,6 +21,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 import type { ConversationCard } from "../../chatModel";
+import type { TimelineItem } from "../../timeline/types";
 import type { TeamFeedItem, TeamView } from "../ipc";
 import { TeamThreadFeed } from "../TeamThreadFeed";
 import { useTeamStore } from "../teamStore";
@@ -44,6 +46,7 @@ beforeEach(() => {
   backend.calls = [];
   backend.teams = [TEAM];
   backend.feed = FEED;
+  backend.handoff = SIMPLE;
   useTeamStore.setState({ teams: [TEAM], feeds: { t1: FEED }, targets: {}, told: {}, adding: {} });
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -73,5 +76,86 @@ describe("o fio do time", () => {
     expect(host.textContent).toContain("Resumo longo da entrega do integrante");
     const summary = [...host.querySelectorAll("span")].find((s) => s.textContent === "Resumo longo da entrega do integrante")!;
     expect(summary.className).toContain("truncate");
+  });
+
+  const peer = (id: string, body: string): TimelineItem => ({
+    kind: "user", id,
+    text: `[Mensagem #9 de OpenCode · Revisor 2 via ADE AGS] aviso\n<untrusted_data source="peer:OpenCode · Revisor 2">\n${body}\n</untrusted_data>\n(Para responder, use: ags peer tell "x" "<mensagem>")`,
+  });
+
+  it("mensagem de subagente entra no resumo (contada) e só aparece, em Markdown, ao abrir", async () => {
+    const items = [peer("u1", "Fase 4B:\nlinha dois\n\n```ts\nconst a = 1;\n```")];
+    await act(async () => { root!.render(<TeamThreadFeed conversation={lead} cards={[lead]} items={items} />); });
+    const toggle = host.querySelector("button[aria-expanded]") as HTMLButtonElement;
+    expect(toggle.textContent).toContain("chat.team.feed.messages:1");
+    expect(host.textContent).not.toContain("Fase 4B");
+    await act(async () => { toggle.click(); });
+    const row = [...host.querySelectorAll("button[aria-expanded]")].find((b) => b.textContent?.includes("OpenCode · Revisor 2")) as HTMLButtonElement;
+    expect(row).toBeTruthy();
+    await act(async () => { row.click(); });
+    expect(host.querySelector("br")).not.toBeNull();
+    expect(host.querySelector("pre code")?.textContent).toContain("const a = 1;");
+  });
+
+  it("a entrega que já tem linha própria não se repete como mensagem", async () => {
+    const items = [peer("u1", "ENTREGA #7: pronto · 0 arquivo(s)")];
+    await act(async () => { root!.render(<TeamThreadFeed conversation={lead} cards={[lead]} items={items} />); });
+    expect((host.querySelector("button[aria-expanded]") as HTMLElement).textContent).not.toContain("chat.team.feed.messages");
+  });
+
+  const FULL = {
+    summary: "Fase 4A (cardápio da semana) implementada: gerador puro e trocarItem, migração SQLite, tela /cardapio e card na tela Hoje acima da Dica do dia. tsc e expo lint limpos, sem cortar nada no fim da frase.",
+    status: "complete",
+    changed_files: [{ path: "src/cardapio.ts", description: "gerador" }, { path: "src/tela.tsx" }],
+    tests: [{ command: "ags test affected", status: "passed" }, { command: "bun run lint", status: "failed" }],
+    risks: ["migração toca o banco"],
+    next_steps: ["revisar a tela"],
+    evidence: ["PR https://github.com/tonalenar/ADE-AGS/pull/99"],
+  };
+
+  it("a entrega vira cartão: agente, estado Concluída e resumo de uma linha, sem cortar no meio", async () => {
+    backend.handoff = FULL;
+    await act(async () => { root!.render(<TeamThreadFeed conversation={lead} cards={[lead]} />); });
+    await act(async () => { (host.querySelector("button[aria-expanded]") as HTMLButtonElement).click(); });
+    const card = host.querySelector("[data-delivery-card]") as HTMLElement;
+    expect(card).toBeTruthy();
+    expect(card.textContent).toContain("chat.team.card.finished");
+    expect(card.textContent).toContain(FULL.summary);
+    expect(card.textContent).not.toContain("…");
+    const summary = [...card.querySelectorAll("span")].find((s) => s.textContent === FULL.summary)!;
+    expect(summary.className).toContain("truncate");
+    expect(card.querySelector("pre, ul")).toBeNull();
+  });
+
+  it("expandir mostra o Markdown completo: tarefa, arquivos, testes, riscos, pendências e o link do PR", async () => {
+    backend.handoff = FULL;
+    await act(async () => { root!.render(<TeamThreadFeed conversation={lead} cards={[lead]} />); });
+    await act(async () => { (host.querySelector("button[aria-expanded]") as HTMLButtonElement).click(); });
+    const header = host.querySelector("[data-delivery-card] button[aria-expanded]") as HTMLButtonElement;
+    await act(async () => { header.click(); });
+    const card = host.querySelector("[data-delivery-card]") as HTMLElement;
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(card.textContent).toContain("Fazer o backend");
+    expect(card.querySelectorAll("li").length).toBeGreaterThanOrEqual(6);
+    expect(card.querySelector("code")?.textContent).toContain("src/cardapio.ts");
+    expect(card.textContent).toContain("migração toca o banco");
+    expect(card.textContent).toContain("revisar a tela");
+    expect(card.textContent).toContain("bun run lint");
+    expect([...card.querySelectorAll("button")].some((b) => b.textContent === "https://github.com/tonalenar/ADE-AGS/pull/99")).toBe(true);
+  });
+
+  it("a delegação do orquestrador abre com o texto completo da tarefa", async () => {
+    const long = "Implemente o backend inteiro.\n\n- passo um\n- passo dois com um texto bem longo que a linha recolhida nunca mostraria por inteiro";
+    const feed: TeamFeedItem[] = [{ ...FEED[0]!, task: long }];
+    backend.feed = feed;
+    useTeamStore.setState({ feeds: { t1: feed } });
+    await act(async () => { root!.render(<TeamThreadFeed conversation={lead} cards={[lead]} />); });
+    await act(async () => { (host.querySelector("button[aria-expanded]") as HTMLButtonElement).click(); });
+    const header = host.querySelector("[data-delegation-card] button[aria-expanded]") as HTMLButtonElement;
+    expect(host.querySelectorAll("li").length).toBe(0);
+    await act(async () => { header.click(); });
+    const card = host.querySelector("[data-delegation-card]") as HTMLElement;
+    expect(card.querySelectorAll("li").length).toBe(2);
+    expect(card.textContent).toContain("nunca mostraria por inteiro");
   });
 });

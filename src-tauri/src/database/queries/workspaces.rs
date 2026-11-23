@@ -460,13 +460,3 @@ pub(crate) fn db_restore_workspace_now(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn db_restore_workspace(
-    workspace_id: String,
-    db: tauri::State<'_, DbConnection>,
-) -> Result<(), String> {
-    let db = db.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || db_restore_workspace_now(workspace_id, &db))
-        .await
-        .map_err(|e| e.to_string())?
-}

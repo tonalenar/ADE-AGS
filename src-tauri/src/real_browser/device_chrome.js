@@ -4,8 +4,9 @@
 //   topo descem a mesma altura; ao rolar, o conteúdo passa por trás do vidro.
 // - Android: a barra de status e a barra do Chrome são opacas no topo, como no Chrome real, e ficam no app
 //   (PhoneChrome.tsx), fora da página. Aqui só a alça de gestos, por cima da página, que vai até o fim da tela.
-// - Os dois: os cantos arredondados da tela. A vista nativa é retangular e o recorte dela no macOS não pega; os cantos
-//   são desenhados por cima da página, na cor da moldura, e nada vaza pela curva.
+// - Os cantos arredondados da tela são só da máscara nativa (CAShapeLayer no macOS, região no Windows): aqui não se
+//   desenha canto nenhum, para não cortar o meio da tela quando o aparelho gira.
+// - Deitado, o iPhone mantém a barra de início (209 pt) e leva a ilha para a lateral esquerda; o Android mantém a alça.
 // Os botões funcionam: voltar e recarregar aqui mesmo; o endereço, as abas e o menu vão ao app pela ponte (mensagens
 // `ags-preview` com tipo `device:*`, que o app aceita só desta lista fechada).
 // A moldura entra e sai ao vivo (o app roda este script no documento aberto e `__agsDeviceChromeStop` a tira), sem
@@ -17,10 +18,8 @@
   const platform = "__AGS_PLATFORM__";
   const L = __AGS_LABELS__;
   const ios = platform === "ios";
-  // A cor da moldura (`phoneScreen` em ResponsiveStage.tsx) e o raio da tela, em px da página.
-  const BEZEL = "#0b0b0d";
-  const RADIUS = ios ? 52 : 34;
-  const STATUS = ios ? 54 : 0;
+  // A altura da barra de status do iPhone (iPhone 17/16 Pro), em px da página.
+  const STATUS = ios ? 62 : 0;
   const cleanup = [];
   let stopped = false;
   Object.defineProperty(window, "__agsDeviceChromeStop", {
@@ -44,8 +43,6 @@
     }
     return false;
   };
-  const corner = (v, h) => `<span class="corner" style="${v}:0;${h}:0;background:radial-gradient(circle at ${h === "left" ? RADIUS : 0}px ${v === "top" ? RADIUS : 0}px, transparent ${RADIUS - 0.75}px, ${BEZEL} ${RADIUS}px)"></span>`;
-  const corners = (ios ? corner("top", "left") + corner("top", "right") : "") + corner("bottom", "left") + corner("bottom", "right");
   const send = (type, extra) => window.postMessage(Object.assign({ source: "ags-preview", type }, extra || {}), "*");
   const host = () => (location.hostname || location.href).replace(/^www\./, "");
   const clock = () => { const d = new Date(); return d.getHours() + ":" + String(d.getMinutes()).padStart(2, "0"); };
@@ -64,7 +61,6 @@
     * { box-sizing: border-box; font-family: -apple-system, "SF Pro Text", system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
     .layer { position: fixed; inset: 0; pointer-events: none; color: #000; }
     .layer.dark { color: #fff; }
-    .corner { position: absolute; width: ${RADIUS}px; height: ${RADIUS}px; pointer-events: none; }
     .gesture { position: absolute; left: 50%; bottom: 9px; transform: translateX(-50%); width: 108px; height: 4px; border-radius: 2px; background: rgba(0,0,0,.72); }
     .dark .gesture { background: rgba(255,255,255,.82); }
     button { pointer-events: auto; border: 0; background: none; color: inherit; display: grid; place-items: center; cursor: pointer; padding: 0; }
@@ -77,7 +73,7 @@
     .dark .status::before { background: linear-gradient(to bottom, rgba(0,0,0,.6), rgba(0,0,0,.3) 55%, rgba(0,0,0,0)); }
     .status .time { width: 100px; text-align: center; font-size: 17px; font-weight: 600; letter-spacing: -.3px; }
     .status .icons { width: 100px; display: flex; gap: 6px; align-items: center; justify-content: center; }
-    .island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 118px; height: 34px; border-radius: 17px; background: #000; }
+    .island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 126px; height: 37px; border-radius: 19px; background: #000; }
     .glass { background: rgba(255,255,255,.62); backdrop-filter: blur(18px) saturate(1.8); -webkit-backdrop-filter: blur(18px) saturate(1.8);
       box-shadow: 0 6px 24px rgba(0,0,0,.14), inset 0 0 0 .5px rgba(255,255,255,.7), inset 0 1px 0 rgba(255,255,255,.9); color: #000; }
     .dark .glass { background: rgba(40,40,44,.6); box-shadow: 0 6px 24px rgba(0,0,0,.4), inset 0 0 0 .5px rgba(255,255,255,.15); color: #fff; }
@@ -86,14 +82,16 @@
     .pill { pointer-events: auto; flex: 1; height: 48px; border-radius: 24px; display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: 16px; min-width: 0; }
     .addr { flex: 1; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
     input.addr { pointer-events: auto; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; text-align: left; min-width: 0; }
-    .home { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; border-radius: 3px; background: currentColor; }
+    .home { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 139px; height: 5px; border-radius: 3px; background: currentColor; }
     .sheet { pointer-events: auto; position: absolute; left: 14px; right: 14px; bottom: 88px; border-radius: 22px; padding: 6px; display: none; }
     .sheet.open { display: block; }
     .sheet button { width: 100%; display: flex; justify-content: flex-start; height: 44px; padding: 0 14px; border-radius: 14px; font-size: 16px; }
     .sheet button:active { background: rgba(127,127,127,.18); }
-    .land .status, .land .island, .land .home, .land .gesture { display: none; }
-    .land .bar { left: 50%; right: auto; width: 420px; transform: translateX(-50%); bottom: 12px; }
-    .land .sheet { left: 50%; right: auto; width: 420px; transform: translateX(-50%); bottom: 70px; }
+    .land .status { display: none; }
+    .land .island { top: 50%; left: 11px; width: 37px; height: 126px; transform: translateY(-50%); }
+    .land .home { width: 209px; }
+    .land .bar { left: 50%; right: auto; width: min(420px, calc(100% - 148px)); transform: translateX(-50%); bottom: 20px; }
+    .land .sheet { left: 50%; right: auto; width: min(420px, calc(100% - 148px)); transform: translateX(-50%); bottom: 78px; max-height: calc(100% - 110px); overflow: auto; }
   `;
   const iosParts = `
       <div class="status"><span class="time"></span><span class="icons">${ic.signal}${ic.wifi}${ic.battery}</span></div><span class="island"></span>
@@ -236,7 +234,7 @@
     el.id = "__ags-device-chrome";
     el.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:block";
     root = el.attachShadow({ mode: "closed" });
-    root.innerHTML = `<style>${css}</style><div class="layer">${ios ? iosParts : '<span class="gesture"></span>'}${corners}</div>`;
+    root.innerHTML = `<style>${css}</style><div class="layer">${ios ? iosParts : '<span class="gesture"></span>'}</div>`;
     addr = root.querySelector(".addr");
     const layer = root.querySelector(".layer");
     const tick = () => {

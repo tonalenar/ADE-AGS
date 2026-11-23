@@ -10,13 +10,13 @@ use crate::database::DbConnection;
 use super::api::{self, NewThread, ThreadStatus};
 use super::store::{MessageSearchHit, RequestRow, ThreadRow};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_threads(db: State<'_, DbConnection>) -> Result<Vec<ThreadRow>, String> {
     api::threads(&db)
 }
 
 #[allow(clippy::too_many_arguments)]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_thread_create(
     db: State<'_, DbConnection>,
     agent_id: String,
@@ -66,17 +66,17 @@ pub async fn chat_thread_send(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_thread_items(db: State<'_, DbConnection>, thread_id: String) -> Result<Vec<Item>, String> {
     api::items(&db, &thread_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_thread_search(db: State<'_, DbConnection>, query: String, limit: Option<usize>) -> Result<Vec<MessageSearchHit>, String> {
     api::search_messages(&db, &query, limit.unwrap_or(30))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_thread_requests(db: State<'_, DbConnection>, thread_id: String) -> Result<Vec<RequestRow>, String> {
     api::requests(&db, &thread_id)
 }
@@ -91,7 +91,7 @@ pub fn chat_thread_provider_config(thread_id: String) -> Option<Value> {
     super::opencode::provider_config(&thread_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_thread_goal_get(db: State<'_, DbConnection>, thread_id: String) -> Result<Option<super::store::ThreadGoal>, String> {
     api::thread_goal(&db, &thread_id)
 }
@@ -165,29 +165,29 @@ pub async fn chat_task_output(db: State<'_, DbConnection>, thread_id: String, ta
     api::task_output(&db, &thread_id, &task_id).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_request_answer(app: AppHandle, db: State<'_, DbConnection>, request_id: String, choice: String) -> Result<bool, String> {
     api::answer(&app, &db, &request_id, &choice)
 }
 
 /// Reaplica a política do time e as regras da pessoa aos pedidos que esperam, de TODAS as conversas ativas (a janela
 /// chama ao montar, depois de um reload). Devolve quantos respondeu. Idempotente.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_requests_sweep(app: AppHandle, db: State<'_, DbConnection>) -> usize {
     super::permission::sweep(&app, &db)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_thread_retune(db: State<'_, DbConnection>, thread_id: String, model: Option<String>, effort: Option<String>, access: String) -> Result<ThreadRow, String> {
     api::retune(&db, &thread_id, model, effort, access)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_thread_rename(db: State<'_, DbConnection>, thread_id: String, title: String) -> Result<(), String> {
     api::rename(&db, &thread_id, &title)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_thread_settle(db: State<'_, DbConnection>, thread_id: String, settled: bool) -> Result<(), String> {
     api::settle(&db, &thread_id, settled)
 }
@@ -204,7 +204,7 @@ pub fn chat_permission_notify(app: AppHandle, title: String, body: String) -> Re
 }
 
 /// O que espera a resposta da pessoa no pool de contas da conversa («Continuar na conta B?», «Voltar à A?»).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_pool_pending(db: State<'_, DbConnection>, thread_id: String) -> Option<super::pool::Pending> {
     super::pool::pending(&db, &thread_id)
 }
@@ -215,7 +215,7 @@ pub async fn chat_account_set(app: AppHandle, db: State<'_, DbConnection>, threa
     super::pool::switch_manual(&app, &db, &thread_id, account_id).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_pool_state(db: State<'_, DbConnection>, thread_id: String) -> super::pool::State {
     super::pool::state(&db, &thread_id)
 }
@@ -226,7 +226,7 @@ pub async fn chat_pool_accept(app: AppHandle, db: State<'_, DbConnection>, threa
     super::pool::accept(&app, &db, &thread_id).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_pool_dismiss(db: State<'_, DbConnection>, thread_id: String) {
     super::pool::dismiss(&db, &thread_id);
 }

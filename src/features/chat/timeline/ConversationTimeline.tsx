@@ -18,7 +18,7 @@ import { appResourceOf, mcpAppServerOf } from "../mcpApps/mcpAppResource";
 import { clearTimelineFind, setRightPanel, useChatStore } from "../store";
 import { AgentBubble, PersonBubble } from "./Bubbles";
 import { renderChatCodeBlock } from "./CodeBlockFrame";
-import { parsePeerEnvelope, senderAgent } from "./peerEnvelope";
+import { parsePeerEnvelope, peerMarkdown, senderAgent } from "./peerEnvelope";
 import { speakerHeaders } from "./speakers";
 import type { PendingSend } from "./pending";
 import { displayUserText } from "./userMessage";
@@ -26,7 +26,7 @@ import { isFresh } from "./streaming";
 import { commandTitle } from "./toolTitle";
 import { activityOf, joinParts, summarizeTools } from "./workSummary";
 import { SelectionComment } from "../quotes/SelectionComment";
-import { voicesByItem } from "./agentSwitch";
+import { voicesByItem, type Voice } from "./agentSwitch";
 import { NoticeRow } from "./NoticeRow";
 import { latestInteractivePoolNoticeId } from "./poolNotice";
 import { TurnEndNotice } from "./TurnEndNotice";
@@ -87,6 +87,27 @@ interface RevealOf {
   headers: ReadonlySet<string>;
 }
 
+const EMPTY_STRING_SET: ReadonlySet<string> = new Set();
+
+function sameStringSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const value of a) {
+    if (!b.has(value)) return false;
+  }
+  return true;
+}
+
+function sameVoiceMap(a: ReadonlyMap<string, Voice>, b: ReadonlyMap<string, Voice>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const [id, voice] of a) {
+    const other = b.get(id);
+    if (!other || other.id !== voice.id || other.label !== voice.label) return false;
+  }
+  return true;
+}
+
 /** Responder a pergunta em aberto pelo cartão dela (só nas conversas por protocolo, com uma pergunta esperando). */
 const AnswerContext = createContext<((choice: string) => void) | null>(null);
 
@@ -105,7 +126,7 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export const TimelineView = memo(function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, approvalDocked = false, live: _live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied, loadError = null, onRetryLoad }: {
+export const TimelineView = memo(function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, approvalDocked = false, live: _live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, hidePeerMessages = false, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied, loadError = null, onRetryLoad }: {
   /** A conversa por protocolo (os avisos do pool de contas pedem a resposta dela). */
   threadId?: string;
   /** Identidade local usada para abrir a busca apenas na timeline visível. */
@@ -142,6 +163,8 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   onResend?: (text: string) => void;
   /** Depois dos turnos, no fim do fio: as delegações e entregas do time (`team/TeamThreadFeed`). */
   after?: React.ReactNode;
+  /** Orquestrador de um time: as mensagens de outros agentes saem do corpo e ficam no resumo do time (`after`). */
+  hidePeerMessages?: boolean;
   /** Resultado da busca que deve ser levado à vista e realçado uma vez. */
   searchTargetId?: string | null;
   searchTargetToken?: number | null;
@@ -157,10 +180,10 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   // A conta dos turnos reaproveita o que já estava pronto: o pedaço que chega no fim não refaz os turnos anteriores.
   const turnsCache = useRef<TurnsCache | null>(null);
   const allTurns = useMemo(() => {
-    const next = timelineTurnsCached(turnsCache.current, items);
+    const next = timelineTurnsCached(turnsCache.current, items, { hidePeerMessages });
     turnsCache.current = next;
     return next.turns;
-  }, [items]);
+  }, [items, hidePeerMessages]);
   const turns = useMemo(() => applyToolCallVisibility(allTurns, toolVisibility), [allTurns, toolVisibility]);
   const compacting = useMemo(() => isCompacting(items, Date.now()), [items]);
   // O «Pensando…» com brilho: só enquanto o agente trabalha, fora de compactação e sem pedido de aprovação esperando.
@@ -175,11 +198,30 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   if (baseline.current === null && loaded) baseline.current = new Set(items.filter((i) => !streaming?.has(i.id)).map((i) => i.id));
   // Cada mensagem entra animada uma única vez (remontar ao mudar de lugar no turno não repete).
   const entered = useRef<Set<string>>(new Set());
-  const headers = useMemo(() => speakerHeaders(items), [items]);
-  const voices = useMemo(() => voicesByItem(items), [items]);
+  const headersRef = useRef<ReadonlySet<string>>(EMPTY_STRING_SET);
+  const headers = useMemo(() => {
+    const next = speakerHeaders(items);
+    if (sameStringSet(headersRef.current, next)) return headersRef.current;
+    headersRef.current = next;
+    return next;
+  }, [items]);
+  const voicesRef = useRef<ReadonlyMap<string, Voice>>(new Map());
+  const voices = useMemo(() => {
+    const next = voicesByItem(items);
+    if (sameVoiceMap(voicesRef.current, next)) return voicesRef.current;
+    voicesRef.current = next;
+    return next;
+  }, [items]);
+  const streamingRef = useRef<ReadonlySet<string>>(EMPTY_STRING_SET);
+  const stableStreaming = useMemo(() => {
+    const next = streaming ?? EMPTY_STRING_SET;
+    if (sameStringSet(streamingRef.current, next)) return streamingRef.current;
+    streamingRef.current = next;
+    return next;
+  }, [streaming]);
   const reveal = useMemo<RevealOf>(() => ({
-    animate: (item) => !!streaming?.has(item.id) || (baseline.current !== null && isFresh(item, baseline.current, mountedAt)),
-    live: (id) => !!streaming?.has(id),
+    animate: (item) => stableStreaming.has(item.id) || (baseline.current !== null && isFresh(item, baseline.current, mountedAt)),
+    live: (id) => stableStreaming.has(id),
     entering: (id) => {
       if (baseline.current === null || baseline.current.has(id) || entered.current.has(id)) return false;
       entered.current.add(id);
@@ -188,7 +230,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     agent: { id: agentId, label: agentLabel },
     voiceOf: (itemId) => voices.get(itemId) ?? { id: agentId, label: agentLabel },
     headers,
-  }), [streaming, mountedAt, agentId, agentLabel, headers, voices]);
+  }), [stableStreaming, mountedAt, agentId, agentLabel, headers, voices]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   // Função estável: o `SelectionComment` a tem nas dependências dos listeners.
@@ -625,7 +667,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   );
 });
 
-function VirtualTurn({ turnKey, index, onMeasure, children }: {
+const VirtualTurn = memo(function VirtualTurn({ turnKey, index, onMeasure, children }: {
   turnKey: string;
   index: number;
   onMeasure: (index: number, key: string, height: number) => void;
@@ -643,9 +685,40 @@ function VirtualTurn({ turnKey, index, onMeasure, children }: {
     return () => observer.disconnect();
   }, [index, onMeasure, turnKey]);
   return <div ref={ref} data-virtual-turn={turnKey}>{children}</div>;
+});
+
+interface TurnViewProps {
+  turn: Turn;
+  /** O modelo ainda está pensando neste turno: o «Pensando…» com brilho vai depois das linhas. */
+  thinking?: boolean;
+  working?: boolean;
+  waiting?: boolean;
+  workingSince?: number | null;
+  onOpenTerminal?: () => void;
+  searchTargetId?: string | null;
+  composerTarget?: string;
+  quietWhenEmpty?: boolean;
 }
 
-function TurnView({ turn, thinking = false, working = false, waiting = false, workingSince = null, onOpenTerminal, searchTargetId, composerTarget, quietWhenEmpty = false }: { turn: Turn; /** O modelo ainda está pensando neste turno: o «Pensando…» com brilho vai depois das linhas. */ thinking?: boolean; working?: boolean; waiting?: boolean; workingSince?: number | null; onOpenTerminal?: () => void; searchTargetId?: string | null; composerTarget?: string; quietWhenEmpty?: boolean }) {
+function sameTurnViewProps(prev: TurnViewProps, next: TurnViewProps): boolean {
+  if (prev.turn !== next.turn) return false;
+  if ((prev.thinking ?? false) !== (next.thinking ?? false)) return false;
+  const prevWorking = prev.working ?? false;
+  const nextWorking = next.working ?? false;
+  if (prevWorking !== nextWorking) return false;
+  // `waiting` e `workingSince` só aparecem enquanto o turno está aberto e trabalhando.
+  if (next.turn.end === null && nextWorking) {
+    if ((prev.waiting ?? false) !== (next.waiting ?? false)) return false;
+    if ((prev.workingSince ?? null) !== (next.workingSince ?? null)) return false;
+  }
+  if (prev.onOpenTerminal !== next.onOpenTerminal) return false;
+  if ((prev.searchTargetId ?? null) !== (next.searchTargetId ?? null)) return false;
+  if (prev.composerTarget !== next.composerTarget) return false;
+  if ((prev.quietWhenEmpty ?? false) !== (next.quietWhenEmpty ?? false)) return false;
+  return true;
+}
+
+const TurnView = memo(function TurnView({ turn, thinking = false, working = false, waiting = false, workingSince = null, onOpenTerminal, searchTargetId, composerTarget, quietWhenEmpty = false }: TurnViewProps) {
   const { t, i18n } = useTranslation();
   const timeFormat = useDisplayPrefs().timeFormat;
   // Como no T3 Code: turnos concluídos sem erro nem interrupção recolhem automaticamente atrás de
@@ -735,14 +808,14 @@ function TurnView({ turn, thinking = false, working = false, waiting = false, wo
       {turn.end && turn.end.files.length > 0 && <div><ChangedFilesCard files={turn.end.files} /></div>}
     </>
   );
-}
+}, sameTurnViewProps);
 
 /**
  * A "mensagem da pessoa" de um turno. Se ela é, na verdade, de outro agente (`ags peer tell/ask`
  * cai no terminal como mensagem do usuário), mostra só o corpo, no balão do remetente e com o logo
  * dele; o envelope de segurança continua indo ao modelo, só a tela o esconde (`peerEnvelope.ts`).
  */
-function UserMessage({ item, searchHit = false, composerTarget }: { item: TimelineItem; searchHit?: boolean; composerTarget?: string }) {
+const UserMessage = memo(function UserMessage({ item, searchHit = false, composerTarget }: { item: TimelineItem; searchHit?: boolean; composerTarget?: string }) {
   const reveal = useContext(RevealContext);
   const text = item.text ?? "";
   const peer = useMemo(() => parsePeerEnvelope(text), [text]);
@@ -750,16 +823,16 @@ function UserMessage({ item, searchHit = false, composerTarget }: { item: Timeli
   if (!peer) return <PersonBubble text={text} at={item.at} itemId={item.id} searchHit={searchHit} composerTarget={composerTarget} />;
   return (
     <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} receipt={peer.id} header={reveal.headers.has(item.id)} entering={entering} at={item.at} copyText={peer.body} itemId={item.id} searchHit={searchHit}>
-      <ChatMessageMarkdown content={peer.body} renderCodeBlock={renderChatCodeBlock} />
+      <ChatMessageMarkdown content={peerMarkdown(peer.body)} renderCodeBlock={renderChatCodeBlock} />
     </AgentBubble>
   );
-}
+});
 
 /**
  * Uma fala do agente em markdown. A que chegou agora entra com transição suave por bloco
  * (`.chat-markdown[data-streaming]`, igual ao T3 Code) sem cursor piscante no fim.
  */
-function AgentText({ item, searchHit = false }: { item: TimelineItem; searchHit?: boolean }) {
+const AgentText = memo(function AgentText({ item, searchHit = false }: { item: TimelineItem; searchHit?: boolean }) {
   const reveal = useContext(RevealContext);
   const live = reveal.live(item.id);
   // O delta do provedor já chega no ritmo real; revela direto e reserva o fade para nós Markdown novos.
@@ -771,10 +844,42 @@ function AgentText({ item, searchHit = false }: { item: TimelineItem; searchHit?
       <ChatMessageMarkdown content={text} renderCodeBlock={renderChatCodeBlock} streaming={isStreaming} />
     </AgentBubble>
   );
+});
+
+function sameItemList(a: readonly TimelineItem[], b: readonly TimelineItem[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function sameBodyRow(a: BodyRow, b: BodyRow): boolean {
+  if (a === b) return true;
+  if (a.type !== b.type || a.key !== b.key) return false;
+  if (a.type === "work" || a.type === "infra") {
+    return sameItemList(a.tools, (b as typeof a).tools);
+  }
+  return a.item === (b as typeof a).item;
+}
+
+interface BodyRowViewProps {
+  row: BodyRow;
+  onOpenTerminal?: () => void;
+  active?: boolean;
+  searchTargetId?: string | null;
+}
+
+function sameBodyRowViewProps(prev: BodyRowViewProps, next: BodyRowViewProps): boolean {
+  return sameBodyRow(prev.row, next.row)
+    && (prev.active ?? false) === (next.active ?? false)
+    && prev.onOpenTerminal === next.onOpenTerminal
+    && (prev.searchTargetId ?? null) === (next.searchTargetId ?? null);
 }
 
 /** `active`: a última linha do turno em aberto (o agente ainda está trabalhando nela). */
-function BodyRowView({ row, onOpenTerminal, active = false, searchTargetId }: { row: BodyRow; onOpenTerminal?: () => void; active?: boolean; searchTargetId?: string | null }) {
+const BodyRowView = memo(function BodyRowView({ row, onOpenTerminal, active = false, searchTargetId }: BodyRowViewProps) {
   const { t } = useTranslation();
   const answer = useContext(AnswerContext);
   switch (row.type) {
@@ -820,7 +925,7 @@ function BodyRowView({ row, onOpenTerminal, active = false, searchTargetId }: { 
         </div>
       );
   }
-}
+}, sameBodyRowViewProps);
 
 /** O resumo do raciocínio sem a marcação do markdown (os títulos em `**…**` do Codex) e numa linha só. */
 function flatThought(text: string): string {
@@ -834,7 +939,7 @@ const THOUGHT_CLAMP_CHARS = 240;
  * O resumo do pensamento do agente, em cinza, com o ícone de cérebro (como o T3 Code). Recolhido mostra até 3 linhas;
  * o clique abre o texto inteiro, em markdown. Chega aos poucos enquanto o agente pensa (o rascunho cresce no lugar).
  */
-function ReasoningRow({ item }: { item: TimelineItem }) {
+const ReasoningRow = memo(function ReasoningRow({ item }: { item: TimelineItem }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const text = (item.text ?? "").trim();
@@ -863,7 +968,7 @@ function ReasoningRow({ item }: { item: TimelineItem }) {
       )}
     </div>
   );
-}
+});
 
 /** «Pensando…» com o brilho passando, enquanto o modelo ainda pensa (o `cc-shimmer` para com `prefers-reduced-motion`). */
 function ThinkingRow() {
@@ -888,7 +993,7 @@ const VERB: Record<ToolKind, string> = {
  * com o trilho de ícone `w-6` e o brilho `.cc-live-tool-shine` quando ativo (como o `WorkGroupSection`
  * no T3 Code, sem pontos pulsantes; lista expandida limitada com rolagem interna).
  */
-function WorkGroup({ tools, active }: { tools: TimelineItem[]; active: boolean }) {
+const WorkGroup = memo(function WorkGroup({ tools, active }: { tools: TimelineItem[]; active: boolean }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Uma ferramenta que vira resumo começa recolhida: o detalhe da linha aberta não vira uma lista aberta sem aviso.
@@ -965,7 +1070,7 @@ function WorkGroup({ tools, active }: { tools: TimelineItem[]; active: boolean }
         : open && <div className="ms-7 flex flex-col max-h-72 overflow-y-auto overflow-x-hidden rounded-md">{tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}</div>}
     </div>
   );
-}
+}, (prev, next) => prev.active === next.active && sameItemList(prev.tools, next.tools));
 
 /** O que se abre de uma ferramenta só: o comando inteiro, o desfecho desconhecido, o app MCP e a saída. */
 function ToolDetails({ tool, command, longCommand, unknownOutcome, app, open }: {
@@ -1014,7 +1119,7 @@ function ToolDetails({ tool, command, longCommand, unknownOutcome, app, open }: 
 }
 
 /** Os comandos `ags …` do time numa linha só, recolhida: bastidor, a conversa não os mostra um a um. */
-function InfraRow({ tools }: { tools: TimelineItem[] }) {
+const InfraRow = memo(function InfraRow({ tools }: { tools: TimelineItem[] }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
@@ -1030,14 +1135,14 @@ function InfraRow({ tools }: { tools: TimelineItem[] }) {
       {open && <div className="ms-7 flex flex-col max-h-72 overflow-y-auto overflow-x-hidden rounded-md">{tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}</div>}
     </div>
   );
-}
+}, (prev, next) => sameItemList(prev.tools, next.tools));
 
 /** Uma ferramenta numa linha só (as de dentro do resumo e do bastidor). É o mesmo `WorkGroup`, com uma ferramenta. */
 export function ToolRow({ tool }: { tool: TimelineItem }) {
   return <WorkGroup tools={[tool]} active={false} />;
 }
 
-function ChangedFilesCard({ files }: { files: ChangedFile[] }) {
+const ChangedFilesCard = memo(function ChangedFilesCard({ files }: { files: ChangedFile[] }) {
   const { t } = useTranslation();
   const added = files.reduce((n, f) => n + f.added, 0);
   const removed = files.reduce((n, f) => n + f.removed, 0);
@@ -1066,7 +1171,7 @@ function ChangedFilesCard({ files }: { files: ChangedFile[] }) {
       </ul>
     </div>
   );
-}
+});
 
 /** «Trabalhando há 12s» com linha divisória inferior e sem ponto pulsante (paridade com `WorkingTimelineRow` do T3 Code). */
 function WorkingLine({ since, waiting }: { since: number | null; waiting: boolean }) {

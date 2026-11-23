@@ -183,12 +183,12 @@ fn release(id: &str) {
         .remove(id);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduled_task_list() -> Result<Vec<TaskView>, String> {
     Ok(scheduled_tasks::all()?.iter().map(to_view).collect())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduled_task_create(
     app: AppHandle,
     db: State<'_, DbConnection>,
@@ -232,7 +232,7 @@ pub fn scheduled_task_create(
     Ok(to_view(&created))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduled_task_update(
     app: AppHandle,
     db: State<'_, DbConnection>,
@@ -285,7 +285,7 @@ pub fn scheduled_task_update(
     Ok(to_view(&updated))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduled_task_set_enabled(
     app: AppHandle,
     id: String,
@@ -333,12 +333,12 @@ pub async fn scheduled_task_run_now(
         return Err("A tarefa já está em execução.".into());
     }
     let db = db.inner().clone();
-    let result = execute(&app, &db, &id, None, true).await;
+    let result = execute(&app, &db, &id, None).await;
     release(&id);
     result
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduled_task_delete(app: AppHandle, id: String) -> Result<bool, String> {
     if !claim(&id) {
         return Err("A tarefa está em execução; aguarde antes de removê-la.".into());
@@ -356,7 +356,7 @@ pub fn scheduled_task_delete(app: AppHandle, id: String) -> Result<bool, String>
     Ok(removed)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduled_task_history(task_id: String) -> Result<Vec<TaskRun>, String> {
     let task = scheduled_tasks::all()?
         .into_iter()
@@ -400,7 +400,7 @@ pub(crate) fn scheduler_tick(app: &AppHandle, gate: crate::missions::automation:
                 return;
             };
             let result =
-                tauri::async_runtime::block_on(execute(&app, &db, &id, Some(scheduled_for), false));
+                tauri::async_runtime::block_on(execute(&app, &db, &id, Some(scheduled_for)));
             if let Err(error) = result {
                 eprintln!("[tarefas agendadas] dispatch de {id} falhou: {error}");
             }
@@ -439,13 +439,7 @@ fn record_unavailable(
         };
         scheduled_tasks::push_history(task, run);
         task.updated_at = now.timestamp();
-        match task.schedule {
-            crate::routines::Schedule::Once { .. } => {
-                task.enabled = false;
-                task.next_run = None;
-            }
-            _ => task.next_run = scheduled_tasks::next_run(&task.schedule, now),
-        }
+        scheduled_tasks::advance(task, now);
         Ok(())
     })?;
     changed(app);
@@ -457,7 +451,6 @@ async fn execute(
     db: &DbConnection,
     task_id: &str,
     scheduled_for: Option<i64>,
-    manual: bool,
 ) -> Result<TaskRun, String> {
     let now = Local::now();
     let run = TaskRun {
@@ -478,10 +471,9 @@ async fn execute(
             .iter_mut()
             .find(|task| task.id == task_id)
             .ok_or("A tarefa não existe mais.")?;
+        // Reivindica o horário já aqui: se o registro do fim falhar, o próximo tick não reenvia o prompt.
         if let Some(scheduled_for) = scheduled_for {
-            if !task.enabled || task.next_run != Some(scheduled_for) {
-                return Err("O horário desta tarefa mudou antes do dispatch.".into());
-            }
+            scheduled_tasks::claim_due(task, scheduled_for, now)?;
         }
         let mut run = run.clone();
         run.cwd = task.cwd.clone();
@@ -516,15 +508,6 @@ async fn execute(
         history.thread_id = thread_id.clone().or(history.thread_id.clone());
         history.result = message.clone();
         task.updated_at = finished.timestamp();
-        if !manual {
-            match task.schedule {
-                crate::routines::Schedule::Once { .. } => {
-                    task.enabled = false;
-                    task.next_run = None;
-                }
-                _ => task.next_run = scheduled_tasks::next_run(&task.schedule, finished),
-            }
-        }
         Ok(history.clone())
     })?;
     changed(app);

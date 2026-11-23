@@ -788,6 +788,12 @@ pub(super) fn tab_send(app: &AppHandle, args: &Value) -> Result<Value, String> {
     if let Some(error) = crate::ipc::guard::tab_send_error(&crate::canvas::load_boards()?, &caller, &tab_id, opened_by.as_deref()) {
         return Err(error);
     }
+    let autocompact_on = db(app)
+        .map(|db| crate::conversa::autocompact::config(&db).enabled)
+        .unwrap_or(false);
+    if let Some(error) = crate::ipc::guard::compact_command_error(&caller, &tab_id, &text, autocompact_on) {
+        return Err(error);
+    }
     let from_tab = match &caller {
         crate::terminal::Caller::Tab(tab) => tab.clone(),
         crate::terminal::Caller::Outside => String::new(),

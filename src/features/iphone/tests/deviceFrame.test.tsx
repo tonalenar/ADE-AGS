@@ -61,6 +61,39 @@ describe("botão lateral do aparelho", () => {
     expect(iphoneButtonState).toHaveBeenLastCalledWith("device:x", "volumeUp", false);
   });
 
+  it("girar mantém o raio, a moldura e o tamanho da ilha; a ilha vai para a lateral e os botões giram", () => {
+    const withIsland: FrameLayout = { buttons: [{ button: "volumeUp", side: "right", top: 0.1, height: 0.06, kind: "button" }], island: true, bezel: 0.05, radius: 0.1 };
+    const draw = (width: number, height: number) => {
+      act(() => {
+        root ??= createRoot(host);
+        root.render(<DeviceFrame device="device:x" name="iPhone" layout={withIsland} screen={{ width, height }} enabled><i /></DeviceFrame>);
+      });
+      const island = host.querySelector<HTMLElement>('span[aria-hidden="true"].rounded-full')!;
+      const screenBox = [...host.querySelectorAll<HTMLElement>("div")].find((d) => d.className.includes("overflow-hidden"))!;
+      const outer = host.firstElementChild as HTMLElement;
+      return { island, screenBox, outer, button: button() };
+    };
+    const portrait = draw(200, 400);
+    const p = {
+      radius: portrait.screenBox.style.borderRadius, w: portrait.island.style.width, h: portrait.island.style.height,
+      top: portrait.island.style.top, buttonRight: portrait.button.style.right,
+    };
+    expect(p.top).not.toBe("");
+    expect(p.buttonRight).not.toBe("");
+    const land = draw(400, 200);
+    expect(land.screenBox.style.borderRadius).toBe(p.radius);
+    expect(land.outer.style.width).toBe("420px");
+    expect(land.outer.style.height).toBe("220px");
+    // A ilha deitada: largura e altura trocadas, junto da lateral esquerda, no meio da altura.
+    expect(land.island.style.width).toBe(p.h);
+    expect(land.island.style.height).toBe(p.w);
+    expect(land.island.style.top).toBe("50%");
+    expect(land.island.style.left).not.toBe("");
+    // O botão da direita vai para a borda de cima.
+    expect(land.button.style.top.startsWith("-")).toBe(true);
+    expect(land.button.style.right).toBe("");
+  });
+
   it("não aperta enquanto o toque não está pronto", () => {
     render(false);
     act(() => { button().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1 })); });

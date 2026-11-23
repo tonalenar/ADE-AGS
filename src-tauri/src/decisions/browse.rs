@@ -308,7 +308,7 @@ pub fn pick(db: &DbConnection, query: &StepQuery) -> StepReply {
     if !settings.active() || !settings.allows(POINT_BROWSE) {
         return StepReply::without_choice(
             "off",
-            "O Jev não está pilotando navegadores: ligue em Ajustes → Decisões (Navegador do canvas).",
+            "O Jev não está pilotando navegadores: ligue em Ajustes → Decisões (Navegador — piloto act).",
         );
     }
     let clean_started = Instant::now();
@@ -442,8 +442,82 @@ pub(super) fn pick_with(db: &DbConnection, settings: &config::Settings, api_key:
             cost: Some(cost),
             fault: None,
         },
-        Err(reason) => StepReply { cost: Some(cost), fault, ..StepReply::without_choice("error", reason) },
+        Err(reason) => {
+            let status = if matches!(result, Err(super::protocol::DecisionError::QuotaExhausted { .. })) {
+                "no_credit"
+            } else {
+                "error"
+            };
+            StepReply { cost: Some(cost), fault, ..StepReply::without_choice(status, reason) }
+        }
     }
+}
+
+/// Checagem local de disponibilidade do piloto (zero HTTP, zero gasto de saldo): confere se o piloto está ligado,
+/// se há chave para o provedor Jev e se há aviso recente de saldo/cota esgotada. Chamada pelo `jevPilot` antes de `autoFill`.
+pub fn status_with(settings: &config::Settings, api_key: Option<&str>) -> StepReply {
+    if !settings.active() || !settings.allows(POINT_BROWSE) {
+        return StepReply::without_choice(
+            "off",
+            "O Jev não está pilotando navegadores: ligue em Ajustes → Decisões (Navegador — piloto act).",
+        );
+    }
+    if settings.provider == config::ProviderKind::Jev
+        && api_key.map(str::trim).filter(|k| !k.is_empty()).is_none()
+    {
+        return StepReply {
+            fault: Some("local"),
+            ..StepReply::without_choice(
+                "error",
+                "Sem chave da API do Jev no cofre: configure em Ajustes → Decisões.",
+            )
+        };
+    }
+    if let Some(reason) = http::quota_exhausted_reason(settings.provider, &settings.base_url) {
+        return StepReply {
+            fault: Some("local"),
+            ..StepReply::without_choice("no_credit", reason)
+        };
+    }
+    StepReply {
+        status: "ok",
+        operation: None,
+        target: None,
+        probability: None,
+        goal_done: None,
+        operation_probability: None,
+        target_probability: None,
+        confidence: None,
+        reason: None,
+        latency_ms: None,
+        cost: None,
+        fault: None,
+    }
+}
+
+/// Estado do piloto lido do banco + cofre (sem rede, sem gastar saldo).
+pub fn status(db: &DbConnection) -> StepReply {
+    let settings = match db.lock().ok().and_then(|conn| config::load(&conn).ok()) {
+        Some(settings) => settings,
+        None => return StepReply::without_choice("error", "Não consegui ler os ajustes de Decisões."),
+    };
+    if !settings.active() || !settings.allows(POINT_BROWSE) {
+        return status_with(&settings, None);
+    }
+    let key = if settings.provider == config::ProviderKind::Jev {
+        config::load_key()
+    } else {
+        None
+    };
+    status_with(&settings, key.as_deref())
+}
+
+#[tauri::command]
+pub async fn decision_pilot_status(db: tauri::State<'_, DbConnection>) -> Result<StepReply, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || status(&db))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -646,5 +720,38 @@ mod test {
         assert!(read_answer(&unknown_target, &clean).is_err());
         let missing_target = BTreeMap::from([("operacao".to_string(), answer("click", 0.9))]);
         assert!(read_answer(&missing_target, &clean).is_err());
+    }
+
+    #[test]
+    fn status_detecta_desligado_sem_chave_e_sem_saldo_antes_de_agir() {
+        let off = config::Settings::default();
+        assert_eq!(status_with(&off, None).status, "off");
+
+        let mut jev = config::Settings {
+            enabled: true,
+            provider: config::ProviderKind::Jev,
+            base_url: "https://status-test.typesafe.invalid".into(),
+            model: "jev-latest".into(),
+            browser_pilot: true,
+            ..config::Settings::default()
+        };
+        assert_eq!(status_with(&jev, None).status, "error", "Jev sem chave não pode rodar autoFill");
+        assert_eq!(status_with(&jev, Some("sk-valida-123456")).status, "ok");
+
+        http::mark_quota_exhausted(
+            jev.provider,
+            &jev.base_url,
+            "O Jev está sem saldo (http 402).".into(),
+        );
+        let no_credit = status_with(&jev, Some("sk-valida-123456"));
+        assert_eq!(no_credit.status, "no_credit");
+        assert!(no_credit.reason.as_deref().unwrap_or("").contains("sem saldo"));
+
+        http::clear_quota_exhausted(jev.provider, &jev.base_url);
+        assert_eq!(status_with(&jev, Some("sk-valida-123456")).status, "ok");
+
+        // Com browser_pilot desligado, mesmo com enabled=true e chave, volta "off".
+        jev.browser_pilot = false;
+        assert_eq!(status_with(&jev, Some("sk-valida-123456")).status, "off");
     }
 }

@@ -135,7 +135,7 @@ pub fn start(app: AppHandle) {
     });
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pet_status(db: tauri::State<'_, DbConnection>) -> PetStatus {
     status_for(read_u64(&db, XP_KEY))
 }

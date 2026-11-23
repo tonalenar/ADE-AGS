@@ -1,16 +1,21 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useAccountsStore } from "@/features/accounts/store";
 import { SubagentSwitch } from "@/features/canvas/SubagentSwitch";
+import { getRoster } from "@/features/runs/ipc";
+import type { Roster } from "@/features/runs/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
 
-import { AgentModelPicker, EffortMenu, hasEffort } from "../AgentModelPicker";
+import { AgentModelPicker, EffortMenu } from "../AgentModelPicker";
 import { CheckIcon } from "../chatIcons";
 import { loadChatPrefs } from "../chatPrefs";
 import type { ConversationCard } from "../chatModel";
 import { usePopover } from "../usePopover";
 import type { TeamPolicy, TeamView } from "./ipc";
+import { agentChoices } from "./linkAgentChoices";
+import { effectiveEffort, effectiveRole, linkEffortSupported } from "./linkFormModel";
 import { AgentMono, useRoleLabel } from "./TeamParts";
 import { branchFor, defaultPolicy, POLICIES, TEAM_ROLES, takenRefs } from "./teamModel";
 import { draftMemberName, type DraftMember } from "./teamDraft";
@@ -83,6 +88,23 @@ export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, ti
   const detected = useTabsStore((s) => s.detectedAgents);
   const agents = useMemo(() => detected.filter((a) => a.available && a.id !== SHELL_AGENT_ID), [detected]);
   const open = useMemo(() => cards.filter((c) => !taken.has(c.tabId)), [cards, taken]);
+  // Agente + conta, como o trilho do seletor de modelo: a principal e as contas extras (também as sem login).
+  const [roster, setRoster] = useState<Roster | null>(null);
+  const accountsLoaded = useAccountsStore((s) => s.loaded);
+  const createdAccounts = useAccountsStore((s) => s.accounts);
+  const systemAccounts = useAccountsStore((s) => s.systemAccounts);
+  useEffect(() => {
+    if (!accountChoice) return;
+    let alive = true;
+    getRoster(false).then((next) => { if (alive) setRoster(next); }).catch(() => undefined);
+    if (!accountsLoaded) useAccountsStore.getState().load().catch(() => undefined);
+    return () => { alive = false; };
+  }, [accountChoice]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir o formulário
+  const principalLabel = t("accounts.principalName");
+  const choices = useMemo(
+    () => agentChoices(agents, accountChoice ? roster : null, [...(systemAccounts ?? []), ...(createdAccounts ?? [])], principalLabel),
+    [agents, accountChoice, roster, systemAccounts, createdAccounts, principalLabel],
+  );
   const locked = initial !== null;
   // Como na prancheta: um agente que o time ainda não tem, numa conversa nova; Revisor; Pede tudo.
   const [pick, setPick] = useState<LinkPick | null>(() => {
@@ -94,8 +116,11 @@ export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, ti
   // O modelo e o esforço do agente novo (`null` = o padrão dele); trocar de agente zera os dois.
   const [tune, setTune] = useState<{ model: string | null; effort: string | null; account: string | null }>(
     () => (initial?.kind === "new" ? { model: initial.model, effort: initial.effort, account: initial.account ?? null } : { model: null, effort: null, account: null }));
-  const choose = (next: LinkPick) => {
-    if (!(pick?.kind === "new" && next.kind === "new" && pick.agent.id === next.agent.id)) setTune({ model: null, effort: null, account: null });
+  const [effortTouched, setEffortTouched] = useState(initial?.kind === "new" && initial.effort != null);
+  const choose = (next: LinkPick, account: string | null = null) => {
+    const sameAgent = pick?.kind === "new" && next.kind === "new" && pick.agent.id === next.agent.id;
+    if (!sameAgent) setEffortTouched(false);
+    if (!sameAgent || tune.account !== account) setTune({ model: null, effort: null, account });
     setPick(next);
   };
   const [role, setRole] = useState<string>(initial?.role ?? "reviewer");
@@ -109,8 +134,14 @@ export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, ti
   const chooseRole = (next: string) => {
     setRole(next);
     // A política acompanha o papel até a pessoa escolher uma.
-    if (!touchedPolicy) setPolicy(defaultPolicy(next));
+    if (!touchedPolicy) setPolicy(defaultPolicy(effectiveRole(next, subagent)));
   };
+  // "Subagente" no Papel e o interruptor são a mesma escolha: ligado, o Papel fica inativo mostrando "Subagente".
+  const chooseSubagent = (next: boolean) => {
+    setSubagent(next);
+    if (!touchedPolicy) setPolicy(defaultPolicy(effectiveRole(role, next)));
+  };
+  const shownRole = effectiveRole(role, subagent);
 
   const pickLabel = initial ? draftMemberName(initial)
     : !pick ? t("chat.team.form.none")
@@ -118,13 +149,14 @@ export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, ti
     : pick.card.title;
   const fresh = initial ? initial.kind === "new" : pick?.kind === "new";
   const freshAgent = initial?.kind === "new" ? initial.agent : pick?.kind === "new" ? pick.agent : null;
+  const effort = effectiveEffort({ effort: tune.effort, touched: effortTouched, subagent, agentId: freshAgent?.id ?? null });
 
   const submit = async () => {
     if ((!pick && !locked) || busy) return;
     setBusy(true);
     setError("");
     try {
-      await onSubmit({ pick: locked ? null : pick, role, policy, subagent, worktree, model: tune.model, effort: tune.effort, account: accountChoice ? tune.account : null });
+      await onSubmit({ pick: locked ? null : pick, role: shownRole, policy, subagent, worktree, model: tune.model, effort: fresh ? effort : tune.effort, account: accountChoice ? tune.account : null });
     } catch (e) {
       setError(t("chat.team.errors.link", { error: String(e) }));
     } finally {
@@ -142,11 +174,14 @@ export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, ti
           {(close) => (
             <>
               {agents.length > 0 && <MenuTitle>{t("chat.team.form.newGroup")}</MenuTitle>}
-              {agents.map((agent) => (
-                <MenuItem key={`new:${agent.id}`} on={pick?.kind === "new" && pick.agent.id === agent.id}
-                  onClick={() => { choose({ kind: "new", agent }); close(); }}>
-                  <AgentMono agentId={agent.id} label={agent.label} size={16} />
-                  <span className="truncate">{t("chat.team.form.newConversation", { agent: agent.label })}</span>
+              {choices.map((choice) => (
+                <MenuItem key={`new:${choice.key}`} on={pick?.kind === "new" && pick.agent.id === choice.agent.id && tune.account === choice.accountId}
+                  onClick={() => { choose({ kind: "new", agent: choice.agent }, choice.accountId); close(); }}>
+                  <AgentMono agentId={choice.agent.id} label={choice.agent.label} size={16} />
+                  <span className="truncate">
+                    {t("chat.team.form.newConversation", { agent: choice.name })}
+                    {choice.loggedIn ? "" : ` (${t("chat.picker.accountLoggedOut")})`}
+                  </span>
                 </MenuItem>
               ))}
               {open.length > 0 && <MenuTitle>{t("chat.team.form.existing")}</MenuTitle>}
@@ -163,10 +198,15 @@ export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, ti
         )}
       </Row>
       <Row label={t("chat.team.form.role")}>
-        <Menu label={roleLabel(role)} ariaLabel={t("chat.team.form.role")}>
-          {(close) => TEAM_ROLES.map((id) => (
-            <MenuItem key={id} on={role === id} onClick={() => { chooseRole(id); close(); }}>{roleLabel(id)}</MenuItem>
-          ))}
+        <Menu label={subagent ? t("role.subagent") : roleLabel(role)} ariaLabel={t("chat.team.form.role")} disabled={subagent}>
+          {(close) => (
+            <>
+              {TEAM_ROLES.map((id) => (
+                <MenuItem key={id} on={!subagent && role === id} onClick={() => { chooseRole(id); close(); }}>{roleLabel(id)}</MenuItem>
+              ))}
+              <MenuItem on={subagent} onClick={() => { chooseSubagent(true); close(); }}>{t("role.subagent")}</MenuItem>
+            </>
+          )}
         </Menu>
       </Row>
       <Row label={t("chat.team.form.policy")}>
@@ -180,19 +220,20 @@ export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, ti
       </Row>
       {freshAgent && (
         <Row label={t("chat.team.form.model")}>
-          <AgentModelPicker agents={[freshAgent]} value={{ agentId: freshAgent.id, model: tune.model, effort: tune.effort, account: accountChoice ? tune.account : null }}
+          <AgentModelPicker agents={[freshAgent]} value={{ agentId: freshAgent.id, model: tune.model, effort, account: accountChoice ? tune.account : null }}
             onChange={(v) => setTune((cur) => ({ ...cur, model: v.model, account: accountChoice ? v.account : null }))} showAccount={accountChoice} placement="below" />
         </Row>
       )}
       {freshAgent && (
         // O esforço some nos agentes que não têm (o `EffortMenu` devolve nada).
-        <EffortRow agent={freshAgent} model={tune.model} value={tune.effort} onChange={(effort) => setTune((cur) => ({ ...cur, effort }))} />
+        <EffortRow agent={freshAgent} model={tune.model} account={accountChoice ? tune.account : null} value={effort}
+          onChange={(next) => { setEffortTouched(true); setTune((cur) => ({ ...cur, effort: next })); }} />
       )}
-      <SubagentSwitch value={subagent} onChange={setSubagent} />
+      <SubagentSwitch value={subagent} onChange={chooseSubagent} />
       {fresh && (
         <label className="flex items-center gap-2 text-chat-caption text-gray-600 dark:text-white/60">
           <input type="checkbox" checked={worktree} onChange={(e) => setWorktree(e.target.checked)} className="accent-accent-600" />
-          {t("chat.team.form.worktree", { branch: branchFor(role) })}
+          {t("chat.team.form.worktree", { branch: branchFor(shownRole) })}
         </label>
       )}
       {dragHint && <div className="text-chat-caption text-gray-500 dark:text-white/45">{t("chat.team.form.dragHint")}</div>}
@@ -211,12 +252,12 @@ export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, ti
   );
 }
 
-function EffortRow({ agent, model, value, onChange }: { agent: AgentInfo; model: string | null; value: string | null; onChange: (effort: string | null) => void }) {
+function EffortRow({ agent, model, account, value, onChange }: { agent: AgentInfo; model: string | null; account: string | null; value: string | null; onChange: (effort: string | null) => void }) {
   const { t } = useTranslation();
-  if (!hasEffort(agent.id)) return null;
+  if (!linkEffortSupported(agent.id)) return null;
   return (
     <Row label={t("chat.team.form.effort")}>
-      <EffortMenu agentId={agent.id} model={model} account={null} value={value} onChange={onChange} placement="below" />
+      <EffortMenu forceSupported agentId={agent.id} model={model} account={account} value={value} onChange={onChange} placement="below" />
     </Row>
   );
 }
@@ -231,12 +272,12 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-function Menu({ label, ariaLabel, children }: { label: string; ariaLabel: string; children: (close: () => void) => React.ReactNode }) {
+function Menu({ label, ariaLabel, disabled = false, children }: { label: string; ariaLabel: string; disabled?: boolean; children: (close: () => void) => React.ReactNode }) {
   const { open, setOpen, ref } = usePopover();
   return (
     <div ref={ref} className="relative min-w-0">
-      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={`${ariaLabel}: ${label}`} onClick={() => setOpen(!open)}
-        className="h-7 max-w-[220px] px-2.5 rounded-[7px] border border-gray-200 dark:border-white/[0.08] inline-flex items-center gap-1 text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-white/[0.06]">
+      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={`${ariaLabel}: ${label}`} disabled={disabled} onClick={() => setOpen(!open)}
+        className="h-7 max-w-[220px] px-2.5 rounded-[7px] border border-gray-200 dark:border-white/[0.08] inline-flex items-center gap-1 text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-white/[0.06] disabled:opacity-60 disabled:hover:bg-transparent">
         <span className="truncate">{label}</span><span aria-hidden="true">▾</span>
       </button>
       {open && (

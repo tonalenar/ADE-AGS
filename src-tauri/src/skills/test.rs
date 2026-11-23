@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 use uuid::Uuid;
 
-use crate::database::{DbConnection, db_mark_window_closed};
+use crate::database::DbConnection;
 
 use super::authoring::{SkillDraft, create_skill, fork_skill};
 use super::bundled::{Action, BUNDLED, Provisioned, decide, ensure_one, ensure_one_when};
@@ -707,7 +707,7 @@ fn skills_do_not_leak_between_workspaces_sharing_a_folder() {
     );
 
     // Se cierra A y se abre B — el cambio de workspace que reportaba el bug.
-    wait(db_mark_window_closed("win".to_string(), state.clone())).unwrap();
+    crate::database::db_mark_window_closed_now("win".to_string(), state.inner()).unwrap();
     assert!(
         link_a.symlink_metadata().is_err(),
         "al cerrar A su skill debe salir de la carpeta"
