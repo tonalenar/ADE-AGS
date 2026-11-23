@@ -313,6 +313,16 @@ pub fn history_with_repo(
 }
 
 pub fn validate_start(conn: &Connection, workspace: &str) -> Result<Value, String> {
+    validate_start_with_repo(conn, workspace, None, false, None)
+}
+
+pub fn validate_start_with_repo(
+    conn: &Connection,
+    workspace: &str,
+    repo_key: Option<&str>,
+    repo_fail_closed: bool,
+    history_scope: Option<&super::repo_scope::TaskHistoryScope>,
+) -> Result<Value, String> {
     let pending:i64=conn.query_row("SELECT COUNT(*) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.workspace_id=?1 AND r.status='proposed'",[workspace],|r|r.get(0)).map_err(|e|e.to_string())?;
     if pending >= super::PENDING_MAX {
         return Err("Revise as propostas pendentes antes de sonhar (limite: 32).".into());
@@ -321,7 +331,14 @@ pub fn validate_start(conn: &Connection, workspace: &str) -> Result<Value, Strin
     if running {
         return Err("Já existe um sonho em andamento neste workspace.".into());
     }
-    let input = history(conn, workspace, HISTORY_MISSIONS)?;
+    let input = history_with_repo(
+        conn,
+        workspace,
+        HISTORY_MISSIONS,
+        repo_key,
+        repo_fail_closed,
+        history_scope,
+    )?;
     if input["sources"].as_array().is_none_or(Vec::is_empty) {
         return Err("Este workspace ainda não tem histórico com fontes para sonhar.".into());
     }
@@ -511,7 +528,34 @@ pub async fn memory_dream_start(
         .inner()
         .clone();
     let check_id = workspace_id.clone();
-    crate::database::blocking_db(&db, move |conn| validate_start(conn, &check_id)).await?;
+    let cwd: Option<String> = crate::database::blocking_db(&db, move |conn| {
+        Ok(conn
+            .query_row(
+                "SELECT cwd FROM runs WHERE workspace_id=?1 AND cwd<>'' ORDER BY created_at DESC LIMIT 1",
+                [&check_id],
+                |r| r.get(0),
+            )
+            .ok())
+    })
+    .await?;
+    let (repo_key, history_scope) = match cwd.as_deref() {
+        Some(path) => {
+            let scope = super::repo_scope::workspace_history_scope_unlocked(&db, &workspace_id, path)?;
+            (scope.repo_key.clone(), Some(scope))
+        }
+        None => (None, None),
+    };
+    let check_id = workspace_id.clone();
+    crate::database::blocking_db(&db, move |conn| {
+        validate_start_with_repo(
+            conn,
+            &check_id,
+            repo_key.as_deref(),
+            cwd.is_some(),
+            history_scope.as_ref(),
+        )
+    })
+    .await?;
     crate::runs::start_memory_dream(&app, &db, &workspace_id).await
 }
 

@@ -499,3 +499,90 @@ fn history_pula_entradas_problematicas_com_aviso_e_aceita_politica_de_senha() {
     assert_eq!(facts.len(), 1);
     assert!(h["omittedInputs"].as_u64().unwrap_or(0) >= 2, "{h}");
 }
+
+#[test]
+fn task_tool_propose_grava_repo_key_da_task() {
+    let (c, task, source) = fixture();
+    let out = crate::memory::task_tool_with_repo(
+        &c,
+        &task,
+        "memory.propose",
+        json!({
+            "scope": "workspace",
+            "key": "regra-repo-a",
+            "kind": "note",
+            "body": "Regra específica do repo A",
+            "priority": 1,
+            "reason": source
+        }),
+        Some("github.com/acme/repo-a".into()),
+    )
+    .unwrap();
+    let parsed: Value = serde_json::from_str(out["text"].as_str().unwrap()).unwrap();
+    let entry_id = parsed["entryId"].as_str().unwrap();
+    let stored_repo: Option<String> = c
+        .query_row("SELECT repo_key FROM memory_entries WHERE id = ?1", [entry_id], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        stored_repo.as_deref(),
+        Some("github.com/acme/repo-a"),
+        "proposta da Frota MCP precisa gravar o repo_key da task"
+    );
+}
+
+#[test]
+fn validate_start_with_repo_isola_entradas_de_outro_repositorio() {
+    let c = crate::database::test_db();
+    c.execute_batch(
+        "INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w','Dream',0,0);
+         INSERT INTO runs(id,workspace_id,objective,cwd,created_at) VALUES('r-a','w','A','/repo-a',0),('r-b','w','B','/repo-b',0);",
+    )
+    .unwrap();
+    crate::runs::store::add_fact(&c, "r-a", None, "finding", "Fato do repo A").unwrap();
+    crate::runs::store::add_fact(&c, "r-b", None, "finding", "Fato do repo B").unwrap();
+    for (key, repo) in [("mem-a", "github.com/acme/repo-a"), ("mem-b", "github.com/acme/repo-b")] {
+        let p = super::super::propose(
+            &c,
+            "workspace",
+            "w",
+            None,
+            &super::super::ProposalInput {
+                scope: "workspace".into(),
+                key: key.into(),
+                kind: "note".into(),
+                body: format!("Regra de {repo}"),
+                priority: 1,
+                operation: "create".into(),
+                expected_revision: None,
+                source_fact_id: None,
+                reason: None,
+                acknowledge_secret: false,
+            },
+            super::super::ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None },
+        )
+        .unwrap();
+        super::super::decide(&c, &p.entry_id, p.revision, true).unwrap();
+        c.execute("UPDATE memory_entries SET repo_key = ?1 WHERE id = ?2", params![repo, p.entry_id])
+            .unwrap();
+    }
+    let scope = super::super::repo_scope::TaskHistoryScope {
+        repo_key: Some("github.com/acme/repo-a".into()),
+        run_ids: ["r-a".to_string()].into_iter().collect(),
+        mission_ids: Default::default(),
+    };
+    let input = validate_start_with_repo(&c, "w", Some("github.com/acme/repo-a"), true, Some(&scope)).unwrap();
+    let approved_keys: Vec<&str> = input["approvedMemory"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|e| e["key"].as_str())
+        .collect();
+    assert_eq!(approved_keys, vec!["mem-a"]);
+    let fact_bodies: Vec<&str> = input["facts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["body"].as_str())
+        .collect();
+    assert_eq!(fact_bodies, vec!["Fato do repo A"]);
+}
