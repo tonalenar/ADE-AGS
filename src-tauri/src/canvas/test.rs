@@ -294,3 +294,333 @@ fn papeis_ilegivel_nao_e_regravado() {
     assert_eq!(std::fs::read(&path).unwrap(), original);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+mod persistence_tests {
+    use super::*;
+    use crate::canvas::persistence::{
+        ensure_worker, CanvasIo, CanvasStore, DiskCanvasIo, FSYNC_INTERVAL, SAVE_DEBOUNCE,
+    };
+    use crate::util::user_json::SyncMode;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    struct TempCanvas {
+        dir: PathBuf,
+        path: PathBuf,
+    }
+
+    impl TempCanvas {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "ags-canvas-perf-{tag}-{}",
+                uuid::Uuid::new_v4().simple()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("canvas.json");
+            Self { dir, path }
+        }
+    }
+
+    impl Drop for TempCanvas {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[derive(Default)]
+    struct IoCounters {
+        reads: AtomicUsize,
+        writes: AtomicUsize,
+        fsyncs: AtomicUsize,
+        write_modes: Mutex<Vec<SyncMode>>,
+        on_write: Mutex<Option<mpsc::Sender<SyncMode>>>,
+    }
+
+    struct CountingDiskIo {
+        inner: DiskCanvasIo,
+        counters: Arc<IoCounters>,
+    }
+
+    impl CountingDiskIo {
+        fn new() -> (Self, Arc<IoCounters>) {
+            let counters = Arc::new(IoCounters::default());
+            (
+                Self {
+                    inner: DiskCanvasIo,
+                    counters: Arc::clone(&counters),
+                },
+                counters,
+            )
+        }
+    }
+
+    impl CanvasIo for CountingDiskIo {
+        fn read(&self, path: &Path) -> Result<Boards, String> {
+            self.counters.reads.fetch_add(1, Ordering::SeqCst);
+            self.inner.read(path)
+        }
+
+        fn write(&self, path: &Path, boards: &Boards, sync: SyncMode) -> Result<(), String> {
+            self.inner.write(path, boards, sync)?;
+            self.counters.writes.fetch_add(1, Ordering::SeqCst);
+            if sync == SyncMode::Sync {
+                self.counters.fsyncs.fetch_add(1, Ordering::SeqCst);
+            }
+            self.counters.write_modes.lock().unwrap().push(sync);
+            if let Some(tx) = self.counters.on_write.lock().unwrap().as_ref() {
+                let _ = tx.send(sync);
+            }
+            Ok(())
+        }
+
+        fn sync(&self, path: &Path) -> Result<(), String> {
+            self.inner.sync(path)?;
+            self.counters.fsyncs.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn board_with_note(content: &str) -> Board {
+        let mut board = Board::default();
+        board.notes.insert(
+            "note-1".into(),
+            Note {
+                name: "N".into(),
+                content: content.into(),
+                ..Default::default()
+            },
+        );
+        board
+    }
+
+    /// N saves dentro da janela de 300 ms devem coalescer em 1 única escrita em disco
+    /// contendo a última versão, sem `fsync` quente.
+    #[test]
+    fn n_saves_em_300ms_coalescem_em_uma_unica_escrita_com_a_ultima_versao() {
+        let tmp = TempCanvas::new("coalesce");
+        let (io, counters) = CountingDiskIo::new();
+        let store = CanvasStore::new(io, SAVE_DEBOUNCE, FSYNC_INTERVAL);
+        let t0 = Instant::now();
+
+        for i in 0..20 {
+            let at = t0 + Duration::from_millis(i * 10);
+            store
+                .save_at(&tmp.path, "main|/proj", board_with_note(&format!("v{i}")), at)
+                .unwrap();
+        }
+
+        // Antes do debounce vencer (último save em t0 + 190ms -> deadline em t0 + 490ms): 0 escritas.
+        assert_eq!(
+            store.flush_due_at(t0 + Duration::from_millis(400)).unwrap(),
+            0
+        );
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 0);
+
+        // Após o debounce vencer: 1 única escrita atômica, sem fsync, com a versão final v19.
+        assert_eq!(
+            store.flush_due_at(t0 + Duration::from_millis(490)).unwrap(),
+            1
+        );
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.fsyncs.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            *counters.write_modes.lock().unwrap(),
+            vec![SyncMode::AtomicNoSync]
+        );
+
+        let from_disk = DiskCanvasIo.read(&tmp.path).unwrap();
+        assert_eq!(from_disk["main|/proj"].notes["note-1"].content, "v19");
+    }
+
+    /// Após a primeira carga, leituras repetidas usam o cache em memória sem reler/parsear
+    /// `canvas.json`, e enxergam imediatamente o que foi salvo mesmo antes do debounce gravar.
+    #[test]
+    fn leitura_usa_cache_sem_reler_disco_e_enxerga_save_imediatamente() {
+        let tmp = TempCanvas::new("cache");
+        let initial = Boards::from([("main|/p".into(), board_with_note("inicial"))]);
+        DiskCanvasIo
+            .write(&tmp.path, &initial, SyncMode::AtomicNoSync)
+            .unwrap();
+
+        let (io, counters) = CountingDiskIo::new();
+        let store = CanvasStore::new(io, SAVE_DEBOUNCE, FSYNC_INTERVAL);
+        let t0 = Instant::now();
+
+        let first = store.load_at(&tmp.path, t0).unwrap();
+        assert_eq!(first["main|/p"].notes["note-1"].content, "inicial");
+        assert_eq!(counters.reads.load(Ordering::SeqCst), 1);
+
+        for _ in 0..10 {
+            let cached = store.load_at(&tmp.path, t0).unwrap();
+            assert_eq!(cached["main|/p"].notes["note-1"].content, "inicial");
+        }
+        assert_eq!(
+            counters.reads.load(Ordering::SeqCst),
+            1,
+            "leituras seguintes não podem reler nem parsear o arquivo"
+        );
+
+        // Um save atualiza o cache na hora sem reler o disco e sem bloquear esperando o debounce.
+        store
+            .save_at(&tmp.path, "main|/p", board_with_note("atualizado"), t0)
+            .unwrap();
+        let updated = store.load_at(&tmp.path, t0).unwrap();
+        assert_eq!(updated["main|/p"].notes["note-1"].content, "atualizado");
+        assert_eq!(counters.reads.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 0);
+    }
+
+    /// `fsync` não roda em toda escrita: só quando o intervalo maior (`FSYNC_INTERVAL`) vence.
+    #[test]
+    fn fsync_so_roda_apos_intervalo_maior() {
+        let tmp = TempCanvas::new("fsync-interval");
+        let (io, counters) = CountingDiskIo::new();
+        let store = CanvasStore::new(io, SAVE_DEBOUNCE, FSYNC_INTERVAL);
+        let t0 = Instant::now();
+
+        store
+            .save_at(&tmp.path, "main|/p", board_with_note("v1"), t0)
+            .unwrap();
+        store.flush_due_at(t0 + SAVE_DEBOUNCE).unwrap();
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.fsyncs.load(Ordering::SeqCst), 0);
+
+        // 5 s depois: nova gravação ainda sem fsync.
+        let t1 = t0 + Duration::from_secs(5);
+        store
+            .save_at(&tmp.path, "main|/p", board_with_note("v2"), t1)
+            .unwrap();
+        store.flush_due_at(t1 + SAVE_DEBOUNCE).unwrap();
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 2);
+        assert_eq!(counters.fsyncs.load(Ordering::SeqCst), 0);
+
+        // Sem nova escrita, ao passar FSYNC_INTERVAL: faz apenas sync_all sem reescrever o JSON.
+        store
+            .flush_due_at(t0 + FSYNC_INTERVAL + Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 2);
+        assert_eq!(counters.fsyncs.load(Ordering::SeqCst), 1);
+    }
+
+    /// No fechamento da app, o flush grava imediatamente a última versão pendente com `fsync`.
+    /// Se a última versão já estava gravada sem `fsync`, apenas sincroniza o arquivo.
+    #[test]
+    fn flush_no_exit_grava_o_ultimo_estado_com_fsync() {
+        let tmp = TempCanvas::new("exit-flush");
+        let (io, counters) = CountingDiskIo::new();
+        let store = CanvasStore::new(io, SAVE_DEBOUNCE, FSYNC_INTERVAL);
+        let t0 = Instant::now();
+
+        store
+            .save_at(&tmp.path, "main|/p", board_with_note("v1"), t0)
+            .unwrap();
+        store
+            .save_at(&tmp.path, "main|/p", board_with_note("v2"), t0)
+            .unwrap();
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 0);
+
+        // Fecha antes do debounce vencer: grava v2 atomicamente com fsync.
+        store
+            .flush_all_with_fsync(t0 + Duration::from_millis(50))
+            .unwrap();
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.fsyncs.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            DiskCanvasIo.read(&tmp.path).unwrap()["main|/p"].notes["note-1"].content,
+            "v2"
+        );
+
+        // Novo save já escrito pelo debounce sem fsync; no exit só chama sync sem reescrever.
+        let t1 = t0 + Duration::from_secs(1);
+        store
+            .save_at(&tmp.path, "main|/p", board_with_note("v3"), t1)
+            .unwrap();
+        store.flush_due_at(t1 + SAVE_DEBOUNCE).unwrap();
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 2);
+        assert_eq!(counters.fsyncs.load(Ordering::SeqCst), 1);
+
+        store.flush_all_with_fsync(t1 + Duration::from_secs(2)).unwrap();
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 2);
+        assert_eq!(counters.fsyncs.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            DiskCanvasIo.read(&tmp.path).unwrap()["main|/p"].notes["note-1"].content,
+            "v3"
+        );
+    }
+
+    /// Prova o worker em segundo plano real (`Condvar`): coalesce rajada e notifica pelo canal.
+    #[test]
+    fn worker_em_segundo_plano_coalesce_e_persiste_em_disco() {
+        let tmp = TempCanvas::new("worker");
+        let (io, counters) = CountingDiskIo::new();
+        let (tx, rx) = mpsc::channel();
+        *counters.on_write.lock().unwrap() = Some(tx);
+
+        let store = Arc::new(CanvasStore::new(
+            io,
+            Duration::from_millis(5),
+            Duration::from_secs(60),
+        ));
+        let now = Instant::now();
+        for i in 0..5 {
+            store
+                .save_at(&tmp.path, "main|/p", board_with_note(&format!("w{i}")), now)
+                .unwrap();
+        }
+        ensure_worker(&store);
+
+        let mode = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("worker deveria gravar após o debounce");
+        store.stop_worker();
+
+        assert_eq!(mode, SyncMode::AtomicNoSync);
+        assert_eq!(counters.writes.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            DiskCanvasIo.read(&tmp.path).unwrap()["main|/p"].notes["note-1"].content,
+            "w4"
+        );
+    }
+
+    /// Caminho público global: `save_board` + `flush_pending_saves` persiste o último estado.
+    #[test]
+    fn flush_pending_saves_global_grava_ultimo_estado() {
+        let tmp = TempCanvas::new("global-flush");
+        TEST_FILE_PATH.with(|slot| *slot.borrow_mut() = Some(tmp.path.clone()));
+
+        save_board("main|/g", board_with_note("antes")).unwrap();
+        save_board("main|/g", board_with_note("final")).unwrap();
+        // Leitura imediata pelo cache já devolve o valor final.
+        assert_eq!(
+            load_boards().unwrap()["main|/g"].notes["note-1"].content,
+            "final"
+        );
+        flush_pending_saves().unwrap();
+
+        TEST_FILE_PATH.with(|slot| *slot.borrow_mut() = None);
+
+        let on_disk = DiskCanvasIo.read(&tmp.path).unwrap();
+        assert_eq!(on_disk["main|/g"].notes["note-1"].content, "final");
+    }
+
+    /// Os comandos Tauri `canvas_load` e `canvas_save` não podem rodar síncronos na thread principal.
+    #[test]
+    fn comandos_canvas_sao_assincronos_com_spawn_blocking() {
+        let src = include_str!("mod.rs");
+        let section = &src[src.find("// ── Comandos Tauri").expect("seção de comandos")..];
+        assert!(
+            section.contains("pub async fn canvas_load("),
+            "canvas_load precisa ser async para sair da thread principal"
+        );
+        assert!(
+            section.contains("pub async fn canvas_save("),
+            "canvas_save precisa ser async para sair da thread principal"
+        );
+        assert!(
+            section.matches("spawn_blocking(").count() >= 2,
+            "canvas_load e canvas_save devem delegar I/O para spawn_blocking"
+        );
+    }
+}
