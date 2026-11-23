@@ -72,7 +72,7 @@ export interface ComposerControlsContext {
  * o clipe os põem numa fileira de miniaturas acima do texto; o bloco (miniaturas + texto) cresce até 40%
  * da janela e depois rola por dentro, sem barra, com o enviar sempre à vista. Enviar só com anexos vale.
  */
-export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onBackgroundSubmit, onSendAndNewThread, onStop, stopUnavailableReason = null, onQueue, queue: waiting = [], onUnqueue, onUpdateQueued, promptHistory = [], cwd = null, disabled = false, autoFocus = false, quoteKey = null, composerTarget = quoteKey, quoteThreadId, quoteSourceIds, turnActive = false, forceSend = false }: {
+export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onBackgroundSubmit, onSendAndNewThread, onStop, stopUnavailableReason = null, onQueue, queue: waiting = [], onUnqueue, onUpdateQueued, promptHistory = [], cwd = null, disabled = false, autoFocus = false, quoteKey = null, composerTarget = quoteKey, quoteThreadId, quoteSourceIds, turnActive = false, forceSend = false, suggestion = null }: {
   placeholder: string;
   /** Logo depois do anexar, à esquerda (o segmentado "Time | Só o orquestrador", prancheta 15). */
   leading?: React.ReactNode;
@@ -115,15 +115,22 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   turnActive?: boolean;
   /** Uma pergunta/aprovação espera resposta direta, independentemente da preferência. */
   forceSend?: boolean;
+  /** O próximo prompt sugerido (texto fantasma): Tab ou → aceita, digitar descarta. Só com o campo vazio e o agente parado. */
+  suggestion?: string | null;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   // A leitura dos rascunhos roda uma vez ao montar; o `t` mais novo vale só para a mensagem de erro.
   const tRef = useRef(t);
   tRef.current = t;
   const eventTarget = composerTarget ?? quoteKey;
   const followUpBehavior = useChatPrefs().followUpBehavior;
   const sendShortcut = useChatPrefs().sendShortcut;
+  const spellcheckPref = useChatPrefs().spellcheck;
+  const suggestionsPref = useChatPrefs().promptSuggestions;
   const [text, setText] = useState("");
+  // A sugestão descartada não volta ao apagar o que se digitou; um turno novo zera o descarte.
+  const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
+  useEffect(() => { if (turnActive) setDismissedSuggestion(null); }, [turnActive]);
   const [busy, setBusy] = useState(false);
   const submitInFlightRef = useRef(false);
   const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
@@ -545,6 +552,13 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     return true;
   };
 
+  const ghost = suggestionsPref && !turnActive && !disabled && !stashRestoring && !editingQueueId && text === "" && suggestion && suggestion !== dismissedSuggestion ? suggestion : null;
+  const acceptGhost = () => {
+    if (!ghost) return;
+    setText(ghost);
+    setCaret(ghost.length);
+    setDismissedSuggestion(ghost);
+  };
   const enterQueues = turnActive && !forceSend && followUpBehavior === "queue" && !!onQueue;
   const submitForEnter = () => enterQueues ? queue() : void submit();
   const submitForModifiedEnter = () => {
@@ -834,7 +848,13 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
         )}
       <label className={`block px-4 pb-2 ${extras > 0 ? "pt-3" : "pt-3.5"}`}>
         <span className="sr-only">{t("chat.composer.label")}</span>
-        <textarea ref={ref} rows={1} value={text} autoFocus={autoFocus} data-chat-composer="" data-chat-composer-target={eventTarget ?? undefined}
+        <span className="relative block">
+        {ghost && (
+          <span data-composer-suggestion="" aria-hidden="true" title={t("chat.composer.suggest.hint")}
+            className="pointer-events-none absolute inset-x-0 top-0 overflow-hidden whitespace-pre-wrap text-chat-ui leading-relaxed text-gray-400 dark:text-white/35">{ghost}</span>
+        )}
+        <textarea ref={ref} rows={1} value={text} autoFocus={autoFocus}
+          spellCheck={spellcheckPref && !text.startsWith("/")} lang={i18n?.language} autoCorrect="off" autoCapitalize="off"  data-chat-composer="" data-chat-composer-target={eventTarget ?? undefined}
           data-chat-composer-send-alternate={sendAlternateAvailable ? "true" : undefined}
           data-chat-composer-send-background={sendBackgroundAvailable ? "true" : undefined}
           data-chat-composer-send-and-new-thread={sendAndNewThreadAvailable ? "true" : undefined}
@@ -844,6 +864,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
             if (stashRestoringRef.current) return;
             historyDraft.current = null;
             setHistoryIndex(null);
+            if (ghost) setDismissedSuggestion(ghost);
             setText(e.target.value);
             setCaret(e.target.selectionStart);
           }}
@@ -864,6 +885,18 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
               e.preventDefault();
               e.stopPropagation();
               return;
+            }
+            if (ghost && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) {
+              if (e.key === "Tab" || e.key === "ArrowRight") {
+                e.preventDefault();
+                acceptGhost();
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setDismissedSuggestion(ghost);
+                return;
+              }
             }
             if (editingQueueId && e.key === "Escape") {
               e.preventDefault();
@@ -905,9 +938,10 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
               else if (action === "opposite") submitForModifiedEnter();
             }
           }}
-          placeholder={placeholder}
+          placeholder={ghost ? "" : placeholder}
           className="block min-h-[calc(2lh+0.5rem)] w-full resize-none bg-transparent outline-none text-chat-ui leading-relaxed
             text-gray-900 dark:text-white placeholder:text-gray-500 dark:placeholder:text-white/45 disabled:cursor-not-allowed disabled:opacity-50" />
+        </span>
       </label>
       </div>
       {/*

@@ -197,7 +197,7 @@ pub struct PtySnapshot {
 
 /// O que o processo já escreveu, com a posição exata do fluxo em que o snapshot foi tirado.
 /// Erro se o PTY já terminou (o frontend então não espera mais saída).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_snapshot(id: u32) -> Result<PtySnapshot, String> {
     if !registry().contains_key(&id) {
         return Err(format!("PTY session {id} not found"));
@@ -1742,7 +1742,7 @@ pub fn live_tab_dirs() -> Vec<(String, String)> {
 
 /// Se "conecta" a un PTY que ya existe (p. ej. al mover una tab a otra ventana sin
 /// matar el proceso) y devuelve el scrollback acumulado para reproducirlo en el xterm nuevo.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_attach(id: u32) -> Result<String, String> {
     if !registry().contains_key(&id) {
         return Err(format!("PTY session {id} not found"));

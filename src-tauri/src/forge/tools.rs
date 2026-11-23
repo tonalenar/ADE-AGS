@@ -233,6 +233,44 @@ fn cwd_of(app: &AppHandle, payload: &Value) -> Result<String, String> {
         .ok_or_else(|| "missing cwd or taskId".to_string())
 }
 
+/// Uma aba só opera no repositório da própria pasta (ou num worktree dele).
+pub(crate) fn tab_cwd_allowed(tab_cwd: &str, requested: &str) -> Result<(), String> {
+    use std::path::Path;
+    let canon = |p: &str| std::fs::canonicalize(p).unwrap_or_else(|_| Path::new(p).to_path_buf());
+    if canon(tab_cwd) == canon(requested) {
+        return Ok(());
+    }
+    use crate::memory::repo_scope::repo_key;
+    match (repo_key(Path::new(tab_cwd)), repo_key(Path::new(requested))) {
+        (Some(mine), Some(asked)) if mine == asked => Ok(()),
+        _ => Err(format!(
+            "Recusado: `{requested}` não é o repositório da própria pasta desta aba (`{tab_cwd}`). \
+Uma aba só usa as ferramentas git remotas no repositório dela ou num worktree dele."
+        )),
+    }
+}
+
+/// Aba que pede por `tabId`: confere a pasta pedida com a pasta registrada da aba. Tarefas, conversas
+/// (`thread:`), clientes remotos (`remote:`, já restritos pelas pastas do MCP) e a pessoa não passam por aqui.
+fn check_tab_scope(app: &AppHandle, payload: &Value, requested: &str) -> Result<(), String> {
+    if payload.get("taskId").is_some() {
+        return Ok(());
+    }
+    let Some(tab) = payload.get("tabId").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()) else {
+        return Ok(());
+    };
+    if tab.starts_with("thread:") || tab.starts_with("remote:") {
+        return Ok(());
+    }
+    let tab_cwd: Option<String> = {
+        let conn = db(app)?;
+        let conn = conn.lock().map_err(|e| e.to_string())?;
+        conn.query_row("SELECT cwd FROM tabs WHERE id = ?1", [tab], |r| r.get(0)).ok()
+    };
+    let tab_cwd = tab_cwd.ok_or_else(|| format!("Recusado: a aba `{tab}` não está registrada no ADE AGS."))?;
+    tab_cwd_allowed(&tab_cwd, requested)
+}
+
 fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
 }
@@ -564,6 +602,7 @@ async fn call(app: &AppHandle, cwd: &str, name: &str, args: &Value) -> Result<St
 pub(crate) fn run(app: &AppHandle, payload: &Value) -> Result<Value, String> {
     {use tauri::Manager;let db=app.try_state::<crate::database::DbConnection>().ok_or("database unavailable")?;let conn=db.lock().map_err(|e|e.to_string())?;crate::runs::policy::guard_task(&conn,payload.get("taskId").and_then(Value::as_str),"forge.run")?;}
     let cwd = cwd_of(app, payload)?;
+    check_tab_scope(app, payload, &cwd)?;
     let tool = payload.get("tool").and_then(Value::as_str).ok_or("missing tool")?.to_string();
     let args = payload.get("args").cloned().unwrap_or(Value::Null);
     let text = tauri::async_runtime::block_on(call(app, &cwd, &tool, &args)).map_err(|e| e.to_string())?;

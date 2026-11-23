@@ -42,6 +42,8 @@ type Reply = oneshot::Sender<Result<Value, String>>;
 
 pub struct Session {
     thread_id: String,
+    /// Chave da conta em `runs::quota` (`system:claude-code` ou `account_id`), para registrar `rate_limit_event`.
+    account_key: String,
     /// Modo Fast configurado na abertura do processo.
     fast_mode: bool,
     tx: mpsc::UnboundedSender<String>,
@@ -493,6 +495,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     let (tx, rx) = mpsc::unbounded_channel::<String>();
     let session = Arc::new(Session {
         thread_id: row.id.clone(),
+        account_key: crate::runs::quota::account_key("claude-code", row.account_id.as_deref()),
         fast_mode,
         tx,
         pending: Mutex::new(HashMap::new()),
@@ -641,6 +644,7 @@ fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Val
             }
         }
         _ => {
+            record_rate_limit_msg(db, session, &msg, crate::util::now_ts());
             session.remember_task_output(&msg);
             session.remember_task_command(&msg);
             let outs = session.mapper.lock().map(|mut m| m.feed(&msg, crate::util::now_ts_ms())).unwrap_or_default();
@@ -953,6 +957,13 @@ pub(super) fn is_turn_line(msg: &Value) -> bool {
     }
 }
 
+/// Registra em `runs::quota` quando uma sessão do Claude emite `rate_limit_event`.
+pub(super) fn record_rate_limit_msg(db: &DbConnection, session: &Session, msg: &Value, now: i64) {
+    if let Some(quota) = crate::runs::quota::parse_rate_limit(msg) {
+        crate::runs::quota::record(db, &session.account_key, quota, now);
+    }
+}
+
 /// Uma sessão sem processo para os testes do Parar: o que ela escreveria no stdio chega ao receptor. A conversa aponta
 /// para ela, como em produção, para que `api::interrupt` a encontre.
 #[cfg(test)]
@@ -960,6 +971,7 @@ pub(crate) fn session_for_test(thread_id: &str) -> (Arc<Session>, mpsc::Unbounde
     let (tx, rx) = mpsc::unbounded_channel::<String>();
     let session = Arc::new(Session {
         thread_id: thread_id.to_string(),
+        account_key: "system:claude-code".to_string(),
         fast_mode: false,
         tx,
         pending: Mutex::new(HashMap::new()),

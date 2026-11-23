@@ -3,12 +3,21 @@ use std::path::{Component, Path};
 use serde::{Deserialize, Serialize};
 
 use crate::ai_memory::client::{Client, PageWrite};
+use crate::ai_memory::scoped_bridge::reserved_project;
 use crate::memory::agent::looks_like_user_secret;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryConflict {
+    #[serde(default)]
+    pub workspace: String,
+    #[serde(default)]
+    pub project: String,
     pub path: String,
+    /// Caminho da página no espelho (`ai-memory/<workspace>/<projeto>/<página>`): identifica o conflito
+    /// entre projetos que têm páginas de mesmo caminho.
+    #[serde(default)]
+    pub remote_path: String,
     pub title: String,
     pub local_body: String,
     pub remote_body: String,
@@ -100,22 +109,28 @@ pub(crate) fn parse_exported_page(raw: &[u8]) -> Option<ExportedPage> {
     })
 }
 
+pub(crate) fn remote_path_of(workspace: &str, project: &str, path: &str) -> String {
+    format!("ai-memory/{}/{}/{path}", safe_segment(workspace, "default"), safe_segment(project, "project"))
+}
+
+/// Aplica cada página no projeto que o espelho registra para ela. `accept_remote_path` é o
+/// `remote_path` do conflito que o usuário escolheu sobrescrever.
 pub(crate) fn apply_import(
     client: &Client,
-    workspace: &str,
-    project: &str,
     pages: impl IntoIterator<Item = ExportedPage>,
     accept_remote_path: Option<&str>,
 ) -> Result<RestoreReport, String> {
     let mut report = RestoreReport::default();
     for page in pages {
-        if page.workspace != workspace || page.project != project {
+        if reserved_project(&page.workspace) || reserved_project(&page.project) {
             continue;
         }
         if page_has_secret(&page) {
             report.skipped_secrets += 1;
             continue;
         }
+        let (workspace, project) = (page.workspace.as_str(), page.project.as_str());
+        let remote_path = remote_path_of(workspace, project, &page.path);
         let local = client.find_page_scoped(&page.path, workspace, project)?;
         if let Some(local_page) = local.as_ref() {
             if local_page.title.as_deref().unwrap_or(&page.path) == page.title
@@ -124,7 +139,7 @@ pub(crate) fn apply_import(
                 report.unchanged += 1;
                 continue;
             }
-            if accept_remote_path != Some(page.path.as_str()) {
+            if accept_remote_path != Some(remote_path.as_str()) {
                 if looks_like_user_secret(local_page.title.as_deref().unwrap_or(&page.path))
                     || looks_like_user_secret(&local_page.body)
                 {
@@ -132,7 +147,10 @@ pub(crate) fn apply_import(
                     continue;
                 }
                 report.conflicts.push(MemoryConflict {
+                    workspace: page.workspace.clone(),
+                    project: page.project.clone(),
                     path: page.path,
+                    remote_path,
                     title: page.title,
                     local_body: conflict_preview(&local_page.body),
                     remote_body: conflict_preview(&page.body),
@@ -153,50 +171,34 @@ pub(crate) fn apply_import(
     Ok(report)
 }
 
-/// Resolve o projeto no backend pela pasta de trabalho, sem aceitar identidade de escopo do front.
-pub(crate) fn import_project_pages(
+/// Restaura todas as páginas do espelho, cada uma no projeto dela, sem depender de pasta ou aba.
+/// O escopo vem do caminho do arquivo no espelho; um arquivo cujo front matter diverge do caminho é ignorado.
+pub(crate) fn import_all_pages(
     ai_memory_program: Option<&Path>,
-    cwd: Option<&str>,
     files: impl IntoIterator<Item = (String, Vec<u8>)>,
     accept_remote_path: Option<&str>,
 ) -> Result<RestoreReport, String> {
-    let pages: Vec<_> = files.into_iter().filter_map(|(remote_path, raw)| {
-        parse_exported_page(&raw).map(|page| (remote_path, page))
-    }).collect();
+    let pages: Vec<_> = files
+        .into_iter()
+        .filter_map(|(remote_path, raw)| parse_exported_page(&raw).map(|page| (remote_path, page)))
+        .filter(|(remote_path, page)| {
+            *remote_path == remote_path_of(&page.workspace, &page.project, &page.path)
+        })
+        .collect();
     if pages.is_empty() {
         return Ok(RestoreReport::default());
-    }
-    let Some(cwd) = cwd.map(str::trim).filter(|cwd| !cwd.is_empty()) else {
-        return Ok(RestoreReport::default());
-    };
-    let cwd = Path::new(cwd);
-    if !cwd.is_absolute() || !cwd.is_dir() {
-        return Err("A pasta do projeto precisa ser absoluta e existir para restaurar as memórias.".into());
     }
     let Some(program) = ai_memory_program else {
         return Ok(RestoreReport::default());
     };
-    let client = Client::at(Some(program.to_path_buf()), cwd.to_path_buf())?;
+    let client = Client::at(Some(program.to_path_buf()), super::export::neutral_cwd())?;
     client.ensure_supported()?;
-    let home = dirs::home_dir().unwrap_or_default();
-    let (workspace, project) = crate::ai_memory::tabs::resolve_scope(program, cwd, &home)
-        .ok_or_else(|| "Não foi possível resolver um projeto único no ai-memory para esta pasta.".to_string())?;
-    if crate::ai_memory::scoped_bridge::reserved_project(&workspace)
-        || crate::ai_memory::scoped_bridge::reserved_project(&project)
-    {
-        return Err("Projeto reservado não permitido para restauração.".into());
-    }
-    let mut report = apply_import(
-        &client,
-        &workspace,
-        &project,
-        pages.iter().map(|(_, page)| page.clone()),
-        accept_remote_path,
-    )?;
+    let mut report = apply_import(&client, pages.iter().map(|(_, page)| page.clone()), accept_remote_path)?;
     for (remote_path, page) in pages {
-        if page.workspace == workspace && page.project == project && safe_page_path(&page.path)
+        if !reserved_project(&page.workspace)
+            && !reserved_project(&page.project)
+            && safe_page_path(&page.path)
             && !page_has_secret(&page)
-            && remote_path == format!("ai-memory/{}/{}/{}", safe_segment(&workspace, "default"), safe_segment(&project, "project"), page.path)
         {
             report.allowed_remote_files.push(remote_path);
         }

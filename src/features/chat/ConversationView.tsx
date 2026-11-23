@@ -15,6 +15,7 @@ import { BotIcon } from "./chatIcons";
 import { accessModesFor, extractSlashCommand, hasTimeline, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
 import { matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
 import { messageFor } from "./attachments/send";
+import { suggestNextPrompt } from "./composerSuggest";
 import { ChatComposer } from "./ChatComposer";
 import { useChatPrefs } from "./chatPrefs";
 import { ComposerAssistMenu } from "./ComposerAssistMenu";
@@ -30,6 +31,8 @@ import { clearTabSearchJump, requestTimelineFollow, setChatSlot, setTerminalOpen
 import { AgentSwitchDialog } from "./structured/AgentSwitchDialog";
 import { useTeamComposer } from "./team/TeamComposer";
 import { TeamThreadFeed } from "./team/TeamThreadFeed";
+import { teamLedBy } from "./team/teamModel";
+import { useTeamStore } from "./team/teamStore";
 import { TimelineView } from "./timeline/ConversationTimeline";
 import { addPending, usePending } from "./timeline/pending";
 import { buildTuiAgentHandoff } from "./timeline/tuiAgentHandoff";
@@ -113,6 +116,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   const pending = usePending(card.tabId, items);
   const searchTarget = useChatStore((s) => s.tabSearchTarget?.tabId === card.tabId ? s.tabSearchTarget : null);
   const busy = working || phase === "working";
+  const nextPromptSuggestion = useMemo(() => busy ? null : suggestNextPrompt(items, { yes: t("chat.composer.suggest.yes"), runTests: t("chat.composer.suggest.runTests") }), [busy, items, t]);
   const [switchTo, setSwitchTo] = useState<TuiSwitchTarget | null>(null);
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
@@ -122,7 +126,8 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   // Trocar reinicia o agente (retomando a sessão): nunca no meio de um turno.
   const locked = busy || !!approval;
   const openTerminal = useCallback(() => setTerminalOpen(card.tabId, true), [card.tabId]);
-  const timelineAfter = useMemo(() => <TeamThreadFeed conversation={card} cards={cards} />, [card, cards]);
+  const leadsTeam = useTeamStore((s) => teamLedBy(s.teams, card.tabId) !== null);
+  const timelineAfter = useMemo(() => <TeamThreadFeed conversation={card} cards={cards} items={items} />, [card, cards, items]);
   const retune = (patch: Partial<{ model: string | null; effort: string | null; access: ChatAccess; plan: boolean; fastMode: boolean }>) =>
     retuneConversationTab(card.tabId, {
       model: patch.model !== undefined ? patch.model : tuning.model,
@@ -185,7 +190,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
       {approval && <PermissionCard key={approval.id} ask={approval} terminal />}
       {team?.error && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{team.error}</p>}
       <ChatComposer cwd={card.cwd} quoteKey={card.tabId} quoteSourceIds={quoteSourceIds} promptHistory={promptHistory}
-        turnActive={busy} forceSend={!!approval}
+        turnActive={busy} suggestion={approval ? null : nextPromptSuggestion} forceSend={!!approval}
         placeholder={approval ? t("chat.composer.redirect") : busy ? t(followUpBehavior === "queue" ? "chat.composer.queueHintQueue" : "chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
         onSubmit={async (text, attachments) => {
           const planCommand = extractSlashCommand(text, "plan");
@@ -307,7 +312,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
         approvalDocked={approval !== null}
         agentLabel={card.agentLabel} agentId={card.agentId} pending={pending} onOpenTerminal={openTerminal}
         conversationKey={`tab:${card.tabId}`} searchTargetId={searchTarget?.itemId} searchTargetToken={searchTarget?.token} onSearchTargetApplied={clearTabSearchJump}
-        after={timelineAfter} />
+        after={timelineAfter} hidePeerMessages={leadsTeam} />
     )} />
       {terminalOpen && (
         <section aria-label={t("chat.terminal.label")} style={{ height: DRAWER_H }}

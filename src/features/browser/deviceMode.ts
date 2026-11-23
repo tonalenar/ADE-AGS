@@ -1,4 +1,5 @@
 import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { defaultModel, outerAspect } from "./deviceCatalog";
 import { clampViewport, FILL_VIEWPORT, isFillViewport, isPhoneViewport, rotate, type Viewport } from "./viewport";
 
 export type DevicePlatform = "ios" | "android" | null;
@@ -18,19 +19,26 @@ const deviceActions = new Map<string, BrowserDeviceActions>();
 
 /** Tela de partida de cada plataforma (em pé). */
 export function startViewportFor(platform: DevicePlatform): Viewport {
-  if (platform === "android") return { width: 412, height: 915 };
-  if (platform === "ios") return { width: 390, height: 844 };
+  if (platform === "android") return { width: defaultModel("android").width, height: defaultModel("android").height };
+  if (platform === "ios") return { width: defaultModel("ios").width, height: defaultModel("ios").height };
   return { width: 1440, height: 900 };
 }
+
+/** As telas de partida antigas (iPhone 14, Pixel antigo): salvas em abas, também contam como partida. */
+const LEGACY_STARTS: Viewport[] = [{ width: 390, height: 844 }, { width: 412, height: 915 }];
 
 /** Há uma moldura/quadro explícito quando existe viewport e ele não é o preenchimento (1920×1080). */
 export function isFramedViewport(viewport: Viewport | null | undefined): viewport is Viewport {
   return !!viewport && !isFillViewport(viewport);
 }
 
-/** Proporção largura/altura a manter na miniatura flutuante; null quando ocupa livremente o cartão. */
-export function floatAspectRatioOf(viewport: Viewport | null | undefined): number | null {
+/**
+ * Proporção largura/altura a manter na miniatura flutuante; null quando ocupa livremente o cartão. Celular: a do
+ * aparelho INTEIRO (tela + moldura), para o chassi encaixar justo, em pé e deitado.
+ */
+export function floatAspectRatioOf(viewport: Viewport | null | undefined, mobile: DevicePlatform = null): number | null {
   if (!isFramedViewport(viewport) || viewport.width <= 0 || viewport.height <= 0) return null;
+  if (isPhoneViewport(viewport)) return outerAspect(viewport, mobile ?? "ios");
   return viewport.width / viewport.height;
 }
 
@@ -45,7 +53,7 @@ export function nextPlatformState(current: DeviceModeState, platform: DevicePlat
   }
   if (framed) {
     const landscape = framed.width > framed.height;
-    const isStart = [startViewportFor("ios"), startViewportFor("android")].some(
+    const isStart = [startViewportFor("ios"), startViewportFor("android"), ...LEGACY_STARTS].some(
       (d) => (framed.width === d.width && framed.height === d.height) || (framed.width === d.height && framed.height === d.width),
     );
     return {

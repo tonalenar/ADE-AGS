@@ -386,9 +386,24 @@ pub struct Builder {
     usage_of: HashMap<String, usize>,
     /// Codex: o último total visto, para não contar duas vezes um `token_count` repetido.
     codex_total: Option<u64>,
+    /// O menor índice de um item que já existia e foi alterado (resultado de ferramenta, tokens) desde o último [`Builder::take_dirty`].
+    dirty: Option<usize>,
 }
 
 impl Builder {
+    pub fn items(&self) -> &[Item] {
+        &self.items
+    }
+
+    /// O menor índice alterado depois de existir, e zera. Itens novos no fim não contam.
+    pub fn take_dirty(&mut self) -> Option<usize> {
+        self.dirty.take()
+    }
+
+    fn touch(&mut self, index: usize) {
+        self.dirty = Some(self.dirty.map_or(index, |d| d.min(index)));
+    }
+
     pub fn feed(&mut self, agent_id: &str, line: &Value) {
         let at = line.get("timestamp").and_then(Value::as_str).and_then(parse_ts_ms);
         match agent_id {
@@ -417,6 +432,7 @@ impl Builder {
 
     fn finish_tool(&mut self, id: &str, status: ToolStatus, output: Option<String>, app: Option<AppResource>) {
         if let Some(&index) = self.tools.get(id) {
+            self.touch(index);
             let tool = &mut self.items[index];
             tool.status = Some(status);
             if app.is_some() {
@@ -508,6 +524,7 @@ impl Builder {
             match self.usage_of.get(message_id) {
                 // A última linha da mensagem traz a saída completa.
                 Some(&index) => {
+                    self.touch(index);
                     self.items[index].tokens = Some(tokens);
                     self.items[index].usage_breakdown = UsageBreakdown::from_claude(line.pointer("/message/usage"));
                 }

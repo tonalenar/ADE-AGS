@@ -129,7 +129,7 @@ pub(super) fn is_installed(target: &Path, source: Option<&PathBuf>) -> bool {
     meta.is_file()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn cli_install_status(app: AppHandle) -> Result<CliInstallStatus, String> {
     let dir = target_dir().ok_or("Não foi possível determinar a pasta do usuário")?;
     let target = dir.join(CLI_FILE);
@@ -145,7 +145,7 @@ pub fn cli_install_status(app: AppHandle) -> Result<CliInstallStatus, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn install_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
     let source = source_binary(&app).ok_or_else(|| {
         format!(
@@ -185,7 +185,7 @@ pub fn install_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
     cli_install_status(app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn uninstall_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
     let dir = target_dir().ok_or("Não foi possível determinar a pasta do usuário")?;
     let target = dir.join(CLI_FILE);

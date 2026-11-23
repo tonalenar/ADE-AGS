@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Button, CloseIcon } from "neogestify-ui-components";
 import { AlertaToast } from "@/shared/ui/alerts";
@@ -22,6 +21,7 @@ import {
   type DraftErrors,
   type Routine,
 } from "./routineModel";
+import { routineCreateUi, routineListAll, routineRemove, routineRunNow, routineSetCatchUp, routineSetEnabled } from "./ipc";
 
 export { describeSchedule } from "./routineModel";
 export type { Routine, Schedule } from "./routineModel";
@@ -74,7 +74,7 @@ export function RoutinesPanel({ onClose, embedded = false }: { onClose: () => vo
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(() => {
-    invoke<Routine[]>("routine_list_all")
+    routineListAll()
       .then((list) => { setRoutines(list); setLoadError(null); })
       .catch((e) => { setRoutines((current) => current ?? []); setLoadError(String(e)); });
   }, []);
@@ -94,12 +94,12 @@ export function RoutinesPanel({ onClose, embedded = false }: { onClose: () => vo
 
   // ── Lista ─────────────────────────────────────────────────────────
 
-  const toggle = (r: Routine) => invoke("routine_set_enabled", { id: r.id, enabled: !r.enabled }).catch(fail);
-  const toggleCatchUp = (r: Routine) => invoke("routine_set_catch_up", { id: r.id, catchUp: !r.catchUp }).catch(fail);
+  const toggle = (r: Routine) => routineSetEnabled(r.id, !r.enabled).catch(fail);
+  const toggleCatchUp = (r: Routine) => routineSetCatchUp(r.id, !r.catchUp).catch(fail);
   const runNow = async (r: Routine) => {
     setRunning(r.id);
     try {
-      await invoke("routine_run_now", { id: r.id });
+      await routineRunNow(r.id);
     } catch (e) {
       fail(e);
     } finally {
@@ -108,7 +108,7 @@ export function RoutinesPanel({ onClose, embedded = false }: { onClose: () => vo
   };
   const remove = (r: Routine) => {
     setConfirmId(null);
-    invoke("routine_remove", { id: r.id }).catch(fail);
+    routineRemove(r.id).catch(fail);
   };
 
   // ── Formulário ────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ export function RoutinesPanel({ onClose, embedded = false }: { onClose: () => vo
     setSaving(true);
     setFormError(null);
     try {
-      await invoke("routine_create_ui", {
+      await routineCreateUi({
         name: draft.name.trim(),
         text: normalizeText(draft.text),
         schedule,

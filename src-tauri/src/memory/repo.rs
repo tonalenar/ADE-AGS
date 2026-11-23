@@ -830,7 +830,7 @@ pub(crate) fn redaction_needles(bodies: &[String]) -> Vec<String> {
     needles
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_export_repo(workspace_id: String, sync: tauri::State<super::repo_sync::RepoSync>) -> Result<ExportResult, String> {
     // The worker renders under the database lock and runs git only after releasing it.
     sync.export_now(&workspace_id)

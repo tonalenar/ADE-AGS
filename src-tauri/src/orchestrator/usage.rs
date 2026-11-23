@@ -84,7 +84,7 @@ fn stats_with_limit(limit: usize) -> Stats {
 }
 
 /// Estado del modo orquestador. Lo pide la UI al montar; después se mantiene con el evento.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn orchestrator_stats(db: tauri::State<crate::database::DbConnection>) -> Result<Stats, String> {
     Ok(stats_with_limit(watch_limit(&db)))
 }

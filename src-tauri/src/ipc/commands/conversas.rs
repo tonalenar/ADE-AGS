@@ -150,6 +150,14 @@ pub(super) fn chat_compact(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let thread = thread_arg(args)?;
     let instructions = arg_str_opt(args, "instructions");
     let db = db(app)?;
+    // `from` só chega aqui quando um agente provado pediu (a pessoa fora do app não tem): ele compacta a própria conversa
+    // e só se o autocompact da pessoa está ligado para o agente dela.
+    if arg_str_opt(args, "from").is_some_and(|from| !from.is_empty()) {
+        let row = api::thread(&db, &thread)?;
+        if let Some(error) = crate::conversa::autocompact::agent_compact_error(&crate::conversa::autocompact::config(&db), &row.agent_id) {
+            return Err(error);
+        }
+    }
     tauri::async_runtime::block_on(api::compact_context(
         app,
         &db,

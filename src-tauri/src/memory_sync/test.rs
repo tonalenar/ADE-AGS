@@ -179,13 +179,13 @@ exit 99
         ExportedPage { workspace: "default".into(), project: "ADE-AGS".into(), path: "notes/conflict.md".into(), title: "Conflito".into(), body: "versão remota".into(), pinned: false },
         ExportedPage { workspace: "default".into(), project: "ADE-AGS".into(), path: "notes/secret.md".into(), title: "Segredo".into(), body: "ghp_1234567890123456789012345678901234".into(), pinned: false },
     ];
-    let report = apply_import(&client, "default", "ADE-AGS", pages.clone(), None).unwrap();
+    let report = apply_import(&client, pages.clone(), None).unwrap();
     assert_eq!((report.imported, report.unchanged, report.conflicts.len(), report.skipped_secrets), (1, 1, 1, 1));
     assert_eq!(report.conflicts[0].local_body, "versão local");
     assert_eq!(std::fs::read_to_string(store.join("new.md.body")).unwrap(), "novo corpo");
     assert!(!store.join("conflict.md.body").exists());
 
-    let accepted = apply_import(&client, "default", "ADE-AGS", pages, Some("notes/conflict.md")).unwrap();
+    let accepted = apply_import(&client, pages, Some("ai-memory/default/ADE-AGS/notes/conflict.md")).unwrap();
     assert_eq!(accepted.imported, 2);
     assert_eq!(std::fs::read_to_string(store.join("conflict.md.body")).unwrap(), "versão remota");
 }
@@ -344,6 +344,14 @@ fn update_sqlite_memory(db: &DbConnection, workspace: &str, key: &str, kind: &st
 struct FakeAiMemory {
     program: PathBuf,
     project_cwd: PathBuf,
+    store: PathBuf,
+}
+
+#[cfg(unix)]
+impl FakeAiMemory {
+    fn written(&self, project: &str, path: &str) -> Option<String> {
+        std::fs::read_to_string(self.store.join(format!("written-{project}--{}", path.replace('/', "_")))).ok()
+    }
 }
 
 #[cfg(unix)]
@@ -355,18 +363,23 @@ impl FakeAiMemory {
         let store = root.join("aim-pages");
         std::fs::create_dir_all(&store).unwrap();
 
-        let recent: Vec<_> = pages
-            .iter()
-            .map(|(path, title, _ws, _proj, _body)| {
-                json!({
-                    "path": path,
-                    "title": title,
-                    "snippet": title,
-                    "updated_at": "2026-11-22T10:00:00Z"
+        for (_, _, _, proj, _) in pages {
+            let recent: Vec<_> = pages
+                .iter()
+                .filter(|(_, _, _, p, _)| p == proj)
+                .map(|(path, title, ws, p, _body)| {
+                    json!({
+                        "path": path,
+                        "title": title,
+                        "snippet": title,
+                        "updated_at": "2026-11-22T10:00:00Z",
+                        "workspace": ws,
+                        "project": p
+                    })
                 })
-            })
-            .collect();
-        std::fs::write(store.join("recent.json"), serde_json::to_vec(&recent).unwrap()).unwrap();
+                .collect();
+            std::fs::write(store.join(format!("recent-{proj}.json")), serde_json::to_vec(&recent).unwrap()).unwrap();
+        }
         let mut projects = Vec::new();
         for (_, _, workspace, project, _) in pages {
             if !projects.iter().any(|item: &serde_json::Value| item["project_name"] == *project) {
@@ -396,13 +409,13 @@ impl FakeAiMemory {
                 .unwrap(),
             )
             .unwrap();
-            pages_map.insert((*path).to_string(), file_name);
+            pages_map.insert(format!("{proj}:{path}"), file_name);
         }
 
         let mut case_arms = String::new();
-        for (path, file_name) in pages_map {
+        for (key, file_name) in pages_map {
             case_arms.push_str(&format!(
-                "      \"{path}\") cat \"{}/{file_name}\" ;;\n",
+                "      \"{key}\") cat \"{}/{file_name}\" ;;\n",
                 store.display()
             ));
         }
@@ -415,8 +428,13 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 if [ "$1" = "recent" ]; then
-  if [ "$AI_MEMORY_HOST_CWD" != "{cwd}" ]; then exit 77; fi
-  cat "{store}/recent.json"
+  for arg in "$@"; do
+    case "$arg" in
+      --project=*) proj="${{arg#--project=}}" ;;
+    esac
+  done
+  if [ -z "$proj" ]; then exit 78; fi
+  if [ -f "{store}/recent-$proj.json" ]; then cat "{store}/recent-$proj.json"; else echo '[]'; fi
   exit 0
 fi
 if [ "$1" = "list-projects" ]; then
@@ -427,22 +445,32 @@ if [ "$1" = "read-page" ]; then
   for arg in "$@"; do
     case "$arg" in
       --path=*) p="${{arg#--path=}}" ;;
+      --project=*) proj="${{arg#--project=}}" ;;
     esac
   done
-  case "$p" in
+  case "$proj:$p" in
 {case_arms}      *) echo 'Error: GET /admin/read-page: server returned 404 Not Found: {{}}' >&2; exit 1 ;;
   esac
   exit 0
 fi
+if [ "$1" = "write-page" ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      --path=*) p="${{arg#--path=}}" ;;
+      --project=*) proj="${{arg#--project=}}" ;;
+    esac
+  done
+  cat > "{store}/written-$proj--$(echo "$p" | tr / _)"
+  exit 0
+fi
 exit 99
 "#,
-            cwd = project_cwd.display(),
             store = store.display(),
             case_arms = case_arms,
         );
         std::fs::write(&program, script).unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
-        Self { program, project_cwd }
+        Self { program, project_cwd, store }
     }
 }
 
@@ -750,8 +778,8 @@ async fn filtra_segredos_em_revisoes_historicas_do_sqlite_e_nao_duplica_commit()
 
 #[cfg(unix)]
 #[tokio::test]
-async fn respeita_escopo_do_marcador_ai_memory_e_omite_outros_projetos() {
-    let root = TempRoot::new("marker-scope");
+async fn backup_cobre_todos_os_projetos_sem_aba_aberta_e_ignora_reservados() {
+    let root = TempRoot::new("all-projects");
     let data = root.path().join("app-data");
     let bare = init_bare_remote(root.path(), "remote.git");
     let db = test_db_arc();
@@ -759,39 +787,103 @@ async fn respeita_escopo_do_marcador_ai_memory_e_omite_outros_projetos() {
     let aim = FakeAiMemory::new(
         root.path(),
         &[
-            ("notes/do-projeto.md", "Do projeto", "ws-a", "proj-a", "Conteúdo do projeto A."),
-            ("notes/de-outro.md", "De outro", "ws-a", "proj-b", "Conteúdo que pertence ao projeto B."),
+            ("notes/do-a.md", "Do A", "ws-a", "proj-a", "Conteúdo do projeto A."),
+            ("notes/do-b.md", "Do B", "ws-b", "proj-b", "Conteúdo do projeto B."),
+            ("notes/mesmo.md", "Mesmo A", "ws-a", "proj-a", "Mesmo caminho em A."),
+            ("notes/mesmo.md", "Mesmo B", "ws-b", "proj-b", "Mesmo caminho em B."),
+            ("notes/global.md", "Global", "_global", "_global", "Conteúdo global."),
+            ("notes/perfil.md", "Perfil", "ws-a", "_profile", "Conteúdo de perfil."),
         ],
     );
-    std::fs::write(
-        aim.project_cwd.join(".ai-memory.toml"),
-        "workspace = \"ws-a\"\nproject = \"proj-a\"\n",
-    )
-    .unwrap();
+    // Marcador na pasta não restringe mais o backup a um projeto.
+    std::fs::write(aim.project_cwd.join(".ai-memory.toml"), "workspace = \"ws-a\"\nproject = \"proj-a\"\n").unwrap();
 
     let forge = FakeForge::new();
     forge.insert_repo("ton/ade-memoria", true, &bare);
-    setup_with(&db, "acc1", "ton", ForgeKind::Github, &forge, "ade-memoria")
+    setup_with(&db, "acc1", "ton", ForgeKind::Github, &forge, "ade-memoria").await.unwrap();
+
+    let res = sync_now_with(&db, &data, None, None, Some(aim.program.clone()), &forge, None)
         .await
         .unwrap();
 
-    let res = sync_now_with(
-        &db,
-        &data,
-        Some("w1"),
-        Some(aim.project_cwd.to_str().unwrap()),
-        Some(aim.program.clone()),
-        &forge,
-        None,
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(res.report.ai_memory_pages, 1);
+    assert!(res.report.pushed);
+    assert_eq!(res.report.ai_memory_pages, 4);
     let files = remote_tree_files(&bare, "main");
-    assert!(files.contains_key("ai-memory/ws-a/proj-a/notes/do-projeto.md"), "{:?}", files.keys());
+    for expected in [
+        "ai-memory/ws-a/proj-a/notes/do-a.md",
+        "ai-memory/ws-b/proj-b/notes/do-b.md",
+        "ai-memory/ws-a/proj-a/notes/mesmo.md",
+        "ai-memory/ws-b/proj-b/notes/mesmo.md",
+    ] {
+        assert!(files.contains_key(expected), "faltou {expected}: {:?}", files.keys());
+    }
+    assert!(files["ai-memory/ws-a/proj-a/notes/mesmo.md"].contains("Mesmo caminho em A."));
+    assert!(files["ai-memory/ws-b/proj-b/notes/mesmo.md"].contains("Mesmo caminho em B."));
     let joined: String = files.values().cloned().collect::<Vec<_>>().join("\n");
-    assert!(!joined.contains("projeto B"));
+    assert!(!joined.contains("Conteúdo global") && !joined.contains("Conteúdo de perfil"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn restauracao_devolve_cada_pagina_ao_projeto_dela_sem_depender_de_pasta() {
+    let root = TempRoot::new("restore-all");
+    let data = root.path().join("app-data");
+    let bare = init_bare_remote(root.path(), "remote.git");
+    let db = test_db_arc();
+    let source = FakeAiMemory::new(
+        root.path(),
+        &[
+            ("notes/do-a.md", "Do A", "ws-a", "proj-a", "Conteúdo do projeto A."),
+            ("notes/do-b.md", "Do B", "ws-b", "proj-b", "Conteúdo do projeto B."),
+        ],
+    );
+    let forge = FakeForge::new();
+    forge.insert_repo("ton/ade-memoria", true, &bare);
+    setup_with(&db, "acc1", "ton", ForgeKind::Github, &forge, "ade-memoria").await.unwrap();
+    sync_now_with(&db, &data, None, None, Some(source.program.clone()), &forge, None).await.unwrap();
+
+    let other_root = TempRoot::new("restore-all-target");
+    let target = FakeAiMemory::new(other_root.path(), &[]);
+    let restored = super::restore_now_with(&db, &data, Some(target.program.clone()), &forge, None, None)
+        .await
+        .unwrap();
+
+    assert_eq!(restored.report.restore.imported, 2);
+    assert_eq!(target.written("proj-a", "notes/do-a.md").as_deref(), Some("Conteúdo do projeto A."));
+    assert_eq!(target.written("proj-b", "notes/do-b.md").as_deref(), Some("Conteúdo do projeto B."));
+    assert!(target.written("proj-b", "notes/do-a.md").is_none());
+    let files = remote_tree_files(&bare, "main");
+    assert!(files.contains_key("ai-memory/ws-a/proj-a/notes/do-a.md"), "o remoto não pode perder páginas");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn avisa_quando_ai_memory_esta_vazio_ou_nao_responde_em_vez_de_sucesso_com_zero() {
+    use std::os::unix::fs::PermissionsExt;
+    use super::export::AiMemoryStatus;
+
+    let root = TempRoot::new("warn-status");
+    let data = root.path().join("app-data");
+    let bare = init_bare_remote(root.path(), "remote.git");
+    let db = test_db_arc();
+    let forge = FakeForge::new();
+    forge.insert_repo("ton/ade-memoria", true, &bare);
+    setup_with(&db, "acc1", "ton", ForgeKind::Github, &forge, "ade-memoria").await.unwrap();
+
+    let empty = FakeAiMemory::new(root.path(), &[]);
+    let res = sync_now_with(&db, &data, None, None, Some(empty.program.clone()), &forge, None).await.unwrap();
+    assert_eq!(res.report.ai_memory_status, AiMemoryStatus::Empty);
+    assert!(res.report.ai_memory_note.is_some());
+
+    let broken = root.path().join("ai-memory-quebrado");
+    std::fs::write(&broken, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'ai-memory 3.3.0'; exit 0; fi\nexit 1\n").unwrap();
+    std::fs::set_permissions(&broken, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let res = sync_now_with(&db, &data, None, None, Some(broken), &forge, None).await.unwrap();
+    assert_eq!(res.report.ai_memory_status, AiMemoryStatus::Unavailable);
+
+    let res = sync_now_with(&db, &data, None, None, None, &forge, None).await.unwrap();
+    assert_eq!(res.report.ai_memory_status, AiMemoryStatus::Unavailable);
+    assert!(remote_tree_files(&bare, "main").keys().all(|k| !k.starts_with("ai-memory/")), "nada de projeto pode ir ao remoto");
 }
 
 #[test]

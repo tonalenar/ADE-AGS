@@ -144,7 +144,7 @@ describe("MemorySyncCard", () => {
       connectBtn!.click();
     });
 
-    expect(ipcMock.memorySyncSetup).toHaveBeenCalledWith("acc-gh", "ade-memoria", "/repo/projeto");
+    expect(ipcMock.memorySyncSetup).toHaveBeenCalledWith("acc-gh", "ade-memoria");
     expect(host.textContent).toContain("tonalencar/ade-memoria");
   });
 
@@ -203,6 +203,61 @@ describe("MemorySyncCard", () => {
     expect(ipcMock.memorySyncNow).toHaveBeenCalledWith("w1", "/repo/projeto");
   });
 
+  it.each([
+    ["unavailable", "memorySync.warnUnavailable"],
+    ["empty", "memorySync.warnEmpty"],
+  ] as const)("avisa em vez de mostrar sucesso quando o ai-memory está %s", async (aiMemoryStatus, key) => {
+    ipcMock.memorySyncStatus.mockResolvedValue(
+      baseStatus({
+        enabled: true,
+        configured: true,
+        accountId: "acc-gh",
+        repo: "tonalencar/ade-memoria",
+        last: {
+          at: 1_700_000_000,
+          restored: false,
+          pushed: false,
+          commit: null,
+          aiMemoryPages: 0,
+          sqliteEntries: 0,
+          sqliteRevisions: 0,
+          skippedPages: [],
+          aiMemoryNote: null,
+          aiMemoryStatus,
+          restore: { imported: 0, unchanged: 0, conflicts: [], skippedSecrets: 0 },
+        },
+      }),
+    );
+    await render("", null);
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(key);
+  });
+
+  it("não avisa quando páginas foram enviadas", async () => {
+    ipcMock.memorySyncStatus.mockResolvedValue(
+      baseStatus({
+        enabled: true,
+        configured: true,
+        accountId: "acc-gh",
+        repo: "tonalencar/ade-memoria",
+        last: {
+          at: 1_700_000_000,
+          restored: false,
+          pushed: true,
+          commit: "abc1234",
+          aiMemoryPages: 3,
+          sqliteEntries: 0,
+          sqliteRevisions: 0,
+          skippedPages: [],
+          aiMemoryNote: null,
+          aiMemoryStatus: "ok",
+          restore: { imported: 0, unchanged: 0, conflicts: [], skippedSecrets: 0 },
+        },
+      }),
+    );
+    await render();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+
   it("mostra contagens da restauração e deixa escolher uma versão para o conflito", async () => {
     const initial = baseStatus({
       enabled: true,
@@ -223,7 +278,7 @@ describe("MemorySyncCard", () => {
           imported: 2,
           unchanged: 3,
           skippedSecrets: 1,
-          conflicts: [{ path: "notas/decisao.md", title: "Decisão", localBody: "local", remoteBody: "GitHub" }],
+          conflicts: [{ path: "notas/decisao.md", remotePath: "ai-memory/default/ADE-AGS/notas/decisao.md", title: "Decisão", localBody: "local", remoteBody: "GitHub" }],
         },
       },
     });
@@ -239,7 +294,7 @@ describe("MemorySyncCard", () => {
     expect(host.textContent).toContain("GitHub");
     const keepLocal = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes("memorySync.keepLocal"));
     await act(async () => keepLocal!.click());
-    expect(ipcMock.memorySyncResolveConflict).toHaveBeenCalledWith("w1", "/repo/projeto", "notas/decisao.md", false);
+    expect(ipcMock.memorySyncResolveConflict).toHaveBeenCalledWith("w1", "/repo/projeto", "ai-memory/default/ADE-AGS/notas/decisao.md", false);
   });
 
   it("desligar chama memorySyncSetEnabled(false) e impede envio manual", async () => {
@@ -261,7 +316,7 @@ describe("MemorySyncCard", () => {
       switches[0].click();
     });
 
-    expect(ipcMock.memorySyncSetEnabled).toHaveBeenCalledWith(false, "/repo/projeto");
+    expect(ipcMock.memorySyncSetEnabled).toHaveBeenCalledWith(false);
     expect(host.textContent).toContain("memorySync.pausedNote");
     const sendBtn = [...host.querySelectorAll("button")].find((b) =>
       b.textContent?.includes("memorySync.sendNow"),

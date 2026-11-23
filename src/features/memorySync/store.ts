@@ -10,11 +10,11 @@ interface MemorySyncState {
   running: boolean;
   error: string | null;
   load: () => Promise<void>;
-  setup: (accountId: string, repoName: string, cwd: string) => Promise<void>;
-  setEnabled: (enabled: boolean, cwd: string) => Promise<void>;
+  setup: (accountId: string, repoName: string) => Promise<void>;
+  setEnabled: (enabled: boolean) => Promise<void>;
   setAuto: (autoEnabled: boolean, intervalHours: number) => Promise<void>;
   syncNow: (workspaceId: string | null, cwd: string) => Promise<void>;
-  restoreNow: (cwd: string) => Promise<void>;
+  restoreNow: () => Promise<void>;
   resolveConflict: (workspaceId: string | null, cwd: string, path: string, useRemote: boolean) => Promise<void>;
 }
 
@@ -28,11 +28,11 @@ export const useMemorySyncStore = create<MemorySyncState>()((set, get) => ({
     set({ status, error: status.lastError });
   },
 
-  setup: async (accountId, repoName, cwd) => {
+  setup: async (accountId, repoName) => {
     if (get().running) return;
     set({ running: true, error: null });
     try {
-      const status = await ipc.memorySyncSetup(accountId, repoName, cwd);
+      const status = await ipc.memorySyncSetup(accountId, repoName);
       set({ status, error: status.lastError });
     } catch (cause) {
       await get().load().catch(() => {});
@@ -42,11 +42,11 @@ export const useMemorySyncStore = create<MemorySyncState>()((set, get) => ({
     }
   },
 
-  setEnabled: async (enabled, cwd) => {
+  setEnabled: async (enabled) => {
     if (get().running) return;
     set({ running: true, error: null });
     try {
-      const status = await ipc.memorySyncSetEnabled(enabled, cwd);
+      const status = await ipc.memorySyncSetEnabled(enabled);
       set({ status, error: status.lastError });
     } catch (cause) {
       await get().load().catch(() => {});
@@ -83,11 +83,11 @@ export const useMemorySyncStore = create<MemorySyncState>()((set, get) => ({
     }
   },
 
-  restoreNow: async (cwd) => {
+  restoreNow: async () => {
     if (get().running) return;
     set({ running: true, error: null });
     try {
-      const result = await ipc.memorySyncRestoreNow(cwd);
+      const result = await ipc.memorySyncRestoreNow();
       set({ status: result.status, error: result.status.lastError });
     } catch (cause) {
       set({ error: uiErrorText(cause) });

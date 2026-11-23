@@ -388,16 +388,20 @@ fn create_inner(
     let id = uuid::Uuid::new_v4().to_string();
     // `pool:<nome>` no lugar da conta: o pool escolhe a conta agora e a conversa fica ligada a ele (o pool de
     // contas do chat só troca com o pool escolhido pela pessoa).
-    let (account_id, pool_id) = match input
-        .account_id
+    // Subagente/integrante sem conta escolhida nasce no pool padrão do agente (se houver um ativo): o failover
+    // vale desde o primeiro turno. Se o pool padrão não tem conta usável agora, a conversa nasce sem conta fixa.
+    let requested = super::pool::with_default_pool(db, &input.agent_id, input.account_id.clone(), input.parent_ref.is_some());
+    let defaulted = input.account_id.is_none() && requested.is_some();
+    let (account_id, pool_id) = match requested
         .as_deref()
         .and_then(crate::accounts::pools::pool_ref)
     {
-        Some(name) => {
-            let (account, pool) = super::pool::resolve_at_create(db, &input.agent_id, name)?;
-            (account, Some(pool))
-        }
-        None => (input.account_id.clone(), None),
+        Some(name) => match super::pool::resolve_at_create(db, &input.agent_id, name) {
+            Ok((account, pool)) => (account, Some(pool)),
+            Err(_) if defaulted => (None, None),
+            Err(e) => return Err(e),
+        },
+        None => (requested.clone(), None),
     };
     if let Some(id) = account_id.as_deref() {
         crate::accounts::ensure_supported_outside_pty(db, id)?;

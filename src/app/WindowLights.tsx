@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { closeWindowWithSave } from "@/app/closeWithSave";
 import { DESKTOP_OS } from "@/app/platform";
+import { windowControlsPlace } from "@/shared/ipc/window";
 
 /*
  * Cerrar / minimizar / maximizar, nativos de cada sistema.
@@ -51,7 +51,7 @@ function placeLights() {
     const key = JSON.stringify(place);
     if (key === sent) return;
     sent = key;
-    invoke("window_controls_place", place).catch(() => { sent = ""; });
+    windowControlsPlace(place).catch(() => { sent = ""; });
   });
 }
 

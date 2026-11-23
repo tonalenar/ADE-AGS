@@ -248,7 +248,7 @@ export function MissionsPage() {
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="relative flex items-center gap-2 h-[52px] shrink-0 pl-4 pr-14 border-b border-black/[0.08] dark:border-[rgba(84,84,88,0.55)] bg-white/80 dark:bg-[rgba(30,30,32,0.72)] backdrop-blur-xl">
-        <span className="pointer-events-none absolute inset-x-0 text-center text-[13px] font-semibold text-gray-900 dark:text-[#f5f5f7]">
+        <span className="pointer-events-none absolute inset-x-0 text-center text-[13px] font-semibold text-gray-900 dark:text-ink">
           {t("missions.title")} <span className="font-medium text-gray-400 dark:text-white/30">· {missions.length}</span>
         </span>
         <div className="flex-1" />
@@ -273,7 +273,7 @@ export function MissionsPage() {
 
       <div className="flex flex-1 min-h-0">
         <div onKeyDown={onListKey} className="w-80 shrink-0 cc-scroll border-r border-black/[0.08] dark:border-[rgba(84,84,88,0.55)] bg-gray-50/60 dark:bg-surface px-3 pt-4 pb-3">
-          <h1 className="mx-1 mb-3 text-[26px] leading-8 font-semibold tracking-[-0.4px] text-gray-900 dark:text-[#f5f5f7]">{t("missions.title")}</h1>
+          <h1 className="mx-1 mb-3 text-[26px] leading-8 font-semibold tracking-[-0.4px] text-gray-900 dark:text-ink">{t("missions.title")}</h1>
           {loaded && missions.length === 0 ? (
             <EmptyState
               className="py-16 px-4"
@@ -433,7 +433,7 @@ function MissionRow({ mission, squad, phase, active, onSelect }: {
           ? "bg-accent-500/15 shadow-[inset_0_0_0_0.5px_rgba(10,132,255,0.35)]"
           : "hover:bg-black/[0.04] dark:hover:bg-white/[0.04]"}`}
     >
-      <span title={mission.title} className="truncate text-[13px] leading-[17px] font-semibold text-gray-900 dark:text-[#f5f5f7]">{readableTitle(mission.title)}</span>
+      <span title={mission.title} className="truncate text-[13px] leading-[17px] font-semibold text-gray-900 dark:text-ink">{readableTitle(mission.title)}</span>
       <span className="mt-1 flex items-center gap-2 min-w-0 text-[11px] leading-[14px] text-gray-500 dark:text-white/60">
         <StatusBadge phase={phase} />
         <span className="flex min-w-0 items-center gap-[5px]">
@@ -585,8 +585,8 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
     </> } : null,
     branch ? { key: "branch", node: <>
       <svg viewBox="0 0 18 18" aria-hidden className={metaIcon} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="5" cy="4" r="1.7" /><circle cx="5" cy="14" r="1.7" /><circle cx="13" cy="6" r="1.7" /><path d="M5 5.7v6.6" /><path d="M13 7.7c0 2.9-8 1.9-8 4.6" /></svg>
-      <span className="truncate font-mono text-gray-900 dark:text-[#f5f5f7]">{branch}</span>
-    </> } : { key: "cwd", node: <span className="truncate font-mono text-gray-900 dark:text-[#f5f5f7]" title={mission.cwd}>{tailPath(mission.cwd)}</span> },
+      <span className="truncate font-mono text-gray-900 dark:text-ink">{branch}</span>
+    </> } : { key: "cwd", node: <span className="truncate font-mono text-gray-900 dark:text-ink" title={mission.cwd}>{tailPath(mission.cwd)}</span> },
     pr ? { key: "pr", node: <>
       <svg viewBox="0 0 18 18" aria-hidden className={metaIcon} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="5" cy="4" r="1.7" /><circle cx="5" cy="14" r="1.7" /><circle cx="13" cy="14" r="1.7" /><path d="M5 5.7v6.6" /><path d="M13 12.3V7a2.5 2.5 0 0 0-2.5-2.5H9" /><path d="M10.4 3.2 9 4.5l1.4 1.3" /></svg>
       {prUrl(pr)
@@ -596,7 +596,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
     </> } : null,
     activeText ? { key: "time", node: <>
       <svg viewBox="0 0 18 18" aria-hidden className={metaIcon} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="9" cy="9" r="6.5" /><path d="M9 5.4V9l2.4 1.6" /></svg>
-      <span className="font-mono tabular-nums text-gray-900 dark:text-[#f5f5f7]">{activeText}</span>
+      <span className="font-mono tabular-nums text-gray-900 dark:text-ink">{activeText}</span>
     </> } : null,
   ] as ({ key: string; node: React.ReactNode } | null)[]).filter((item): item is { key: string; node: React.ReactNode } => item !== null);
 
@@ -607,7 +607,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
           <div className="text-[11px] leading-[14px] uppercase tracking-[0.06em] text-gray-500 dark:text-white/60">
             {t("missions.eyebrow", { status: t(`missions.status.${phase}`) })}
           </div>
-          <h2 className="mt-1.5 text-[26px] leading-8 font-semibold tracking-[-0.4px] text-gray-900 dark:text-[#f5f5f7] [overflow-wrap:anywhere]" title={mission.title}>{readableTitle(mission.title)}</h2>
+          <h2 className="mt-1.5 text-[26px] leading-8 font-semibold tracking-[-0.4px] text-gray-900 dark:text-ink [overflow-wrap:anywhere]" title={mission.title}>{readableTitle(mission.title)}</h2>
           <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] leading-[17px] text-gray-500 dark:text-white/60">
             {metaItems.map((item, i) => (
               <span key={item.key} className="flex min-w-0 items-center gap-4">
@@ -619,10 +619,10 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         </div>
         <div className="mt-0.5 flex shrink-0 items-center gap-2">
           {canEdit(mission.status) && (
-            <Button variant="custom" onClick={onEdit} disabled={busy} className="h-7 inline-flex items-center gap-1.5 rounded-[7px] px-3.5 text-[13px] font-medium whitespace-nowrap bg-white dark:bg-surface-raised text-gray-900 dark:text-[#f5f5f7] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.12)] dark:shadow-[inset_0_0_0_0.5px_rgba(84,84,88,0.55),0_1px_2px_rgba(0,0,0,0.3)] disabled:opacity-50">{t("missions.edit")}</Button>
+            <Button variant="custom" onClick={onEdit} disabled={busy} className="h-7 inline-flex items-center gap-1.5 rounded-[7px] px-3.5 text-[13px] font-medium whitespace-nowrap bg-white dark:bg-surface-raised text-gray-900 dark:text-ink shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.12)] dark:shadow-[inset_0_0_0_0.5px_rgba(84,84,88,0.55),0_1px_2px_rgba(0,0,0,0.3)] disabled:opacity-50">{t("missions.edit")}</Button>
           )}
           {action === "cancel" && (
-            <Button variant="custom" onClick={() => act("cancel")} disabled={busy} className="h-7 inline-flex items-center gap-1.5 rounded-[7px] px-3.5 text-[13px] font-medium whitespace-nowrap bg-white dark:bg-surface-raised text-gray-900 dark:text-[#f5f5f7] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.12)] dark:shadow-[inset_0_0_0_0.5px_rgba(84,84,88,0.55),0_1px_2px_rgba(0,0,0,0.3)] disabled:opacity-50">
+            <Button variant="custom" onClick={() => act("cancel")} disabled={busy} className="h-7 inline-flex items-center gap-1.5 rounded-[7px] px-3.5 text-[13px] font-medium whitespace-nowrap bg-white dark:bg-surface-raised text-gray-900 dark:text-ink shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.12)] dark:shadow-[inset_0_0_0_0.5px_rgba(84,84,88,0.55),0_1px_2px_rgba(0,0,0,0.3)] disabled:opacity-50">
               {busy && <AnimateSpin className="w-3.5 h-3.5" />}
               {t("missions.action.cancel")}
             </Button>
@@ -685,7 +685,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         ] as const).map((x) => (
           <button key={x.id} type="button" role="tab" aria-selected={tab === x.id} onClick={() => setTab(x.id)}
             className={`relative inline-flex h-10 items-center gap-1.5 px-3 text-[13px] font-medium transition-colors
-              ${tab === x.id ? "text-gray-900 dark:text-[#f5f5f7]" : "text-gray-500 hover:text-gray-800 dark:text-white/55 dark:hover:text-white"}`}>
+              ${tab === x.id ? "text-gray-900 dark:text-ink" : "text-gray-500 hover:text-gray-800 dark:text-white/55 dark:hover:text-white"}`}>
             {x.label}
             {x.n > 0 && <span className="rounded-full bg-black/[0.06] px-1.5 font-mono text-[10.5px] tabular-nums text-gray-500 dark:bg-white/[0.08] dark:text-white/55">{x.n}</span>}
             {tab === x.id && <span aria-hidden className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-accent-500" />}

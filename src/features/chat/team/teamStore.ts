@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 import i18n from "i18next";
 
-import { resolveAccountChoice } from "@/features/accounts/pools";
+import { poolDefaultRef, resolveAccountChoice } from "@/features/accounts/pools";
 import type { Board } from "@/features/canvas/board";
 import { boardKey, boardKeyOfTab, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
@@ -506,9 +506,11 @@ export async function spawnMember(input: NewMemberInput): Promise<SpawnedMember>
     const { access, plan } = conversationAccess(input.policy, agent.id);
     if ((input.structured || agent.isStructured) && isStructuredAgent(agent.id)) {
       const localAcp = isLocalAcpAgent(agent.id);
+      // Sem conta escolhida, o integrante nasce no pool ativo do agente (failover desde o primeiro turno).
+      const account = localAcp ? null : input.account ?? (await poolDefaultRef(agent.id).catch(() => null)) ?? null;
       const row = await chatThreadCreate({ agentId: agent.id, cwd, workspaceId: useTabsStore.getState().workspaceId, title: label,
         model: localAcp ? null : input.model, effort: localAcp ? null : input.effort ?? null,
-        access: localAcp ? "ask" : plan ? "plan" : access, accountId: localAcp ? null : input.account ?? null });
+        access: localAcp ? "ask" : plan ? "plan" : access, accountId: account });
       await reloadThreads();
       const ref = threadKey(row.id);
       return { ref, label, place, provision: provision.id, close: closing(ref, () => settleThread(row.id, true)) };

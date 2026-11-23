@@ -22,7 +22,7 @@ export function DeviceFloatBar({ device, scale, armed, onModel, onScale, onWindo
   const button = "nodrag cc-t flex items-center justify-center h-7 min-w-7 px-1.5 rounded-full text-white/75 hover:text-white hover:bg-white/12 disabled:opacity-35 disabled:hover:bg-transparent";
   return (
     <div className="ade-node-drag flex shrink-0 items-start justify-center cursor-grab active:cursor-grabbing" style={{ height: DEVICE_BAR_H }}>
-      <div className="flex items-center gap-0.5 h-9 pl-1.5 pr-1 rounded-full bg-[#1c1c1e]/92 backdrop-blur-md ring-1 ring-white/10
+      <div className="flex items-center gap-0.5 h-9 pl-1.5 pr-1 rounded-full bg-surface/92 backdrop-blur-md ring-1 ring-white/10
         shadow-[0_10px_30px_-10px_rgba(0,0,0,0.6)] ade-device-bar-in">
         <PopupSelect aria-label={t("canvas.device.model")} value={device.id} onChange={(event) => onModel(event.target.value)}
           className="nodrag h-7 max-w-40 rounded-full border-0 bg-white/8 pl-2.5 text-[11.5px] text-white">

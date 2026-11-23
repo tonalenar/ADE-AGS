@@ -1,7 +1,7 @@
 //! Testes da superfície nativa do navegador (o Portal): o contrato do `Place` que chega do front e a lógica pura
 //! que decide o que mudou, o que a máscara desenha e quando a vista é escondida.
 
-use super::surface::{diff_place, effective_zoom, empty_clip_visibility, keeps_pumping, open_step, outline, rounded_parts, same_emulated_platform, visibility_change, ClipState, CreationState, NativePlace, OpenStep, PathStep, PlaceChanges, PlaceState};
+use super::surface::{diff_place, effective_frame, effective_zoom, empty_clip_visibility, keeps_pumping, needs_layer_transaction, open_step, outline, rounded_parts, same_emulated_platform, visibility_change, ClipState, CreationState, NativePlace, OpenStep, PathStep, PlaceChanges, PlaceState};
 use super::{Place, Rect};
 use serde_json::json;
 
@@ -179,5 +179,35 @@ fn native_place_preserva_visibilidade_oculta_na_emulacao() {
     assert!(!saved.visible);
     let shown = NativePlace::new([0, 0, 390, 844], vec![[0, 0, 390, 844]], vec![[0, 0, 390, 844]], 12.0, false, true);
     assert!(shown.visible);
+}
+
+#[test]
+fn frame_colapsado_preserva_ultimo_frame_valido_sem_resized() {
+    let last = PlaceState { frame: [10, 20, 400, 300], parts: vec![[0, 0, 400, 300]], radius: 0.0, zoom: 0.5 };
+    let frame = effective_frame([0, 0, 0, 0], Some(last.frame));
+    assert_eq!(frame, [10, 20, 400, 300]);
+
+    let next = PlaceState { frame, parts: vec![], radius: 0.0, zoom: 0.5 };
+    let changes = diff_place(Some(&last), &next);
+    assert!(!changes.frame);
+    assert!(!changes.resized);
+    assert!(!changes.zoom);
+}
+
+#[test]
+fn zoom_com_ruido_sub_milesimo_nao_dispara_reaplicacao() {
+    let last = PlaceState { frame: [0, 0, 400, 300], parts: vec![[0, 0, 400, 300]], radius: 0.0, zoom: 0.5 };
+    let jitter = PlaceState { zoom: 0.5002, ..last.clone() };
+    assert!(!diff_place(Some(&last), &jitter).zoom);
+
+    let changed = PlaceState { zoom: 0.505, ..last.clone() };
+    assert!(diff_place(Some(&last), &changed).zoom);
+}
+
+#[test]
+fn mudanca_de_zoom_abre_transacao_atomica_de_camada() {
+    let zoom_only = PlaceChanges { zoom: true, ..PlaceChanges::default() };
+    assert!(needs_layer_transaction(&zoom_only, false, None));
+    assert!(!needs_layer_transaction(&PlaceChanges::default(), false, None));
 }
 

@@ -141,6 +141,20 @@ pub(crate) fn open_side_connection_at(path: &std::path::Path) -> SqlResult<Conne
     Ok(conn)
 }
 
+/// Timeout curto da conexão lateral usada pelo checkpoint periódico do WAL (F-K10).
+/// Evita que a manutenção espere 30 s por leitores ou escritores ativos.
+pub(crate) const WAL_CHECKPOINT_BUSY_TIMEOUT_MS: u64 = 250;
+
+/// Conexão lateral dedicada ao `PRAGMA wal_checkpoint(PASSIVE)`, com `busy_timeout` curto.
+pub(crate) fn open_wal_checkpoint_connection_at(path: &std::path::Path) -> SqlResult<Connection> {
+    let conn = Connection::open(path)?;
+    conn.execute_batch(&format!(
+        "PRAGMA foreign_keys = ON;
+         PRAGMA busy_timeout = {WAL_CHECKPOINT_BUSY_TIMEOUT_MS};"
+    ))?;
+    Ok(conn)
+}
+
 /// Abre el archivo y deja WAL y las claves foráneas. No migra.
 fn open_configured() -> Result<DbConnection, BootError> {
     let path = db_path()?;

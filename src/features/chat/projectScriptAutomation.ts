@@ -18,6 +18,7 @@ import {
   type ChatProjectScript,
 } from "./projectScripts";
 import { projectScriptCommandGet, projectScriptRunCancel, projectScriptRunStart } from "./projectScriptsIpc";
+import { onThreadEvent } from "./threadEvents";
 
 type Trigger = "worktree" | "settle";
 type RunResult = { code: number | null; cancelled: boolean; error: string | null };
@@ -215,13 +216,11 @@ export function startProjectScriptSettleWatcher(): () => void {
   }
   trimThreadTurns(threadTurns);
   let acceptingEvents = false;
-  let disposed = false;
-  let stopThreadEvents: (() => void) | null = null;
-  void listen<ThreadEvent>("cc-chat-thread", (event) => {
-    if (!acceptingEvents || event.payload.type !== "phase") return;
-    const id = event.payload.threadId;
+  const stopThreadEvents = onThreadEvent<ThreadEvent>((event) => {
+    if (!acceptingEvents || event.type !== "phase") return;
+    const id = event.threadId;
     const current = threadTurns.get(id) ?? { working: false, turn: 0, settled: 0 };
-    if (event.payload.phase === "working") {
+    if (event.phase === "working") {
       if (!current.working) current.turn += 1;
       current.working = true;
       threadTurns.set(id, current);
@@ -238,10 +237,7 @@ export function startProjectScriptSettleWatcher(): () => void {
     window.setTimeout(() => {
       if (noPendingStructuredWork(id)) launchThreadSettle(id, turn);
     }, 0);
-  }).then((unlisten) => {
-    if (disposed) unlisten();
-    else stopThreadEvents = unlisten;
-  }).catch(() => undefined);
+  });
   const previousTabs = new Map<string, StructuredSnapshot | null>();
   const stopTabs = subscribeStructuredState((tabId, snapshot) => {
     const previous = previousTabs.get(tabId);
@@ -253,9 +249,8 @@ export function startProjectScriptSettleWatcher(): () => void {
   });
   acceptingEvents = true;
   stopWatching = () => {
-    disposed = true;
     acceptingEvents = false;
-    stopThreadEvents?.();
+    stopThreadEvents();
     stopTabs();
     stopWatching = null;
   };

@@ -83,6 +83,7 @@ export interface TeamHandoff {
     summary?: string;
     changed_files?: { path: string; description?: string }[];
     tests?: { command: string; status: "passed" | "failed" | "not_run" }[];
+    decisions?: string[];
     risks?: string[];
     next_steps?: string[];
     status?: "continue" | "complete" | "blocked";

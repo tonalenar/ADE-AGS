@@ -1,14 +1,152 @@
-import { useRef } from "react";
+import { memo, useRef, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import { Terminal } from "@/features/terminal/LazyTerminal";
 import { useTabsStore } from "@/features/tabs/store";
-import { CANVAS_GROUP, CHAT_GROUP, focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
+import type { Tab } from "@/features/tabs/types";
+import { CANVAS_GROUP, CHAT_GROUP, focusGroup, placeStyle, usePlacements, type Placement, type Rect } from "@/features/tabs/layout/layoutStore";
+import { sameRect } from "@/features/canvas/geometry";
 import { useWorkMode } from "@/features/canvas/store";
 import { useChatShell } from "@/app/uiStore";
 import { isPageRoute } from "@/features/chat/chatRoutes";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
 import { buildAssignCommand, buildResumeCommand, canAssignSession, isResumable, newSessionId, resumeFailed } from "@/features/sessions/agentResume";
+
+interface TerminalSlotProps {
+  tab: Tab;
+  placement: Placement | undefined;
+  focused: boolean;
+  onWorkspace: boolean;
+  startedAt: MutableRefObject<Map<string, number>>;
+  launch: MutableRefObject<Map<string, { resuming: boolean; assignedId?: string }>>;
+  lastRect: MutableRefObject<Map<string, Rect | null>>;
+  activateTab: (id: string) => void;
+  setPtyId: (id: string, ptyId: number) => void;
+  setSessionId: (id: string, sessionId: string) => void;
+  restartAgent: (id: string) => void;
+}
+
+function samePlacement(a: Placement | undefined, b: Placement | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.groupId === b.groupId && sameRect(a.rect, b.rect);
+}
+
+function sameTerminalSlotProps(prev: TerminalSlotProps, next: TerminalSlotProps): boolean {
+  return prev.tab === next.tab
+    && prev.focused === next.focused
+    && prev.onWorkspace === next.onWorkspace
+    && samePlacement(prev.placement, next.placement)
+    && prev.activateTab === next.activateTab
+    && prev.setPtyId === next.setPtyId
+    && prev.setSessionId === next.setSessionId
+    && prev.restartAgent === next.restartAgent;
+}
+
+/** Wrapper memoizado por aba: evita re-renderizar abas inalteradas durante o pan do canvas sem mudar key nem pai de `<Terminal>`. */
+const TerminalSlot = memo(function TerminalSlot({
+  tab,
+  placement,
+  focused,
+  onWorkspace,
+  startedAt,
+  launch,
+  lastRect,
+  activateTab,
+  setPtyId,
+  setSessionId,
+  restartAgent,
+}: TerminalSlotProps) {
+  // El resume del agente ya reconstruye su propia conversación; reproducir
+  // también el scrollback crudo aquí duplicaría/ensuciaría la salida.
+  const key = agentKey(tab.id);
+  const instance = `${tab.id}:${tab.restartNonce ?? 0}`;
+  if (!startedAt.current.has(instance)) startedAt.current.set(instance, Date.now());
+  if (!launch.current.has(instance)) {
+    const resuming = !!tab.sessionId && isResumable(tab.agentId);
+    // Sesión nueva de una TUI que deja elegir el id: la app lo elige y lo graba en la tab.
+    // Así la conversación de la tab es la que nació en ella, y no "la más reciente de la
+    // carpeta" (que puede ser otra conversa del mismo proyecto, hecha fuera de la app).
+    // Con un PTY ya vivo (`ptyId`) no: el proceso que corre no arrancó con este id.
+    const assignedId =
+      !tab.sessionId && !tab.ptyId && canAssignSession(tab.agentId) ? newSessionId(tab.agentId) : undefined;
+    launch.current.set(instance, { resuming, assignedId });
+  }
+  const { resuming: isResuming, assignedId } = launch.current.get(instance)!;
+  const command = assignedId
+    ? buildAssignCommand(tab.agentId, tab.command, assignedId)
+    : buildResumeCommand(tab.agentId, tab.command, tab.sessionId);
+  if (placement) lastRect.current.set(key, placement.rect);
+  const shown = placement !== undefined;
+  return (
+    <div
+      style={{
+        ...placeStyle(lastRect.current.get(key) ?? null),
+        // No canvas a terminal viva é desenhada POR CIMA do cartão do nó, que tem cantos de 14 px:
+        // sem isto ela saía em ângulo reto por cima dos cantos de baixo. Só os de baixo: o topo
+        // fica debaixo do cabeçalho do nó.
+        ...(placement?.groupId === CANVAS_GROUP ? { borderRadius: "0 0 14px 14px", overflow: "hidden" } : {}),
+        // No chat o terminal é o cartão da conversa: cantos como os do composer.
+        ...(placement?.groupId === CHAT_GROUP ? { borderRadius: 12, overflow: "hidden" } : {}),
+        // Sin "visible" explícito: así hereda el visibility del contenedor de
+        // AppShell (que lo oculta fuera de /workspace) en vez de sobreescribirlo.
+        visibility: shown ? undefined : "hidden",
+        // Fuera del panel (que recorta): xterm deja de dibujar una terminal solo
+        // cuando su IntersectionObserver dice que no se ve, y `visibility:hidden`
+        // sigue "intersectando". Una oculta que recibe salida sin parar redibujaba
+        // filas que nadie mira. Se mueve sin cambiar de tamaño, así su TUI no recibe
+        // un resize; al volver, xterm la redibuja entera sola.
+        //
+        // En el canvas alejado la terminal conserva su tamaño real y se ESCALA hasta su
+        // nodo (ver `canvas/geometry.ts`): así sigue viva y no cambia filas ni columnas.
+        transform: shown ? (placement?.rect?.scale ? `scale(${placement.rect.scale})` : undefined) : "translateX(-300vw)",
+        transformOrigin: "0 0",
+        pointerEvents: shown ? "auto" : "none",
+        zIndex: shown ? 1 : 0,
+      }}
+      // A escala do canvas, para o mouse da terminal acertar a célula (ver `scaledMouse.ts`).
+      data-term-scale={shown && placement?.rect?.scale ? placement.rect.scale : undefined}
+      onPointerDownCapture={() => {
+        if (placement?.groupId === CANVAS_GROUP) activateTab(tab.id);
+        else if (placement?.groupId) focusGroup(placement.groupId);
+      }}
+    >
+      <Terminal
+        // El nonce en la key: reiniciar el agente desmonta esta terminal (lo que mata
+        // su proceso) y monta otra, que relanza con `--resume`.
+        key={`${tab.id}:${tab.restartNonce ?? 0}`}
+        tabId={tab.id}
+        command={command}
+        cwd={tab.cwd}
+        agentId={tab.agentId}
+        accountId={tab.accountId}
+        scrubSecrets={tab.scrubSecrets}
+        prelaunch={tab.prelaunch}
+        attachPtyId={tab.ptyId ?? undefined}
+        initialScrollback={isResuming ? undefined : tab.scrollback}
+        isActive={focused && onWorkspace}
+        isVisible={shown}
+        openedAt={tab.openedAt}
+        // Con el id elegido por la app no hay nada que descubrir: el sondeo por "la más
+        // reciente de la carpeta" es justamente lo que adoptaba conversas ajenas.
+        knownSessionId={tab.sessionId || assignedId}
+        onReady={(ptyId) => {
+          setPtyId(tab.id, ptyId);
+          if (assignedId && tab.sessionId !== assignedId) setSessionId(tab.id, assignedId);
+        }}
+        onExit={(code) => {
+          // O `--resume` falhó (sesión borrada o id inválido): sin esto la pestaña quedaba
+          // muerta. Se descarta el id y se relanza de cero, con el scrollback guardado.
+          if (resumeFailed(isResuming, code, Date.now() - (startedAt.current.get(instance) ?? 0))) {
+            setSessionId(tab.id, "");
+            restartAgent(tab.id);
+          }
+        }}
+        onSessionDiscovered={(sessionId) => setSessionId(tab.id, sessionId)}
+      />
+    </div>
+  );
+}, sameTerminalSlotProps);
 
 export function TerminalPanel() {
   const { t } = useTranslation();
@@ -47,96 +185,22 @@ export function TerminalPanel() {
     // así que h-full es la única forma de darle altura real al panel.
     <div className={`relative h-full w-full overflow-hidden ${overlay ? "pointer-events-none" : "bg-gray-100 dark:bg-surface"}`}>
       {tabs.map((tab) => {
-        // El resume del agente ya reconstruye su propia conversación; reproducir
-        // también el scrollback crudo aquí duplicaría/ensuciaría la salida.
         const key = agentKey(tab.id);
-        const instance = `${tab.id}:${tab.restartNonce ?? 0}`;
-        if (!startedAt.current.has(instance)) startedAt.current.set(instance, Date.now());
-        if (!launch.current.has(instance)) {
-          const resuming = !!tab.sessionId && isResumable(tab.agentId);
-          // Sesión nueva de una TUI que deja elegir el id: la app lo elige y lo graba en la tab.
-          // Así la conversación de la tab es la que nació en ella, y no "la más reciente de la
-          // carpeta" (que puede ser otra conversa del mismo proyecto, hecha fuera de la app).
-          // Con un PTY ya vivo (`ptyId`) no: el proceso que corre no arrancó con este id.
-          const assignedId =
-            !tab.sessionId && !tab.ptyId && canAssignSession(tab.agentId) ? newSessionId(tab.agentId) : undefined;
-          launch.current.set(instance, { resuming, assignedId });
-        }
-        const { resuming: isResuming, assignedId } = launch.current.get(instance)!;
-        const command = assignedId
-          ? buildAssignCommand(tab.agentId, tab.command, assignedId)
-          : buildResumeCommand(tab.agentId, tab.command, tab.sessionId);
-        const placement = visible.get(key);
-        if (placement) lastRect.current.set(key, placement.rect);
-        const shown = placement !== undefined;
         return (
-          <div
+          <TerminalSlot
             key={tab.id}
-            style={{
-              ...placeStyle(lastRect.current.get(key) ?? null),
-              // No canvas a terminal viva é desenhada POR CIMA do cartão do nó, que tem cantos de 14 px:
-              // sem isto ela saía em ângulo reto por cima dos cantos de baixo. Só os de baixo: o topo
-              // fica debaixo do cabeçalho do nó.
-              ...(placement?.groupId === CANVAS_GROUP ? { borderRadius: "0 0 14px 14px", overflow: "hidden" } : {}),
-              // No chat o terminal é o cartão da conversa: cantos como os do composer.
-              ...(placement?.groupId === CHAT_GROUP ? { borderRadius: 12, overflow: "hidden" } : {}),
-              // Sin "visible" explícito: así hereda el visibility del contenedor de
-              // AppShell (que lo oculta fuera de /workspace) en vez de sobreescribirlo.
-              visibility: shown ? undefined : "hidden",
-              // Fuera del panel (que recorta): xterm deja de dibujar una terminal solo
-              // cuando su IntersectionObserver dice que no se ve, y `visibility:hidden`
-              // sigue "intersectando". Una oculta que recibe salida sin parar redibujaba
-              // filas que nadie mira. Se mueve sin cambiar de tamaño, así su TUI no recibe
-              // un resize; al volver, xterm la redibuja entera sola.
-              //
-              // En el canvas alejado la terminal conserva su tamaño real y se ESCALA hasta su
-              // nodo (ver `canvas/geometry.ts`): así sigue viva y no cambia filas ni columnas.
-              transform: shown ? (placement?.rect?.scale ? `scale(${placement.rect.scale})` : undefined) : "translateX(-300vw)",
-              transformOrigin: "0 0",
-              pointerEvents: shown ? "auto" : "none",
-              zIndex: shown ? 1 : 0,
-            }}
-            // A escala do canvas, para o mouse da terminal acertar a célula (ver `scaledMouse.ts`).
-            data-term-scale={shown && placement?.rect?.scale ? placement.rect.scale : undefined}
-            onPointerDownCapture={() => {
-              if (placement?.groupId === CANVAS_GROUP) activateTab(tab.id);
-              else if (placement?.groupId) focusGroup(placement.groupId);
-            }}
-          >
-            <Terminal
-              // El nonce en la key: reiniciar el agente desmonta esta terminal (lo que mata
-              // su proceso) y monta otra, que relanza con `--resume`.
-              key={`${tab.id}:${tab.restartNonce ?? 0}`}
-              tabId={tab.id}
-              command={command}
-              cwd={tab.cwd}
-              agentId={tab.agentId}
-              accountId={tab.accountId}
-              scrubSecrets={tab.scrubSecrets}
-              prelaunch={tab.prelaunch}
-              attachPtyId={tab.ptyId ?? undefined}
-              initialScrollback={isResuming ? undefined : tab.scrollback}
-              isActive={key === focusedItem && onWorkspace}
-              isVisible={shown}
-              openedAt={tab.openedAt}
-              // Con el id elegido por la app no hay nada que descubrir: el sondeo por "la más
-              // reciente de la carpeta" es justamente lo que adoptaba conversas ajenas.
-              knownSessionId={tab.sessionId || assignedId}
-              onReady={(ptyId) => {
-                setPtyId(tab.id, ptyId);
-                if (assignedId && tab.sessionId !== assignedId) setSessionId(tab.id, assignedId);
-              }}
-              onExit={(code) => {
-                // O `--resume` falhó (sesión borrada o id inválido): sin esto la pestaña quedaba
-                // muerta. Se descarta el id y se relanza de cero, con el scrollback guardado.
-                if (resumeFailed(isResuming, code, Date.now() - (startedAt.current.get(instance) ?? 0))) {
-                  setSessionId(tab.id, "");
-                  restartAgent(tab.id);
-                }
-              }}
-              onSessionDiscovered={(sessionId) => setSessionId(tab.id, sessionId)}
-            />
-          </div>
+            tab={tab}
+            placement={visible.get(key)}
+            focused={key === focusedItem}
+            onWorkspace={onWorkspace}
+            startedAt={startedAt}
+            launch={launch}
+            lastRect={lastRect}
+            activateTab={activateTab}
+            setPtyId={setPtyId}
+            setSessionId={setSessionId}
+            restartAgent={restartAgent}
+          />
         );
       })}
 

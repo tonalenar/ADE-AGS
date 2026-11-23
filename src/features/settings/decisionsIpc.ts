@@ -8,6 +8,15 @@ export interface ConnectionTest {
   error: string | null;
 }
 
+/** Estado em edição na tela para "Testar conexão" testar o rascunho atual antes de salvar. */
+export interface ConnectionTestDraft {
+  provider: DecisionSettings["provider"];
+  baseUrl: string;
+  model: string;
+  timeoutMs: number;
+  apiKey?: string;
+}
+
 export interface PairCount {
   heuristic: string;
   provider: string;
@@ -91,7 +100,8 @@ export const setDecisionKey = (key: string, slot: KeySlot = "primary") => invoke
 
 export const clearDecisionKey = (slot: KeySlot = "primary") => invoke<void>("decision_key_clear", { slot });
 
-export const testDecisionConnection = (slot: KeySlot = "primary") => invoke<ConnectionTest>("decision_test_connection", { slot });
+export const testDecisionConnection = (slot: KeySlot = "primary", draft?: ConnectionTestDraft) =>
+  invoke<ConnectionTest>("decision_test_connection", draft ? { slot, draft } : { slot });
 
 export const decisionShadowReport = () => invoke<ShadowReport>("decision_shadow_report");
 

@@ -364,19 +364,8 @@ pub(crate) fn db_mark_window_closed_now(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn db_mark_window_closed(
-    label: String,
-    db: tauri::State<'_, DbConnection>,
-) -> Result<(), String> {
-    let db = db.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || db_mark_window_closed_now(label, &db))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
 /// Se usa cuando el usuario cierra explícitamente UNA sola ventana (no un cierre en
-/// bloque, ver comentario de `db_mark_window_closed`). Si el workspace todavía tiene
+/// bloque, ver comentario de `db_mark_window_closed_now`). Si el workspace todavía tiene
 /// otras ventanas vivas, esta fila se borra directamente (igual que pasa al cerrar una
 /// tab) para que el conteo de ventanas y la próxima apertura del workspace reflejen la
 /// baja de inmediato, en vez de resucitarla la próxima vez que se abra ese workspace. Si

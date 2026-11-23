@@ -54,6 +54,7 @@ import { closeSummary, forgetLastPanel, setChatBrowserFloatRect, type RightPanel
 import { threadCards, threadIdOf, threadKey } from "./structured/model";
 import { startStructured, useStructured } from "./structured/store";
 import { StructuredConversationView } from "./structured/StructuredConversationView";
+import { onThreadEvent } from "./threadEvents";
 
 /**
  * A casca do modo chat (pranchetas 1 e 2, estilo T3 Code): a sidebar de conversas, a conversa aberta
@@ -273,7 +274,12 @@ function BrowserFloatHost({ hidden }: { hidden: boolean }) {
     const view = s.views.find((v) => v.id === viewId);
     return view?.kind === "browser" ? (view.viewport ?? null) : null;
   });
-  const aspectRatio = floatAspectRatioOf(viewport);
+  const mobile = useViewTabsStore((s) => {
+    if (!viewId) return null;
+    const view = s.views.find((v) => v.id === viewId);
+    return view?.kind === "browser" ? (view.mobile ?? null) : null;
+  });
+  const aspectRatio = floatAspectRatioOf(viewport, mobile);
   const prevRatioRef = useRef<{ viewId: string | null; ratio: number | null }>({ viewId: null, ratio: null });
 
   const measure = useCallback(() => {
@@ -360,15 +366,15 @@ export function useFolderDiffs(cards: ConversationCard[]): Record<string, Folder
       timers.current.set(cwd, window.setTimeout(() => load(cwd), DIFF_DEBOUNCE_MS));
     });
     // A conversa por protocolo não tem transcript: o diff relê quando o turno dela acaba.
-    const offThread = listen<{ threadId: string; type: string; phase?: string }>("cc-chat-thread", (e) => {
-      if (e.payload.type !== "phase" || e.payload.phase !== "idle") return;
-      const cwd = tabCwd.current.get(threadKey(e.payload.threadId));
+    const offThread = onThreadEvent<{ threadId: string; type: string; phase?: string }>((e) => {
+      if (e.type !== "phase" || e.phase !== "idle") return;
+      const cwd = tabCwd.current.get(threadKey(e.threadId));
       if (cwd) load(cwd);
     });
     const pending = timers.current;
     return () => {
       off.then((fn) => fn()).catch(() => undefined);
-      offThread.then((fn) => fn()).catch(() => undefined);
+      offThread();
       pending.forEach((id) => window.clearTimeout(id));
       pending.clear();
     };

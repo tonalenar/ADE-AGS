@@ -32,6 +32,35 @@ pub(crate) fn tab_send_error(boards: &Boards, caller: &Caller, target: &str, ope
     ))
 }
 
+/// O texto é o comando `/compact` de uma TUI (sozinho ou com instruções)? Pura.
+pub(crate) fn is_compact_command(text: &str) -> bool {
+    let first = text.split_whitespace().next().unwrap_or("");
+    first.eq_ignore_ascii_case("/compact")
+}
+
+/// Um agente só compacta a PRÓPRIA conversa, e só com o autocompact da pessoa ligado. Digitar `/compact` em outra aba é
+/// recusado; na própria aba, só com o autocompact ligado (`autocompact_on`). A pessoa (`Outside`) segue livre. Pura.
+pub(crate) fn compact_command_error(caller: &Caller, target: &str, text: &str, autocompact_on: bool) -> Option<String> {
+    let Caller::Tab(me) = caller else { return None };
+    if !is_compact_command(text) {
+        return None;
+    }
+    if me != target {
+        return Some(format!(
+            "Um agente só compacta a própria conversa, nunca a de outro: `/compact` na aba {target} foi recusado. \
+Se o contexto dela precisa ser compactado, avise a pessoa; ela compacta pela tela da ADE AGS."
+        ));
+    }
+    if !autocompact_on {
+        return Some(
+            "O autocompact de contexto está desligado: só a pessoa o liga (Configurações → Chat → Autocompact de contexto), \
+e só com ele ligado um agente pode pedir a compactação da própria conversa."
+                .into(),
+        );
+    }
+    None
+}
+
 /// O recurso `target` (uma aba, `thread:<id>`…) está ao alcance de `me`? É ele mesmo, foi ele quem o abriu (`opened_by`) ou o
 /// canvas o liga a ele (`canvas::reachable`: vizinhos e, para o orquestrador, o time todo).
 pub(crate) fn in_reach(boards: &Boards, me: &str, target: &str, opened_by: Option<&str>) -> bool {

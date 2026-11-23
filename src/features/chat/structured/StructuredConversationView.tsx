@@ -13,6 +13,7 @@ import { accessModesFor, extractSlashCommand, midTurnOf, queueHintKey, type Conv
 import { fastModeForThread, saveFastModeForThread } from "../fastMode";
 import { goalPauseResumeAvailable, isLegacyGoalClearAlias, matrixProviderForAgent, useHarnessCapability } from "../harnessCapabilities";
 import { messageFor } from "../attachments/send";
+import { suggestNextPrompt } from "../composerSuggest";
 import { ChatComposer } from "../ChatComposer";
 import { newConversationLocal } from "../chatActions";
 import { useChatPrefs } from "../chatPrefs";
@@ -127,6 +128,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   const shownItems = useMemo(() => (side?.history.length ? [...side.history, ...items] : items), [side?.history, items]);
   const quoteSourceIds = useMemo(() => new Set(items.map((item) => item.id)), [items]);
   const promptHistory = useMemo(() => items.flatMap((item) => item.kind === "user" && item.text?.trim() ? [item.text] : []), [items]);
+  const nextPromptSuggestion = useMemo(() => working ? null : suggestNextPrompt(items, { yes: t("chat.composer.suggest.yes"), runTests: t("chat.composer.suggest.runTests") }), [working, items, t]);
   // Com o agente trabalhando, a mensagem na fila dele só entra no fio quando o turno dela começa: o envio otimista espera.
   const pending = usePending(key, items, working);
   const streaming = useMemo(() => new Set(live.drafts.map((d) => d.itemId)), [live.drafts]);
@@ -231,7 +233,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
         {(live.error ?? team?.error) && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{live.error ?? team?.error}</p>}
         <LogFailureNotice threadId={thread.id} />
         <ChatComposer cwd={thread.cwd} quoteKey={card.tabId} quoteThreadId={thread.id} quoteSourceIds={quoteSourceIds} promptHistory={promptHistory}
-          turnActive={working} forceSend={!!request}
+          turnActive={working} suggestion={request ? null : nextPromptSuggestion} forceSend={!!request}
           placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working
             ? t(queueHintKey(thread.agentId, followUpBehavior, steerCapability.support, interruptCapability.support), { key: QUEUE_KEY })
             : team?.placeholder ?? (side ? t("chat.sideChat.placeholder") : t("chat.composer.reply"))}
