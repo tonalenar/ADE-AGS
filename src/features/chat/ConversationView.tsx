@@ -15,6 +15,7 @@ import { BotIcon } from "./chatIcons";
 import { accessModesFor, extractSlashCommand, hasTimeline, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
 import { matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
 import { messageFor } from "./attachments/send";
+import { suggestNextPrompt } from "./composerSuggest";
 import { ChatComposer } from "./ChatComposer";
 import { useChatPrefs } from "./chatPrefs";
 import { ComposerAssistMenu } from "./ComposerAssistMenu";
@@ -115,6 +116,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   const pending = usePending(card.tabId, items);
   const searchTarget = useChatStore((s) => s.tabSearchTarget?.tabId === card.tabId ? s.tabSearchTarget : null);
   const busy = working || phase === "working";
+  const nextPromptSuggestion = useMemo(() => busy ? null : suggestNextPrompt(items, { yes: t("chat.composer.suggest.yes"), runTests: t("chat.composer.suggest.runTests") }), [busy, items, t]);
   const [switchTo, setSwitchTo] = useState<TuiSwitchTarget | null>(null);
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
@@ -188,7 +190,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
       {approval && <PermissionCard key={approval.id} ask={approval} terminal />}
       {team?.error && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{team.error}</p>}
       <ChatComposer cwd={card.cwd} quoteKey={card.tabId} quoteSourceIds={quoteSourceIds} promptHistory={promptHistory}
-        turnActive={busy} forceSend={!!approval}
+        turnActive={busy} suggestion={approval ? null : nextPromptSuggestion} forceSend={!!approval}
         placeholder={approval ? t("chat.composer.redirect") : busy ? t(followUpBehavior === "queue" ? "chat.composer.queueHintQueue" : "chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
         onSubmit={async (text, attachments) => {
           const planCommand = extractSlashCommand(text, "plan");

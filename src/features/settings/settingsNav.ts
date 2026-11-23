@@ -119,6 +119,8 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "chat.width", page: "chat", anchor: "chat-mode", titleKey: "chat.settings.width" },
   { id: "chat.skills", page: "chat", anchor: "chat-mode", titleKey: "chat.settings.showSkillsInSlashMenu" },
   { id: "chat.sendShortcut", page: "chat", anchor: "chat-composer", titleKey: "chat.settings.sendShortcut", keywordKeys: ["chat.settings.sendShortcut.hint"] },
+  { id: "chat.spellcheck", page: "chat", anchor: "chat-writing", titleKey: "chat.settings.spellcheck", keywordKeys: ["chat.settings.spellcheck.hint"] },
+  { id: "chat.promptSuggestions", page: "chat", anchor: "chat-writing", titleKey: "chat.settings.promptSuggestions", keywordKeys: ["chat.settings.promptSuggestions.hint"] },
   { id: "chat.toolCalls", page: "chat", anchor: "chat-activity", titleKey: "chat.settings.toolCalls.label", keywordKeys: ["chat.settings.toolCalls.hint"] },
   { id: "chat.autocompact", page: "chat", anchor: "chat-autocompact", titleKey: "chat.autocompact.title" },
   { id: "chat.compact", page: "chat", anchor: "chat-compact", titleKey: "chat.settings.claudeCompact.title" },
