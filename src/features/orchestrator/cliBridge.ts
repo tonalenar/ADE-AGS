@@ -18,7 +18,6 @@ import { getAutonomy } from "@/features/missions/autonomy";
 import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { isPageRoute } from "@/features/chat/chatRoutes";
 import { openThread, reloadThreads, useStructured } from "@/features/chat/structured/store";
-import { reloadTeams, syncTeamCanvas } from "@/features/chat/team/teamStore";
 import { addSurface, openDesignInPanel } from "@/features/chat/store";
 import { conversationOnScreen } from "@/features/chat/conversationOnScreen";
 import { revealFromShowFlag } from "@/features/chat/deviceReveal";
@@ -568,6 +567,7 @@ async function handleTeamSync(args: Record<string, unknown>): Promise<unknown> {
   const teamId = str(args, "teamId");
   if (!teamId) throw new Error("Falta o time");
   const removed = str(args, "removed");
+  const { reloadTeams, syncTeamCanvas } = await import("@/features/chat/team/teamStore");
   const team = (await reloadTeams()).find((t) => t.id === teamId);
   if (!team) throw new Error("Esse time não existe mais");
   await syncTeamCanvas(team, { removed: removed ? [removed] : [] });

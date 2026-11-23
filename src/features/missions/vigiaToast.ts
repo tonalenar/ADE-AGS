@@ -1,12 +1,13 @@
 // O `i18next` puro, como em `terminals.ts`: o wrapper `@/i18n` grava o idioma no banco ao carregar, e isso não é deste módulo.
 import i18n from "i18next";
-import { openConversation } from "@/features/chat/chatActions";
 import type { BotToastInput } from "@/shared/brand/botToastStore";
 
 /**
- * Abre a conversa do aviso pela navegação que já existe (`openConversation`).
+ * Abre a conversa do aviso pela navegação que já existe (`openConversation`). Carregada no clique, e não no import: o
+ * Vigia não puxa o chat para dentro do próprio módulo de carga.
  */
 export async function abrirConversaDoVigia(tabId: string): Promise<void> {
+  const { openConversation } = await import("@/features/chat/chatActions");
   openConversation(tabId);
 }
 

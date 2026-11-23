@@ -39,14 +39,7 @@ export function setLanguage(lng: string): Promise<unknown> {
   return loadLocale(lng).then(() => i18n.changeLanguage(lng));
 }
 
-const storedLanguage = (() => {
-  try {
-    return typeof localStorage !== "undefined" ? localStorage.getItem("language") : null;
-  } catch {
-    return null;
-  }
-})();
-const initial = resolveLocale(storedLanguage, typeof navigator !== "undefined" ? navigator.language : undefined);
+const initial = resolveLocale(localStorage.getItem("language"), navigator.language);
 
 i18n.use(initReactI18next).init({
   resources: {},

@@ -5,7 +5,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import type { UnifiedConversation } from "@/features/chat/unified/types";
 import type { TeamMenuAction } from "@/features/tabs/teamTabs";
 import { AlertaToast } from "@/shared/ui/alerts";
-import i18n from "i18next";
+import i18n from "@/i18n";
 
 const refOf = (c: UnifiedConversation): ConversationRef => ({
   key: c.ref, agentId: c.agentId, agentLabel: useTabsStore.getState().tabs.find((t) => t.id === c.ref)?.agentLabel ?? c.agentId, title: c.title, cwd: c.cwd,

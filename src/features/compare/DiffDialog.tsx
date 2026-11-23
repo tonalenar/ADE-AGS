@@ -53,7 +53,7 @@ export function DiffDialog({ comparisonId, pick }: { comparisonId: string; pick:
             )}
             {lines.length > 0 && view.patch ? (
               <pre className="cc-scroll overflow-auto max-h-[55vh] rounded-md border border-gray-200 dark:border-white/10 font-mono text-[11px] leading-[1.45]">
-                {lines.map((line, i) => <div key={i} className={`[content-visibility:auto] [contain-intrinsic-size:auto_16px] px-2 whitespace-pre ${LINE[line.kind]}`}>{line.text || " "}</div>)}
+                {lines.map((line, i) => <div key={i} className={`px-2 whitespace-pre ${LINE[line.kind]}`}>{line.text || " "}</div>)}
               </pre>
             ) : (
               !view.untracked.length && <p className="text-gray-500">{t("compare.diff.empty")}</p>

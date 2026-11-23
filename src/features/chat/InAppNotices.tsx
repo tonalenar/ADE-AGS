@@ -7,7 +7,6 @@ import { noticesBetween, noticeStatesOf, type ConversationNotice, type NoticeKin
 import { threadIdOf, threadStatusSignature } from "@/features/chat/structured/model";
 import { useStructured } from "@/features/chat/structured/store";
 import { useConversations, useSelectedRef } from "@/features/chat/unified/useConversations";
-import { selectConversation } from "@/features/chat/unified/selectionActions";
 import { useInAppNotices } from "@/features/settings/inAppNoticesPreference";
 import { AlertaToast } from "@/shared/ui/alerts";
 
@@ -33,6 +32,7 @@ const NOTICE_MS = 5000;
  * protocolo (`thread:<id>`). Carregada no clique, e não no import: o aviso não puxa o canvas para o entry da casca.
  */
 export async function abrirConversaDoAviso(ref: string): Promise<void> {
+  const { selectConversation } = await import("@/features/chat/unified/selectionActions");
   selectConversation(ref);
 }
 

@@ -1,14 +1,10 @@
-import { Suspense, useEffect, useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { lazyWithRetry } from "@/app/lazyWithRetry";
 import { EMPTY_LIVE } from "@/features/chat/structured/model";
 import { hydrateThread, openThread, useStructured } from "@/features/chat/structured/store";
 import { withDrafts } from "@/features/chat/timeline/streaming";
-
-const TimelineView = lazyWithRetry(() =>
-  import("@/features/chat/timeline/ConversationTimeline").then((m) => ({ default: m.TimelineView })),
-);
+import { TimelineView } from "@/features/chat/timeline/ConversationTimeline";
 
 /**
  * A conversa por protocolo (`thread:<id>`) nas Abas: a mesma timeline do chat, em React puro (sem xterm,
@@ -33,10 +29,8 @@ export function ProtocolPane({ threadId, agentId, agentLabel }: { threadId: stri
         </button>
       </div>
       <div className="flex-1 min-h-0 flex flex-col">
-        <Suspense fallback={null}>
-          <TimelineView items={items} loaded={hydrated} working={working} approval={null} live streaming={streaming}
-            agentLabel={agentLabel} agentId={agentId} threadId={threadId} />
-        </Suspense>
+        <TimelineView items={items} loaded={hydrated} working={working} approval={null} live streaming={streaming}
+          agentLabel={agentLabel} agentId={agentId} threadId={threadId} />
       </div>
     </div>
   );
