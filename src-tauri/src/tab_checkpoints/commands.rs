@@ -89,7 +89,7 @@ pub fn on_submit(pty_id: u32, text: &str, author: &str) {
 }
 
 /// O Enter na aba, visto pelo terminal da tela (a pessoa, ou um colado do próprio app).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn tab_checkpoint_auto(app: AppHandle, tab_id: String, cwd: String, message: String, author: String) {
     spawn_auto(app, tab_id, cwd, message, author);
 }

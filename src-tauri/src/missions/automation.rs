@@ -169,13 +169,13 @@ fn current(db: &crate::database::DbConnection) -> Result<Status, String> {
     status_with_scheduled_tasks(&conn, gate(), &routines, &tasks)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_status(db: tauri::State<'_, crate::database::DbConnection>) -> Result<Status, String> {
     current(&db)
 }
 
 /// O botão "Retomar automação". Só a tela chama (não há CLI nem MCP).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn automation_resume(app: AppHandle, db: tauri::State<'_, crate::database::DbConnection>) -> Result<Status, String> {
     resume(crate::util::now_ts_ms());
     let status = current(&db)?;

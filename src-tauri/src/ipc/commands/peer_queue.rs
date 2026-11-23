@@ -609,19 +609,19 @@ pub struct QueueCount {
 }
 
 /// Quantas mensagens esperam cada aba (o selo "N na fila").
-#[tauri::command]
+#[tauri::command(async)]
 pub fn peer_queue_counts(app: AppHandle) -> Result<Vec<QueueCount>, String> {
     let counts = with_db(&app, store::pending_counts)?;
     Ok(counts.into_iter().map(|(tab_id, count)| QueueCount { tab_id, count }).collect())
 }
 
 /// O que espera uma aba, na ordem da entrega.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn peer_queue_list(app: AppHandle, tab_id: String) -> Result<Vec<PeerMessage>, String> {
     with_db(&app, |conn| store::queued_for(conn, &tab_id))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn peer_queue_edit(app: AppHandle, id: i64, text: String) -> Result<PeerMessage, String> {
     let msg = with_db_now(&app, |conn, now| store::edit(conn, id, &text, now))?;
     changed(&app, Some(&msg.to_tab_id));
@@ -629,14 +629,14 @@ pub fn peer_queue_edit(app: AppHandle, id: i64, text: String) -> Result<PeerMess
 }
 
 /// Sobe (`delta` < 0) ou desce (> 0) uma casa. Devolve a fila nova.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn peer_queue_move(app: AppHandle, id: i64, delta: i64) -> Result<Vec<PeerMessage>, String> {
     let list = with_db_now(&app, |conn, now| store::move_by(conn, id, delta.signum(), now))?;
     changed(&app, list.first().map(|m| m.to_tab_id.as_str()));
     Ok(list)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn peer_queue_cancel(app: AppHandle, id: i64) -> Result<PeerMessage, String> {
     let msg = with_db_now(&app, |conn, now| store::cancel(conn, id, "Cancelada pelo usuário.", now))?;
     changed(&app, Some(&msg.to_tab_id));
@@ -644,7 +644,7 @@ pub fn peer_queue_cancel(app: AppHandle, id: i64) -> Result<PeerMessage, String>
 }
 
 /// "Enviar agora": a mensagem vai para a frente e é digitada sem esperar o destino ficar quieto.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn peer_queue_send_now(app: AppHandle, id: i64) -> Result<PeerMessage, String> {
     let msg = with_db_now(&app, |conn, now| store::send_now(conn, id, now))?;
     changed(&app, Some(&msg.to_tab_id));

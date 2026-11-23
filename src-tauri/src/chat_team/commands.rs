@@ -25,7 +25,7 @@ fn lock(db: &DbConnection) -> Result<std::sync::MutexGuard<'_, rusqlite::Connect
     db.lock().map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_list(db: State<'_, DbConnection>) -> Result<Vec<TeamView>, String> {
     api::list(&*lock(&db)?)
 }
@@ -44,7 +44,7 @@ pub struct CreateInput {
     pub title: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_create(app: AppHandle, db: State<'_, DbConnection>, input: CreateInput) -> Result<TeamView, String> {
     let (team, _) = api::create(
         &*lock(&db)?,
@@ -92,7 +92,7 @@ pub struct PromoteInput {
 
 /// Promove uma coroa do canvas (com os cordados) a time do chat, `origin = 'canvas'`. **Só grava linhas:** não
 /// abre processo, PTY nem worktree. Quem já é de outro time ou de uma missão fica em `skipped`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_promote(app: AppHandle, db: State<'_, DbConnection>, input: PromoteInput) -> Result<api::Promoted, String> {
     if input.board_key.as_deref().is_some_and(|k| k.contains("#m:")) {
         return Err("O quadro de uma missão não vira time do chat: o time dela é o da missão.".into());
@@ -163,7 +163,7 @@ pub struct MirrorInput {
 
 /// Grava a linha-espelho `origin = 'mission'` de uma missão que acabou de abrir seu time em terminais, para o
 /// chat mostrá-la. **Só grava linhas** (nada de processo, PTY ou worktree) e a missão segue dona de tudo.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_mission_mirror(app: AppHandle, db: State<'_, DbConnection>, input: MirrorInput) -> Result<api::Mirrored, String> {
     let members = input
         .members
@@ -199,7 +199,7 @@ pub fn chat_team_mission_mirror(app: AppHandle, db: State<'_, DbConnection>, inp
 }
 
 /// A missão fechou: tira o espelho. Não fecha agente nem terminal.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_mission_unmirror(app: AppHandle, db: State<'_, DbConnection>, mission_id: String) -> Result<bool, String> {
     let existing = crate::chat_team::store::team_of_mission(&*lock(&db)?, &mission_id)?;
     let done = api::unmirror_mission(&*lock(&db)?, &mission_id)?;
@@ -211,7 +211,7 @@ pub fn chat_team_mission_unmirror(app: AppHandle, db: State<'_, DbConnection>, m
 
 /// A coroa saiu do canvas: tira SÓ o papel de orquestrador. O time e os integrantes ficam e o time pode receber
 /// outro orquestrador (`chat_team_lead`).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_unlead(app: AppHandle, db: State<'_, DbConnection>, team_id: String) -> Result<bool, String> {
     let done = api::unlead(&*lock(&db)?, &team_id, crate::util::now_ts_ms())?;
     announce(&app, &team_id);
@@ -230,7 +230,7 @@ pub struct LeadInput {
 }
 
 /// Dá um orquestrador a um time que ficou sem (ou troca o dele).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_lead(app: AppHandle, db: State<'_, DbConnection>, input: LeadInput) -> Result<TeamView, String> {
     let view = api::lead(&*lock(&db)?, &input.team_id, &input.orchestrator, &input.agent_id, &input.label, crate::util::now_ts_ms())?;
     announce(&app, &input.team_id);
@@ -239,7 +239,7 @@ pub fn chat_team_lead(app: AppHandle, db: State<'_, DbConnection>, input: LeadIn
 
 /// Troca a ref de um integrante (ou do orquestrador) no roster **e nas cordas** do canvas: aba ↔ `thread:<id>`.
 /// É só a troca de endereço; quem converte (fecha uma, abre a outra) é quem chama.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_rebind(app: AppHandle, db: State<'_, DbConnection>, old_ref: String, new_ref: String) -> Result<Option<api::Rebound>, String> {
     let mut boards = crate::canvas::load_boards()?;
     let rebound = api::rebind(&*lock(&db)?, &old_ref, &new_ref, crate::util::now_ts_ms())?;
@@ -305,7 +305,7 @@ pub fn briefing_for(orchestrator: &str, member: &MemberRow, role_label: &str, in
     model::member_briefing(orchestrator, &me, instructions)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_link(app: AppHandle, db: State<'_, DbConnection>, input: LinkInput) -> Result<Linked, String> {
     let policy = input.policy.as_deref().map(Policy::parse).transpose()?;
     let roles = crate::canvas::roles::all();
@@ -347,7 +347,7 @@ pub struct ProvisionInput {
 }
 
 /// Grava o integrante novo (`provisioning`) antes de abrir a conversa e o worktree; devolve o nome único.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_provision_begin(app: AppHandle, db: State<'_, DbConnection>, input: ProvisionInput) -> Result<super::store::ProvisionRow, String> {
     let row = api::provision_begin(&*lock(&db)?, &input.team_id, &input.agent_id, &input.role, &input.label, crate::util::now_ts_ms())?;
     announce(&app, &input.team_id);
@@ -355,13 +355,13 @@ pub fn chat_team_provision_begin(app: AppHandle, db: State<'_, DbConnection>, in
 }
 
 /// O worktree do integrante novo ficou pronto (a conversa ainda vai abrir).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_provision_place(db: State<'_, DbConnection>, id: String, worktree: Option<String>, branch: Option<String>) -> Result<(), String> {
     super::store::provision_place(&*lock(&db)?, &id, worktree.as_deref(), branch.as_deref(), crate::util::now_ts_ms())
 }
 
 /// Abrir a conversa ou o worktree do integrante novo falhou.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_provision_fail(app: AppHandle, db: State<'_, DbConnection>, id: String, member: Option<String>, reason: String) -> Result<bool, String> {
     let (done, team) = {
         let conn = lock(&db)?;
@@ -375,7 +375,7 @@ pub fn chat_team_provision_fail(app: AppHandle, db: State<'_, DbConnection>, id:
 }
 
 /// As delegações em andamento do time com escopos de escrita sobrepostos (só aviso).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_overlaps(db: State<'_, DbConnection>, team_id: String) -> Result<Vec<crate::missions::conflicts::scopes::Overlap>, String> {
     let conn = lock(&db)?;
     let team = crate::chat_team::store::team(&conn, &team_id)?.ok_or("Esse time não existe mais.")?;
@@ -383,7 +383,7 @@ pub fn chat_team_overlaps(db: State<'_, DbConnection>, team_id: String) -> Resul
     api::scope_overlaps(&conn, &view)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_unlink(app: AppHandle, db: State<'_, DbConnection>, team_id: String, member: String) -> Result<bool, String> {
     let done = api::unlink(&*lock(&db)?, &team_id, &member, crate::util::now_ts_ms())?;
     announce(&app, &team_id);
@@ -405,7 +405,7 @@ pub struct UpdateInput {
     pub subagent: Option<bool>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_update(app: AppHandle, db: State<'_, DbConnection>, input: UpdateInput) -> Result<MemberRow, String> {
     let roles = crate::canvas::roles::all();
     let patch = MemberPatch {
@@ -421,7 +421,7 @@ pub fn chat_team_update(app: AppHandle, db: State<'_, DbConnection>, input: Upda
 }
 
 /// Desfaz o time. As conversas continuam abertas; só as ligações saem (a tela tira as cordas).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_dissolve(app: AppHandle, db: State<'_, DbConnection>, team_id: String) -> Result<bool, String> {
     let done = crate::chat_team::store::delete_team(&*lock(&db)?, &team_id)?;
     announce(&app, &team_id);
@@ -429,7 +429,7 @@ pub fn chat_team_dissolve(app: AppHandle, db: State<'_, DbConnection>, team_id: 
 }
 
 /// As delegações e entregas do time, para os cartões do fio do orquestrador.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_feed(db: State<'_, DbConnection>, team_id: String, limit: Option<i64>) -> Result<Vec<FeedItem>, String> {
     let conn = lock(&db)?;
     let team = crate::chat_team::store::team(&conn, &team_id)?.ok_or("Esse time não existe mais.")?;
@@ -438,7 +438,7 @@ pub fn chat_team_feed(db: State<'_, DbConnection>, team_id: String, limit: Optio
 }
 
 /// O Handoff v1 inteiro de uma entrega do time (`ENTREGA #id`), para o resumo no fio.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_handoff(db: State<'_, DbConnection>, team_id: String, id: i64) -> Result<Value, String> {
     let conn = lock(&db)?;
     let (scope, from, payload) = crate::missions::messages::handoff(&conn, id)?.ok_or_else(|| format!("Não existe a entrega #{id}."))?;
@@ -451,7 +451,7 @@ pub fn chat_team_handoff(db: State<'_, DbConnection>, team_id: String, id: i64) 
 
 /// O resumo do time para o orquestrador (vai junto da próxima mensagem do modo Time). Os nomes são os
 /// gravados; a tela pode trocar pelos títulos atuais.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_notice(db: State<'_, DbConnection>, team_id: String) -> Result<String, String> {
     let conn = lock(&db)?;
     let team = crate::chat_team::store::team(&conn, &team_id)?.ok_or("Esse time não existe mais.")?;
@@ -502,7 +502,7 @@ pub async fn chat_team_worktree(db: State<'_, DbConnection>, cwd: String, role: 
 // SÓ a pessoa, pela tela, cria, muda ou apaga regras e liga/desliga o «decidir sozinho». Não há comando de CLI nem
 // de MCP para nada disto: um agente (ou o texto de uma mensagem de colega) nunca amplia a própria permissão.
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_permission_rules(db: State<'_, DbConnection>) -> Result<Vec<super::permission::Rule>, String> {
     super::store::rules(&*lock(&db)?)
 }
@@ -516,7 +516,7 @@ pub struct RuleInput {
     pub agent_id: Option<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_permission_rule_add(app: AppHandle, db: State<'_, DbConnection>, input: RuleInput) -> Result<super::permission::Rule, String> {
     let rule = super::store::add_rule(&*lock(&db)?, input.kind, &input.pattern, input.agent_id.as_deref(), crate::util::now_ts_ms())?;
     let _ = app.emit(RULES_EVENT, json!({}));
@@ -537,7 +537,7 @@ pub struct RulePatchInput {
     pub any_agent: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_permission_rule_update(app: AppHandle, db: State<'_, DbConnection>, id: String, patch: RulePatchInput) -> Result<bool, String> {
     let agent = if patch.any_agent { Some(None) } else { patch.agent_id.as_deref().map(Some) };
     let changed = super::store::update_rule(&*lock(&db)?, &id, patch.pattern.as_deref(), agent)?;
@@ -546,7 +546,7 @@ pub fn chat_permission_rule_update(app: AppHandle, db: State<'_, DbConnection>, 
     Ok(changed)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_permission_rule_remove(app: AppHandle, db: State<'_, DbConnection>, id: String) -> Result<bool, String> {
     let removed = super::store::remove_rule(&*lock(&db)?, &id)?;
     let _ = app.emit(RULES_EVENT, json!({}));
@@ -554,7 +554,7 @@ pub fn chat_permission_rule_remove(app: AppHandle, db: State<'_, DbConnection>, 
 }
 
 /// O interruptor «não decidir sozinho» de um time: desligado, o backend manda TUDO à pessoa.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_auto_decide(app: AppHandle, db: State<'_, DbConnection>, team_id: String, enabled: bool) -> Result<bool, String> {
     let changed = super::store::set_auto_decide(&*lock(&db)?, &team_id, enabled)?;
     announce(&app, &team_id);
@@ -569,7 +569,7 @@ pub fn chat_team_auto_decide(app: AppHandle, db: State<'_, DbConnection>, team_i
 pub const RULES_EVENT: &str = "cc-chat-permission-rules";
 
 /// «Acesso total libera ferramentas de fora do shell» do time (MCP, `Task`…). Desligado por padrão; só a pessoa liga.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_allow_tools(app: AppHandle, db: State<'_, DbConnection>, team_id: String, enabled: bool) -> Result<bool, String> {
     let changed = super::store::set_allow_tools(&*lock(&db)?, &team_id, enabled)?;
     announce(&app, &team_id);
@@ -580,7 +580,7 @@ pub fn chat_team_allow_tools(app: AppHandle, db: State<'_, DbConnection>, team_i
 }
 
 /// O vigia do chat do time (avisos de bloqueio ao orquestrador). Desligar não apaga nada. Só a pessoa, pela tela.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_watch(app: AppHandle, db: State<'_, DbConnection>, team_id: String, enabled: bool) -> Result<bool, String> {
     let changed = super::store::set_watch(&*lock(&db)?, &team_id, enabled)?;
     announce(&app, &team_id);
@@ -589,7 +589,7 @@ pub fn chat_team_watch(app: AppHandle, db: State<'_, DbConnection>, team_id: Str
 }
 
 /// O aviso de «sem progresso» do vigia do chat. Só a pessoa, pela tela.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_team_watch_stall(app: AppHandle, db: State<'_, DbConnection>, team_id: String, enabled: bool) -> Result<bool, String> {
     let changed = super::store::set_watch_stall(&*lock(&db)?, &team_id, enabled)?;
     announce(&app, &team_id);

@@ -183,12 +183,12 @@ fn release(id: &str) {
         .remove(id);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduled_task_list() -> Result<Vec<TaskView>, String> {
     Ok(scheduled_tasks::all()?.iter().map(to_view).collect())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduled_task_create(
     app: AppHandle,
     db: State<'_, DbConnection>,
@@ -232,7 +232,7 @@ pub fn scheduled_task_create(
     Ok(to_view(&created))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduled_task_update(
     app: AppHandle,
     db: State<'_, DbConnection>,
@@ -285,7 +285,7 @@ pub fn scheduled_task_update(
     Ok(to_view(&updated))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduled_task_set_enabled(
     app: AppHandle,
     id: String,
@@ -338,7 +338,7 @@ pub async fn scheduled_task_run_now(
     result
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduled_task_delete(app: AppHandle, id: String) -> Result<bool, String> {
     if !claim(&id) {
         return Err("A tarefa está em execução; aguarde antes de removê-la.".into());
@@ -356,7 +356,7 @@ pub fn scheduled_task_delete(app: AppHandle, id: String) -> Result<bool, String>
     Ok(removed)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduled_task_history(task_id: String) -> Result<Vec<TaskRun>, String> {
     let task = scheduled_tasks::all()?
         .into_iter()

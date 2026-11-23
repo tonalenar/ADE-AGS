@@ -34,7 +34,7 @@ pub fn set_setting(db: &DbConnection, key: &str, value: &str) -> Result<(), Stri
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn db_get_setting(
     key: String,
     db: tauri::State<DbConnection>,
@@ -42,7 +42,7 @@ pub fn db_get_setting(
     get_setting(&db, &key)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn db_set_setting(
     key: String,
     value: String,
