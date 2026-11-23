@@ -136,7 +136,7 @@ export function PhysicalPane({ device, picker, composerTarget }: { device: strin
           ) : size.w > 0 && (
             <div className="flex min-h-full min-w-full w-max flex-col items-center justify-center gap-4 px-6 py-5">
               <DeviceFrame device={device} name={name} layout={layout} screen={screen} enabled={ready}>
-                <PhysicalMirror screenId="chat-devices-physical" device={device} known={!missing} status={status} radius={screenRadiusOf(layout, screen.width)} onError={fail} engaged={probe} showStatus={false} />
+                <PhysicalMirror screenId="chat-devices-physical" device={device} known={!missing} status={status} radius={screenRadiusOf(layout, screen.width, screen.height)} onError={fail} engaged={probe} showStatus={false} />
               </DeviceFrame>
             </div>
           )}

@@ -19,6 +19,24 @@ describe("moldura dos aparelhos do painel (pranchetas 9 e 10)", () => {
     expect(f.outerH).toBeLessThan(900);
   });
 
+  it("girar o aparelho não engorda a moldura nem o raio: tudo vem do lado menor", () => {
+    const portrait = deviceFrame("ios", { w: 402, h: 874 }, { w: 900, h: 500 }, 500);
+    // Deitado, na mesma altura: o aparelho gira e a moldura e os cantos continuam iguais em pontos.
+    const land = deviceFrame("ios", { w: 874, h: 402 }, { w: 900, h: portrait.outerW }, 900);
+    expect(land.outerH).toBeCloseTo(portrait.outerW, 0);
+    expect(land.outerW).toBeCloseTo(portrait.outerH, 0);
+    expect(land.pad).toBeCloseTo(portrait.pad, 0);
+    expect(land.outerRadius).toBeCloseTo(portrait.outerRadius, 0);
+    expect(land.screenRadius).toBeCloseTo(portrait.screenRadius, 0);
+  });
+
+  it("deitado o Android também mantém a moldura (2424×1080 contra 1080×2424)", () => {
+    const portrait = deviceFrame("android", { w: 1080, h: 2424 }, { w: 400, h: 800 }, 800);
+    const land = deviceFrame("android", { w: 2424, h: 1080 }, { w: 800, h: 400 }, 800);
+    expect(land.pad).toBeCloseTo(portrait.pad, 0);
+    expect(land.screenRadius).toBeCloseTo(portrait.screenRadius, 0);
+  });
+
   it("sem espaço ou sem tela, nada", () => {
     expect(deviceFrame("ios", { w: 402, h: 874 }, { w: 0, h: 500 }).outerW).toBe(0);
     expect(deviceFrame("ios", { w: 0, h: 0 }, { w: 400, h: 500 }).outerH).toBe(0);
