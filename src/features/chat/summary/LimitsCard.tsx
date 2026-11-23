@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { accountUsageSummary } from "@/features/accounts/ipc";
+import { accountProblemText } from "@/features/accounts/problem";
 import { agentName } from "@/features/agents/agentTile";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AccountUsageSummary, AgentAccount } from "@/features/accounts/types";
-import { formatRemaining } from "@/features/accounts/usage";
+import { formatAgo, formatRemaining } from "@/features/accounts/usage";
 import { useUsageStore } from "@/features/canvas/usageStore";
 import { Row, Section } from "@/features/sidePanel/Section";
 import { chatPoolState, type ChatPoolState } from "@/features/accounts/chatPool";
@@ -21,7 +22,7 @@ import { teamLedBy } from "../team/teamModel";
 import { startTeams, useTeamStore } from "../team/teamStore";
 import {
   budgetOf, connectedAccounts, headlineOf, limitLevel, readAgy, readAntigravity, readClaude, readCodex, renewal, usedAccounts,
-  type AccountEntry, type AccountLike, type AccountReading, type Budget, type LimitLevel, type LimitWindow,
+  type AccountEntry, type AccountLike, type AccountReading, type Budget, type LimitLevel, type LimitWindow, type StaleReading, type UnmeasuredReason,
 } from "./limitsModel";
 
 /** Os agentes cuja cota o ADE mede de verdade (ver `usageStore`). */
@@ -125,7 +126,7 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
       const { refresh, refreshAgy } = useUsageStore.getState();
       if (usesAgy) void refreshAgy(false);
       for (const entry of entries.filter((candidate) => candidate.who.length > 0)) {
-        if (entry.account && MEASURED_AGENTS.has(entry.agentId) && !(entry.agentId === "antigravity" && !entry.accountId)) void refresh(entry.account as AgentAccount, false);
+        if (entry.account && entry.account.kind !== "api_key" && MEASURED_AGENTS.has(entry.agentId) && !(entry.agentId === "antigravity" && !entry.accountId)) void refresh(entry.account as AgentAccount, false);
       }
       const rows = await accountUsageSummary(1).catch(() => [] as AccountUsageSummary[]);
       if (alive) setSummaries(Object.fromEntries(rows.map((r) => [r.accountKey, r])));
@@ -166,6 +167,7 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
     if (entry.agentId === "antigravity" && !entry.accountId) return readAgy(agy, true, now);
     const account = entry.account;
     if (!account) return { state: "unmeasured", reason: !loaded ? "loading" : entry.accountId ? "unresolved" : "noSource" };
+    if (account.kind === "api_key" && entry.agentId === "claude-code") return { state: "unmeasured", reason: "apiKey" };
     if (entry.agentId === "claude-code") return readClaude(claude[account.id] ?? null, account.loggedIn, now);
     if (entry.agentId === "codex") return readCodex(codex[account.id], account.loggedIn, now);
     return readAntigravity(antigravity[account.id], account.loggedIn, now);
@@ -289,21 +291,50 @@ function AccountBlock({ entry, reading, budget, now, poolNote = null, hideHeader
         <>
           {reading.windows.map((w, i) => <WindowBar key={`${w.kind}:${w.label ?? ""}:${i}`} window={w} now={now} rejected={reading.rejected} />)}
           {reading.rejected && reading.windows.length === 0 && <Row><span className={TEXT.full}>{t("chat.summary.limits.exhausted")}</span></Row>}
+          {reading.stale && <StaleNotice stale={reading.stale} />}
         </>
       ) : (
-        <Unmeasured reason={reading.reason} />
+        <Unmeasured reason={reading.reason} retryInSeconds={reading.retryInSeconds} />
       )}
       {budget && <BudgetBar budget={budget} />}
     </div>
   );
 }
 
-function Unmeasured({ reason }: { reason: string }) {
+function StaleNotice({ stale }: { stale: StaleReading }) {
   const { t } = useTranslation();
+  const ago = formatAgo(stale.ageSeconds);
+  const measuredText = ago.unit === "now"
+    ? t("chat.summary.limits.measuredNow")
+    : t("chat.summary.limits.measuredAgo", { time: `${ago.value} ${ago.unit}` });
+  const detailText = stale.retryInSeconds && stale.retryInSeconds > 0
+    ? t("chat.summary.limits.refreshRetryIn", { time: formatRemaining(stale.retryInSeconds) })
+    : accountProblemText(stale.problemText, t);
+  return (
+    <Row>
+      <span className="text-[11px] text-gray-500 dark:text-white/45">
+        {measuredText}{detailText ? ` · ${detailText}` : ""}
+      </span>
+    </Row>
+  );
+}
+
+function Unmeasured({ reason, retryInSeconds }: { reason: UnmeasuredReason; retryInSeconds?: number }) {
+  const { t } = useTranslation();
+  if (reason === "loading") {
+    return (
+      <Row>
+        <span className="text-gray-500 dark:text-white/45">{t("chat.summary.limits.reading")}</span>
+      </Row>
+    );
+  }
+  const detail = reason === "rateLimited" && retryInSeconds && retryInSeconds > 0
+    ? t("chat.summary.limits.reason.rateLimitedRetry", { time: formatRemaining(retryInSeconds) })
+    : t(`chat.summary.limits.reason.${reason}`);
   return (
     <Row>
       <span className="text-gray-500 dark:text-white/45">
-        {reason === "loading" ? t("chat.summary.limits.reading") : `${t("chat.summary.notMeasured")} · ${t(`chat.summary.limits.reason.${reason}`)}`}
+        {`${t("chat.summary.notMeasured")} · ${detail}`}
       </span>
     </Row>
   );

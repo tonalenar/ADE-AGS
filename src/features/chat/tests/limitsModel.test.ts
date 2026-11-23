@@ -63,6 +63,61 @@ describe("Claude Code: a cota vem do /usage da própria TUI", () => {
     const r = readClaude(live({ session: { percent: 140, resets: null }, week: { percent: -3, resets: null } }), true, NOW) as { windows: { percent: number }[] };
     expect(r.windows.map((w) => w.percent)).toEqual([100, 0]);
   });
+
+  it("preserva último valor bom recente com idade quando a atualização falha (exceto erro de autenticação)", () => {
+    const r = readClaude(live({
+      fetchedAt: NOW - 180,
+      cached: true,
+      problem: "accounts.plan.problem.rateLimited",
+      retryAt: NOW + 120,
+    }), true, NOW);
+    expect(r).toMatchObject({
+      state: "measured",
+      stale: {
+        ageSeconds: 180,
+        problemKey: "accounts.plan.problem.rateLimited",
+        retryInSeconds: 120,
+      },
+    });
+  });
+
+  it("leitura antiga além do limite com falha ou erro de auth vira não medido com motivo específico", () => {
+    expect(readClaude(live({
+      fetchedAt: NOW - 4000,
+      cached: true,
+      problem: "accounts.plan.problem.timeout",
+    }), true, NOW)).toEqual({ state: "unmeasured", reason: "timeout" });
+
+    expect(readClaude(live({
+      fetchedAt: NOW - 60,
+      cached: true,
+      problem: "accounts.auth.expired",
+    }), true, NOW)).toEqual({ state: "unmeasured", reason: "authExpired" });
+
+    expect(readClaude(live({
+      available: false,
+      session: null,
+      week: null,
+      problem: "accounts.plan.problem.rateLimited",
+      retryAt: NOW + 90,
+    }), true, NOW)).toEqual({ state: "unmeasured", reason: "rateLimited", retryInSeconds: 90 });
+
+    expect(readClaude(live({
+      available: false,
+      session: null,
+      week: null,
+      problem: "accounts.plan.problem.apiKey",
+    }), true, NOW)).toEqual({ state: "unmeasured", reason: "apiKey" });
+  });
+
+  it("resetsAt numérico do Claude funciona como janela cronometrada e expira após renovar", () => {
+    const r = readClaude(live({
+      session: { percent: 33, resets: null, resetsAt: NOW + 600 },
+      week: { percent: 12, resets: null, resetsAt: NOW - 10 },
+    }), true, NOW) as { windows: { kind: string; percent: number | null; expired: boolean }[] };
+    expect(r.windows[0]).toMatchObject({ kind: "session", percent: 33, expired: false });
+    expect(r.windows[1]).toMatchObject({ kind: "week", percent: null, expired: true });
+  });
 });
 
 describe("Codex: a cota vem de duas janelas com horário", () => {
