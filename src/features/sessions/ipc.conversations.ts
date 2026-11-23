@@ -1,7 +1,6 @@
 /** Comandos das conversas do projeto (checkpoints, edição e busca). Ver `database/queries/sessions.rs`. */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { SessionHistoryEntry } from "./types";
 
 export interface ArchivedMessageSearchHit {
   historyId: string;

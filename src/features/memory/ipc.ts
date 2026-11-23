@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { MemoryContextMetrics, MemoryMissionContextMetrics } from "./contextMetrics";
+import type { MemoryMissionContextMetrics } from "./contextMetrics";
 import type { DeletedMemoryWorkspace, MemoryAgentDraft, MemoryExportResult, MemoryFilter, MemorySourceVerification, MemoryWorkspaceStats } from "./types";
 
 import type { Fact } from "@/features/runs/types";

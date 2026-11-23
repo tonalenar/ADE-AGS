@@ -23,7 +23,7 @@ import type { Attachment } from "@/features/chat/attachments/attachModel";
 
 import { compareAttach, compareFinish, compareKeep, comparePrepare, compareRemove } from "./ipc";
 import { draftProblem, hardBlocked, pickLabel, pickSlug, picksToRemove, promptFor, riskyRemovals, uniquePicks } from "./model";
-import { loadComparisons, setPending, upsertComparison, useCompareStore } from "./store";
+import { loadComparisons, setPending, upsertComparison } from "./store";
 import type { Comparison, PickDraft } from "./types";
 
 export interface StartInput {

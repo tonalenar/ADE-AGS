@@ -12,7 +12,7 @@ import type { AgentSkillScan, SkillSummary } from "@/features/skills/types";
 import { forgePulls } from "@/features/forge/ipc";
 import type { ForgeItem } from "@/features/forge/types";
 
-import { basenameOrSelf } from "@/shared/path";
+import { basename } from "@/shared/path";
 import { addSurface, setRightPanel } from "./store";
 import { PROTOCOL_AGENTS, type ProviderSlashCommand } from "./chatModel";
 import { legacyComposerCapabilityAvailable, matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
@@ -91,7 +91,7 @@ function normalized(value: string): string {
 }
 
 function skillSlug(skill: SkillSummary): string {
-  return basenameOrSelf(skill.sourcePath) || normalized(skill.name).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return basename(skill.sourcePath) || normalized(skill.name).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 function skillAttached(skill: SkillSummary, workspaceId: string, cwd: string, tabId: string | null): boolean {

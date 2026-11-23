@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { activityPhrase, formatElapsed, formatTokens, planProgress, type Activity, type TurnLive } from "./activityModel";
-import { useNow, type LiveSummary } from "./liveSummary";
+import { useNow } from "./liveSummary";
 import type { PlanStep, ToolStatus } from "./timeline/types";
 
 /**
