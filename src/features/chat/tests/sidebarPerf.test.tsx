@@ -196,7 +196,16 @@ beforeEach(() => {
   root = createRoot(host);
 });
 
+// Componentes carregados sob demanda (Markdown/KaTeX) podem terminar de carregar depois do fim do teste; o aviso
+// de act() do React chegaria com o ambiente já fechando e derrubaria a execução. Este arquivo mede renders, não isso.
+const realConsoleError = console.error;
+console.error = (...args: unknown[]) => {
+  if (typeof args[0] === "string" && args[0].includes("not wrapped in act")) return;
+  realConsoleError(...args);
+};
+
 afterEach(async () => {
+  await act(async () => { await Promise.resolve(); });
   await act(async () => { root.unmount(); });
   host.remove();
   vi.useRealTimers();
