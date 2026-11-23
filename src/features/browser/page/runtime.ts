@@ -1335,7 +1335,7 @@ declare global {
   /** Um campo que abre uma lista de sugestões ao digitar (autocomplete): `role=combobox`, `aria-autocomplete` de lista, ou
    *  `aria-haspopup=listbox`, ou um popup controlado (`aria-controls` + `aria-expanded`). */
   function isCombobox(el: Element): boolean {
-    if (el.getAttribute("role")?.trim().split(/s+/)[0] === "combobox") return true;
+    if (el.getAttribute("role")?.trim().split(/\s+/)[0] === "combobox") return true;
     const auto = el.getAttribute("aria-autocomplete");
     if (auto === "list" || auto === "both") return true;
     if (el.getAttribute("aria-haspopup") === "listbox") return true;
@@ -1344,7 +1344,7 @@ declare global {
 
   /** As opções visíveis da lista de um combobox: a que ele controla, ou, sem essa ligação, qualquer opção visível. */
   function visibleOptions(el: Element): Element[] {
-    const ids = `${el.getAttribute("aria-controls") ?? ""} ${el.getAttribute("aria-owns") ?? ""}`.split(/s+/).filter(Boolean);
+    const ids = `${el.getAttribute("aria-controls") ?? ""} ${el.getAttribute("aria-owns") ?? ""}`.split(/\s+/).filter(Boolean);
     const roots = ids.map((id) => document.getElementById(id)).filter((n): n is HTMLElement => !!n);
     const found = roots.length > 0
       ? roots.flatMap((root) => (root.getAttribute("role") === "option" ? [root] : Array.from(root.querySelectorAll("[role=option]"))))

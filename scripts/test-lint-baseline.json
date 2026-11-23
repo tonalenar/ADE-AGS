@@ -47,9 +47,6 @@
       "espera-real": 2,
       "polling": 2
     },
-    "src/features/browser/tests/combobox.test.ts": {
-      "espera-real": 4
-    },
     "src/features/browser/tests/settleRuntime.test.ts": {
       "espera-real": 2
     },
