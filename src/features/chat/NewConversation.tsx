@@ -13,6 +13,7 @@ import { AgentModelPicker } from "./AgentModelPicker";
 import { ProjectBadge } from "./ChatProjectBadge";
 import type { Attachment } from "./attachments/attachModel";
 import { threadMessage, tuiMessage } from "./attachments/send";
+import { formatPoolError } from "@/features/accounts/poolRef";
 import { startConversation } from "./chatActions";
 import { setComposing } from "./store";
 import { BotIcon, BranchIcon, CheckIcon, ChevronDownIcon, FolderGitIcon, FolderIcon, SettingsIcon } from "./chatIcons";
@@ -499,7 +500,7 @@ export function NewConversation({ projects, folder, onFolder }: {
           agentId: agent.id, cwd, workspaceId, title: conversationTitle(launchPrompt) ?? project.name,
           model: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.model : null, effort: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.effort : null, access: launchPlan ? "plan" : access,
           accountId: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.accountId : null,
-        }, sent.text, sent.images, background, fastModeSupported(agent.id, fastSurface) && prefs.fastMode, (message) => setError(t("chat.new.failed", { error: message })));
+        }, sent.text, sent.images, background, fastModeSupported(agent.id, fastSurface) && prefs.fastMode, (message) => setError(t("chat.new.failed", { error: formatPoolError(message, t) })));
         if (threadId === null) return false;
         update({ cwd: project.cwd, agentId: agent.id });
         return true;
@@ -520,7 +521,7 @@ export function NewConversation({ projects, folder, onFolder }: {
       update({ cwd: project.cwd, agentId: agent.id });
       return true;
     } catch (e) {
-      setError(t("chat.new.failed", { error: String(e) }));
+      setError(t("chat.new.failed", { error: formatPoolError(e, t) }));
       return false;
     } finally {
       submitInFlight.current = false;

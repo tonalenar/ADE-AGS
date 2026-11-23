@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
+import { isPoolEmpty } from "@/features/accounts/poolRef";
 import { isPoolValue, poolValue, usePools } from "@/features/accounts/pools";
 
 interface AccountPickerStepProps {
@@ -95,28 +96,33 @@ export function AccountPickerStep({ agentId, value, onChange, showLabel = true, 
     && !forAgent.some((account) => account.id === value)
     ? value
     : undefined;
-  if (forAgent.length === 0 && !unavailableSavedId) return null;
+  if (forAgent.length === 0 && pools.length === 0 && !unavailableSavedId) return null;
 
   const options = [
     ...(allowAuto
-      ? [{ id: AUTO_ACCOUNT as string | undefined, name: t("accounts.auto"), hint: t("accounts.auto.hint"), warn: false }]
+      ? [{ id: AUTO_ACCOUNT as string | undefined, name: t("accounts.auto"), hint: t("accounts.auto.hint"), warn: false, disabled: false }]
       : []),
-    { id: undefined, name: t("accounts.system"), hint: t("accounts.system.hint"), warn: false },
+    { id: undefined, name: t("accounts.system"), hint: t("accounts.system.hint"), warn: false, disabled: false },
     ...(unavailableSavedId
-      ? [{ id: unavailableSavedId as string | undefined, name: t("accounts.unavailable"), hint: unavailableSavedId, warn: true }]
+      ? [{ id: unavailableSavedId as string | undefined, name: t("accounts.unavailable"), hint: unavailableSavedId, warn: true, disabled: false }]
       : []),
-    ...pools.map((p) => ({
-      id: poolValue(p.name) as string | undefined,
-      name: `⟳ ${p.name}`,
-      hint: t(`accounts.pools.strategy.${p.strategy}`),
-      warn: false,
-    })),
+    ...pools.map((p) => {
+      const empty = isPoolEmpty(p);
+      return {
+        id: poolValue(p.name) as string | undefined,
+        name: `⟳ ${p.name}`,
+        hint: empty ? t("accounts.pools.emptyOptionReason") : t(`accounts.pools.strategy.${p.strategy}`),
+        warn: empty,
+        disabled: empty,
+      };
+    }),
     ...forAgent.map((a) => ({
       id: a.id as string | undefined,
       name: a.name,
       // El mail es lo que de verdad identifica la cuenta; el nombre lo eligió el usuario.
       hint: a.label ?? (a.loggedIn ? t("accounts.ready") : t("accounts.needsLogin")),
       warn: !a.loggedIn,
+      disabled: false,
     })),
   ];
 
@@ -136,14 +142,18 @@ export function AccountPickerStep({ agentId, value, onChange, showLabel = true, 
             <Button variant="custom"
               key={option.id ?? "system"}
               type="button"
-              onClick={() => onChange(option.id)}
+              disabled={option.disabled}
+              aria-disabled={option.disabled || undefined}
+              onClick={() => { if (!option.disabled) onChange(option.id); }}
               aria-pressed={isSelected}
               className={`
                 flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg border text-left
                 transition-colors duration-200 min-w-32
-                ${isSelected
-                  ? "border-accent-500 bg-accent-50 dark:bg-accent-500/10 shadow-sm"
-                  : "border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] hover:border-gray-300 dark:hover:border-white/20"}
+                ${option.disabled
+                  ? "border-gray-200 dark:border-white/10 bg-gray-50/40 dark:bg-white/[0.01] opacity-55 cursor-not-allowed"
+                  : isSelected
+                    ? "border-accent-500 bg-accent-50 dark:bg-accent-500/10 shadow-sm"
+                    : "border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] hover:border-gray-300 dark:hover:border-white/20"}
               `}
             >
               <span title={option.name} className={`text-xs font-semibold truncate max-w-40

@@ -98,7 +98,7 @@ O failover acima é da frota headless. No modo chat, uma conversa por protocolo 
 | `auto` | troca e avisa (`poolSwitch`); sem conta livre, `poolBlocked` com o motivo. Avisos são gravados como JSON estruturado e traduzidos nos 3 catálogos (`pt-BR`, `en`, `es`), mantendo leitura de textos legados |
 | Volta | quando a hora de renovação da conta original passa, a próxima mensagem da pessoa (conversa livre) volta a ela: `auto` volta e envia o resumo junto; `ask` pergunta (`poolReturnAsk`) e, ao aceitar, volta a conta e guarda `handoff_key` para a próxima mensagem sem disparar turno só com contexto. Toda mudança de conta emite evento `"thread"` com `accountId` |
 | Renovação | `reset_at` lê «resets 1:10pm» no fuso do sistema; sem hora legível, vale 5 h |
-| Conta apagada | ao remover uma conta, o diálogo lista os pools afetados e `delete_agent_account` retira a referência deles (`accounts::pools::remove_account_from_pools`) |
+| Conta apagada | ao remover uma conta, o diálogo lista os pools afetados e avisa quais ficarão vazios; `delete_agent_account` retira a referência deles (`accounts::pools::remove_account_from_pools`) sem excluir nenhum pool automaticamente. Um pool com 0 membros mostra estado «Pool vazio» com Editar/Excluir na aba Pools, aparece desabilitado nos seletores de conta/pool (chat, missões, squads, nova aba, frota) e retorna payload estruturado traduzível (`{"code":"poolEmpty","pool":…}` ou `missions.error.poolEmpty` no precheck) caso alguém tente usá-lo |
 
 ### Continuidade: handoff por resumo
 

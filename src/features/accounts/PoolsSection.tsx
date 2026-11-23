@@ -10,6 +10,7 @@ import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { accountBadgeStyle, accountDisplayLabel, accountInitials } from "./accountIdentity";
 import { CHAT_POOL_MODES, loadChatPoolMode, saveChatPoolMode, type ChatPoolMode } from "./chatPool";
+import { isPoolEmpty } from "./poolRef";
 import {
   STRATEGIES,
   poolPreviewPicks,
@@ -54,9 +55,10 @@ function usagePercentOf(
 }
 
 /** Menu ⋯ para cada pool. */
-function PoolOverflowMenu({ label, paused, poolName, onEdit, onCopy, onTogglePause, onDelete }: {
+function PoolOverflowMenu({ label, paused, empty = false, poolName, onEdit, onCopy, onTogglePause, onDelete }: {
   label: string;
   paused: boolean;
+  empty?: boolean;
   poolName: string;
   onEdit: () => void;
   onCopy: () => void;
@@ -112,27 +114,31 @@ function PoolOverflowMenu({ label, paused, poolName, onEdit, onCopy, onTogglePau
             <span aria-hidden="true" className="w-4 text-center opacity-75">✎</span>
             <span>{t("btn.edit")}</span>
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => { setOpen(false); onCopy(); }}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-white/[0.06]"
-          >
-            <span aria-hidden="true" className="w-4 text-center opacity-75">⧉</span>
-            <span>
-              {t("accounts.pools.menu.copyPrefix")}{" "}
-              <code className="rounded bg-gray-100 dark:bg-white/10 px-1 py-px text-[11px]">pool:{poolName}</code>
-            </span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => { setOpen(false); onTogglePause(); }}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-white/[0.06]"
-          >
-            <span aria-hidden="true" className="w-4 text-center opacity-75">{paused ? "▶" : "⏸"}</span>
-            <span>{paused ? t("accounts.pools.menu.resume") : t("accounts.pools.menu.pause")}</span>
-          </button>
+          {!empty && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { setOpen(false); onCopy(); }}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-white/[0.06]"
+              >
+                <span aria-hidden="true" className="w-4 text-center opacity-75">⧉</span>
+                <span>
+                  {t("accounts.pools.menu.copyPrefix")}{" "}
+                  <code className="rounded bg-gray-100 dark:bg-white/10 px-1 py-px text-[11px]">pool:{poolName}</code>
+                </span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { setOpen(false); onTogglePause(); }}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-white/[0.06]"
+              >
+                <span aria-hidden="true" className="w-4 text-center opacity-75">{paused ? "▶" : "⏸"}</span>
+                <span>{paused ? t("accounts.pools.menu.resume") : t("accounts.pools.menu.pause")}</span>
+              </button>
+            </>
+          )}
           <hr className="my-1 border-0 border-t border-gray-200 dark:border-white/[0.08]" />
           <button
             type="button"
@@ -607,16 +613,17 @@ export function PoolsTabPage() {
           pools.map((pool) => {
             const agentLabel = capable.find((c) => c.agentId === pool.agentId)?.label ?? pool.agentId;
             const Icon = agentIcon(pool.agentId, agentLabel);
+            const empty = isPoolEmpty(pool);
             const paused = Boolean(pool.paused);
             const preview = previews[pool.id];
             const pickedLabel = preview?.available ? memberName(pool.agentId, preview.accountId) : null;
-            const firstMemberLabel = memberName(pool.agentId, pool.members[0] ?? null);
+            const firstMemberLabel = empty ? null : memberName(pool.agentId, pool.members[0] ?? null);
 
             return (
               <div
                 key={pool.id}
                 data-pool-row={pool.id}
-                className={`flex items-start gap-3 px-4 py-3.5 ${paused ? "opacity-60" : ""}`}
+                className={`flex items-start gap-3 px-4 py-3.5 ${paused && !empty ? "opacity-60" : ""}`}
               >
                 <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-white/[0.06] text-gray-700 dark:text-white/80">
                   <Icon className="w-4 h-4" />
@@ -630,59 +637,90 @@ export function PoolsTabPage() {
                     </span>
                   </div>
 
-                  {/* Cadeia de contas */}
-                  <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
-                    {pool.members.map((memberId, idx) => {
-                      const acc = resolveAccount(pool.agentId, memberId);
-                      const label = memberName(pool.agentId, memberId);
-                      const style = accountBadgeStyle(acc?.accentColor);
-                      const pct = usagePercentOf(acc, claude, codex, antigravity, agy);
-                      const statusText = acc && !acc.loggedIn
-                        ? t("accounts.pools.noLogin")
-                        : pct !== null
-                          ? `${pct}%`
-                          : "—";
-                      return (
-                        <span key={`${memberId ?? "system"}-${idx}`} className="inline-flex items-center gap-1.5">
-                          {idx > 0 && <span aria-hidden="true" className="text-gray-400 dark:text-white/35">→</span>}
-                          <span className="inline-flex items-center gap-1.5">
-                            <span
-                              aria-hidden="true"
-                              style={style}
-                              className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9.5px] font-semibold
-                                ${style ? "" : "bg-gray-200 text-gray-700 dark:bg-white/12 dark:text-white"}`}
-                            >
-                              {accountInitials(label)}
+                  {empty ? (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="text-[12.5px] font-medium text-gray-600 dark:text-white/70">
+                        {t("accounts.pools.emptyState")}
+                      </div>
+                      <p className="m-0 text-[12px] text-gray-400 dark:text-white/45">
+                        {t("accounts.pools.emptyStateHint")}
+                      </p>
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setEditorState({ open: true, pool })}
+                        >
+                          {t("btn.edit")}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-600 dark:text-red-400"
+                          onClick={() => setDeleting(pool)}
+                        >
+                          {t("btn.delete")}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Cadeia de contas */}
+                      <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
+                        {pool.members.map((memberId, idx) => {
+                          const acc = resolveAccount(pool.agentId, memberId);
+                          const label = memberName(pool.agentId, memberId);
+                          const style = accountBadgeStyle(acc?.accentColor);
+                          const pct = usagePercentOf(acc, claude, codex, antigravity, agy);
+                          const statusText = acc && !acc.loggedIn
+                            ? t("accounts.pools.noLogin")
+                            : pct !== null
+                              ? `${pct}%`
+                              : "—";
+                          return (
+                            <span key={`${memberId ?? "system"}-${idx}`} className="inline-flex items-center gap-1.5">
+                              {idx > 0 && <span aria-hidden="true" className="text-gray-400 dark:text-white/35">→</span>}
+                              <span className="inline-flex items-center gap-1.5">
+                                <span
+                                  aria-hidden="true"
+                                  style={style}
+                                  className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9.5px] font-semibold
+                                    ${style ? "" : "bg-gray-200 text-gray-700 dark:bg-white/12 dark:text-white"}`}
+                                >
+                                  {accountInitials(label)}
+                                </span>
+                                <span className="text-gray-800 dark:text-gray-100">{label}</span>
+                                <span className="text-[11px] text-gray-400 dark:text-white/40 tabular-nums">{statusText}</span>
+                              </span>
                             </span>
-                            <span className="text-gray-800 dark:text-gray-100">{label}</span>
-                            <span className="text-[11px] text-gray-400 dark:text-white/40 tabular-nums">{statusText}</span>
-                          </span>
-                        </span>
-                      );
-                    })}
-                  </div>
+                          );
+                        })}
+                      </div>
 
-                  {/* "Agora escolheria X" vindo do backend (routing::pick_in_pool) */}
-                  <div className="text-[12px] text-gray-400 dark:text-white/45">
-                    {paused ? (
-                      t("accounts.pools.pausedLine", { account: firstMemberLabel })
-                    ) : pickedLabel ? (
-                      <>
-                        {t("accounts.pools.wouldPickPrefix")}{" "}
-                        <b className="font-medium text-gray-800 dark:text-white/90">{pickedLabel}</b>
-                        {preview && preview.swapsToday > 0 && (
-                          <> · {t("accounts.pools.swapsToday", { count: preview.swapsToday })}</>
+                      {/* "Agora escolheria X" vindo do backend (routing::pick_in_pool) */}
+                      <div className="text-[12px] text-gray-400 dark:text-white/45">
+                        {paused && firstMemberLabel ? (
+                          t("accounts.pools.pausedLine", { account: firstMemberLabel })
+                        ) : pickedLabel ? (
+                          <>
+                            {t("accounts.pools.wouldPickPrefix")}{" "}
+                            <b className="font-medium text-gray-800 dark:text-white/90">{pickedLabel}</b>
+                            {preview && preview.swapsToday > 0 && (
+                              <> · {t("accounts.pools.swapsToday", { count: preview.swapsToday })}</>
+                            )}
+                          </>
+                        ) : (
+                          t("accounts.pools.noneAvailable")
                         )}
-                      </>
-                    ) : (
-                      t("accounts.pools.noneAvailable")
-                    )}
-                  </div>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <PoolOverflowMenu
                   label={t("accounts.pools.menu.more", { name: pool.name })}
                   paused={paused}
+                  empty={empty}
                   poolName={pool.name}
                   onEdit={() => setEditorState({ open: true, pool })}
                   onCopy={() => copyPoolRef(pool)}

@@ -29,6 +29,18 @@ pub const MAX_POOLS: usize = 20;
 const MAX_NAME: usize = 30;
 /// El prefijo con que se pide un pool donde iría una cuenta.
 pub const PREFIX: &str = "pool:";
+/// Código estruturado de erro quando se tenta usar um pool que ficou sem contas.
+pub const EMPTY_POOL_CODE: &str = "poolEmpty";
+
+/// Payload JSON estruturado para erro de pool vazio, traduzido no frontend nos 3 catálogos
+/// (segue o padrão estruturado de mensagens de pool do #415).
+pub fn empty_pool_error(pool_name: &str) -> String {
+    serde_json::json!({
+        "code": EMPTY_POOL_CODE,
+        "pool": pool_name,
+    })
+    .to_string()
+}
 
 /// Política global quando a cota de uma conta em um pool acaba (conversas e tarefas em segundo plano).
 /// Sem valor salvo, o padrão é `Ask` ("Perguntar").

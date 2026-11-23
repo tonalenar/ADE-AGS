@@ -258,4 +258,55 @@ describe("Redesenho de Configurações → Provedores e contas", () => {
     const alert = document.querySelector('[role="alert"]');
     expect(alert?.textContent).toContain('settings.accounts.delete.inPools {"pools":"Diário"}');
   });
+
+  it("ao remover a última conta de um pool, o diálogo avisa que esse pool ficará vazio", async () => {
+    currentPools = [
+      { id: "p1", name: "Diário", agentId: "antigravity", members: [null, "a2"], strategy: "least_used", failover: true, paused: false },
+      { id: "p2", name: "SóA2", agentId: "antigravity", members: ["a2"], strategy: "sticky", failover: true, paused: false },
+    ];
+    usePoolsStore.setState({ pools: currentPools, loaded: true });
+
+    await mount();
+    await click(tabs()[1]); // Contas
+    const agyTab = [...host.querySelectorAll('[role="tab"]')].find((b) => b.textContent?.includes("Antigravity"));
+    await click(agyTab ?? null);
+
+    const cardA2 = host.querySelector('[data-account-card="a2"]')!;
+    await click(cardA2.querySelector('button[aria-haspopup="menu"]'));
+    const removeBtn = [...cardA2.querySelectorAll('[role="menuitem"]')].find((m) => m.textContent?.includes("settings.accounts.menu.remove"));
+    await click(removeBtn);
+
+    const alert = document.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('settings.accounts.delete.inPools {"pools":"Diário"}');
+    expect(alert?.textContent).toContain('settings.accounts.delete.emptiesPools {"count":1,"pools":"SóA2"}');
+  });
+
+  it("na aba Pools, um pool vazio exibe estado claro com ações Editar e Excluir", async () => {
+    currentPools = [
+      { id: "p-empty", name: "Vazio", agentId: "antigravity", members: [], strategy: "sticky", failover: false, paused: true },
+    ];
+    usePoolsStore.setState({ pools: currentPools, loaded: true });
+
+    await mount();
+    await click(tabs()[2]); // Pools
+
+    const row = host.querySelector('[data-pool-row="p-empty"]')!;
+    expect(row.textContent).toContain("accounts.pools.emptyState");
+    expect(row.textContent).toContain("accounts.pools.emptyStateHint");
+    expect(row.textContent).not.toContain("accounts.pools.pausedLine");
+
+    const editBtn = [...row.querySelectorAll("button")].find((b) => b.textContent === "btn.edit");
+    const deleteBtn = [...row.querySelectorAll("button")].find((b) => b.textContent === "btn.delete");
+    expect(editBtn).toBeTruthy();
+    expect(deleteBtn).toBeTruthy();
+
+    await click(editBtn);
+    expect(document.body.textContent).toContain("accounts.pools.editTitle");
+
+    const cancelBtn = [...document.querySelectorAll("button")].find((b) => b.textContent === "btn.cancel");
+    await click(cancelBtn);
+
+    await click(deleteBtn);
+    expect(document.body.textContent).toContain('accounts.pools.deleteDialog.title {"name":"Vazio"}');
+  });
 });

@@ -116,5 +116,16 @@ describe("NoticeRow do pool de contas", () => {
     await render(<NoticeRow threadId="t1" item={notice("accountSwitch", JSON.stringify({ to: "Erist" }))} />);
     expect(host.textContent).toContain("chat.timeline.notice.accountSwitch");
     expect(host.textContent).toContain('chat.timeline.notice.accountSwitchBody{"to":"Erist"}');
+
+    await render(
+      <NoticeRow
+        threadId="t1"
+        item={notice("poolBlocked", JSON.stringify({ from: "Ton", reason: JSON.stringify({ code: "poolEmpty", pool: "Trabalho" }) }))}
+      />,
+    );
+    // O motivo estruturado vira o texto traduzido do pool vazio dentro do corpo do aviso.
+    expect(host.textContent).toContain("chat.timeline.notice.poolBlockedBody");
+    expect(host.textContent).toContain('accounts.pools.error.empty{\\"name\\":\\"Trabalho\\"}');
+    expect(host.textContent).not.toContain("poolEmpty");
   });
 });

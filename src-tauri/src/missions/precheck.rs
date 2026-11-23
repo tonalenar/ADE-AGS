@@ -485,6 +485,9 @@ pub(crate) fn validate_launch_with_pools(
         if pool.agent_id != assignment.agent_id {
             return Err("missions.error.accountMissing".into());
         }
+        if pool.members.is_empty() {
+            return Err("missions.error.poolEmpty".into());
+        }
         let members: Vec<&crate::runs::roster::RosterAccount> = pool
             .members
             .iter()

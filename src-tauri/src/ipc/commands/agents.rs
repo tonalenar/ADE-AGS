@@ -42,6 +42,9 @@ pub(super) fn resolve_pool_account(app: &AppHandle, agent_id: &str, pool: &str) 
         .find(|a| a.agent_id == agent_id)
         .ok_or_else(|| format!("'{agent_id}' não existe: indique o agente com --agent para usar um pool"))?;
     crate::accounts::pools::with_pool_pick(&db, pool, |spec| {
+        if spec.members.is_empty() {
+            return Err(crate::accounts::pools::empty_pool_error(&spec.name));
+        }
         crate::runs::routing::pick_in_pool(agent, spec, crate::util::now_ts())
             .map(|(id, _)| id)
             .map_err(|e| format!("Pool '{pool}': {e}"))

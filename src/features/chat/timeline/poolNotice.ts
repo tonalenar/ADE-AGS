@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 
 import type { ChatPoolPending } from "@/features/accounts/chatPool";
+import { formatPoolError } from "@/features/accounts/poolRef";
 
 import type { TimelineItem } from "./types";
 
@@ -68,7 +69,7 @@ export function formatPoolNoticeText(code: string, text: string | undefined, t: 
       return text;
     case "poolBlocked": {
       if (payload.kind === "failed" && typeof payload.reason === "string") {
-        return t("chat.timeline.notice.poolSwitchFailedBody", { reason: payload.reason });
+        return t("chat.timeline.notice.poolSwitchFailedBody", { reason: formatPoolError(payload.reason, t) });
       }
       if (typeof payload.from === "string") {
         const reason =
@@ -77,7 +78,7 @@ export function formatPoolNoticeText(code: string, text: string | undefined, t: 
             : payload.reasonCode === "hourlyLimit" && typeof payload.max === "number"
               ? t("chat.timeline.notice.poolBlockedHourly", { max: payload.max })
               : typeof payload.reason === "string"
-                ? payload.reason
+                ? formatPoolError(payload.reason, t)
                 : "";
         if (reason) return t("chat.timeline.notice.poolBlockedBody", { from: payload.from, reason });
       }

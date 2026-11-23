@@ -4,6 +4,7 @@ import { Alert, AnimateSpin, Button, Input, TextArea } from "neogestify-ui-compo
 
 import { getRoster } from "@/features/runs/ipc";
 import type { Roster } from "@/features/runs/types";
+import { formatPoolError } from "@/features/accounts/poolRef";
 import { AccountPickerStep, AUTO_ACCOUNT } from "@/features/tabs/wizard/AccountPickerStep";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
@@ -75,7 +76,7 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
       });
       onClose();
     } catch (cause) {
-      setError(String(cause));
+      setError(formatPoolError(cause, t));
       setBusy(false);
     }
   };
@@ -325,7 +326,7 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, fastMo
       )}
       {availability && availability !== "available" && (
         <p className={`text-[10px] ${availability === "unknown" ? "text-gray-400 dark:text-white/35" : "text-amber-700 dark:text-amber-300"}`}>
-          {t(`squads.availability.${availability}`)}{unavailableReason ? ` · ${unavailableReason}` : ""}
+          {t(`squads.availability.${availability}`)}{unavailableReason ? ` · ${formatPoolError(unavailableReason, t)}` : ""}
         </p>
       )}
     </div>

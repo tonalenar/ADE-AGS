@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   STRATEGIES,
+  affectedPoolsOnAccountDelete,
+  formatPoolError,
+  isPoolEmpty,
   isPoolValue,
   poolNameOf,
   poolPreviewPicks,
@@ -13,6 +16,7 @@ import {
   poolSetPaused,
   poolUpdate,
   poolValue,
+  resolveAccountChoice,
 } from "../pools";
 import {
   POOL_FAILOVER_TOPIC,
@@ -173,6 +177,34 @@ describe("pools de cuentas (lado de la pantalla)", () => {
     const previews = await poolPreviewPicks();
     expect(mock.invoke).toHaveBeenCalledWith("pool_preview_picks");
     expect(previews[0]?.accountId).toBe("acc-1");
+  });
+
+  it("identifica pools vazios, separa pools que ficam vazios ao apagar conta e traduz erro estruturado", async () => {
+    expect(isPoolEmpty({ members: [] })).toBe(true);
+    expect(isPoolEmpty({ members: [null] })).toBe(false);
+    expect(isPoolEmpty({ members: ["a1"] })).toBe(false);
+
+    const pools = [
+      { id: "p1", name: "Dupla", agentId: "codex", members: [null, "a1"], strategy: "least_used" as const, failover: true },
+      { id: "p2", name: "Ultimo", agentId: "codex", members: ["a1"], strategy: "sticky" as const, failover: true },
+      { id: "p3", name: "Outro", agentId: "codex", members: ["a2", "a3"], strategy: "round_robin" as const, failover: true },
+    ];
+    expect(affectedPoolsOnAccountDelete(pools, "a1")).toEqual({
+      kept: ["Dupla"],
+      emptied: ["Ultimo"],
+    });
+
+    const t = (key: string, vars?: Record<string, unknown>) => `${key}:${JSON.stringify(vars ?? {})}`;
+    expect(formatPoolError(JSON.stringify({ code: "poolEmpty", pool: "Ultimo" }), t)).toBe(
+      'accounts.pools.error.empty:{"name":"Ultimo"}',
+    );
+    expect(formatPoolError(`Pool 'Ultimo': ${JSON.stringify({ code: "poolEmpty", pool: "Ultimo" })}`, t)).toBe(
+      'accounts.pools.error.empty:{"name":"Ultimo"}',
+    );
+    expect(formatPoolError("erro genérico", t)).toBe("erro genérico");
+
+    mock.invoke.mockRejectedValueOnce(JSON.stringify({ code: "poolEmpty", pool: "Ultimo" }));
+    await expect(resolveAccountChoice("codex", "pool:Ultimo")).rejects.toThrow("Ultimo");
   });
 });
 

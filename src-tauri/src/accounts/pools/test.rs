@@ -276,3 +276,26 @@ fn with_pool_pick_serializa_concorrencia_sem_repetir_start() {
     got.sort_unstable();
     assert_eq!(got, vec![0, 1, 2, 3, 4, 5, 6, 7]);
 }
+
+#[test]
+fn empty_pool_error_gera_payload_estruturado_e_remocao_da_ultima_conta_preserva_pool_vazio() {
+    let db = test_db_conn();
+    save(
+        &db,
+        &[pool("Solo", &[Some("a")], Strategy::Sticky)],
+    )
+    .unwrap();
+
+    // Remover a última conta deixa o pool com 0 membros sem apagá-lo automaticamente.
+    let affected = remove_account_from_pools(&db, "a").unwrap();
+    assert_eq!(affected, vec!["Solo".to_string()]);
+    let reloaded = load(&db);
+    assert_eq!(reloaded.len(), 1);
+    assert!(reloaded[0].members.is_empty());
+
+    // O erro de pool vazio é um payload JSON estruturado traduzível.
+    let raw = empty_pool_error("Solo");
+    let parsed: serde_json::Value = serde_json::from_str(&raw).expect("payload JSON válido");
+    assert_eq!(parsed["code"], EMPTY_POOL_CODE);
+    assert_eq!(parsed["pool"], "Solo");
+}
