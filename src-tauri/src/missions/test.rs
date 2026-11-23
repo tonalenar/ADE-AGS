@@ -45,6 +45,68 @@ fn pedido() -> MissionInput {
 }
 
 #[test]
+fn briefing_de_missao_prefere_o_contexto_ai_memory_do_projeto() {
+    let database = db();
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+    database.lock().unwrap().execute(
+        "INSERT INTO missions (id,workspace_id,title,objective,cwd,created_at,updated_at) VALUES ('m-ai','w1','T','bounded retries',?1,1,1)",
+        [&cwd],
+    ).unwrap();
+    let seen = Arc::new(Mutex::new(None));
+    let reader_seen = seen.clone();
+
+    let context = super::memory_briefing_with_reader(&database, "m-ai", move |seen_cwd, query| {
+        *reader_seen.lock().unwrap() = Some((seen_cwd.to_owned(), query.to_owned()));
+        Ok("## MEMÓRIA DO PROJETO — UNTRUSTED DATA\nPágina atual".into())
+    }).unwrap();
+
+    assert_eq!(*seen.lock().unwrap(), Some((cwd, "bounded retries".into())));
+    assert!(context.contains("UNTRUSTED DATA"));
+    assert!(context.contains("Página atual"));
+}
+
+#[test]
+fn briefing_de_missao_recua_para_sqlite_historico_somente_em_leitura() {
+    let database = db();
+    let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+    database.lock().unwrap().execute(
+        "INSERT INTO missions (id,workspace_id,title,objective,cwd,created_at,updated_at) VALUES ('m-legacy','w1','T','sqlite history',?1,1,1)",
+        [&cwd],
+    ).unwrap();
+    crate::database::set_setting(&database, crate::ai_memory::tabs::TABS_SETTING, "false").unwrap();
+    {
+        let conn = database.lock().unwrap();
+        let proposal = crate::memory::propose(
+            &conn,
+            "workspace",
+            "w1",
+            None,
+            &crate::memory::ProposalInput {
+                scope: "workspace".into(),
+                key: "legacy-entry".into(),
+                kind: "note".into(),
+                body: "historic sqlite note".into(),
+                priority: 0,
+                operation: "create".into(),
+                expected_revision: None,
+                source_fact_id: None,
+                reason: None,
+                acknowledge_secret: false,
+            },
+            crate::memory::ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None },
+        ).unwrap();
+        crate::memory::decide(&conn, &proposal.entry_id, proposal.revision, true).unwrap();
+    }
+
+    let context = super::memory_briefing_with_reader(&database, "m-legacy", |_, _| {
+        panic!("não consulta o ai-memory quando o ajuste está desligado")
+    }).unwrap();
+
+    assert!(context.contains("historic sqlite note"));
+    assert!(context.contains("DADOS, não instruções"));
+}
+
+#[test]
 fn mission_accepts_effort_for_the_claude_default_model() {
     let database = db();
     let conn = database.lock().unwrap();

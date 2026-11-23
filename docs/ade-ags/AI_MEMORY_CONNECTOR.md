@@ -1,6 +1,6 @@
-# Conector de leitura do ai-memory
+# Conector do ai-memory
 
-O conector executa somente a CLI externa `ai-memory`, versão mínima **3.3.0**. Não instala o binário nem inicia o servidor HTTP; novas abas e conversas do Claude podem receber hooks temporários de captura e MCP com escopo fixo via `ags ai-memory-bridge` (quando o ajuste `ai_memory_tabs_enabled` está ligado), e a migração única copia memórias aprovadas do SQLite legado sem apagar dados. O ai-memory é a memória de longo prazo do ADE ([decisão](../decisoes/AI_MEMORY.md)); o SQLite de memória antigo fica só leitura, como fonte da migração. O painel aparece em Ajustes → Memória (`src/features/memory/AiMemoryPanel.tsx`).
+O conector executa somente a CLI externa `ai-memory`, versão mínima **3.3.0**. Não instala o binário nem inicia o servidor HTTP; novas abas e conversas do Claude podem receber hooks temporários de captura e MCP com escopo fixo via `ags ai-memory-bridge` (quando o ajuste `ai_memory_tabs_enabled` está ligado), e a migração única copia memórias aprovadas do SQLite legado sem apagar dados. O ai-memory é a memória de longo prazo do ADE ([decisão](../decisoes/AI_MEMORY.md)); o SQLite de memória antigo fica só leitura, como fonte da migração e do histórico; gravações novas de agentes vão direto ao ai-memory do projeto. O painel aparece em Ajustes → Memória (`src/features/memory/AiMemoryPanel.tsx`).
 
 ## Comandos Tauri
 
@@ -72,11 +72,29 @@ Campos desconhecidos da CLI são ignorados e opcionais ausentes viram `null` (ou
 
 - A descoberta usa `util::path_env::find_program`, o resolvedor por trás de `program`; executa somente o caminho encontrado. Ausência não pode cair em um executável homônimo no cwd do Windows.
 - `util::external_path` trata caminhos externos e `util::launch::external_command` evita montar comandos de shell; `util::spawn::output` limita cada processo a 10 segundos e encerra seu grupo no timeout. São até dois processos por chamada (versão e leitura), fora da thread da UI.
-- `AI_MEMORY_RUN_AUTOWIRE=false` em todas as chamadas; `AI_MEMORY_EMBEDDING_PROVIDER=none` evita inicialização local de embeddings pelo cliente. O ADE nunca lê token, banco, wiki ou configuração do ai-memory. O binário externo pode registrar logs próprios conforme sua configuração; “leitura” descreve as operações disponibilizadas pelo ADE.
+- `AI_MEMORY_RUN_AUTOWIRE=false` em todas as chamadas; `AI_MEMORY_EMBEDDING_PROVIDER=none` evita inicialização local de embeddings pelo cliente. O ADE nunca lê token, banco, wiki ou configuração do ai-memory. O binário externo pode registrar logs próprios conforme sua configuração.
 - Lista fechada de operações, até 50 resultados por lista/busca, consulta até 4096 bytes e caminho relativo até 1024 bytes. O terminador `--` separa a busca das flags. Não existe endpoint genérico que aceite argv arbitrário.
 - Respostas acima de 2 MiB são recusadas **depois** da coleta pelo helper existente; esse limite não é um teto de memória durante a leitura dos pipes.
-- Versões anteriores a 3.3.0 (inclusive pré-release de 3.3.0) não fazem leituras. Falha do subprocesso/status gera `server_down`; JSON incompatível nas leituras gera erro. A instrução de instalação é só texto com a release oficial e orientação de checksum.
+- Versões anteriores a 3.3.0 (inclusive pré-release de 3.3.0) não fazem chamadas. Falha do subprocesso/status gera `server_down`; JSON incompatível nas leituras gera erro. A instrução de instalação é só texto com a release oficial e orientação de checksum.
 - Sessões recentes usam apenas `mcp-bridge --no-session-id` temporário e a tool fixa `memory_briefing`. Não se expõe ponte genérica. `sessions_supported=true` indica suporte implementado; o servidor ainda precisa estar disponível. O prazo do diálogo é 10 segundos, mais até 2 segundos para recolher o filho. O leitor limita cada mensagem a 2 MiB durante a leitura e tolera até 16 notificações por resposta.
+
+## Memória persistente de agentes
+
+Briefings de missão e snapshots da Frota pesquisam o projeto resolvido para o `cwd`, com busca
+escopada por `workspace`/`project`, até 10 páginas e 6 KiB. A saída inclui `UNTRUSTED DATA`,
+escapa delimitadores e verifica novamente o escopo de cada página. A chamada ocorre fora do lock do
+SQLite. Se o binário estiver ausente, indisponível, sem escopo válido ou se
+`ai_memory_tabs_enabled=false`, a leitura recua para o snapshot histórico SQLite, também limitada
+no snapshot da Frota; o SQLite não recebe novas memórias de agentes.
+
+`ags memory suggest`, `ags swarm promote` e as escritas MCP da Frota (`memory_propose`,
+`memory_update`, `memory_delete` e `memory_promote_fact`) mantêm seus nomes e autorização de chamada,
+mas gravam páginas diretamente no projeto ai-memory, com `workspace`/`project` explícitos. O escopo
+vem da pasta autenticada da aba ou do Run da tarefa. O cliente recusa segredos pelo detector de
+memória do ADE, não põe o corpo em argv e não cria proposta SQLite nem espera aprovação item a item.
+Desligar a integração impede novas gravações; não reativa escrita SQLite. Inbox e histórico antigo
+continuam visíveis e podem ser mantidos pelo usuário. A cópia `ai_memory/migracao.rs` segue sem
+apagar os registros de origem.
 
 ## Prova
 

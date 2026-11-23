@@ -154,6 +154,15 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
     container.remove();
   });
 
+  it("explica que novas memórias vão ao ai-memory e mantém a fila legada visível", async () => {
+    await act(async () => {
+      root.render(<MemoryInbox workspaceId="w1" onClose={vi.fn()} />);
+    });
+
+    expect(document.body.textContent).toContain("memoryInbox.legacyNotice");
+    expect(document.body.textContent).toContain("db_cache");
+  });
+
   it("ao abrir confirmação e pressionar Enter, não aprova nada fora do botão focado", async () => {
     const onClose = vi.fn();
 

@@ -197,8 +197,8 @@ pub(super) fn mission_review(app: &AppHandle, args: &Value) -> Result<Value, Str
     Ok(json!(crate::missions::review::review_with_db(&db, &id)?))
 }
 
-/// `ags memory suggest --mission <id> --scope workspace|mission --key <k> --body "..."`: el agente
-/// PROPONE una memoria para la próxima misión. Queda pendiente: solo el usuario la aprueba.
+/// `ags memory suggest --mission <id> --scope workspace|mission --key <k> --body "..."` grava
+/// diretamente no ai-memory do projeto com escopo derivado da aba autenticada.
 fn authenticated_tab(args: &Value) -> Result<String, String> {
     crate::terminal::authorize(
         arg_str_opt(args, "session").as_deref(),
@@ -252,121 +252,38 @@ fn memory_mission_in_boards(
 }
 
 pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    use crate::memory::agent::{AgentProposal, author_of, propose_for_mission_with_repo};
-
-    // Numa missão, a proposta é da missão; numa conversa de projeto (sem missão) vale para o projeto.
     let caller_tab = authenticated_tab(args)?;
     let mission = memory_caller_mission(args).ok();
     let key = arg_str(args, "key")?;
     let body = arg_str(args, "body")?;
     let scope = arg_str_opt(args, "scope").unwrap_or_else(|| {
-        if mission.is_some() {
-            "mission".into()
-        } else {
-            "workspace".into()
-        }
+        if mission.is_some() { "mission".into() } else { "workspace".into() }
     });
+    if !matches!(scope.as_str(), "workspace" | "mission") || (scope == "mission" && mission.is_none()) {
+        return Err("scope must be workspace, or mission for a tab attached to a Mission".into());
+    }
     let kind = arg_str_opt(args, "kind").unwrap_or_else(|| "note".into());
-    let priority = args.get("priority").and_then(Value::as_i64).unwrap_or(0);
-
-    // Quién propone: a aba que a sessão autenticou, não o `from` que o agente mandou.
-    let from = Some(authenticated_tab(args)?);
-    let name = from
-        .as_deref()
-        .and_then(|id| {
-            super::peers::open_tabs(app)
-                .ok()?
-                .into_iter()
-                .find(|t| t.id == id)
-                .map(|t| t.name)
-        })
-        .unwrap_or_else(|| "agente".to_string());
-    let author = author_of(&name);
-
     let db = db(app)?;
-    let repository_key = match mission.as_deref() {
-        Some(mission_id) => {
-            crate::memory::repo_scope::mission_repo_key_unlocked(&db, Some(mission_id))?
-        }
-        None => crate::memory::repo_scope::tab_repo_key_unlocked(&db, &caller_tab)?,
-    };
-    let result = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        match &mission {
-            Some(mission) => propose_for_mission_with_repo(
-                &conn,
-                &AgentProposal {
-                    mission_id: mission,
-                    scope: &scope,
-                    key: &key,
-                    kind: &kind,
-                    body: &body,
-                    priority,
-                    author,
-                    author_name: &name,
-                },
-                repository_key.as_deref(),
-            )?,
-            None => {
-                let (workspace, _) = workspace_for_caller(&conn, &caller_tab)?;
-                crate::memory::agent::propose_for_workspace_with_repo(
-                    &conn,
-                    &workspace,
-                    &AgentProposal {
-                        mission_id: "",
-                        scope: &scope,
-                        key: &key,
-                        kind: &kind,
-                        body: &body,
-                        priority,
-                        author,
-                        author_name: &name,
-                    },
-                    repository_key.as_deref(),
-                )?
-            }
-        }
-    };
-    crate::memory::notify_changed(app);
-    let draft_warning = if result.status == "agent_draft" {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        let (workspace, _) = workspace_for_caller(&conn, &caller_tab)?;
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM memory_agent_drafts WHERE workspace_id=?1",
-                [&workspace],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        let warning = format!(
-            "Memória: {count} rascunhos de agente aguardam revisão do usuário; a caixa de 32 pendências está cheia."
-        );
-        let app = app.clone();
-        let from = from.clone();
-        let notice = warning.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            if let Some(from) = from {
-                let _ = super::peers::peer_tell(
-                    &app,
-                    &json!({"from":from,"to":"Orquestrador","text":notice}),
-                );
-            }
-        });
-        Some(warning)
-    } else {
-        None
-    };
+    if !crate::ai_memory::memory_enabled(&db) {
+        return Err("ai-memory está desativado; a memória SQLite antiga é somente leitura".into());
+    }
+    let cwd = super::peers::open_tabs(app)?.into_iter().find(|tab| tab.id == caller_tab)
+        .map(|tab| tab.cwd).ok_or("a aba autenticada não está aberta")?;
+    let mut tags = vec!["ade-ags".to_string()];
+    if scope == "mission" {
+        if let Some(id) = mission { tags.push(format!("mission-{}", id.chars().take(32).collect::<String>())); }
+    }
+    crate::ai_memory::write_agent_memory(&cwd, &key, &kind, &body, &tags, None)?;
     Ok(json!({
-        "entryId": result.entry_id,
-        "revision": result.revision,
-        "status": if result.status == "agent_draft" { "agent_draft" } else { "pending" },
-        "warning": draft_warning,
-        "message": "Proposta enviada. Fica pendente até o usuário aprovar na tela de Missões; você não precisa fazer mais nada.",
+        "status": "saved",
+        "destination": "ai-memory",
+        "message": "Memória gravada no ai-memory do projeto, sem aprovação item a item.",
     }))
 }
 
-/// `ags memory search "<assunto>" [--mission <id>]`: busca por relevância nas memórias aprovadas
-/// do workspace e (quando em missão) da missão. Funciona tanto em missão quanto em aba solta.
+/// `ags memory search "<assunto>" [--mission <id>]`: busca por relevância no histórico SQLite aprovado do
+/// workspace e (quando em missão) da missão; funciona em missão e em aba solta. Páginas atuais do ai-memory
+/// ficam nas tools MCP escopadas.
 pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let tab = authenticated_tab(args)?;
     let query = arg_str(args, "query")?;
@@ -615,18 +532,30 @@ pub(super) fn swarm_read_on(conn: &rusqlite::Connection, id: &str) -> Result<Val
 pub(super) fn swarm_promote(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let mission = memory_caller_mission(args)?;
     let db = db(app)?;
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let row = crate::missions::store::get(&conn, &mission)?.ok_or("mission not found")?;
-    let result = crate::memory::lifecycle::swarm_promote(
-        &conn,
-        &row.workspace_id,
-        &mission,
-        &arg_str(args, "note")?,
-        &arg_str(args, "key")?,
-    )?;
-    drop(conn);
-    crate::memory::notify_changed(app);
-    Ok(json!(result))
+    if !crate::ai_memory::memory_enabled(&db) {
+        return Err("ai-memory está desativado; a memória SQLite antiga é somente leitura".into());
+    }
+    let (cwd, body) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let row = crate::missions::store::get(&conn, &mission)?.ok_or("mission not found")?;
+        let body: String = conn.query_row(
+            "SELECT body FROM memory_swarm_notes WHERE id=?1 AND workspace_id=?2 AND mission_id=?3",
+            rusqlite::params![arg_str(args, "note")?, row.workspace_id, mission],
+            |row| row.get(0),
+        ).map_err(|_| "swarm note unavailable")?;
+        (row.cwd, body)
+    };
+    let key = arg_str(args, "key")?;
+    let tags = vec![
+        "ade-ags".to_string(),
+        format!("mission-{}", mission.chars().take(32).collect::<String>()),
+    ];
+    crate::ai_memory::write_agent_memory(&cwd, &key, "note", &body, &tags, None)?;
+    Ok(json!({
+        "status": "saved",
+        "destination": "ai-memory",
+        "message": "Nota gravada no ai-memory do projeto, sem aprovação item a item.",
+    }))
 }
 
 pub(super) fn memory_maintenance(

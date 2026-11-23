@@ -142,6 +142,66 @@ fn source_ownership_limits_and_read_only_review() {
     }
     assert_eq!(preview, super::super::repo::render(&c, "w", &[]).unwrap());
 }
+
+#[test]
+fn ai_memory_route_keeps_dreamer_source_citation_validation_read_only() {
+    let (c, task, source) = fixture();
+    let before: (i64, i64) = c
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM memory_entries),(SELECT COUNT(*) FROM memory_revisions)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+
+    let rejected = crate::memory::task_memory_write_with_repo(
+        &c,
+        &task,
+        "memory.propose",
+        json!({"scope":"workspace","key":"uncited","kind":"note","body":"A finding","reason":"invented source"}),
+        None,
+    );
+    assert!(rejected.err().expect("uncited Dreamer write must fail").contains("exact authorized"));
+
+    let dream_run: String = c
+        .query_row("SELECT run_id FROM memory_dreams WHERE task_id=?1", [&task], |row| row.get(0))
+        .unwrap();
+    let fact = crate::runs::store::add_fact(
+        &c,
+        &dream_run,
+        None,
+        "finding",
+        "A fact owned by the Dreamer Run",
+    )
+    .unwrap();
+    assert!(crate::memory::task_memory_write_with_repo(
+        &c,
+        &task,
+        "memory.promoteFact",
+        json!({"fact_id":fact.id,"scope":"workspace","key":"promoted"}),
+        None,
+    )
+    .is_err());
+
+    let accepted = crate::memory::task_memory_write_with_repo(
+        &c,
+        &task,
+        "memory.propose",
+        json!({"scope":"workspace","key":"cited","kind":"note","body":"A finding","reason":source}),
+        None,
+    )
+    .unwrap();
+    assert_eq!(accepted.key, "cited");
+    let after: (i64, i64) = c
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM memory_entries),(SELECT COUNT(*) FROM memory_revisions)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(after, before, "AI-memory routing must not write SQLite history");
+}
+
 #[test]
 fn history_is_workspace_bounded_and_injection_is_omitted() {
     let (c, task, _) = fixture();

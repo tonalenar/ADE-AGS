@@ -1011,11 +1011,24 @@ pub(crate) fn memory_context_text(
 /// memórias relevantes ao objetivo (ver `decisions/relevance.rs`); se não escolher, sai o índice de
 /// sempre, com as mesmas entradas de `memory_context_text`. Não segura o banco na chamada ao provedor.
 pub(crate) fn memory_briefing(db: &DbConnection, mission_id: &str) -> Result<String, String> {
+    memory_briefing_with_reader(db, mission_id, crate::ai_memory::project_context)
+}
+
+fn memory_briefing_with_reader(
+    db: &DbConnection,
+    mission_id: &str,
+    read_ai_memory: impl FnOnce(&str, &str) -> Result<String, String>,
+) -> Result<String, String> {
     let mission = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::get(&conn, mission_id)?
             .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?
     };
+    if crate::ai_memory::memory_enabled(db) {
+        if let Ok(context) = read_ai_memory(&mission.cwd, &mission.objective) {
+            return Ok(context);
+        }
+    }
     let repo = crate::memory::repo_scope::repo_key(Path::new(&mission.cwd));
     let docs = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -1078,6 +1091,11 @@ pub(crate) fn mission_memory_context_now(app: &AppHandle, mission_id: String) ->
         store::get(&conn, &mission_id)?
             .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?
     };
+    if crate::ai_memory::memory_enabled(&db) {
+        if let Ok(context) = crate::ai_memory::project_context(&mission.cwd, &mission.objective) {
+            return Ok(context);
+        }
+    }
     let repo = crate::memory::repo_scope::repo_key(Path::new(&mission.cwd));
     let conn = db.lock().map_err(|e| e.to_string())?;
     memory_context_text(

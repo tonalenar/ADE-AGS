@@ -394,7 +394,7 @@ fn ags_binary() -> Option<PathBuf> {
 }
 
 /// Prefere o par explícito do marcador; projeto reservado bloqueia sem fallback; sem marcador, exige correspondência única.
-fn resolve_scope(binary: &Path, cwd: &Path, home: &Path) -> Option<(String, String)> {
+pub(crate) fn resolve_scope(binary: &Path, cwd: &Path, home: &Path) -> Option<(String, String)> {
     match super::marker::resolve(cwd, Some(home)) {
         super::marker::Scope::Pair(workspace, project) => Some((workspace, project)),
         super::marker::Scope::Reserved => None,

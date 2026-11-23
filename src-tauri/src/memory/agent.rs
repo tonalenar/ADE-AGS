@@ -1,21 +1,13 @@
-//! Memórias propostas pelos agentes de uma missão em terminais.
+//! Validações e regras históricas das propostas de memória SQLite do ADE.
 //!
-//! O ciclo fecha assim: o agente **lê** (`memory search`), trabalha e, ao terminar, **propõe**
-//! o que valeria guardar para a próxima missão. Propor não é gravar: a proposta fica
-//! pendente até o usuário aprová-la na tela de Missões. Um agente nunca aprova.
-//!
-//! Como o texto vem de um agente (que leu páginas, arquivos e saídas de comandos), é dado
-//! não confiável. Por isso aqui há três travas além das que `propose` já tem (tamanho,
-//! cota, no máximo 32 pendentes por dono):
-//!
-//! - **segredos**: uma proposta que pareça uma chave, token ou senha é recusada. Memória é
-//!   texto que vai para o briefing de outros agentes e para o banco;
-//! - **prioridade baixa**: o agente pode sugerir até 3; subir a prioridade é decisão do usuário;
-//! - **autoria**: fica marcada como de `lead` ou `worker`, com a missão e o nome da terminal
-//!   no motivo, para o usuário saber de onde veio ao decidir.
+//! As gravações novas dos agentes passam pelo cliente escopado do ai-memory; este módulo mantém o
+//! contrato legado para migração e ferramentas de revisão do histórico. O detector rígido continua
+//! sendo usado pelo caminho novo para recusar chaves, tokens e senhas antes de gravar.
 
+#[cfg(test)]
 use rusqlite::Connection;
 
+#[cfg(test)]
 use super::{propose, ProposalActor, ProposalInput, ProposalResult};
 
 /// O nome da terminal do orquestrador (a mesma constante do frontend, `LEAD_NAME`).
@@ -167,6 +159,7 @@ pub fn propose_for_mission(conn: &Connection, p: &AgentProposal<'_>) -> Result<P
 }
 
 /// Propõe memória usando uma chave derivada antes do chamador adquirir o mutex do banco.
+#[cfg(test)]
 pub fn propose_for_mission_with_repo(
     conn: &Connection,
     p: &AgentProposal<'_>,
@@ -186,6 +179,7 @@ pub fn propose_for_workspace(conn: &Connection, workspace_id: &str, p: &AgentPro
 }
 
 /// Propõe uma memória do PROJETO a partir de uma aba solta, marcando o `repo_key` derivado da pasta da aba.
+#[cfg(test)]
 pub fn propose_for_workspace_with_repo(
     conn: &Connection,
     workspace_id: &str,
@@ -198,6 +192,7 @@ pub fn propose_for_workspace_with_repo(
     propose_in(conn, workspace_id, None, p, repo_key)
 }
 
+#[cfg(test)]
 fn propose_in(
     conn: &Connection,
     workspace_id: &str,

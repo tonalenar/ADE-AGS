@@ -5,6 +5,128 @@ use super::{
 };
 use crate::database::DbConnection;
 use crate::util::path_env;
+use sha2::{Digest, Sha256};
+
+fn scoped_client(cwd: &str) -> Result<(Client, String, String), String> {
+    let path = std::path::Path::new(cwd);
+    let binary = path_env::find_program("ai-memory")
+        .ok_or_else(|| "O ai-memory não está instalado ou não está disponível no PATH.".to_string())?;
+    let client = Client::at(Some(binary.clone()), path.to_path_buf())?;
+    let home = dirs::home_dir().unwrap_or_default();
+    let (workspace, project) = super::tabs::resolve_scope(&binary, path, &home)
+        .ok_or_else(|| "Não foi possível resolver um projeto único no ai-memory para esta pasta.".to_string())?;
+    super::sessions::validate_scope(&workspace, &project)?;
+    if super::scoped_bridge::reserved_project(&project) {
+        return Err("Projeto reservado não permitido.".into());
+    }
+    Ok((client, workspace, project))
+}
+
+/// A preferência por memória de sessão desligada mantém apenas o fallback histórico de leitura.
+pub(crate) fn memory_enabled(db: &DbConnection) -> bool {
+    crate::database::get_setting(db, super::tabs::TABS_SETTING)
+        .map(|value| super::tabs::enabled(value.as_deref()))
+        .unwrap_or(false)
+}
+
+/// Busca memória do projeto da pasta sem ler o banco SQLite legado.
+pub(crate) fn project_context(cwd: &str, query: &str) -> Result<String, String> {
+    let (client, workspace, project) = scoped_client(cwd)?;
+    client.project_context(query, &workspace, &project)
+}
+
+/// Grava memória de agente no projeto ai-memory resolvido para a pasta, sem fila item a item.
+pub(crate) fn write_agent_memory(
+    cwd: &str,
+    key: &str,
+    kind: &str,
+    body: &str,
+    tags: &[String],
+    reason: Option<&str>,
+) -> Result<(), String> {
+    let prepared = prepare_agent_write(key, kind, body, tags, reason)?;
+    let (client, workspace, project) = scoped_client(cwd)?;
+    write_prepared_agent_memory(&client, &workspace, &project, prepared)
+}
+
+struct PreparedAgentWrite {
+    path: String,
+    title: String,
+    kind: &'static str,
+    tags: Vec<String>,
+    body: Vec<u8>,
+}
+
+fn prepare_agent_write(
+    key: &str,
+    kind: &str,
+    body: &str,
+    tags: &[String],
+    reason: Option<&str>,
+) -> Result<PreparedAgentWrite, String> {
+    let key = crate::memory::normalize_key(key)
+        .map_err(|_| "A chave da memória deve ter de 1 a 128 bytes UTF-8 e não conter controles.".to_string())?;
+    let body = crate::memory::normalize_body(body)
+        .map_err(|_| "O corpo da memória deve ter de 1 a 4096 bytes UTF-8.".to_string())?;
+    let reason = crate::memory::normalize_reason(reason)
+        .map_err(|_| "O motivo da memória deve ter até 512 bytes UTF-8.".to_string())?;
+    if [key.as_str(), body.as_str(), reason.as_deref().unwrap_or("")]
+        .iter()
+        .any(|text| crate::memory::agent::looks_like_secret(text))
+        || tags.iter().any(|tag| crate::memory::agent::looks_like_secret(tag))
+    {
+        return Err(crate::memory::agent::secret_confirmation_error());
+    }
+    let page_kind = match kind {
+        "decision" => "decision",
+        "constraint" => "rule",
+        "finding" | "file" | "note" => "fact",
+        _ => return Err("Tipo de memória desconhecido.".into()),
+    };
+    let slug = key.to_ascii_lowercase().chars().map(|ch| {
+        if ch.is_ascii_alphanumeric() { ch } else { '-' }
+    }).collect::<String>().split('-').filter(|part| !part.is_empty()).collect::<Vec<_>>().join("-");
+    let digest = Sha256::digest(key.as_bytes());
+    let suffix = digest[..8].iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let path = format!("ade-ags/{}-{suffix}.md", if slug.is_empty() { "memory" } else { &slug });
+    let tags: Vec<String> = tags.iter().filter(|tag| {
+        !tag.is_empty() && tag.len() <= 96 && !tag.chars().any(char::is_control) && !tag.chars().any(char::is_whitespace)
+    }).cloned().collect();
+    let page_body = if let Some(reason) = reason { format!("{body}\n\nMotivo: {reason}") } else { body };
+    Ok(PreparedAgentWrite { path, title: key, kind: page_kind, tags, body: page_body.into_bytes() })
+}
+
+fn write_prepared_agent_memory(
+    client: &Client,
+    workspace: &str,
+    project: &str,
+    prepared: PreparedAgentWrite,
+) -> Result<(), String> {
+    let write = super::client::PageWrite {
+        path: &prepared.path,
+        title: &prepared.title,
+        kind: prepared.kind,
+        tags: &prepared.tags,
+        pinned: false,
+    };
+    client.write_scoped_page(&write, prepared.body, workspace, project)
+}
+
+/// Entrada de teste que mantém o mesmo validador e cliente, injetando apenas cliente e escopo.
+#[cfg(test)]
+pub(super) fn write_agent_memory_with_scope(
+    client: &Client,
+    workspace: &str,
+    project: &str,
+    key: &str,
+    kind: &str,
+    body: &str,
+    tags: &[String],
+    reason: Option<&str>,
+) -> Result<(), String> {
+    let prepared = prepare_agent_write(key, kind, body, tags, reason)?;
+    write_prepared_agent_memory(client, workspace, project, prepared)
+}
 
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,

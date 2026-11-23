@@ -357,10 +357,7 @@ fn run_start_task_now(
         Ok(guard) => guard,
         Err(e) => return fail(&task.id, e),
     };
-    let memory = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        crate::memory::snapshot_context_for_run(&conn, &task.run_id)?
-    };
+    let memory = crate::memory::snapshot_context_for_run_preferred(db, &task.run_id)?;
     let extras = supervisor::LaunchExtras {
         prompt: Some(format!("{}{memory}", task.prompt)),
         ..Default::default()
@@ -570,10 +567,7 @@ pub(crate) fn launch_lead(app: &AppHandle, task: &Task) -> Result<(), String> {
         store::run_by_id(&conn, &task.run_id)?
             .ok_or_else(|| "the lead's Run no longer exists".to_string())?
     };
-    let snapshot = {
-        let conn = db.lock().map_err(|error| error.to_string())?;
-        crate::memory::snapshot_context_for_run(&conn, &run.id)?
-    };
+    let snapshot = crate::memory::snapshot_context_for_run_preferred(&db, &run.id)?;
     let mut system_prompt = context::LEAD_SYSTEM_PROMPT.to_string();
     let mut allowed_tools = orchestration_tool_names(&[Read, Note, Spawn]);
     if run.squad_id.is_some() {
@@ -639,10 +633,7 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
         };
 
         let deps_refs: Vec<&Task> = deps.iter().collect();
-        let snapshot = {
-            let conn = db.lock().map_err(|e| e.to_string())?;
-            crate::memory::snapshot_context_for_run(&conn, &run.id)?
-        };
+        let snapshot = crate::memory::snapshot_context_for_run_preferred(&db, &run.id)?;
         let prompt = format!(
             "{}{}",
             context::worker_prompt(&task, &run.objective, &deps_refs, &facts, to_merge),
