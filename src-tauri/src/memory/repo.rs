@@ -53,6 +53,20 @@ pub fn approved_open_with_repo(
     fail_closed: bool,
     path: &str,
 ) -> Result<String, String> {
+    approved_open_with_repo_resolved(conn, workspace, mission, repo, fail_closed, path)
+        .map(|(text, _)| text)
+}
+
+/// Igual a [`approved_open_with_repo`], mas devolve também a chave real (`memory_entries.key`)
+/// quando o pedido abriu uma entrada individual por `entryId` ou por `key`.
+pub fn approved_open_with_repo_resolved(
+    conn: &Connection,
+    workspace: &str,
+    mission: Option<&str>,
+    repo: Option<&str>,
+    fail_closed: bool,
+    path: &str,
+) -> Result<(String, Option<String>), String> {
     if path.contains('\\') || path.contains("..") || path.starts_with('/') || path.contains(':') {
         return Err("invalid memory path".into());
     }
@@ -62,7 +76,7 @@ pub fn approved_open_with_repo(
     // mandava "abrir por entrada", algo que a CLI não oferecia.
     if let Some(doc) = docs.iter().find(|d| d.entry_id == path || d.key == path) {
         let body = serde_json::json!({"entryId": doc.entry_id, "key": doc.key, "scope": doc.scope, "kind": doc.kind, "priority": doc.priority, "content": doc.body});
-        return Ok(super::untrusted_memory_response(&body.to_string()));
+        return Ok((super::untrusted_memory_response(&body.to_string()), Some(doc.key.clone())));
     }
     let names = ["decisions.md", "constraints.md", "findings.md", "files.md", "notes.md"];
     let mut files = Files::new();
@@ -80,7 +94,7 @@ pub fn approved_open_with_repo(
     let body = files.get(path).ok_or("o caminho da memória não está disponível neste escopo")?;
     let response=super::untrusted_memory_response(&serde_json::json!({"path":path,"content":body}).to_string());
     if response.len() > super::LIST_BYTES { return Err("memory page exceeds 32 KiB; use `ags memory search` and then `ags memory open <entryId>` for one entry".into()); }
-    Ok(response)
+    Ok((response, None))
 }
 
 #[derive(Clone, Serialize)]

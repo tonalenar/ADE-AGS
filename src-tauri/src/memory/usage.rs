@@ -236,7 +236,7 @@ pub fn report(
 
     let active: Vec<String> = {
         let mut stmt = conn
-            .prepare("SELECT key FROM memory_entries WHERE workspace_id=?1 AND status='active'")
+            .prepare("SELECT key FROM memory_entries WHERE workspace_id=?1 AND status='active' AND current_revision IS NOT NULL")
             .map_err(read_err)?;
         let rows = stmt
             .query_map(params![workspace_id], |r| r.get::<_, String>(0))
@@ -300,7 +300,7 @@ mod test {
     fn setup() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "CREATE TABLE memory_entries(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, key TEXT NOT NULL, status TEXT NOT NULL);
+            "CREATE TABLE memory_entries(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, key TEXT NOT NULL, status TEXT NOT NULL, current_revision INTEGER DEFAULT 1);
              CREATE TABLE missions(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title TEXT NOT NULL);",
         )
         .unwrap();
@@ -410,7 +410,7 @@ mod test {
     fn report_conta_as_leituras_e_os_agentes() {
         let conn = setup();
         conn.execute_batch(
-            "INSERT INTO memory_entries VALUES('ea','w1','a','active'),('eb','w1','b','active'),('ec','w1','c','active'),('ed','w1','d','deleted');
+            "INSERT INTO memory_entries(id,workspace_id,key,status) VALUES('ea','w1','a','active'),('eb','w1','b','active'),('ec','w1','c','active'),('ed','w1','d','deleted');
              INSERT INTO missions VALUES('m1','w1','Missão um');",
         )
         .unwrap();
@@ -452,7 +452,7 @@ mod test {
     fn report_ordena_os_mais_lidos_e_respeita_since() {
         let conn = setup();
         conn.execute_batch(
-            "INSERT INTO memory_entries VALUES('ea','w1','a','active'),('eb','w1','b','active');",
+            "INSERT INTO memory_entries(id,workspace_id,key,status) VALUES('ea','w1','a','active'),('eb','w1','b','active');",
         )
         .unwrap();
         record(
@@ -502,7 +502,7 @@ mod test {
     #[test]
     fn relatorio_sem_nenhuma_leitura_marca_todas_como_nunca_lidas() {
         let conn = setup();
-        conn.execute_batch("INSERT INTO memory_entries VALUES('ea','w1','a','active');")
+        conn.execute_batch("INSERT INTO memory_entries(id,workspace_id,key,status) VALUES('ea','w1','a','active');")
             .unwrap();
         let r = report(&conn, "w1", None).unwrap();
         assert_eq!(r.total, 0);
@@ -525,5 +525,19 @@ mod test {
             .query_row("SELECT query FROM memory_usage", [], |r| r.get(0))
             .unwrap();
         assert!(stored.is_none());
+    }
+
+    #[test]
+    fn report_ignora_entrada_sem_revisao_aprovada_em_active_e_never_read() {
+        let conn = setup();
+        conn.execute_batch(
+            "INSERT INTO memory_entries(id, workspace_id, key, status, current_revision)
+             VALUES('e-ok','w1','aprovada','active',1),
+                   ('e-pend','w1','pendente','active',NULL);",
+        )
+        .unwrap();
+        let r = report(&conn, "w1", None).unwrap();
+        assert_eq!(r.active_entries, 1, "entrada sem current_revision não é ativa aprovada");
+        assert_eq!(r.never_read, 1, "entrada sem current_revision não infla never_read");
     }
 }
