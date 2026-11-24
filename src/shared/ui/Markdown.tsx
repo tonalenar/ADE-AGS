@@ -7,9 +7,6 @@ import { Button } from "neogestify-ui-components";
 import { useDisplayPrefs } from "@/features/settings/displayPreferences";
 import { openExternalUrl } from "@/shared/openExternalUrl";
 import { htmlImagesToMarkdown } from "./htmlImages";
-import { MATH_REHYPE_PLUGINS, MATH_REMARK_PLUGINS } from "./markdownMath";
-// O CSS do KaTeX vem do próprio pacote (empacotado com o app): nada vai à rede para desenhar fórmulas.
-import "katex/dist/katex.min.css";
 
 /** Trae una imagen y devuelve algo que un `<img>` puede mostrar (un `data:`). */
 export type ImageLoader = (src: string) => Promise<string>;
@@ -136,8 +133,56 @@ export function codeOfPre(node: HastNode | undefined): { code: string; className
 
 /** Os plugins de cada modo, fixos no módulo: recriá-los a cada render faz o react-markdown reprocessar tudo. */
 const REMARK = [remarkGfm];
-const REMARK_MATH = [remarkGfm, ...MATH_REMARK_PLUGINS];
-const REHYPE_MATH = MATH_REHYPE_PLUGINS;
+
+const FENCED_MATH_RE = /(?:^|\n)[ \t]*(?:`{3,}|~{3,})math\b/i;
+const FENCED_CODE_RE = /(?:^|\n)[ \t]*(`{3,}|~{3,})[^\r\n]*[\s\S]*?(?:\n[ \t]*\1|$)/g;
+const INLINE_CODE_RE = /`+[^`\r\n]*`+/g;
+const INLINE_MATH_RE = /\$[^\s$](?:(?:\\\$|[^$\r\n])*[^\s$\\])?\$(?!\d)/;
+
+/** Detecção barata de fórmula (`$…$`, `$$`, `\(`, `\[` ou bloco ```math) para só baixar o KaTeX quando preciso. */
+export function hasMathSyntax(text: string): boolean {
+  if (!text.includes("$") && !text.includes("\\(") && !text.includes("\\[") && !text.includes("math") && !text.includes("MATH")) {
+    return false;
+  }
+  if (FENCED_MATH_RE.test(text)) return true;
+  if (!text.includes("$") && !text.includes("\\(") && !text.includes("\\[")) return false;
+  const prose = text.replace(FENCED_CODE_RE, "\n").replace(INLINE_CODE_RE, "");
+  if (prose.includes("$$") || prose.includes("\\(") || prose.includes("\\[")) return true;
+  return prose.includes("$") && INLINE_MATH_RE.test(prose);
+}
+
+interface MathPlugins {
+  remark: NonNullable<React.ComponentProps<typeof ReactMarkdown>["remarkPlugins"]>;
+  rehype: NonNullable<React.ComponentProps<typeof ReactMarkdown>["rehypePlugins"]>;
+}
+
+let cachedMathPlugins: MathPlugins | null = null;
+let mathPluginsPromise: Promise<MathPlugins> | null = null;
+
+function loadMathPlugins(): Promise<MathPlugins> {
+  if (cachedMathPlugins) return Promise.resolve(cachedMathPlugins);
+  if (!mathPluginsPromise) {
+    mathPluginsPromise = import("./markdownMath").then((m) => {
+      cachedMathPlugins = {
+        remark: [remarkGfm, ...m.MATH_REMARK_PLUGINS],
+        rehype: m.MATH_REHYPE_PLUGINS,
+      };
+      return cachedMathPlugins;
+    });
+  }
+  return mathPluginsPromise;
+}
+
+/** Indica se o chunk de matemática (KaTeX + remark-math + rehype-katex) já foi pedido ou carregado. */
+export function isMathLoaded(): boolean {
+  return cachedMathPlugins !== null || mathPluginsPromise !== null;
+}
+
+/** Reinicia o estado do loader de matemática entre testes. */
+export function resetMathLoaderForTests(): void {
+  cachedMathPlugins = null;
+  mathPluginsPromise = null;
+}
 
 export interface MarkdownProps {
   content: string;
@@ -166,6 +211,23 @@ export const Markdown = memo(function Markdown({ content, loadImage, onImageClic
   // horizontal y los campos como un párrafo suelto arriba de todo. Los datos que trae ya
   // se muestran aparte, en la cabecera.
   const body = useMemo(() => htmlImagesToMarkdown(stripFrontmatter(content)), [content]);
+  const needsMath = useMemo(() => renderMath && hasMathSyntax(body), [renderMath, body]);
+  const [mathPlugins, setMathPlugins] = useState<MathPlugins | null>(() => (needsMath ? cachedMathPlugins : null));
+
+  useEffect(() => {
+    if (!needsMath) return;
+    if (cachedMathPlugins) {
+      if (mathPlugins !== cachedMathPlugins) setMathPlugins(cachedMathPlugins);
+      return;
+    }
+    let alive = true;
+    void loadMathPlugins().then((loaded) => {
+      if (alive) setMathPlugins(loaded);
+    });
+    return () => { alive = false; };
+  }, [needsMath, mathPlugins]);
+
+  const activeMath = needsMath ? (mathPlugins ?? cachedMathPlugins) : null;
   const transformUrl = useCallback((value: string, key: string, node: { tagName: string }) => key === "src" && node.tagName === "img" && onImageClick && /^(?:data:image\/(?:png|jpe?g|webp|gif);base64,|file:\/\/)/i.test(value) ? value : defaultUrlTransform(value), [onImageClick]);
 
   // Os componentes ficam os mesmos entre um render e outro. Funções novas a cada render fazem o React desmontar e
@@ -244,8 +306,8 @@ export const Markdown = memo(function Markdown({ content, loadImage, onImageClic
   return (
     <div className={`chat-markdown flex flex-col gap-3 ${size.root}`} data-streaming={streaming ? "true" : undefined}>
       <ReactMarkdown
-        remarkPlugins={renderMath ? REMARK_MATH : REMARK}
-        rehypePlugins={renderMath ? REHYPE_MATH : undefined}
+        remarkPlugins={activeMath ? activeMath.remark : REMARK}
+        rehypePlugins={activeMath ? activeMath.rehype : undefined}
         components={components}
         urlTransform={transformUrl}
       >

@@ -1,5 +1,7 @@
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
+// O CSS do KaTeX vem do próprio pacote (empacotado com o app): nada vai à rede para desenhar fórmulas.
+import "katex/dist/katex.min.css";
 
 /**
  * A matemática do Markdown das conversas, como no T3 Code: fórmulas `$…$` e `$$…$$` (remark-math) e o
