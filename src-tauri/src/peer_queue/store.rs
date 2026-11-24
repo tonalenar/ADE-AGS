@@ -373,6 +373,11 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             ON peer_messages(dedupe_key, created_at) WHERE dedupe_key IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_peer_messages_ready
             ON peer_messages(to_tab_id, state, available_at, position);
+        -- Poda por estado/idade e contagem de pendentes por destino (aditivo; nada é apagado).
+        CREATE INDEX IF NOT EXISTS idx_peer_messages_state_updated
+            ON peer_messages(state, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_peer_messages_state_to
+            ON peer_messages(state, to_tab_id);
         CREATE TABLE IF NOT EXISTS peer_message_keys (
             from_tab_id TEXT NOT NULL,
             client_id TEXT NOT NULL,
