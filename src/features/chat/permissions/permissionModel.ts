@@ -454,8 +454,6 @@ export interface PermissionRule {
   createdAt: number;
 }
 
-export const RULES_KEY = "chat.permissions.rules";
-
 /** As regras guardadas, tolerando lixo (versões futuras, texto quebrado). Pura. */
 export function parseRules(raw: string | null | undefined): PermissionRule[] {
   if (!raw) return [];

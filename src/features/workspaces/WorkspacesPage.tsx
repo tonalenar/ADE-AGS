@@ -9,19 +9,10 @@ import { OpenWorkspaceDialog } from "@/features/workspaces/OpenWorkspaceDialog";
 import { DeleteWorkspaceDialog } from "@/features/workspaces/DeleteWorkspaceDialog";
 import { DeletedWorkspacesList } from "@/features/workspaces/DeletedWorkspacesList";
 import { PageHeader } from "@/shared/ui/PageHeader";
+import { relativeAgeParts } from "@/shared/time";
 
 function formatRelative(unixSeconds: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
-  const diffSeconds = Math.max(0, Math.floor(Date.now() / 1000) - unixSeconds);
-  const units: [number, string][] = [
-    [60, "s"], [60, "m"], [24, "h"], [30, "d"], [12, "mo"], [Infinity, "y"],
-  ];
-  let value = diffSeconds;
-  let unit = "s";
-  for (const [size, label] of units) {
-    if (value < size) { unit = label; break; }
-    value = Math.floor(value / size);
-    unit = label;
-  }
+  const { value, unit } = relativeAgeParts(unixSeconds);
   return t("home.recent.lastActive", { time: t(`time.compact.${unit}`, { n: value }) });
 }
 

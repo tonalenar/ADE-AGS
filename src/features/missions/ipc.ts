@@ -19,38 +19,6 @@ export const updateMission = (missionId: string, input: MissionInput) =>
 export const startMission = (missionId: string, force = false) =>
   invoke<Mission>("mission_start", { missionId, force });
 
-/** Arranca la misión en terminales: solo la marca en curso (las pestañas las abre la pantalla). */
-export const startMissionTerminals = (missionId: string, force = false) =>
-  invoke<Mission>("mission_start_terminals", { missionId, force });
-
-export interface DuplicateMissionResult {
-  id: string;
-  title: string;
-  status: string;
-  isRunning: boolean;
-  isRecent: boolean;
-  createdAt: number;
-  startedAt: number | null;
-}
-
-export const checkMissionDuplicate = (missionId: string) =>
-  invoke<DuplicateMissionResult | null>("mission_check_duplicate", { missionId });
-
-export const checkMissionDuplicateInput = (
-  workspaceId: string,
-  cwd: string,
-  title: string,
-  objective: string,
-  currentId?: string
-) =>
-  invoke<DuplicateMissionResult | null>("mission_check_duplicate_input", {
-    workspaceId,
-    cwd,
-    title,
-    objective,
-    currentId,
-  });
-
 /** Da por terminada una misión en terminales. */
 /** O que o diálogo "Finalizar" já traz preenchido (testes registrados e o último PR citado). */
 export const missionDeliveryHint = (missionId: string) =>

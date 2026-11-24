@@ -10,6 +10,3 @@ export function shareMissionFetch<T>(missionId: string, key: string, run: () => 
   return p;
 }
 
-export function clearArcadeDataCache(): void {
-  inflight.clear();
-}

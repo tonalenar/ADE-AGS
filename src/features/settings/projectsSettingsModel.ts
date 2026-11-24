@@ -1,5 +1,6 @@
 import type { ChatProjectIdentity } from "@/features/chat/chatProjectIdentity";
 import { normalizeProjectPath } from "@/features/chat/chatProjectPrefs";
+import { basenameOrSelf } from "@/shared/path";
 
 /**
  * O modelo da página Projetos, sem React: a lista de projetos (das conversas e dos rótulos guardados) e a
@@ -23,8 +24,7 @@ export interface ProjectRow {
 
 /** O último pedoço do caminho: "/Users/ton/app" → "app". Pasta na raiz fica com o próprio caminho. */
 export function basenameOf(cwd: string): string {
-  const parts = normalizeProjectPath(cwd).split("/").filter(Boolean);
-  return parts[parts.length - 1] ?? cwd;
+  return basenameOrSelf(normalizeProjectPath(cwd));
 }
 
 /**

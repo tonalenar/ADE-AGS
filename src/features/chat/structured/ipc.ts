@@ -104,9 +104,6 @@ export interface SendReceipt {
   note?: string;
 }
 
-/** Como `chatThreadSend`, mas idempotente: repetir o mesmo `clientRequestId` devolve o recibo sem reenviar. */
-export const chatThreadSendOnce = (threadId: string, text: string, clientRequestId: string, images?: string[]) =>
-  invoke<SendReceipt>("chat_thread_send", { threadId, text, images: images && images.length > 0 ? images : null, clientRequestId });
 /** Troca o agente da conversa (só entre turnos): a mesma conversa, outro agente (`conversa/troca.rs`). */
 export const chatThreadSwitchAgent = (threadId: string, agentId: string, model: string | null, effort: string | null, access: ThreadAccess, accountId: string | null) =>
   invoke<ThreadRow>("chat_thread_switch_agent", { threadId, agentId, model, effort, access, accountId });

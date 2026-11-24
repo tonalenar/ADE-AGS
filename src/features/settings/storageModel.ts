@@ -1,32 +1,17 @@
 import type { StorageArea } from "@/features/settings/ipc";
+import { formatBytes as formatSharedBytes } from "@/shared/format";
 
 /**
  * O que a página Armazenamento mostra, sem React: o tamanho em texto e os totais. Os números vêm do backend
  * (`src-tauri/src/storage_usage.rs`); aqui só se formata.
  */
 
-const UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
-
 /**
  * Um tamanho em bytes como texto curto ("512 B", "1.2 MB", "34 MB"). A unidade é a mesma em qualquer idioma,
  * então não passa pelo locale. Zero, negativo ou inválido vira "0 B".
  */
 export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < UNITS.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  if (unit === 0) return `${Math.round(value)} B`;
-  let shown = value < 10 ? Number(value.toFixed(1)) : Math.round(value);
-  if (shown >= 1024 && unit < UNITS.length - 1) {
-    unit += 1;
-    shown = shown / 1024;
-    shown = shown < 10 ? Number(shown.toFixed(1)) : Math.round(shown);
-  }
-  return `${shown < 10 ? shown.toFixed(1) : shown} ${UNITS[unit]}`;
+  return formatSharedBytes(bytes, { zeroAsZeroBytes: true });
 }
 
 export interface StorageTotals {

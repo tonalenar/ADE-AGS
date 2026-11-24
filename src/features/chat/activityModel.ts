@@ -1,3 +1,4 @@
+import { formatLocaleTokens } from "@/shared/format";
 import type { PlanStep, TimelineItem, ToolKind, ToolStatus } from "./timeline/types";
 import { fileName } from "./timeline/timelineModel";
 
@@ -144,11 +145,7 @@ export function formatElapsed(ms: number): string {
 
 /** O número de tokens curto no idioma da tela: `88,6 mil` (pt-BR), `88.6K` (en). */
 export function formatTokens(n: number, lang: string): string {
-  try {
-    return new Intl.NumberFormat(lang, { notation: "compact", maximumFractionDigits: 1 }).format(n);
-  } catch {
-    return String(n);
-  }
+  return formatLocaleTokens(n, lang);
 }
 
 /** O andamento do plano: quantos passos concluídos, o total e o passo atual (`-1` = nenhum). */

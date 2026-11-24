@@ -7,8 +7,6 @@
 /** `locale` segue o relógio do sistema; `12-hour` e `24-hour` forçam o formato. */
 export type TimeFormat = "locale" | "12-hour" | "24-hour";
 
-export const TIME_FORMATS: readonly TimeFormat[] = ["locale", "12-hour", "24-hour"];
-
 export function isTimeFormat(value: unknown): value is TimeFormat {
   return value === "locale" || value === "12-hour" || value === "24-hour";
 }

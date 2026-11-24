@@ -6,15 +6,7 @@ import { RegistryProgressBar, useRegistryProgress } from "@/features/marketplace
 import { useMarketplaceStore } from "@/features/marketplace/store";
 import type { RegistrySummary } from "@/features/marketplace/types";
 import { RemoveRegistryDialog } from "@/features/marketplace/RemoveRegistryDialog";
-
-function timeAgo(ts: number | null): string {
-  if (ts == null) return "";
-  const diffS = Math.max(0, Math.floor(Date.now() / 1000) - ts);
-  if (diffS < 60) return `${diffS}s`;
-  if (diffS < 3600) return `${Math.floor(diffS / 60)}m`;
-  if (diffS < 86400) return `${Math.floor(diffS / 3600)}h`;
-  return `${Math.floor(diffS / 86400)}d`;
-}
+import { formatShortAgo as timeAgo } from "@/shared/time";
 
 interface RegistryRowProps {
   registry: RegistrySummary;

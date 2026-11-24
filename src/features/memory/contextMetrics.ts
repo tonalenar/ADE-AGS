@@ -1,3 +1,5 @@
+import { formatKibBytes } from "@/shared/format";
+
 /**
  * Métrica do contexto de memória de um Run (Etapa 24): quanto era despejado antes e quanto vai
  * agora (índice + top-K). A forma vem do contrato com o Backend (`memory_context_metrics`); aqui só
@@ -28,6 +30,5 @@ export function reductionPercent(before: number, after: number): number {
 
 /** "3,0 KiB" / "812 B". */
 export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${Math.max(0, Math.round(bytes))} B`;
-  return `${(bytes / 1024).toFixed(1)} KiB`;
+  return formatKibBytes(bytes);
 }

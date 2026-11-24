@@ -9,6 +9,7 @@ import { accountProblemKey } from "@/features/accounts/problem";
 import type { LiveUsage, Meter } from "@/features/accounts/usage";
 import type { AccountLimits } from "@/features/accounts/types";
 import type { AgyEntry, AntigravityEntry, CodexEntry } from "@/features/canvas/usageStore";
+import { clamp as clampRange } from "@/shared/math";
 
 /** Acima disto a barra fica âmbar; em 100 está esgotada. */
 export const WARN_ABOVE = 80;
@@ -24,7 +25,7 @@ export function limitLevel(percent: number | null): LimitLevel {
   return percent > WARN_ABOVE ? "warn" : "ok";
 }
 
-const clamp = (n: number): number => Math.max(0, Math.min(100, Math.round(n)));
+const clamp = (n: number): number => clampRange(Math.round(n), 0, 100);
 
 // ── Renovação ────────────────────────────────────────────────────────
 

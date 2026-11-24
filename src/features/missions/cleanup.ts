@@ -1,5 +1,6 @@
 /** Contrato de la limpieza de worktrees/ramas de una misión (`mission_cleanup`, Etapa 21, ítem 7a). */
 import { invoke } from "@tauri-apps/api/core";
+import { formatBytes as formatSharedBytes } from "@/shared/format";
 
 export interface CleanupEntry {
   missionId: string | null;
@@ -29,10 +30,5 @@ export const canConfirmCleanup = (r: CleanupReport): boolean => r.dryRun && r.en
 export const totalBytes = (r: CleanupReport): number => r.entries.reduce((n, e) => n + e.sizeBytes, 0);
 
 export function formatBytes(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return "—";
-  const units = ["B", "KB", "MB", "GB"];
-  let v = n;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${i === 0 ? v : v.toFixed(1)} ${units[i]}`;
+  return formatSharedBytes(n, { units: ["B", "KB", "MB", "GB"], alwaysOneDecimal: true });
 }

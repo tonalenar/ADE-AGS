@@ -37,8 +37,6 @@ export interface EffectiveDefaultsDto {
 
 export const chatProjectDefaultsList = () => invoke<ProjectChatDefaultsDto[]>("chat_project_defaults_list");
 
-export const chatProjectDefaultsGet = (cwd: string) => invoke<ProjectChatDefaultsDto | null>("chat_project_defaults_get", { cwd });
-
 export const chatProjectDefaultsEffective = (cwd: string, accountId: string | null) =>
   invoke<EffectiveDefaultsDto>("chat_project_defaults_effective", { cwd, accountId });
 

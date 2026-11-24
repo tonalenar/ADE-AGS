@@ -36,36 +36,6 @@ export function ToolButton({ label, onClick, disabled, active, plain, children }
   return plain ? button : <Tooltip content={label} placement="bottom">{button}</Tooltip>;
 }
 
-/** Una acción propia de esta tab, con rótulo. Marcar y enviar no son iconos que alguien
- *  reconozca de un navegador: sin la palabra al lado había que pasar el mouse para saber
- *  qué hacían. `plain`: ver `ToolButton`. */
-export function ActionButton({ hint, onClick, disabled, active, plain, children }: {
-  hint: string;
-  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
-  disabled?: boolean;
-  active?: boolean;
-  plain?: boolean;
-  children: React.ReactNode;
-}) {
-  const button = (
-    <Button
-      variant="custom"
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={active}
-      title={plain ? hint : undefined}
-      className={`cc-t flex items-center gap-1.5 h-8 px-2.5 rounded-lg shrink-0 border text-[12px] font-semibold
-        disabled:opacity-45 disabled:hover:bg-transparent
-        ${active
-          ? "bg-accent-600 border-accent-600 text-white hover:bg-accent-500"
-          : "border-gray-300 dark:border-white/15 text-gray-800 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-white/10"}`}
-    >
-      {children}
-    </Button>
-  );
-  return plain ? button : <Tooltip content={hint} placement="bottom">{button}</Tooltip>;
-}
-
 /** La raya que separa grupos de botones. */
 export function ToolbarSeparator() {
   return <div className="w-px h-5 mx-0.5 shrink-0 bg-gray-200 dark:bg-white/10" />;

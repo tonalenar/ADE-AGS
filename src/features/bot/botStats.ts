@@ -9,9 +9,6 @@ export type MissionLike = Pick<MissionSummary, "id" | "title" | "status" | "star
   isTest?: boolean | null;
 };
 
-/** Ventana de medición en días: lo reciente pesa más que todo el historial. */
-export const SUCCESS_WINDOWS = [7, 30] as const;
-
 /** Cierres de una ventana (o de todo el historial), sin las misiones de prueba. */
 export interface RateWindow {
   done: number;

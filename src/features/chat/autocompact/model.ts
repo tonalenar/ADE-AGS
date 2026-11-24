@@ -1,3 +1,4 @@
+import { clamp } from "@/shared/math";
 import type { TimelineItem } from "@/features/chat/timeline/types";
 
 /**
@@ -28,7 +29,7 @@ export interface AutoCompactConfig {
 
 export const DEFAULT_CONFIG: AutoCompactConfig = { enabled: true, agents: {} };
 
-export const clampPct = (n: number): number => Math.min(MAX_PCT, Math.max(MIN_PCT, Math.round(n)));
+export const clampPct = (n: number): number => clamp(Math.round(n), MIN_PCT, MAX_PCT);
 
 /** Lê a configuração guardada. Qualquer lixo volta ao padrão (ligado): a pessoa pediu o autocompact ligado. */
 export function parseAutoCompactConfig(raw: string | null | undefined): AutoCompactConfig {
@@ -190,4 +191,3 @@ export function isCompacting(items: readonly TimelineItem[], now: number): boole
  * A mensagem enviada agora espera na fila? Com a conversa compactando, sim, mesmo que o motor aceitasse entrar no turno:
  * a compactação não é um turno que se guia. Sai quando o aviso «Contexto compactado» fecha (a fila do composer).
  */
-export const holdsForCompaction = (compacting: boolean): boolean => compacting;

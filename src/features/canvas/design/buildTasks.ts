@@ -221,5 +221,4 @@ export function buildTasks(design: DesignInput | null | undefined, options?: Bui
 }
 
 export const createBuildTasks = buildTasks;
-export const generateBuildTasks = buildTasks;
 export default buildTasks;

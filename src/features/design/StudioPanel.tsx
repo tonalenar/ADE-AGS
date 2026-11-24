@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { clamp } from "@/shared/math";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useTranslation } from "react-i18next";
 import type { StudioBoard } from "./ArtboardFrame";
@@ -14,7 +15,7 @@ export type PanelTab = "props" | "layers" | "code" | "tweaks";
 export const PANEL_TABS: PanelTab[] = ["props", "layers", "code", "tweaks"];
 /** A largura do painel (312 px) e os limites do arrasto pela borda esquerda. */
 export const PANEL_SIZE = { initial: 312, min: 260, max: 560 } as const;
-export const clampPanel = (w: number) => Math.round(Math.min(PANEL_SIZE.max, Math.max(PANEL_SIZE.min, Number.isFinite(w) ? w : PANEL_SIZE.initial)));
+export const clampPanel = (w: number) => Math.round(clamp(Number.isFinite(w) ? w : PANEL_SIZE.initial, PANEL_SIZE.min, PANEL_SIZE.max));
 
 export type SaveOutcome = "ok" | "conflict" | "error";
 

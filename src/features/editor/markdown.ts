@@ -4,10 +4,12 @@
  * probarlo sin DOM.
  */
 
+import { basename } from "@/shared/path";
+
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdown", "mkd", "mkdn", "mdx"]);
 
 export function isMarkdownPath(path: string): boolean {
-  const name = path.split(/[\\/]/).pop() ?? "";
+  const name = basename(path);
   const dot = name.lastIndexOf(".");
   return dot > 0 && MARKDOWN_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
 }

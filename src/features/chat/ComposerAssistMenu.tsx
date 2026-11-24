@@ -12,6 +12,7 @@ import type { AgentSkillScan, SkillSummary } from "@/features/skills/types";
 import { forgePulls } from "@/features/forge/ipc";
 import type { ForgeItem } from "@/features/forge/types";
 
+import { basename } from "@/shared/path";
 import { addSurface, setRightPanel } from "./store";
 import { PROTOCOL_AGENTS, type ProviderSlashCommand } from "./chatModel";
 import { legacyComposerCapabilityAvailable, matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
@@ -87,10 +88,6 @@ export function replaceToken(text: string, caret: number, token: ActiveToken, re
 
 function normalized(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-}
-
-function basename(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() ?? path;
 }
 
 function skillSlug(skill: SkillSummary): string {

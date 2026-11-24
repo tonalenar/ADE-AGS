@@ -1,3 +1,5 @@
+import { clamp as clampRange } from "@/shared/math";
+
 export interface Viewport { zoom: number; x: number; y: number }
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 3;
@@ -11,7 +13,7 @@ export type ViewportAction =
   | { type: "set"; viewport: Viewport }
   | { type: "reset" };
 
-const clamp = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+const clamp = (z: number) => clampRange(z, MIN_ZOOM, MAX_ZOOM);
 
 export function viewportReducer(v: Viewport, a: ViewportAction): Viewport {
   switch (a.type) {
